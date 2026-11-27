@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useId, type Dispatch, type ReactNode } from "react";
-import { ActivityIcon, ChevronRightIcon } from "lucide-react";
+import { ActivityIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
@@ -13,6 +13,12 @@ import type {
   ConversationToolCall,
   ConversationTools,
 } from "@appstrate/module-chat/conversation-tools";
+import {
+  ActivityChevron,
+  ActivityId,
+  ActivityLead,
+  FailedGlyph,
+} from "@appstrate/module-chat/activity-line";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -47,12 +53,7 @@ import {
   useConversationIntegrations,
   useConversationRuns,
 } from "./use-conversation-lists";
-import {
-  TOOL_STATUS_LABEL,
-  TOOL_STATUS_TONE,
-  useConversationTools,
-  useToolLabel,
-} from "./use-conversation-tools";
+import { TOOL_STATUS_LABEL, useConversationTools, useToolLabel } from "./use-conversation-tools";
 import { useSummarySections, type SummarySectionId } from "./use-summary-sections";
 import { useConversationTabs } from "./use-conversation-tabs";
 
@@ -274,16 +275,12 @@ function SummaryDisclosure({
           <CollapsibleTrigger
             className={cn(
               DISCLOSURE_LINE_CLASS,
-              "hover:bg-muted/50 focus-visible:ring-ring text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset",
+              "group hover:bg-muted/50 focus-visible:ring-ring text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset",
             )}
           >
-            <ChevronRightIcon
-              aria-hidden="true"
-              className={cn(
-                "text-muted-foreground duration-fast ease-surface size-4 shrink-0 transition-transform",
-                open && "rotate-90",
-              )}
-            />
+            <span className="text-muted-foreground">
+              <ActivityChevron />
+            </span>
             <span className="shrink-0 text-sm font-medium">{title}</span>
             {preview ? (
               <span className="text-muted-foreground ml-auto min-w-0 truncate pl-2 text-xs font-normal">
@@ -306,7 +303,7 @@ function folding(sections: ReturnType<typeof useSummarySections>, id: SummarySec
  * One item of the activity on one line: its icon, its name, what it acted on, the space it is in
  * (a list spanning spaces), then its outcome. Laid in its line's own flex row.
  */
-function ActivityLine({
+function SummaryLine({
   icon,
   label,
   detail,
@@ -315,20 +312,18 @@ function ActivityLine({
 }: {
   icon: ReactNode;
   label: string;
-  detail?: string;
+  detail?: ReactNode;
   space?: ReactNode;
   trailing?: ReactNode;
 }) {
   return (
     <>
-      <span className="text-muted-foreground flex size-4 shrink-0 items-center justify-center [&_svg]:size-4">
-        {icon}
-      </span>
+      <ActivityLead className="text-muted-foreground">{icon}</ActivityLead>
       {/* The detail takes only the room left (basis 0): the name truncates once it has none, never over the outcome. */}
       <span className="flex min-w-0 flex-1 items-baseline gap-2">
         <span className="min-w-0 truncate font-medium">{label}</span>
         {detail ? (
-          <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">{detail}</span>
+          <span className="text-muted-foreground flex min-w-0 flex-1">{detail}</span>
         ) : null}
       </span>
       {space}
@@ -355,10 +350,10 @@ function RunLine({
 }) {
   return (
     <RunLink run={run} className={LINE_CLASS}>
-      <ActivityLine
+      <SummaryLine
         icon={<ActivityIcon />}
         label={agentName}
-        detail={`#${run.runNumber}`}
+        detail={<span className="min-w-0 truncate text-xs">{`#${run.runNumber}`}</span>}
         space={spanning ? <RowSpaceName spaceId={run.spaceId} /> : null}
         trailing={<RunStatusBadge status={run.status} unread={run.unread} compact />}
       />
@@ -384,14 +379,17 @@ function CallLine({
         dispatch({ type: "show-tool-call", toolCallId: call.toolCallId, from: "summary" })
       }
     >
-      <ActivityLine
+      <SummaryLine
         icon={<ToolCallIcon call={call} shown={shown} />}
         label={shown.label}
-        detail={shown.idText}
+        detail={shown.idText ? <ActivityId>{shown.idText}</ActivityId> : undefined}
         trailing={
           call.status === "success" ? null : (
-            <span className={cn("text-xs", TOOL_STATUS_TONE[call.status])}>
-              {t(TOOL_STATUS_LABEL[call.status])}
+            <span className="flex items-center gap-1">
+              {call.status === "error" ? <FailedGlyph /> : null}
+              <span className="text-muted-foreground text-xs">
+                {t(TOOL_STATUS_LABEL[call.status])}
+              </span>
             </span>
           )
         }
@@ -420,7 +418,7 @@ function FileLine({
         })
       }
     >
-      <ActivityLine
+      <SummaryLine
         icon={<MimeIcon mime={file.mime} name={file.name} />}
         label={file.name}
         trailing={
@@ -437,7 +435,7 @@ function FileLine({
  * A group of the activity, a section named by its heading: its name, its latest lines, and, when
  * it holds more (`onSeeAll`), "See all" to its tab, with `total` when the server counts it.
  */
-function ActivityGroup({
+function SummaryGroup({
   title,
   aside,
   total,
@@ -537,12 +535,12 @@ function SummaryActivity({
         <div className="flex flex-col gap-1 py-2">
           {runsRead === "pending" ? <GroupSkeleton /> : null}
           {runsRead === "error" ? (
-            <ActivityGroup title={t("common:nav.runs")}>
+            <SummaryGroup title={t("common:nav.runs")}>
               <ErrorState error={runs.query.error} compact />
-            </ActivityGroup>
+            </SummaryGroup>
           ) : null}
           {runRows.length > 0 ? (
-            <ActivityGroup
+            <SummaryGroup
               title={t("common:nav.runs")}
               total={runs.total}
               onSeeAll={runs.total > SUMMARY_ROWS ? seeAll("runs") : undefined}
@@ -555,16 +553,16 @@ function SummaryActivity({
                   spanning={runs.spanning}
                 />
               ))}
-            </ActivityGroup>
+            </SummaryGroup>
           ) : null}
           {filesRead === "pending" ? <GroupSkeleton /> : null}
           {filesRead === "error" ? (
-            <ActivityGroup title={t("common:nav.files")}>
+            <SummaryGroup title={t("common:nav.files")}>
               <ErrorState error={files.query.error} compact />
-            </ActivityGroup>
+            </SummaryGroup>
           ) : null}
           {fileRows.length > 0 ? (
-            <ActivityGroup
+            <SummaryGroup
               title={t("common:nav.files")}
               onSeeAll={
                 files.hasMore || files.files.length > SUMMARY_ROWS ? seeAll("files") : undefined
@@ -573,11 +571,11 @@ function SummaryActivity({
               {fileRows.map((file) => (
                 <FileLine key={file.id} file={file} dispatch={dispatch} />
               ))}
-            </ActivityGroup>
+            </SummaryGroup>
           ) : null}
           {reachedRead === "pending" && callRows.length === 0 ? <GroupSkeleton /> : null}
           {showsIntegrations ? (
-            <ActivityGroup
+            <SummaryGroup
               title={t("context.summary.integrations")}
               aside={
                 reachedRead === "pending" ? (
@@ -598,7 +596,7 @@ function SummaryActivity({
               {callRows.map((call) => (
                 <CallLine key={call.toolCallId} call={call} dispatch={dispatch} />
               ))}
-            </ActivityGroup>
+            </SummaryGroup>
           ) : null}
         </div>
       )}

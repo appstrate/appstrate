@@ -19,7 +19,7 @@
 
 import * as React from "react";
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
-import { ArrowUpRightIcon, BracesIcon, PlayIcon, XIcon } from "lucide-react";
+import { ArrowUpRightIcon, BracesIcon, PlayIcon } from "lucide-react";
 import { formatDuration } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -42,6 +42,7 @@ import {
   ActivityLabel,
   ActivityLine,
   ActivityTrigger,
+  FailedGlyph,
 } from "./activity-line.tsx";
 import { useActivityMode } from "./activity-mode.ts";
 import {
@@ -92,21 +93,6 @@ function readDurationMs(timing: unknown): number | undefined {
     return t.completedAt - t.startedAt;
   }
   return undefined;
-}
-
-/**
- * The small red cross of a failed call, the only red its row keeps. Given a `label` it is an image
- * named by it; without one it is decorative, beside a text that already says the failure.
- */
-export function FailedGlyph({ label }: { label?: string }) {
-  return (
-    <span
-      {...(label ? { role: "img", "aria-label": label } : { "aria-hidden": true })}
-      className="text-destructive shrink-0"
-    >
-      <XIcon className="size-3.5" />
-    </span>
-  );
 }
 
 /** A card's props: its part, and what its stored part says (`useStoredResults`). */

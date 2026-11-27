@@ -52,19 +52,26 @@ export function ConversationSkeleton({
       className={cn("flex size-full flex-col overflow-hidden", THREAD_SIDE_PADDING_CLASS)}
     >
       {/* The thread's column (`--thread-max-width`, 42rem). Turns follow `phone-text.ts`: a
-          one-line bubble is 42px below `md` and 38px from it, a prose line 28px then 24px. The
-          side padding sits outside the column, as on the thread's viewport. */}
+          one-line bubble is 42px below `md` and 38px from it, a prose line 28px then 24px, an
+          activity line 40px on touch and 32px under a mouse. The side padding sits outside the
+          column, as on the thread's viewport. */}
       <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-6 pt-8">
         <Skeleton aria-hidden className="ml-auto h-[42px] w-2/5 rounded-2xl md:h-[38px]" />
-        <div aria-hidden className="flex flex-col gap-3 md:gap-2.5">
-          <Skeleton className="h-4 w-full md:h-3.5" />
-          <Skeleton className="h-4 w-11/12 md:h-3.5" />
-          <Skeleton className="h-4 w-3/5 md:h-3.5" />
+        <div aria-hidden className="flex flex-col gap-1">
+          <ActivityLineSkeleton width="w-40" />
+          <div className="flex flex-col gap-3 md:gap-2.5">
+            <Skeleton className="h-4 w-full md:h-3.5" />
+            <Skeleton className="h-4 w-11/12 md:h-3.5" />
+            <Skeleton className="h-4 w-3/5 md:h-3.5" />
+          </div>
         </div>
         <Skeleton aria-hidden className="ml-auto h-[42px] w-1/3 rounded-2xl md:h-[38px]" />
-        <div aria-hidden className="flex flex-col gap-3 md:gap-2.5">
-          <Skeleton className="h-4 w-full md:h-3.5" />
-          <Skeleton className="h-4 w-2/5 md:h-3.5" />
+        <div aria-hidden className="flex flex-col gap-1">
+          <ActivityLineSkeleton width="w-28" />
+          <div className="flex flex-col gap-3 md:gap-2.5">
+            <Skeleton className="h-4 w-full md:h-3.5" />
+            <Skeleton className="h-4 w-2/5 md:h-3.5" />
+          </div>
         </div>
       </div>
       {placeholder === null ? (
@@ -78,6 +85,16 @@ export function ConversationSkeleton({
           <div className={cn(DISCLAIMER_CLASS, "self-center")}>{disclaimer}</div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** An activity line on its way: `ActivityLine`'s row, its 16px icon and a short label. */
+function ActivityLineSkeleton({ width }: { width: string }) {
+  return (
+    <div className="desktop-pointer:h-8 flex h-10 items-center gap-2">
+      <Skeleton className="size-4 rounded-sm" />
+      <Skeleton className={cn("h-3.5", width)} />
     </div>
   );
 }

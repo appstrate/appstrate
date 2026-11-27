@@ -8,7 +8,7 @@
  */
 
 import * as React from "react";
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, XIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 
 /**
@@ -22,6 +22,23 @@ export const ACTIVITY_BLOCK_CLASS = "isolate my-1";
 const LINE_CLASS =
   "text-muted-foreground desktop-pointer:h-8 flex h-10 min-w-0 items-center gap-2 text-sm";
 
+/** A fixed slot: the spark, a glyph or an icon swap in it without moving the label. */
+export function ActivityLead({
+  className,
+  children,
+}: {
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      className={cn("flex size-4 shrink-0 items-center justify-center [&_svg]:size-4", className)}
+    >
+      {children}
+    </span>
+  );
+}
+
 export function ActivityLine({
   lead,
   className,
@@ -30,10 +47,7 @@ export function ActivityLine({
 }: React.HTMLAttributes<HTMLDivElement> & { lead: React.ReactNode }) {
   return (
     <div {...rest} className={cn(LINE_CLASS, className)}>
-      {/* A fixed slot: the spark, a glyph or an icon swap in it without moving the label. */}
-      <span className="flex size-4 shrink-0 items-center justify-center [&_svg]:size-4">
-        {lead}
-      </span>
+      <ActivityLead>{lead}</ActivityLead>
       {children}
     </div>
   );
@@ -64,6 +78,21 @@ export function ActivityChevron() {
       aria-hidden
       className="duration-fast ease-surface size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90"
     />
+  );
+}
+
+/**
+ * The small red cross of a failed call, the only red its row keeps. Given a `label` it is an image
+ * named by it; without one it is decorative, beside a text that already says the failure.
+ */
+export function FailedGlyph({ label }: { label?: string }) {
+  return (
+    <span
+      {...(label ? { role: "img", "aria-label": label } : { "aria-hidden": true })}
+      className="text-destructive shrink-0"
+    >
+      <XIcon className="size-3.5" />
+    </span>
   );
 }
 

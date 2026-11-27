@@ -28,7 +28,6 @@ import {
 import { useChatHost, type ChatTranslate } from "./runtime-context.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
 import { callsAt, isStampedLookup, type GroupablePart } from "./conversation-tools.ts";
-import { FailedGlyph } from "./tool-uis.tsx";
 import { ThinkingStatus } from "./reasoning.tsx";
 import { useTurnClock } from "./use-turn-clock.ts";
 import { reasoningTitle, showStep } from "./turn-status.ts";
@@ -45,6 +44,7 @@ import {
   ActivityLine,
   ActivityRail,
   ActivityTrigger,
+  FailedGlyph,
 } from "./activity-line.tsx";
 import { ActivityModeContext, type ActivityMode } from "./activity-mode.ts";
 
