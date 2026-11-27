@@ -25,17 +25,33 @@ import { deleteCookie } from "hono/cookie";
 import { getCookies } from "better-auth/cookies";
 import { eq } from "drizzle-orm";
 import { getAuth } from "@appstrate/db/auth";
+import { parseBearer } from "@appstrate/core/bearer";
 import { db } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 
-/** Every browser-facing session read forwards Better Auth's Set-Cookie (sliding refresh). */
+/**
+ * Every session read goes through here. A cookie read forwards Better Auth's
+ * Set-Cookie (sliding refresh).
+ *
+ * A request presenting `Authorization: Bearer …` is judged by that bearer
+ * alone (`viaBearer`): the Cookie header is withheld from the read, and the
+ * read never writes the browser's cookie jar. Better Auth's `bearer()` plugin
+ * (oidc module) signs a dotless bearer itself and substitutes it for the
+ * request's session cookie, so `Bearer undefined` from any script on the page
+ * used to resolve to no session and answer with a `session_token` delete:
+ * the tab that sent nothing wrong was signed out, and the same request with a
+ * dotted bearer silently authenticated through the cookie instead.
+ */
 export async function readSessionWithCookies(c: Context) {
-  const { headers, response } = await getAuth().api.getSession({
-    headers: c.req.raw.headers,
+  const viaBearer = parseBearer(c.req.header("Authorization")) !== null;
+  const headers = new Headers(c.req.raw.headers);
+  if (viaBearer) headers.delete("Cookie");
+  const { headers: out, response } = await getAuth().api.getSession({
+    headers,
     returnHeaders: true,
   });
-  return { session: response, setCookies: headers.getSetCookie() };
+  return { session: response, setCookies: viaBearer ? [] : out.getSetCookie(), viaBearer };
 }
 
 /** Appended, never set: other cookies on the response survive. */
