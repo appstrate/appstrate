@@ -17,6 +17,7 @@ import { ChatSidebarSkeleton } from "@/components/loading-skeletons";
 import { SidebarCredits } from "@/components/sidebar-credits";
 import { SidebarTips } from "@/components/sidebar-tips";
 import { useUnreadRunCount } from "@/hooks/use-run-reads";
+import { useUnreadCount } from "@/hooks/use-notifications";
 import { useOverlayPath } from "@/lib/modal-route";
 import { useCanReach, useReachReady } from "@/hooks/use-can-reach";
 import { useOverviewMode } from "@/hooks/use-overview-mode";
@@ -24,6 +25,7 @@ import { catalogueHref } from "@/lib/catalogue-link";
 import { overlayIntent, preloadOverlaysWhenIdle } from "@/lib/overlay-chunks";
 import { isUnder, SETTINGS_INDEX } from "@/lib/route-access";
 import { settingsSurfaceFromPath } from "@/lib/settings-surface";
+import { keepsDrawerOpen } from "@/lib/drawer-navigation";
 import { KEYBOARD_VIEWPORT_CLASS } from "@appstrate/ui/use-keyboard-viewport";
 import { cn } from "@appstrate/ui/cn";
 import {
@@ -87,10 +89,13 @@ function OverlayEntry({
 export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   const { t } = useTranslation();
   // On a phone the navigation is a sheet over the page: once a link has taken the user somewhere,
-  // the sheet would only hide where they went. Desktop keeps its own, remembered, open state.
+  // the sheet would only hide where they went, unless it was a product tab, which only swaps the
+  // sheet's content (`lib/drawer-navigation.ts`). Desktop keeps its own, remembered, open state.
   const { setOpenMobile, isMobile } = useSidebar();
-  const { key } = useLocation();
-  useEffect(() => setOpenMobile(false), [key, setOpenMobile]);
+  const { key, state } = useLocation();
+  useEffect(() => {
+    if (!keepsDrawerOpen(state)) setOpenMobile(false);
+  }, [key, state, setOpenMobile]);
   // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`). It names no
   // space, so « Tous les espaces » opens it as it is: its add menu picks the space per package.
   const canReach = useCanReach();
@@ -112,11 +117,15 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   return (
     <Sidebar className={`overflow-y-auto ${KEYBOARD_VIEWPORT_CLASS}`}>
       {/* The brand cell sits at the header's height so the two rules meet across the shell. The
-          collapse shows while the pointer is on the sidebar or on focus (`group` is its root). */}
+          collapse shows while the pointer is on the sidebar or on focus (`group` is its root).
+          On a phone the switcher takes its own width, its chevrons right after the names, and
+          the bell and the close button stand at the row's end. */}
       <SidebarHeader className="border-sidebar-border h-header flex-row items-center gap-1 border-b px-2 py-0">
         <div className="min-w-0 flex-1">
           <OrgSwitcher />
         </div>
+        {/* Below `md` the header has no room left for it: the bell is the drawer's. */}
+        <NotificationBell className="md:hidden" />
         <SidebarTrigger className="text-muted-foreground hidden size-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 md:inline-flex">
           <PanelLeft className="size-4" />
         </SidebarTrigger>
@@ -185,7 +194,8 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
 /**
  * The one control that opens the sidebar while it is off screen (a phone, a collapsed desktop): a
  * burger, then the organization's avatar with the space's on its corner, no names; its accessible
- * name says them. It carries the unread dot of the Runs entry it hides.
+ * name says them. It carries the unread dot of the Runs entry it hides, and on a phone that of the
+ * bell, which the drawer holds there.
  */
 function SidebarOpener({ className }: { className?: string }) {
   const { t } = useTranslation();
@@ -194,7 +204,13 @@ function SidebarOpener({ className }: { className?: string }) {
   // The Runs entry's own count (`NavOrg`): the working space's, or every reached space's.
   const { on: overview } = useOverviewMode();
   const unreadRuns = useUnreadRunCount({ spanning: overview });
-  const label = names ? t("nav.toggleSidebarIn", { current: names }) : t("nav.toggleSidebar");
+  // The bell's own count (`NotificationBell`), only where the drawer holds the bell.
+  const { data: notificationCount } = useUnreadCount({ spanning: overview });
+  const unreadNotifications = isMobile ? (notificationCount ?? 0) : 0;
+  let label = names ? t("nav.toggleSidebarIn", { current: names }) : t("nav.toggleSidebar");
+  if (unreadRuns > 0) label = t("nav.toggleSidebarUnread", { label, count: unreadRuns });
+  if (unreadNotifications > 0)
+    label = t("nav.toggleSidebarNotifications", { label, count: unreadNotifications });
   return (
     <Button
       type="button"
@@ -205,14 +221,12 @@ function SidebarOpener({ className }: { className?: string }) {
         className,
       )}
       aria-expanded={isMobile ? openMobile : state === "expanded"}
-      aria-label={
-        unreadRuns > 0 ? t("nav.toggleSidebarUnread", { label, count: unreadRuns }) : label
-      }
+      aria-label={label}
       onClick={toggleSidebar}
     >
       <Menu className="size-5" aria-hidden="true" />
       <OrgSpaceTile ring="ring-canvas" />
-      {unreadRuns > 0 && (
+      {(unreadRuns > 0 || unreadNotifications > 0) && (
         <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 left-6 size-2 rounded-full ring-2" />
       )}
     </Button>
@@ -224,7 +238,8 @@ export function ShellHeader() {
   const collapsed = !isMobile && state === "collapsed";
 
   // One band, up to three rows, on a three-column grid. Row one is the same on
-  // every page: the burger, the trail, the page's controls and the bell. A page
+  // every page: the burger, the trail, the page's controls and, from `md` up,
+  // the bell (below, the drawer holds it and the burger carries its dot). A page
   // with a title block (a detail page) adds its identity in row two, takes its
   // controls down there (right end), and adds its tabs in row three.
   // `group/header` lets the cells ask whether a page has filled the lead slot
@@ -270,9 +285,11 @@ export function ShellHeader() {
       />
       {/* The one utility that is global but not personal: notifications. It
           sits here rather than in the sidebar because the sidebar answers
-          "where am I" and this answers "what is new". Same place on every page. */}
-      <div className="px-gutter h-header col-start-3 row-start-1 flex shrink-0 items-center md:pl-2">
-        <NotificationBell />
+          "where am I" and this answers "what is new". Same place on every page.
+          Below `md` the page's title needs the room: the bell moves to the
+          drawer's first row and this cell is only the right gutter. */}
+      <div className="pr-gutter h-header col-start-3 row-start-1 flex shrink-0 items-center md:pl-2">
+        <NotificationBell className="max-md:hidden" />
       </div>
       {/* The page's tabs: the same band, closed by the header's own rule. */}
       <HeaderSlotOutlet slot="tabs" className="px-gutter col-span-3 empty:hidden" />

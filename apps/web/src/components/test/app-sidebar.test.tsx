@@ -115,9 +115,30 @@ describe("the drawer's head", () => {
   it("closes from its own corner in every product, the drawer being the whole screen on a phone", () => {
     for (const product of ["chat", "studio"] as const) {
       expect(render(product)).toContain('data-testid="sidebar-close"');
-      // The bell is the header's, on every format.
-      expect(render(product)).not.toContain('aria-label="Notifications"');
     }
+  });
+
+  it("holds the bell below md, just before the close button", () => {
+    for (const product of ["chat", "studio"] as const) {
+      const html = render(product);
+      const bell = html.match(/<button[^>]*aria-label="Notifications"[^>]*>/)?.[0] ?? "";
+      expect(bell).toMatch(/class="[^"]*md:hidden/);
+      expect(bell).not.toContain("max-md:hidden");
+      expect(html.indexOf(bell)).toBeLessThan(html.indexOf('data-testid="sidebar-close"'));
+    }
+  });
+
+  it("sizes the switcher to its names on a phone, its chevrons right after them", () => {
+    const html = render("studio");
+    const trigger = html.match(/<button[^>]*data-testid="org-switcher-button"[^>]*>/)?.[0] ?? "";
+    // The sidebar's width from md up only.
+    expect(trigger).toMatch(/class="[^"]*max-w-full md:w-full/);
+    expect(trigger).not.toMatch(/class="[^"]*(?<![:\w-])w-full/);
+    const names = html
+      .slice(html.indexOf(trigger))
+      .match(/<span class="([^"]*leading-tight[^"]*)"/)?.[1];
+    expect(names?.split(" ")).toContain("md:flex-1");
+    expect(names?.split(" ")).not.toContain("flex-1");
   });
 });
 
