@@ -28,6 +28,12 @@ import { settingsSurfaceFromPath } from "@/lib/settings-surface";
 import { keepsDrawerOpen } from "@/lib/drawer-navigation";
 import { KEYBOARD_VIEWPORT_CLASS } from "@appstrate/ui/use-keyboard-viewport";
 import { cn } from "@appstrate/ui/cn";
+import { PanelResizeHandle } from "@/components/panel-resize";
+import {
+  CHAT_SIDEBAR_WIDTH,
+  clampChatSidebarWidth,
+  useChatSidebarWidthStore,
+} from "@/stores/sidebar-store";
 import {
   Sidebar,
   SidebarContent,
@@ -39,6 +45,9 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@appstrate/ui/components/sidebar";
+
+/** The sidebar's frame, which its resize handle controls. */
+const APP_SIDEBAR_ID = "app-sidebar";
 
 /** Where the sidebar's settings entry lands: the organization scope's index. */
 const SETTINGS_ENTRY = SETTINGS_INDEX.organization;
@@ -115,7 +124,8 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   );
 
   return (
-    <Sidebar className={`overflow-y-auto ${KEYBOARD_VIEWPORT_CLASS}`}>
+    <Sidebar id={APP_SIDEBAR_ID} className={`overflow-y-auto ${KEYBOARD_VIEWPORT_CLASS}`}>
+      {product === "chat" && <ChatSidebarResizeHandle />}
       {/* The brand cell sits at the header's height so the two rules meet across the shell. The
           collapse shows while the pointer is on the sidebar or on focus (`group` is its root).
           On a phone the switcher takes its own width, its chevrons right after the names, and
@@ -188,6 +198,32 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
         </div>
       </SidebarFooter>
     </Sidebar>
+  );
+}
+
+/**
+ * The chat sidebar's edge, dragged to widen or narrow it on desktop: conversation titles are worth
+ * the room. Remembered per browser; double-click resets it. A phone's drawer is the whole screen
+ * and a collapsed sidebar is off screen: neither has an edge to drag.
+ */
+function ChatSidebarResizeHandle() {
+  const { t } = useTranslation();
+  const { isMobile, state } = useSidebar();
+  const { width, setLive, commit, setDragging } = useChatSidebarWidthStore();
+  if (isMobile || state === "collapsed") return null;
+  return (
+    <PanelResizeHandle
+      edge="right"
+      controls={APP_SIDEBAR_ID}
+      label={t("nav.resizeSidebar")}
+      width={width ?? CHAT_SIDEBAR_WIDTH.default}
+      min={CHAT_SIDEBAR_WIDTH.min}
+      max={CHAT_SIDEBAR_WIDTH.max}
+      clamp={clampChatSidebarWidth}
+      onLive={setLive}
+      onCommit={commit}
+      onDraggingChange={setDragging}
+    />
   );
 }
 

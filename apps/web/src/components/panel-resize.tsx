@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, type KeyboardEvent, type PointerEvent } from "react";
-
-const KEY_STEP = 24;
+import { cn } from "@appstrate/ui/cn";
+import { keyedWidth } from "@/lib/panel-resize-keys";
 
 /**
- * A vertical separator on the panel's left edge: drag (pointer capture),
- * arrow keys, Home/End, double-click to reset. `onDraggingChange` lets the
- * panel drop its width transition while the pointer drives it.
+ * A vertical separator on a panel's `edge`: drag (pointer capture), arrow
+ * keys, Home/End, double-click to reset. The panel grows toward that edge (the
+ * chat's context panel from its left one, the chat's sidebar from its right).
+ * `onDraggingChange` lets the panel drop its width transition while the pointer
+ * drives it.
  */
 export function PanelResizeHandle({
+  edge = "left",
   controls,
   label,
   width,
@@ -20,6 +23,7 @@ export function PanelResizeHandle({
   onCommit,
   onDraggingChange,
 }: {
+  edge?: "left" | "right";
   controls: string;
   label: string;
   width: number;
@@ -41,8 +45,9 @@ export function PanelResizeHandle({
   };
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!drag.current) return;
-    // The panel grows as the pointer moves left.
-    latest.current = clamp(drag.current.width + drag.current.x - event.clientX);
+    // The panel grows as the pointer moves past its edge.
+    const moved = event.clientX - drag.current.x;
+    latest.current = clamp(drag.current.width + (edge === "left" ? -moved : moved));
     onLive(latest.current);
   };
   const endDrag = () => {
@@ -52,16 +57,7 @@ export function PanelResizeHandle({
     onCommit(latest.current);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const next =
-      event.key === "ArrowLeft"
-        ? width + KEY_STEP
-        : event.key === "ArrowRight"
-          ? width - KEY_STEP
-          : event.key === "Home"
-            ? min
-            : event.key === "End" && Number.isFinite(max)
-              ? max
-              : null;
+    const next = keyedWidth(event.key, { edge, width, min, max });
     if (next === null) return;
     event.preventDefault();
     onCommit(clamp(next));
@@ -77,7 +73,10 @@ export function PanelResizeHandle({
       aria-valuemin={min}
       aria-valuemax={Number.isFinite(max) ? Math.round(max) : undefined}
       tabIndex={0}
-      className="hover:bg-primary/20 focus-visible:bg-primary/30 absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize touch-none transition-colors outline-none"
+      className={cn(
+        "hover:bg-primary/20 focus-visible:bg-primary/30 absolute inset-y-0 z-10 w-1.5 cursor-col-resize touch-none transition-colors outline-none",
+        edge === "left" ? "left-0" : "right-0",
+      )}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}

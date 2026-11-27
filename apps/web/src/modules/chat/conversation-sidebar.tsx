@@ -39,7 +39,7 @@ import {
   type SidebarOrigin,
   type StoredSidebarFile,
 } from "./conversation-sidebar-state";
-import { PanelResizeHandle } from "./panel-resize";
+import { PanelResizeHandle } from "@/components/panel-resize";
 import { usePanelWidth, type PanelView } from "./use-panel-width";
 import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, Suspense, type ReactNode } from "react";
+import { useEffect, Suspense, type CSSProperties, type ReactNode } from "react";
+import { cn } from "@appstrate/ui/cn";
 import { Routes, Route, Outlet, useLocation, useSearchParams, Navigate } from "react-router-dom";
 import { PackageIndexPage } from "./pages/package-index";
 import { DashboardRoute, HomePage, HomeSkeleton } from "./pages/home-page";
@@ -56,7 +57,12 @@ import { useSpaceResolver } from "./hooks/use-current-space";
 import { useOverviewRules } from "./hooks/use-overview-mode";
 import { useHome, useStudioReach } from "./hooks/use-can-reach";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
-import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
+import {
+  CHAT_SIDEBAR_WIDTH,
+  useChatSidebarStore,
+  useChatSidebarWidthStore,
+  useSidebarStore,
+} from "./stores/sidebar-store";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
@@ -475,6 +481,10 @@ function MainLayout({ search }: { search: string }) {
   // chat's navigation, the only one the reader has.
   const navProduct = product === "chat" || (home === "chat" && !studio) ? "chat" : "studio";
   const sidebar = navProduct === "chat" ? chatSidebar : studioSidebar;
+  // The chat's sidebar is resizable on desktop (`ChatSidebarResizeHandle`); a phone's drawer sets
+  // its own width over this one.
+  const chatWidth = useChatSidebarWidthStore((state) => state.width);
+  const resizing = useChatSidebarWidthStore((state) => state.dragging);
   useSpaceResolver(search);
   useOverviewRules();
   useGlobalRunSync();
@@ -485,11 +495,19 @@ function MainLayout({ search }: { search: string }) {
       <SidebarProvider
         open={sidebar.open}
         onOpenChange={sidebar.setOpen}
-        className={
-          product === "chat"
-            ? `relative min-h-0 overflow-hidden ${KEYBOARD_VIEWPORT_CLASS}`
+        style={
+          navProduct === "chat"
+            ? ({
+                "--sidebar-width": `${chatWidth ?? CHAT_SIDEBAR_WIDTH.default}px`,
+              } as CSSProperties)
             : undefined
         }
+        className={cn(
+          product === "chat" && `relative min-h-0 overflow-hidden ${KEYBOARD_VIEWPORT_CLASS}`,
+          // While dragged, the sidebar's gap and frame (both `[data-side] > div`) follow the
+          // pointer instead of easing toward it.
+          navProduct === "chat" && resizing && "[&>[data-side]>div]:transition-none",
+        )}
       >
         <AppSidebar product={navProduct} />
         {/* Studio: the scroll lives HERE, not on an inner div (which would narrow the content
