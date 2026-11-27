@@ -67,7 +67,7 @@ export const rolesPaths = {
       tags: ["Roles"],
       summary: "List space roles",
       description:
-        'Every role assignable in a space of this organization: the four platform presets (`kind: "preset"`, read-only, `id: null`) followed by the organization\'s own bundles (`kind: "custom"`).',
+        'Every role assignable in a space of this organization: the platform presets (`kind: "preset"`, read-only, `id: null`) followed by the organization\'s own bundles (`kind: "custom"`).',
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {

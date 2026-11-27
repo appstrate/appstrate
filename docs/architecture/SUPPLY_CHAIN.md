@@ -118,12 +118,17 @@ drives that dispatcher once per alias backing shape instead. The `apps/cli` barr
 is pure type-only and has no case there. Type-only re-exports are covered by `tsc`
 on the barrels' real consumers.
 
-### Renovate / Dependabot
+### Dependabot
 
-`renovate.json` carries a dedicated rule for the two packages: grouped into one
-PR, labelled `supply-chain` / `pi-sdk`, `rangeStrategy: pin`, **no auto-merge**,
-and gated behind `dependencyDashboardApproval`. Updates to this dependency are a
-deliberate human decision, not an automated background bump.
+`.github/dependabot.yml` gives every `@earendil-works/*` package a group of its
+own (`pi-sdk`), excluded from the `production-dependencies` group: a Pi bump is
+one PR that carries nothing else. Dependabot never merges, so the PR waits for a
+person; updates to this dependency are a deliberate human decision, not an
+automated background bump. Two pins sit outside any manifest Dependabot reads
+and are set by hand in that PR: `PI_SDK_VERSION`
+(`packages/runner-pi/src/provider-map.ts`) and the optional peers of
+`packages/afps-runtime/package.json` (`packages/runner-pi/test/pi-sdk-version.test.ts`
+fails until both match).
 
 ### Live model catalog — later registry data, never later code
 

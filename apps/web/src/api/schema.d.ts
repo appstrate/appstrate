@@ -4619,7 +4619,7 @@ export interface paths {
         };
         /**
          * List space roles
-         * @description Every role assignable in a space of this organization: the four platform presets (`kind: "preset"`, read-only, `id: null`) followed by the organization's own bundles (`kind: "custom"`).
+         * @description Every role assignable in a space of this organization: the platform presets (`kind: "preset"`, read-only, `id: null`) followed by the organization's own bundles (`kind: "custom"`).
          */
         get: operations["listRoles"];
         put?: never;

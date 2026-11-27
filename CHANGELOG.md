@@ -35,6 +35,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Offering an agent returns `warnings[]` (`integration_not_offered`) naming each declared integration that is neither offered nor active by default; the dashboard proposes « Offrir aussi ». An offer of an agent never offers what it declares.
 - Upgrade: after migration `0117`, with the platform stopped and a `pg_dump` taken first, run `scripts/migration/0059-personal-space-audience.ts` (dry run first, then `--apply`; see `scripts/migration/README.md`). An integration an owner had switched on in a personal space without an organization offer is kept by an `available` offer; every other non-home, non-offered package row in a personal space is withdrawn (its schedules disabled `package_removed`, audit `package.unshared` with reason `personal_space`); `package_shared` notifications are deleted and the CHECK is validated. The boot refuses until the script has run.
 
+### Contributors
+
+- Dependabot opens one PR of its own for every `@earendil-works/*` (Pi SDK) bump, never grouped with other updates; the inert `renovate.json` is removed (`docs/architecture/SUPPLY_CHAIN.md`). `@better-auth/cimd` moves to the version of the rest of its family (1.7.27), which leaves one `better-call` in the tree, and `typescript-eslint` is pinned to 8.72.0 (later releases run the lint out of memory).
+
 ### Dashboard
 
 - The dashboard and the chat store their local preferences (theme, sidebar, last organization and space, column widths, view modes, chat toggles, pending CLI pairings) under one key format, `appstrate:<zone>:<key>`. The previous browser keys are abandoned: those preferences reset once after the upgrade.
