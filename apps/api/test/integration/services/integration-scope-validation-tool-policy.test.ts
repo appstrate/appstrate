@@ -3,7 +3,7 @@
 /**
  * The space's approved tools count as known tool names when an agent's selection is validated,
  * but only the ones the policy still stands behind: an approval recorded before the manifest hid
- * (or declared) the tool counts for nothing.
+ * (or declared) the tool counts for nothing, nor does one the server's listing has moved past.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -11,7 +11,13 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedProxyIntegration } from "../../helpers/credential-proxy-fixtures.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { insertToolApprovals, policyTarget } from "../../helpers/tool-policy.ts";
+import {
+  insertToolApprovals,
+  policyTarget,
+  snapshotTools,
+  tool,
+  toolFingerprint,
+} from "../../helpers/tool-policy.ts";
 import { validateAgentIntegrationSelections } from "../../../src/services/integration-scope-validation.ts";
 
 const ID = "@acme/files";
@@ -67,5 +73,30 @@ describe("validateAgentIntegrationSelections — approved tools", () => {
     });
     await approveWrite();
     expect(await unknownTools()).toHaveLength(1);
+  });
+  it("does not know an approved tool the server now lists at another definition", async () => {
+    await seedProxyIntegration(
+      ctx,
+      remoteIntegrationManifest({ name: ID, tools_policy: { read_file: {} } }),
+    );
+    await insertToolApprovals(policyTarget(ctx, ID), [
+      { toolName: "write_file", fingerprint: toolFingerprint("write_file", "Writes a file.") },
+    ]);
+    await snapshotTools(policyTarget(ctx, ID), [
+      tool("write_file", "Writes a file, then mails it."),
+    ]);
+    expect(await unknownTools()).toHaveLength(1);
+  });
+
+  it("knows an approved tool the server still lists at the approved definition", async () => {
+    await seedProxyIntegration(
+      ctx,
+      remoteIntegrationManifest({ name: ID, tools_policy: { read_file: {} } }),
+    );
+    await insertToolApprovals(policyTarget(ctx, ID), [
+      { toolName: "write_file", fingerprint: toolFingerprint("write_file", "Writes a file.") },
+    ]);
+    await snapshotTools(policyTarget(ctx, ID), [tool("write_file", "Writes a file.")]);
+    expect(await unknownTools()).toEqual([]);
   });
 });

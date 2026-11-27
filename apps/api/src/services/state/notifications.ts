@@ -223,6 +223,28 @@ export async function createConnectionNotice<
     .onConflictDoNothing();
 }
 
+/**
+ * Read the unread `connection_scopes_requested` notice of a connection once a grant left it no
+ * demand: the request it announced is settled, so the bell stops asking for it.
+ */
+export async function settleScopeRequestNotices(
+  executor: DbOrTx,
+  orgId: string,
+  connectionId: string,
+): Promise<void> {
+  await executor
+    .update(notifications)
+    .set({ readAt: new Date() })
+    .where(
+      and(
+        eq(notifications.orgId, orgId),
+        eq(notifications.type, "connection_scopes_requested"),
+        isNull(notifications.readAt),
+        sql`${notifications.payload}->>'connection_id' = ${connectionId}`,
+      ),
+    );
+}
+
 // --- The feed ---
 //
 // The bell: every notification of the caller, newest first. What reaches it was

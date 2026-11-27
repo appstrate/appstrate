@@ -16,6 +16,27 @@ export interface ToolSnapshot {
   tools: ToolSnapshotEntry[];
 }
 
+/** Every stored snapshot of the integration in the org, whatever its target. */
+export async function readPackageToolSnapshots(input: {
+  orgId: string;
+  packageId: string;
+}): Promise<ToolSnapshot[]> {
+  return db
+    .select({
+      connectionId: integrationToolSnapshots.connectionId,
+      listedAt: integrationToolSnapshots.listedAt,
+      truncated: integrationToolSnapshots.truncated,
+      tools: integrationToolSnapshots.tools,
+    })
+    .from(integrationToolSnapshots)
+    .where(
+      and(
+        eq(integrationToolSnapshots.orgId, input.orgId),
+        eq(integrationToolSnapshots.packageId, input.packageId),
+      ),
+    );
+}
+
 /** The snapshots of the integration's targets named: a connection's, or `null` for the shared one. */
 export async function readToolSnapshots(input: {
   orgId: string;

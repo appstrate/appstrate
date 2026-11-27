@@ -219,5 +219,14 @@ describe("connection requested scopes", () => {
       await settle();
       expect(await notices()).toHaveLength(2);
     });
+
+    it("is read once a reconnect settles the whole demand, not before", async () => {
+      await recordRequestedScopes(connectionId, INTEGRATION, reach, ["write", "admin"]);
+      await until(async () => (await notices()).length === 1);
+      await save(["read", "write"], connectionId);
+      expect((await notices())[0]!.readAt).toBeNull();
+      await save(["read", "write", "admin"], connectionId);
+      expect((await notices())[0]!.readAt).not.toBeNull();
+    });
   });
 });

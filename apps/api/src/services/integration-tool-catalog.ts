@@ -29,7 +29,11 @@ import {
 import { ApiError } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { syntheticToolNames } from "./integration-manifest-helpers.ts";
-import { type ToolSnapshot, readToolSnapshots } from "./integration-tool-snapshot-reads.ts";
+import {
+  type ToolSnapshot,
+  readPackageToolSnapshots,
+  readToolSnapshots,
+} from "./integration-tool-snapshot-reads.ts";
 
 /** What a space decided about one integration's tools, as stored: approvals newest first. */
 interface ToolSpaceRows {
@@ -418,4 +422,28 @@ export async function loadEffectiveToolCatalog(input: {
   ]);
   const catalog = resolveEffectiveToolCatalog({ integration: input.manifest, policy, snapshots });
   return { catalog, snapshots };
+}
+
+/**
+ * The approved undeclared tools whose approval still stands: every one but those the stored
+ * listings show only at definitions the space did not approve (the catalog's `pending`). What
+ * an agent may name and an export reports, so neither counts an approval the server moved past.
+ * A tool no listing shows keeps its approval: absence of evidence is not a changed definition.
+ */
+export async function currentlyApprovedToolNames(input: {
+  orgId: string;
+  packageId: string;
+  manifest: IntegrationManifest;
+  policy: ToolSpacePolicy;
+}): Promise<Set<string>> {
+  const approved = allApprovedToolNames(input.policy);
+  if (approved.size === 0) return approved;
+  const snapshots = await readPackageToolSnapshots(input);
+  const catalog = resolveEffectiveToolCatalog({
+    integration: input.manifest,
+    policy: input.policy,
+    snapshots,
+  });
+  const pending = new Set(catalog.filter((e) => e.status === "pending").map((e) => e.name));
+  return new Set([...approved].filter((name) => !pending.has(name)));
 }

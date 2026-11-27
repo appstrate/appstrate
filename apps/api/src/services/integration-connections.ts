@@ -25,6 +25,7 @@ import {
 } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { MAX_REQUIRED_SCOPES, sanitiseRequiredScopes } from "@appstrate/core/www-authenticate";
+import { settleScopeRequestNotices } from "./state/notifications.ts";
 import { recordRunScopeRequest } from "./state/runs.ts";
 import {
   spacePackages,
@@ -2472,6 +2473,8 @@ export async function persistCredentialBundle(
         .where(eq(integrationConnections.id, target.connectionId))
         .returning();
       if (!updated) return undefined;
+      if (input.scopesGranted !== undefined && updated.requestedScopes.length === 0)
+        await settleScopeRequestNotices(tx, target.scope.orgId, updated.id);
       const shares = (await loadConnectionShares(tx, [updated.id])).get(updated.id) ?? [];
       return { updated, shares, widened };
     });
@@ -2498,12 +2501,15 @@ export async function persistCredentialBundle(
     eq(integrationConnections.credentialsEncrypted, credentialsEncrypted),
     clearsReconnection ? eq(integrationConnections.needsReconnection, false) : undefined,
   );
-  const [row] = await db
-    .update(integrationConnections)
-    .set(set)
-    .where(byIdWhere)
-    .returning({ credentialRevision });
-  return row ?? null;
+  const [row] = await db.update(integrationConnections).set(set).where(byIdWhere).returning({
+    credentialRevision,
+    orgId: integrationConnections.orgId,
+    requestedScopes: integrationConnections.requestedScopes,
+  });
+  if (!row) return null;
+  if (input.scopesGranted !== undefined && row.requestedScopes.length === 0)
+    await settleScopeRequestNotices(db, row.orgId, target.connectionId);
+  return { credentialRevision: row.credentialRevision };
 }
 
 /**

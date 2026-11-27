@@ -34,7 +34,7 @@ import {
 } from "./integration-connections.ts";
 import { readIntegrationManifestForConnect } from "./integration-service.ts";
 import {
-  allApprovedToolNames,
+  currentlyApprovedToolNames,
   declaredToolNames,
   loadToolSpacePolicy,
   namedToolSelection,
@@ -328,7 +328,12 @@ export async function selectedApprovedTools(
       if (!read.ok) return [];
       // Judged: an open catalog, a declared or a hidden tool stands on no approval.
       const policy = await loadToolSpacePolicy(scope, entry.id, read.manifest);
-      const approved = allApprovedToolNames(policy);
+      const approved = await currentlyApprovedToolNames({
+        orgId: scope.orgId,
+        packageId: entry.id,
+        manifest: read.manifest,
+        policy,
+      });
       const selection = resolveEffectiveToolSelection(entry.tools, read.manifest);
       return namedToolSelection(read.manifest, selection, policy)
         .filter((tool) => approved.has(tool))

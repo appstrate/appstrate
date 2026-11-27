@@ -53,7 +53,7 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { ValidationFieldError } from "@appstrate/core/api-errors";
 import { db } from "@appstrate/db/client";
 import {
-  allApprovedToolNames,
+  currentlyApprovedToolNames,
   isClosedRemoteCatalog,
   loadToolSpacePolicy,
 } from "./integration-tool-catalog.ts";
@@ -461,15 +461,20 @@ export async function validateAgentIntegrationSelections(
     // subtracts `hidden_tools` and appends the synthetic api_call/api_upload
     // entries, so this is the set the sidecar will actually register.
     // Undeclared tools the space approved: callable and nameable like declared ones.
+    // An approval the server's current definition moved past counts for nothing: the picker
+    // shows that tool as pending, and the run would go without it.
     const approvedTools = toolPolicySpaceId
       ? [
-          ...allApprovedToolNames(
-            await loadToolSpacePolicy(
+          ...(await currentlyApprovedToolNames({
+            orgId,
+            packageId: entry.id,
+            manifest: judgedManifest,
+            policy: await loadToolSpacePolicy(
               { orgId, spaceId: toolPolicySpaceId },
               entry.id,
               judgedManifest,
             ),
-          ),
+          })),
         ]
       : [];
     const catalog = resolveIntegrationToolCatalog({ integration: judgedManifest });
