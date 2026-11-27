@@ -809,9 +809,11 @@ export function createSpacesRouter() {
   // there is no per-type activation route beside it.
   //
   // Idempotent upsert: 201 when this call put the package on, 200 when it
-  // already was. If not placed here it can place it, but only with
-  // `<type>:share` in the home (`assertPackageShareAccessForPlacement`), so activation is no
-  // way around `share`; an API key never carries it.
+  // already was. In a team space, a package not placed here is placed by this
+  // call, but only with `<type>:share` in the home
+  // (`assertPackageShareAccessForPlacement`), so activation is no way around
+  // `share`; an API key never carries it. A personal space only switches on
+  // what the organization offers, what it creates and what the deployment ships.
   //
   // No permission guard is mounted: the gate below reads the package's own rows
   // (`gateSpacePackageWrite`, `assertPackageShareAccessForPlacement`).
@@ -826,7 +828,11 @@ export function createSpacesRouter() {
     await gateSpacePackageWrite(c, orgId, data.packageId, "activate", { ownSpace });
 
     // Decides whether `<type>:share` is also needed; `activatePackage` re-checks under lock.
-    const placed = await isPackageReadableInSpace(spaceId, data.packageId);
+    // A personal space is never a placement target: `activatePackage` switches on what is
+    // placed there and answers 409 `personal_space_takes_offers_only` for the rest.
+    const placed =
+      c.get("space")?.ownerUserId != null ||
+      (await isPackageReadableInSpace(spaceId, data.packageId));
     const activation = placed
       ? await activatePackage(scope, data.packageId)
       : await activatePackage(scope, data.packageId, {

@@ -30,7 +30,7 @@ const AVAILABILITY = {
   via: "shared",
   state: "active",
   shared_by: { user_id: "u_2", name: "Ada" },
-  offered_to_org: false,
+  org_offer: null,
   org_offerable: false,
   active_by_default: false,
 };
@@ -190,7 +190,7 @@ describe("the integration overview", () => {
     it("draws the offer row only when the offer stands or the reader may change it", () => {
       const none = renderOverview([]);
       expect(none).not.toContain(t("catalogue.orgOffer.label"));
-      for (const patch of [{ org_offerable: true }, { offered_to_org: true }]) {
+      for (const patch of [{ org_offerable: true }, { org_offer: "on_by_default" }]) {
         const html = renderOverview([], { detail: withAvailability(patch) });
         expect(html).toContain(t("catalogue.orgOffer.label"));
       }

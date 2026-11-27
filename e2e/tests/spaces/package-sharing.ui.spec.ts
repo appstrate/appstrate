@@ -23,7 +23,7 @@
 
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
-import { createAgent, registerUser, type AuthResult } from "../../helpers/seed.ts";
+import { createAgent, createSpace, registerUser, type AuthResult } from "../../helpers/seed.ts";
 import { createApiClient } from "../../helpers/api-client.ts";
 import { selectOption } from "../../helpers/radix.ts";
 import { E2E_BASE_URL } from "../../helpers/base-url.ts";
@@ -55,7 +55,7 @@ function catalogueCard(page: Page, displayName: string): Locator {
     .last();
 }
 
-test("an admin shares an agent with a guest, who adds it to their space and may then run it", async ({
+test("an admin offers an agent to the organization, a guest adds it to their space and may then run it", async ({
   request,
   browser,
   browserCtx,
@@ -90,12 +90,7 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   });
   expect(model.status(), await model.text()).toBe(201);
 
-  // A GUEST: invited for exactly one thing, with no space assignment. Named
-  // distinctly on purpose — the `share-target` picker below is ONE Radix
-  // listbox over people AND spaces, driven by typeahead on the option's FIRST
-  // word, and every other seeded user in this organization is an "E2E User …",
-  // so a shared first word would commit whichever option the list happened to
-  // highlight.
+  // A GUEST: invited for exactly one thing, with no space assignment.
   const guest: AuthResult = await registerUser(request, {
     name: `Guest ${Date.now().toString(36)}`,
   });
@@ -117,31 +112,16 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
     spaceId: guestSpaceId,
   });
 
-  // Before the share the guest cannot even see it.
+  // Before the offer the guest cannot even see it.
   expect((await guestClient.get(`/packages/agents/${scope}/${name}`)).status()).toBe(404);
 
-  // ── The admin shares it, from the package page's own dialog ──
-  const adminPage = await (
-    await createAuthedContext(browser, browserCtx.auth, orgId, browserCtx.org.defaultSpaceId)
-  ).newPage();
-  try {
-    await adminPage.goto(`/agents/${scope}/${name}`);
-    // The actions dropdown, then the share item it gates on `home_shareable`.
-    await adminPage.getByRole("button", { name: "Actions", exact: true }).click();
-    await adminPage.getByRole("menuitem", { name: /Partager|Share/ }).click();
-    // The option's label is the member's `displayName`, which the sign-up hook
-    // seeds from `user.name` (`profiles.displayName = user.name || user.email`)
-    // — so it is the NAME on the wire here, not the address.
-    await selectOption(adminPage, "share-target", guest.name);
-    const shared = adminPage.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" && response.url().includes("/shares") === true,
-    );
-    await adminPage.getByRole("button", { name: /^(Partager|Share)$/ }).click();
-    expect((await shared).status()).toBe(201);
-  } finally {
-    await adminPage.context().close();
-  }
+  // ── The admin offers it to the organization ──
+  // A personal space receives a package only through the offer: `available`
+  // places it in every space without switching it on.
+  const offered = await apiClient.put(`/packages/${scope}/${name}/org-offer`, {
+    mode: "available",
+  });
+  expect(offered.status(), await offered.text()).toBe(200);
 
   // ── The guest finds it and switches it on in their own space ──
   // It is READABLE now, and still not runnable: a placement nobody activated
@@ -262,18 +242,13 @@ test("a placement shared OFF is switched on from the catalogue and lands on an a
   request,
   browser,
   browserCtx,
+  apiClient,
   orgOnlyClient,
 }) => {
   const orgId = browserCtx.org.orgId;
   const scope = `@${browserCtx.org.orgSlug}`;
   const name = `shared-off-${Date.now().toString(36)}`;
-  const homeId = await personalSpaceOf(request, browserCtx.auth.cookie, orgId);
-  const authorClient = createApiClient(request, {
-    cookie: browserCtx.auth.cookie,
-    orgId,
-    spaceId: homeId,
-  });
-  await createAgent(authorClient, scope, name);
+  await createAgent(apiClient, scope, name);
   const member = await registerUser(request);
   const invite = await orgOnlyClient.post(`/orgs/${orgId}/members`, {
     email: member.email,
@@ -285,12 +260,12 @@ test("a placement shared OFF is switched on from the catalogue and lands on an a
   });
   expect(joined.status()).toBe(200);
   const personalId = await personalSpaceOf(request, member.cookie, orgId);
-  const shared = await authorClient.post(`/packages/${scope}/${name}/shares`, {
-    target: { kind: "user", userId: member.userId },
+  const shared = await apiClient.put(`/packages/${scope}/${name}/org-offer`, {
+    mode: "available",
   });
-  expect(shared.status(), await shared.text()).toBe(201);
+  expect(shared.status(), await shared.text()).toBe(200);
 
-  // Landed OFF: a row in the member's space, switched off.
+  // Placed OFF: the offer writes no row, so the member's space lists nothing yet.
   const memberClient = createApiClient(request, {
     cookie: member.cookie,
     orgId,
@@ -300,9 +275,9 @@ test("a placement shared OFF is switched on from the catalogue and lands on an a
   expect(placed.status()).toBe(200);
   expect(
     ((await placed.json()).data as { packageId: string; enabled?: boolean }[]).find(
-      (row) => row.packageId === `${scope}/${name}`,
-    )?.enabled,
-  ).toBe(false);
+      (row) => row.packageId === `${scope}/${name}` && row.enabled,
+    ),
+  ).toBeUndefined();
 
   const page = await (await createAuthedContext(browser, member, orgId, personalId)).newPage();
   try {
@@ -317,11 +292,9 @@ test("a placement shared OFF is switched on from the catalogue and lands on an a
     await expect(page.getByText(`Test Agent ${name}`, { exact: true })).toHaveCount(0);
 
     // Stay in one SPA session from here: a reload would discard the cache
-    // under test. The sidebar opens the catalogue, whose card names the sharer
-    // for THIS space and adds it here in one click.
+    // under test. The sidebar opens the catalogue, whose card adds it here in one click.
     await page.getByRole("link", { name: /^Catalogue/ }).click();
     const card = catalogueCard(page, `Test Agent ${name}`);
-    await expect(card.getByText(`Partagé par ${browserCtx.auth.name}`)).toBeVisible();
     const activated = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -369,17 +342,16 @@ test("a guest finds a placement shared OFF in the catalogue and switches it on",
   });
   expect(accepted.status()).toBe(200);
   const guestSpaceId = await personalSpaceOf(request, guest.cookie, orgId);
-  const shared = await apiClient.post(`/packages/${scope}/${name}/shares`, {
-    target: { kind: "user", userId: guest.userId },
+  const shared = await apiClient.put(`/packages/${scope}/${name}/org-offer`, {
+    mode: "available",
   });
-  expect(shared.status(), await shared.text()).toBe(201);
+  expect(shared.status(), await shared.text()).toBe(200);
 
   const page = await (await createAuthedContext(browser, guest, orgId, guestSpaceId)).newPage();
   try {
     await page.goto("/agents");
     await page.getByRole("link", { name: /^Catalogue/ }).click({ timeout: 5_000 });
     const card = catalogueCard(page, `Test Agent ${name}`);
-    await expect(card.getByText(/^Partagé par /)).toBeVisible();
     const activated = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -418,8 +390,7 @@ test("a guest finds a placement shared OFF in the catalogue and switches it on",
   }
 });
 
-test("a draft-only agent is published from the share dialog itself, then offered", async ({
-  request,
+test("a draft-only agent is published from the share dialog itself, then shared", async ({
   browser,
   browserCtx,
   apiClient,
@@ -437,16 +408,9 @@ test("a draft-only agent is published from the share dialog itself, then offered
   const dropped = await apiClient.delete(`/packages/agents/${scope}/${name}/versions/0.1.0`);
   expect(dropped.status(), await dropped.text()).toBe(204);
 
-  const member = await registerUser(request, { name: `Recipient ${Date.now().toString(36)}` });
-  const invite = await orgOnlyClient.post(`/orgs/${orgId}/members`, {
-    email: member.email,
-    role: "member",
-  });
-  expect(invite.status()).toBe(201);
-  const joined = await request.post(`/invite/${(await invite.json()).token}/accept`, {
-    headers: { Cookie: member.cookie, Origin: E2E_BASE_URL },
-  });
-  expect(joined.status()).toBe(200);
+  // Named on its own first word: the picker is a Radix listbox driven by typeahead.
+  const destinationName = `Recipient${Date.now().toString(36)}`;
+  const destination = await createSpace(orgOnlyClient, destinationName);
 
   const page = await (
     await createAuthedContext(browser, browserCtx.auth, orgId, browserCtx.org.defaultSpaceId)
@@ -455,7 +419,7 @@ test("a draft-only agent is published from the share dialog itself, then offered
     await page.goto(`/agents/${scope}/${name}`);
     await page.getByRole("button", { name: "Actions", exact: true }).click();
     await page.getByRole("menuitem", { name: /Partager|Share/ }).click();
-    await selectOption(page, "share-target", member.name);
+    await selectOption(page, "share-target", destinationName);
 
     // The offer is refused for want of a version, and the dialog says so in
     // place rather than sending the author off to the Versions tab.
@@ -485,18 +449,14 @@ test("a draft-only agent is published from the share dialog itself, then offered
     await page.context().close();
   }
 
-  // The recipient really has the offer, and switching it on in their own space
-  // needs no grant — owning the space is the authorization.
-  const personalId = await personalSpaceOf(request, member.cookie, orgId);
-  const memberClient = createApiClient(request, {
-    cookie: member.cookie,
-    orgId,
-    spaceId: personalId,
-  });
-  const added = await memberClient.post(`/spaces/${personalId}/packages`, {
-    packageId: `${scope}/${name}`,
-  });
-  expect(added.status(), await added.text()).toBe(201);
+  // The placement really exists in the destination space.
+  const shares = await apiClient.get(`/packages/${scope}/${name}/shares`);
+  expect(shares.status(), await shares.text()).toBe(200);
+  expect(
+    ((await shares.json()).data as Array<{ target: { spaceId?: string } }>).map(
+      (entry) => entry.target.spaceId,
+    ),
+  ).toContain(destination.id);
 });
 
 test("a non-admin builder switches a team placement off and on from the space package view", async ({

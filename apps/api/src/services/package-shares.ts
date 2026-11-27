@@ -19,10 +19,7 @@ const sharer = alias(user, "sharer");
 
 /** One entry of `GET /api/packages/{scope}/{name}/shares`. */
 export interface PackageShareView {
-  /** A personal space is rendered as its owner, never as a space id (§3.6). */
-  target:
-    | { kind: "user"; userId: string; name: string }
-    | { kind: "space"; spaceId: string; name: string };
+  target: { kind: "space"; spaceId: string; name: string };
   /** `user_id`, not `userId`: one of the enumerated counter-exceptions of CASING_CONVENTIONS. */
   shared_by: { user_id: string; name: string } | null;
   /** `space_packages.enabled` of the target's row. */
@@ -49,7 +46,7 @@ export function sharerView(row: {
  * caller activate in the target?".
  *
  * @throws 403 when the caller holds no share authority in the LOCKED home; 409
- *   `share_target_is_home` or `package_has_no_version`; 404 if the target
+ *   `share_target_is_home`, `personal_space_takes_offers_only` or `package_has_no_version`; 404 if the target
  *   space is not this organization's or the package went away.
  */
 export async function sharePackage(params: {
@@ -80,18 +77,16 @@ export async function sharePackage(params: {
  * @returns the authority that withdrew it and the disabled schedules, whose
  *   jobs the caller removes once committed.
  * @throws 404 when the space holds no such placement or is a personal space
- *   other than `personalOwnerId`'s; 403 when `authorityFor` refuses.
+ *   (a personal space holds no share); 403 when `authorityFor` refuses.
  */
 export async function revokePackageShare(params: {
   packageId: string;
   spaceId: string;
   orgId: string;
-  /** The one personal space the withdrawal may name; any other answers 404 (§3.6). */
-  personalOwnerId: string | null;
   /** The route's rule, asked against the locked home. */
   authorityFor: (homeSpaceId: string | null) => PlacementRemovalAuthority | null;
 }): Promise<{ authority: PlacementRemovalAuthority; disabledScheduleIds: string[] }> {
-  const { packageId, spaceId, orgId, personalOwnerId, authorityFor } = params;
+  const { packageId, spaceId, orgId, authorityFor } = params;
   const notPlaced = () => notFound(`Package '${packageId}' is not placed in that space`);
   return db.transaction(async (tx) => {
     // Authority is judged against the locked home: a concurrent re-home
@@ -114,15 +109,7 @@ export async function revokePackageShare(params: {
     const [target] = await tx
       .select({ id: spaces.id })
       .from(spaces)
-      .where(
-        and(
-          eq(spaces.id, spaceId),
-          eq(spaces.orgId, orgId),
-          personalOwnerId === null
-            ? isNull(spaces.ownerUserId)
-            : or(isNull(spaces.ownerUserId), eq(spaces.ownerUserId, personalOwnerId)),
-        ),
-      )
+      .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId), isNull(spaces.ownerUserId)))
       .limit(1);
     if (!target) throw notPlaced();
     const { removed, disabledScheduleIds } = await withdrawPlacement(tx, packageId, spaceId);
@@ -147,17 +134,14 @@ export async function listPackageShares(
     .select({
       spaceId: spacePackages.spaceId,
       spaceName: spaces.name,
-      ownerUserId: spaces.ownerUserId,
       sharedBy: spacePackages.sharedBy,
       createdAt: spacePackages.installedAt,
       enabled: spacePackages.enabled,
-      ownerName: user.name,
       sharerName: sharer.name,
     })
     .from(spacePackages)
     .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(user, eq(user.id, spaces.ownerUserId))
     // Membership is the join so a former member's name is never loaded.
     .leftJoin(
       organizationMembers,
@@ -173,6 +157,8 @@ export async function listPackageShares(
         // A row that only decides about the organization's offer is no share.
         eq(spacePackages.placedByOffer, false),
         eq(spaces.orgId, orgId),
+        // A personal space holds no share: its rows are its own, the offer's or the deployment's.
+        isNull(spaces.ownerUserId),
         // A system package is never shared, and the home is not an audience.
         eq(packages.orgId, orgId),
         or(isNull(packages.homeSpaceId), ne(packages.homeSpaceId, spacePackages.spaceId)),
@@ -182,13 +168,7 @@ export async function listPackageShares(
     .orderBy(spacePackages.installedAt);
 
   return rows.map((row) => ({
-    target: row.ownerUserId
-      ? {
-          kind: "user" as const,
-          userId: row.ownerUserId,
-          name: row.ownerName ?? row.ownerUserId,
-        }
-      : { kind: "space" as const, spaceId: row.spaceId, name: row.spaceName },
+    target: { kind: "space" as const, spaceId: row.spaceId, name: row.spaceName },
     shared_by: sharerView(row),
     enabled: row.enabled,
     createdAt: row.createdAt.toISOString(),

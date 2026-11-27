@@ -124,7 +124,7 @@ beforeEach(async () => {
       },
     }) as unknown as Record<string, unknown>,
   });
-  await seedOrgOffer(olivia.orgId, INTEGRATION);
+  await seedOrgOffer(olivia.orgId, INTEGRATION, "on_by_default");
   // Org-wide (`space_id` null): a connection confined to one space cannot be shared out of it.
   const [connection] = await db
     .insert(integrationConnections)

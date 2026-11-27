@@ -87,7 +87,11 @@ async function libraryEntry(
 }
 
 const offer = (id: string) =>
-  app.request(`/api/packages/${id}/org-offer`, { method: "PUT", headers: authHeaders(ctx) });
+  app.request(`/api/packages/${id}/org-offer`, {
+    method: "PUT",
+    headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "on_by_default" }),
+  });
 const deactivate = (id: string) =>
   app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/${id}`, {
     method: "DELETE",

@@ -31,6 +31,7 @@ import {
   spaceRoles,
   user as userTable,
 } from "@appstrate/db/schema";
+import type { OrgOfferMode } from "@appstrate/db/schema";
 import { and, eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -165,9 +166,13 @@ export async function seedPackageShare(
     .onConflictDoNothing();
 }
 
-/** Offer a package to its organization (`org_package_offers`), bypassing the door. */
-export async function seedOrgOffer(orgId: string, packageId: string): Promise<void> {
-  await db.insert(orgPackageOffers).values({ orgId, packageId }).onConflictDoNothing();
+/** Offer a package to its organization (`org_package_offers`) in `mode`, bypassing the door. */
+export async function seedOrgOffer(
+  orgId: string,
+  packageId: string,
+  mode: OrgOfferMode,
+): Promise<void> {
+  await db.insert(orgPackageOffers).values({ orgId, packageId, mode }).onConflictDoNothing();
 }
 
 /**

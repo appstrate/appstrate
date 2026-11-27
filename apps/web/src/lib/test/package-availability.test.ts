@@ -34,6 +34,16 @@ describe("availabilityLabel", () => {
     });
   });
 
+  it("says an offer through the organization with no row of its own is available to switch on", () => {
+    expect(availabilityLabel({ ...base, via: "organization", state: "none" }, "agent")).toEqual({
+      key: "packages.availability.available",
+      params: {},
+    });
+    expect(
+      availabilityLabel({ ...base, via: "organization", state: "none" }, "integration").key,
+    ).toBe("packages.availability.available_integration");
+  });
+
   it("keeps the provenance of an inactive placement", () => {
     for (const via of ["home", "system", "organization"] as const) {
       expect(availabilityLabel({ ...base, via, state: "inactive" }, "agent")).toEqual({

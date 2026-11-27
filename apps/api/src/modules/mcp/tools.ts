@@ -2493,10 +2493,12 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "organization-scoped connection in their personal space when own connections are allowed), each listing those " +
       "`connections` (`id`, `label`, `account_id`, `owned_by_actor`, `needs_reconnection`). On the " +
       "integration entry, not on a connection: `active` (`false`: the integration is switched off " +
-      "in this space, so a run there cannot use it until it is activated — `activatePackage`, or " +
+      "in this space, so a run there cannot use it until it is activated — `activatePackage` (a " +
+      "personal space switches on only what is its own, offered to the organization or on by the " +
+      "platform's default: anything else is refused `personal_space_takes_offers_only`), or " +
       "for an organization owner or admin offered to the organization: from chat, in the " +
       "organization catalog; otherwise `offerPackageToOrg` with an unconfined user credential. An " +
-      "offer activates the integration, never a connection, and a space's own switched-off row " +
+      "offer made on by default activates the integration, an available one only lets a space switch it on, neither ever a connection, and a space's own switched-off row " +
       "still wins); `via` (`home`, `shared`, `system`, `organization`: why it is placed here, " +
       "`null` when the caller holds a connection but it is not placed); `version` and " +
       "`default_tools`, present only when active; `needs_reconnection` (no healthy connection: " +

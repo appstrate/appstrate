@@ -415,6 +415,7 @@ column org_models.reasoning boolean
 column org_models.source text not null default 'custom'::text
 column org_models.updated_at timestamp with time zone not null default now()
 column org_package_offers.created_at timestamp with time zone not null default now()
+column org_package_offers.mode text not null
 column org_package_offers.offered_by text
 column org_package_offers.org_id uuid not null
 column org_package_offers.package_id text not null
@@ -840,7 +841,7 @@ constraint notifications notifications_pkey PRIMARY KEY (id)
 constraint notifications notifications_recipient_type_valid CHECK ((recipient_type = ANY (ARRAY['user'::text, 'end_user'::text])))
 constraint notifications notifications_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 constraint notifications notifications_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
-constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'package_shared'::text, 'agent_message'::text, 'credential_needs_reconnection'::text])))
+constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'agent_message'::text, 'credential_needs_reconnection'::text]))) NOT VALID
 constraint oauth_access_tokens oauth_access_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_access_tokens oauth_access_tokens_pkey PRIMARY KEY (id)
 constraint oauth_access_tokens oauth_access_tokens_refresh_id_oauth_refresh_tokens_id_fk FOREIGN KEY (refresh_id) REFERENCES oauth_refresh_tokens(id) ON DELETE CASCADE
@@ -890,6 +891,7 @@ constraint org_models org_models_credential_provider_fk FOREIGN KEY (credential_
 constraint org_models org_models_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_models org_models_pkey PRIMARY KEY (id)
 constraint org_models org_models_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
+constraint org_package_offers org_package_offers_mode_known CHECK ((mode = ANY (ARRAY['available'::text, 'on_by_default'::text])))
 constraint org_package_offers org_package_offers_offered_by_user_id_fk FOREIGN KEY (offered_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint org_package_offers org_package_offers_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_package_offers org_package_offers_org_id_package_id_pk PRIMARY KEY (org_id, package_id)

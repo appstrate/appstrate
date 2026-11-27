@@ -7,7 +7,8 @@ import type { CataloguePlacement } from "./catalogue-placement";
 import { linkedSpacePath } from "./across-spaces";
 import { packageDetailPath } from "./package-paths";
 
-export type ActivationRefusal = "notPlaced" | "activate" | "deactivate" | "runtimeBound";
+export type ActivationRefusal =
+  "notPlaced" | "notOffered" | "activate" | "deactivate" | "runtimeBound";
 
 export interface ActivationGate {
   allowed: boolean;
@@ -18,6 +19,7 @@ export interface ActivationGate {
 /** Spelled out so the locale test sees every key. */
 export const ACTIVATION_REFUSAL_KEY: Record<ActivationRefusal, string> = {
   notPlaced: "library.cannotShareHere",
+  notOffered: "library.notOffered",
   activate: "library.cannotActivate",
   deactivate: "library.cannotDeactivate",
   runtimeBound: "library.runtimeBound",
@@ -25,7 +27,8 @@ export const ACTIVATION_REFUSAL_KEY: Record<ActivationRefusal, string> = {
 
 /**
  * The server's verdict (library row `activation`): the type's grant in the target space (a personal
- * space's owner needs none) and, where not placed yet, the share right in its home. No verdict
+ * space's owner needs none), where not placed yet the share right in its home, and, in a personal
+ * space, that the organization offers the package. No verdict
  * for a space refuses without blaming either half.
  */
 export function activationGate(
@@ -37,6 +40,7 @@ export function activationGate(
   if (!cell) return { allowed: false, refusal: null };
   const verdict = next ? cell.activate : cell.deactivate;
   if (verdict === "allowed") return { allowed: true, refusal: null };
+  if (verdict === "not_offered") return { allowed: false, refusal: "notOffered" };
   if (verdict === "not_shareable") return { allowed: false, refusal: "notPlaced" };
   if (verdict === "runtime_bound") return { allowed: false, refusal: "runtimeBound" };
   return { allowed: false, refusal: next ? "activate" : "deactivate" };

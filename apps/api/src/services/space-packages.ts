@@ -20,6 +20,7 @@ import {
   packageVersions,
   spaces,
 } from "@appstrate/db/schema";
+import type { OrgOfferMode } from "@appstrate/db/schema";
 import {
   conflict,
   forbidden,
@@ -59,6 +60,7 @@ import {
 } from "./agent-version-resolver.ts";
 import {
   activeHereSql,
+  isActiveByDefault,
   isActiveHere,
   isActiveWithoutRow,
   type ActivatablePackage,
@@ -107,16 +109,47 @@ export async function loadPlaceablePackage(
     .limit(1)
     .for(lock);
   if (!pkg) throw notFound(`Package '${packageId}' not found in this organization`);
-  const offeredToOrg = (await listOrgOffers(scope.orgId, [packageId], tx)).has(packageId);
-  return { ...pkg, offeredToOrg };
+  const orgOffer = (await listOrgOffers(scope.orgId, [packageId], tx)).get(packageId) ?? null;
+  return { ...pkg, orgOffer };
 }
 
 /** Placed here without a row — shipped with the deployment, homed here, or offered to the organization. */
 function placedWithoutRow(
-  pkg: { source: string | null; homeSpaceId: string | null; offeredToOrg: boolean },
+  pkg: { source: string | null; homeSpaceId: string | null; orgOffer: OrgOfferMode | null },
   spaceId: string,
 ): boolean {
-  return pkg.source === "system" || pkg.homeSpaceId === spaceId || pkg.offeredToOrg;
+  return pkg.source === "system" || pkg.homeSpaceId === spaceId || pkg.orgOffer !== null;
+}
+
+/**
+ * What a personal space may have switched on: what it creates (the home), what
+ * the organization offers (either mode) and what the deployment runs by
+ * default. Nothing is placed there by a share. Switching off is always allowed,
+ * so this guards only the writes that turn a package on.
+ */
+export function mayLandInPersonalSpace(
+  pkg: ActivatablePackage & { homeSpaceId: string | null },
+  spaceId: string,
+): boolean {
+  return pkg.homeSpaceId === spaceId || pkg.orgOffer !== null || isActiveByDefault(pkg);
+}
+
+/** Is `spaceId` a personal space (`spaces.owner_user_id` set)? Read inside the caller's transaction. */
+async function isPersonalSpace(tx: Tx, spaceId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ ownerUserId: spaces.ownerUserId })
+    .from(spaces)
+    .where(eq(spaces.id, spaceId))
+    .limit(1);
+  return row?.ownerUserId != null;
+}
+
+/** 409 `personal_space_takes_offers_only`: the package is not offered to the organization. */
+function personalSpaceTakesOffersOnly(packageId: string) {
+  return conflict(
+    "personal_space_takes_offers_only",
+    `'${packageId}' is not offered to the organization: a personal space only runs what it creates, what the organization offers, and the deployment's defaults. An organization owner or admin can offer it (PUT /api/packages/{scope}/{name}/org-offer).`,
+  );
 }
 
 /** The agent and its local decision stay locked until the schedule insert or re-arm commits. */
@@ -150,7 +183,8 @@ export interface PlacementAuthority {
  * The one door that creates a row outside the home (RBAC spec §6.10). Refuses
  * 403 without `<type>:share` in the locked home (checked first, so a caller who
  * no longer governs the package learns nothing), 409 `share_target_is_home`,
- * 409 `package_has_no_version`. `pkg` comes from `loadPlaceablePackage` in this
+ * 409 `personal_space_takes_offers_only` for any personal target, 409
+ * `package_has_no_version`. `pkg` comes from `loadPlaceablePackage` in this
  * transaction. Returns `null` when a row already existed (left untouched).
  */
 export async function placePackage(
@@ -170,6 +204,8 @@ export async function placePackage(
       "This package already lives in that space — sharing it there would place it in itself.",
     );
   }
+  // A share never lands in a personal space: only the offer reaches it.
+  if (await isPersonalSpace(tx, spaceId)) throw personalSpaceTakesOffersOnly(pkg.id);
   await assertHasPublishedVersion(pkg.id, tx);
   const [row] = await tx
     .insert(spacePackages)
@@ -264,6 +300,11 @@ export async function activatePackageWithin(
   const existing = await currentPlacement(tx, packageId, scope.spaceId);
   // The activation rule, read before the write.
   const wasActive = isActiveHere(pkg, existing);
+  // Switching on in a personal space is asked before any placement: a sharer
+  // gets the refusal, not a row.
+  if (!mayLandInPersonalSpace(pkg, scope.spaceId) && (await isPersonalSpace(tx, scope.spaceId))) {
+    throw personalSpaceTakesOffersOnly(packageId);
+  }
   const switchOn = async (created: boolean, shared: boolean) => {
     const [row] = await tx
       .update(spacePackages)
@@ -1071,7 +1112,7 @@ export async function updateSpacePackage(
       return;
     }
     // The public settings door accepts a local row or a current organization offer.
-    if (opts?.requirePlacement ? !pkg.offeredToOrg : !placedWithoutRow(pkg, scope.spaceId)) {
+    if (opts?.requirePlacement ? pkg.orgOffer === null : !placedWithoutRow(pkg, scope.spaceId)) {
       throw notFound(`Package '${packageId}' is not placed in this space`);
     }
     await tx

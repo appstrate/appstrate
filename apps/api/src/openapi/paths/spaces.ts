@@ -464,7 +464,8 @@ export const spacesPaths = {
         "Where the package is PLACED here — homed in this space, holding a row here (`POST /api/packages/{scope}/{name}/shares` creates one), or a system package, placed everywhere — the row is switched on. " +
         "Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. " +
         "Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. " +
-        "In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest switches on a package placed there for them. " +
+        "In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a member switches on a package the organization offers. " +
+        "A PERSONAL space takes only what is homed there, what the organization offers (`PUT /api/packages/{scope}/{name}/org-offer`, either mode) and what the platform activates by default: any other package answers `409 personal_space_takes_offers_only`, and the call never places one there. " +
         "The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it. " +
         "Activating an AGENT activates nothing else: each integration it declares that is not active here is a `warnings[]` item of the response (`code: integration_not_active`, `required` saying whether a launch here is refused until it is activated, or starts without it) — activate it with this same call and its `packageId`, or leave the agent on without it.",
       parameters: [
@@ -529,6 +530,15 @@ export const spacesPaths = {
             "The caller lacks the package type's activation grant in this space, or — for a package not yet placed here — its `share` permission in the package's home space.",
         },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The space is a personal space and the package is neither homed there, offered by the organization nor active by default (`personal_space_takes_offers_only`), or the package has no published version to place (`package_has_no_version`). RFC 9457 problem+json.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

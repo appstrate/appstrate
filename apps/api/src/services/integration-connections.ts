@@ -877,7 +877,7 @@ export async function resolveIntegrationActivations(
       type: found?.type ?? "integration",
       source: found?.source ?? null,
       homeSpaceId: found?.homeSpaceId ?? null,
-      offeredToOrg: offered.has(id),
+      orgOffer: offered.get(id) ?? null,
     };
     const row = found?.packageId
       ? { enabled: found.enabled!, placedByOffer: found.placedByOffer! }

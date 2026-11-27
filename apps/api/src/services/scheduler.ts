@@ -541,7 +541,8 @@ export async function triggerScheduledRun(
       await failSchedule(
         executionBlock === "not_placed"
           ? `Agent '${packageId}' is not placed in space '${spaceId}'. ` +
-              `Share it into that space via POST /api/packages/${packageId}/shares, ` +
+              `Share it into a team space (POST /api/packages/${packageId}/shares), ` +
+              `have an organization owner or admin offer it (PUT /api/packages/${packageId}/org-offer), ` +
               `or move this schedule to a space the agent is placed in.`
           : `Agent '${packageId}' is not active in space '${spaceId}'. ` +
               `Activate it via POST /api/spaces/${spaceId}/packages to resume this schedule.`,

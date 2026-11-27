@@ -2,7 +2,6 @@
 
 import type { TFunction } from "i18next";
 import { formatDateField } from "./format-date";
-import { catalogueHref } from "./catalogue-link";
 import { runDetailPath } from "./package-paths";
 import { linkedSpacePath } from "./across-spaces";
 import type { paths } from "../api/client";
@@ -38,22 +37,6 @@ export function notificationRow(
   t: TFunction<["common", "agents"]>,
 ): NotificationRow {
   const date = formatDateField(notification.createdAt);
-  if (notification.type === "package_shared") {
-    // One share, one decision: open THAT package's sheet, not a list to search.
-    const share = notification.payload;
-    const href = share ? catalogueHref(share.package_type, { packageId: share.packageId }) : null;
-    return {
-      title: t("notifications.packageShared", {
-        name: share?.shared_by_name ?? "",
-        package: share?.packageId ?? "",
-      }),
-      status: null,
-      message: null,
-      meta: date,
-      target: href && canReach(href) ? href : null,
-      targetLabel: "notifications.openPackage",
-    };
-  }
   if (notification.type === "credential_needs_reconnection") {
     // The owner's own connections: where a dead connection is reconnected.
     const dead = notification.payload;

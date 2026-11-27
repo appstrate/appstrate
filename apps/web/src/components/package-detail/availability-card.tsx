@@ -35,16 +35,16 @@ export function AvailabilityCard({
   const { t } = useTranslation("settings");
   const catalogue = useCatalogueEntry(type, packageId, catalogueVersion);
   const { key, params } = availabilityLabel(availability, type);
-  const { offered_to_org, org_offerable, active_by_default } = availability;
+  const { org_offer, org_offerable, active_by_default } = availability;
   return (
     <DetailSectionCard title={t("packages.availability.title")} icon={Share2} bodyClassName="p-0">
       <dl className="divide-y">
         <OperationalStat label={t("packages.availability.here")} value={t(key, params)} size="sm" />
       </dl>
-      {(offered_to_org || org_offerable || active_by_default || catalogue) && (
+      {(org_offer || org_offerable || active_by_default || catalogue) && (
         <div className="flex flex-col gap-3 border-t p-4">
           <OrgOfferRow
-            item={{ id: packageId, name, offered_to_org, org_offerable, active_by_default }}
+            item={{ id: packageId, name, org_offer, org_offerable, active_by_default }}
           />
           {catalogue && (
             <Link

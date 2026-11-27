@@ -97,7 +97,7 @@ const PACKAGE_PLACEMENT_STATE_PROPERTIES = {
     type: "string",
     enum: ["active", "inactive", "none"],
     description:
-      "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it.",
+      "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off — the package is not offered to the organization, or offered as `available` and not yet switched on here. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization as `on_by_default`, which activates it.",
   },
   shared_by: {
     type: ["object", "null"],
@@ -682,21 +682,21 @@ export const schemas = {
       warnings: {
         type: "array",
         description:
-          "Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
+          "Always present. On an organization offer of an AGENT (`PUT …/org-offer`): one item per integration it declares that is neither offered to the organization nor active by default (`code: integration_not_offered`), `[]` for any other type. Otherwise, when the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
         items: { $ref: "#/components/schemas/ActivationWarning" },
       },
     },
   },
   ActivationWarning: {
     description:
-      "A declared integration of the agent that is not active in the space, in the launch `warnings[]` vocabulary (`field: integrations.<id>`, `code: integration_not_active`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item).",
+      "A declared integration of the agent that is not active in the space (`code: integration_not_active`) or, on an organization offer, not offered to the organization (`code: integration_not_offered`), in the launch `warnings[]` vocabulary (`field: integrations.<id>`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item).",
     allOf: [
       { $ref: "#/components/schemas/ResolutionFieldError" },
       {
         type: "object",
         required: ["required"],
         properties: {
-          code: { type: "string", enum: ["integration_not_active"] },
+          code: { type: "string", enum: ["integration_not_active", "integration_not_offered"] },
           required: {
             type: "boolean",
             description: "Whether the agent declares the integration `required`.",
@@ -3302,7 +3302,7 @@ export const schemas = {
         "home_writable",
         "home_deletable",
         "home_shareable",
-        "offered_to_org",
+        "org_offer",
         "org_offerable",
         "active_by_default",
         "placements",
@@ -3327,10 +3327,11 @@ export const schemas = {
             "Description from the package draft manifest; empty string when not provided.",
         },
         ...PACKAGE_HOME_PROPERTIES,
-        offered_to_org: {
-          type: "boolean",
+        org_offer: {
+          type: ["string", "null"],
+          enum: ["available", "on_by_default", null],
           description:
-            "Offered to the organization: placed and active in every space of it that holds no `space_packages` row of its own (a row always wins; `enabled = false` keeps it off).",
+            "The offer to the organization, or `null` when there is none. An offer in either mode PLACES the package in every space of it that holds no `space_packages` row of its own. `on_by_default`: it is also ACTIVE there (a row always wins; `enabled = false` keeps it off). `available`: it is placed and listed but off until the space switches it on (`POST /api/spaces/{id}/packages`).",
         },
         org_offerable: {
           type: "boolean",
@@ -3345,13 +3346,16 @@ export const schemas = {
         activation: {
           type: "array",
           description:
-            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance.",
+            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_offered` — `activate` only, in a personal space: the package is not the space's own, is not offered to the organization and is not on by the deployment's default, so a personal space cannot switch it on (an organization owner or admin can offer it); `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance.",
           items: {
             type: "object",
             required: ["spaceId", "activate", "deactivate"],
             properties: {
               spaceId: { type: "string" },
-              activate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
+              activate: {
+                type: "string",
+                enum: ["allowed", "not_offered", "not_shareable", "forbidden"],
+              },
               deactivate: {
                 type: "string",
                 enum: ["allowed", "not_shareable", "forbidden", "runtime_bound"],
@@ -3374,12 +3378,13 @@ export const schemas = {
     type: "object",
     description:
       "What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`) and the package's offer fields. A projection of `GET /api/spaces/{id}/library`, never a second computation, carried by the detail of every package type (`getIntegration`, `getAgentPackage`, `getSkill`, `getIntegrationPackage`).",
-    required: ["via", "state", "shared_by", "offered_to_org", "org_offerable", "active_by_default"],
+    required: ["via", "state", "shared_by", "org_offer", "org_offerable", "active_by_default"],
     properties: {
       ...PACKAGE_PLACEMENT_STATE_PROPERTIES,
-      offered_to_org: {
-        type: "boolean",
-        description: "Offered to the organization (`offered_to_org` of the library entry).",
+      org_offer: {
+        type: ["string", "null"],
+        enum: ["available", "on_by_default", null],
+        description: "The offer to the organization (`org_offer` of the library entry).",
       },
       org_offerable: {
         type: "boolean",
@@ -3409,42 +3414,22 @@ export const schemas = {
   ShareTarget: {
     type: "object",
     description:
-      "Where a package is placed outside its home. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
-    required: ["kind"],
-    oneOf: [
-      {
-        type: "object",
-        required: ["kind", "userId"],
-        properties: {
-          kind: { type: "string", enum: ["user"] },
-          userId: { type: "string", description: "Organization member's user id." },
-        },
-        additionalProperties: false,
-      },
-      {
-        type: "object",
-        required: ["kind", "spaceId"],
-        properties: {
-          kind: { type: "string", enum: ["space"] },
-          spaceId: { type: "string", description: "Space id (`spc_…`) the caller can reach." },
-        },
-        additionalProperties: false,
-      },
-    ],
+      'Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only. A person is not a target either: `kind: "user"` is a 400.',
+    required: ["kind", "spaceId"],
+    properties: {
+      kind: { type: "string", enum: ["space"] },
+      spaceId: { type: "string", description: "Team space id (`spc_…`) the caller can reach." },
+    },
+    additionalProperties: false,
   },
   ShareTargetView: {
     type: "object",
-    description:
-      "A share's subject as the server renders it back. A personal-space target comes back as its OWNER — never as a space id, which is the one fact a personal space withholds.",
-    required: ["kind", "name"],
+    description: "A share's subject as the server renders it back: a team space.",
+    required: ["kind", "spaceId", "name"],
     properties: {
-      kind: { type: "string", enum: ["user", "space"] },
-      userId: { type: "string", description: "Present when `kind` is `user`." },
-      spaceId: { type: "string", description: "Present when `kind` is `space`." },
-      name: {
-        type: "string",
-        description: "The member's display name, or the space's name.",
-      },
+      kind: { type: "string", enum: ["space"] },
+      spaceId: { type: "string", description: "Space id (`spc_…`)." },
+      name: { type: "string", description: "The space's name." },
     },
   },
   PackageShare: {
@@ -3481,11 +3466,15 @@ export const schemas = {
     type: "object",
     description:
       "The offer of a package to its organization, as it stands after `PUT …/org-offer`.",
-    required: ["object", "packageId", "offered_to_org"],
+    required: ["object", "packageId", "org_offer"],
     properties: {
       object: { type: "string", enum: ["package_org_offer"] },
       packageId: { type: "string", description: "Package id (`@scope/name`)." },
-      offered_to_org: { type: "boolean", enum: [true] },
+      org_offer: {
+        type: "string",
+        enum: ["available", "on_by_default"],
+        description: "The mode the offer now has.",
+      },
     },
   },
   PackageHome: {

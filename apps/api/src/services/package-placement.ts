@@ -22,6 +22,7 @@ import {
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { orgPackageOffers, packages, schedules, spacePackages, spaces } from "@appstrate/db/schema";
+import type { OrgOfferMode } from "@appstrate/db/schema";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { disableSchedules } from "./schedules-naming-connection.ts";
 
@@ -29,34 +30,46 @@ const offerSpace = alias(spaces, "offer_space");
 
 /**
  * Drizzle filter: is the outer `packages` row offered to the organization `orgId`
- * (`org_package_offers`)? A correlated EXISTS, so no call site joins anything.
- * `orgId` is a value, or a subquery of the outer query.
+ * (`org_package_offers`), in `mode` when given, in either mode otherwise? A
+ * correlated EXISTS, so no call site joins anything. `orgId` is a value, or a
+ * subquery of the outer query.
  */
-function offeredToOrgSql(orgId: string | SQLWrapper) {
+function offeredToOrgSql(orgId: string | SQLWrapper, mode?: OrgOfferMode) {
   return exists(
     db
       .select({ one: sql`1` })
       .from(orgPackageOffers)
-      .where(and(eq(orgPackageOffers.orgId, orgId), eq(orgPackageOffers.packageId, packages.id))),
+      .where(
+        and(
+          eq(orgPackageOffers.orgId, orgId),
+          eq(orgPackageOffers.packageId, packages.id),
+          mode ? eq(orgPackageOffers.mode, mode) : undefined,
+        ),
+      ),
   );
 }
 
-/** {@link offeredToOrgSql} for the organization of `spaceId`, a value or a column of the outer query. */
-export function offeredToSpaceOrgSql(spaceId: string | AnyPgColumn) {
+/**
+ * {@link offeredToOrgSql} for the organization of `spaceId`, a value or a column of the outer
+ * query. Without `mode` it is the PLACEMENT question (offered in any mode); with one, the
+ * ACTIVATION question (`on_by_default`).
+ */
+export function offeredToSpaceOrgSql(spaceId: string | AnyPgColumn, mode?: OrgOfferMode) {
   return offeredToOrgSql(
     db.select({ orgId: offerSpace.orgId }).from(offerSpace).where(eq(offerSpace.id, spaceId)),
+    mode,
   );
 }
 
-/** The packages offered to `orgId`, narrowed to `packageIds` when given. */
+/** The packages offered to `orgId` with the mode of each offer, narrowed to `packageIds` when given. */
 export async function listOrgOffers(
   orgId: string,
   packageIds?: readonly string[],
   executor: DbOrTx = db,
-): Promise<Set<string>> {
-  if (packageIds?.length === 0) return new Set();
+): Promise<Map<string, OrgOfferMode>> {
+  if (packageIds?.length === 0) return new Map();
   const rows = await executor
-    .select({ packageId: orgPackageOffers.packageId })
+    .select({ packageId: orgPackageOffers.packageId, mode: orgPackageOffers.mode })
     .from(orgPackageOffers)
     .where(
       and(
@@ -64,21 +77,21 @@ export async function listOrgOffers(
         packageIds ? inArray(orgPackageOffers.packageId, [...packageIds]) : undefined,
       ),
     );
-  return new Set(rows.map((row) => row.packageId));
+  return new Map(rows.map((row) => [row.packageId, row.mode]));
 }
 
-/** The subset of `packageIds` offered to the organization of `spaceId`: the in-memory twin's input. */
+/** The subset of `packageIds` offered to the organization of `spaceId`, with each offer's mode: the in-memory twin's input. */
 export async function listOfferedToSpaceOrg(
   spaceId: string,
   packageIds: readonly string[],
   executor: DbOrTx = db,
-): Promise<Set<string>> {
+): Promise<Map<string, OrgOfferMode>> {
   const [space] = await executor
     .select({ orgId: spaces.orgId })
     .from(spaces)
     .where(eq(spaces.id, spaceId))
     .limit(1);
-  return space ? listOrgOffers(space.orgId, packageIds, executor) : new Set();
+  return space ? listOrgOffers(space.orgId, packageIds, executor) : new Map();
 }
 
 /**
