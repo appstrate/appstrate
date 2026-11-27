@@ -242,6 +242,19 @@ describe("the reasoning of an assistant turn", () => {
     expect(answered).not.toContain("reasoning.");
   });
 
+  it("names the run a message ends on while it runs, not the model thinking", () => {
+    const run = {
+      type: "dynamic-tool",
+      toolName: "run_and_wait",
+      toolCallId: "call_run",
+      state: "input-available",
+      input: { kind: "agent", scope: "@acme", name: "digest" },
+    } as const;
+    const html = render([run]);
+    expect(statusRegions(html)).toBe(1);
+    expect(html).not.toContain("reasoning.running");
+  });
+
   it("never receives a reasoning part without readable text: the loading line stays", () => {
     // assistant-ui drops blank reasoning parts (`thread-message-like.js`), so
     // every reasoning step has text to open.

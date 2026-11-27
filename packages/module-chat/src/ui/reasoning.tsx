@@ -23,9 +23,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
-import { useChatHost } from "./runtime-context.ts";
+import { useChatHost, type ChatTranslate } from "./runtime-context.ts";
 import { endsInActivity, type GroupablePart } from "./conversation-tools.ts";
-import { reasoningTitle } from "./turn-status.ts";
+import { reasoningTitle, showStep } from "./turn-status.ts";
+import { deriveToolPhase } from "./tool-result.ts";
 import { useTurnClock } from "./use-turn-clock.ts";
 import {
   ACTIVITY_BLOCK_CLASS,
@@ -37,6 +38,13 @@ import {
   ActivityTrigger,
 } from "./activity-line.tsx";
 import { useActivityMode } from "./activity-mode.ts";
+
+/** A thread part as the loading line reads it. */
+type ThreadPart = Parameters<typeof deriveToolPhase>[0] & {
+  readonly type: string;
+  readonly toolName?: string;
+  readonly args?: unknown;
+};
 
 /** One full loop of the spark (each diagonal swaps twice), in ms (`.spark` in styles.css). */
 const SPARK_LOOP_MS = 2400;
@@ -67,15 +75,26 @@ export function ThinkingStatus() {
   );
 }
 
-/** The `indicator` part: the spark, the model thinking, the clock. One line, like what replaces it. */
+/** The call a message ends on while it runs (a run's card), named as the turn's step; "" otherwise. */
+function runningCallLabel(parts: readonly ThreadPart[], t: ChatTranslate): string {
+  const last = parts[parts.length - 1];
+  if (last?.type !== "tool-call" || deriveToolPhase(last) !== "running") return "";
+  return showStep(last, undefined, t).label;
+}
+
+/**
+ * The `indicator` part: the spark, the clock, and what the turn is on (the call still running
+ * above it, else the model thinking). One line, like what replaces it.
+ */
 export function LoadingLine() {
   const { t } = useChatHost();
   const deferred = useAuiState((s) => endsInActivity(s.message.parts as readonly GroupablePart[]));
+  const step = useAuiState((s) => runningCallLabel(s.message.parts as readonly ThreadPart[], t));
   const clock = useTurnClock(!deferred);
   if (deferred) return null;
   return (
     <ActivityLine lead={<ThinkingStatus />} className={ACTIVITY_BLOCK_CLASS}>
-      <ActivityLabel active>{t("reasoning.running")}</ActivityLabel>
+      <ActivityLabel active>{step || t("reasoning.running")}</ActivityLabel>
       {clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
     </ActivityLine>
   );
