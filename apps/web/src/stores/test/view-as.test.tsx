@@ -416,6 +416,7 @@ function listedSpace(
 ): SpaceObject {
   return {
     object: "space",
+    shows_studio: true,
     orgId: "org_a",
     icon: null,
     color: null,

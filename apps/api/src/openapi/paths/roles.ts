@@ -100,7 +100,7 @@ export const rolesPaths = {
       tags: ["Roles"],
       summary: "Create a custom space role",
       description:
-        "Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop, and so is `studio:read`, which a custom role holds through `shows_studio` instead. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.",
+        "Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -122,14 +122,13 @@ export const rolesPaths = {
                 permissions: {
                   type: "array",
                   items: { type: "string", minLength: 1 },
-                  description:
-                    "Space-level permission strings the role grants (at least one). Never `studio:read`: a 400, the role resolves it from `shows_studio`.",
+                  description: "Space-level permission strings the role grants (at least one).",
                 },
                 shows_studio: {
                   type: "boolean",
                   default: true,
                   description:
-                    "Whether holders see the Studio (they resolve `studio:read`). Default `true`. A display setting, not a boundary: the API answers the role's other permissions either way.",
+                    "Whether holders see the Studio's screens in the interface. Default `true`. A display attribute, not a permission and not a boundary: the API answers the role's permissions either way.",
                 },
               },
               additionalProperties: false,
@@ -169,7 +168,7 @@ export const rolesPaths = {
       tags: ["Roles"],
       summary: "List the permissions a custom role may hold",
       description:
-        "The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold. `studio:read` is not listed: a custom role holds it through `shows_studio`.",
+        "The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold. Whether a role shows the Studio is not a permission: it is the role's `shows_studio`.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -224,7 +223,7 @@ export const rolesPaths = {
                 shows_studio: {
                   type: "boolean",
                   description:
-                    "Whether holders see the Studio (they resolve `studio:read`). Absent = unchanged.",
+                    "Whether holders see the Studio's screens in the interface. Absent = unchanged.",
                 },
               },
               additionalProperties: false,

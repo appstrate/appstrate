@@ -35,13 +35,14 @@ const GMAIL = {
   kind: "integration",
   id: "@appstrate/gmail",
   display_name: "Gmail",
-  icon: "https://example.test/gmail.svg",
+  icons: [{ src: "https://example.test/gmail.svg" }],
 } as const;
 
 /** A proxied request's presentation, as the platform stamps it (`integration-tools.ts`). */
-const apiCall = (method?: string): ToolPresentation => ({
-  title: "API call",
+const apiCall = (method?: string, requests?: number): ToolPresentation => ({
+  call: "proxied_request",
   ...(method ? { method } : {}),
+  ...(requests ? { requests } : {}),
   subject: GMAIL,
 });
 
@@ -57,7 +58,7 @@ const integrationCall = (args: Record<string, unknown>, presentation: ToolPresen
 
 describe("callPresentation", () => {
   it("reads the presentation off the result's provider metadata", () => {
-    const presentation = { title: "List agents" };
+    const presentation = { call: "caller", subject: { kind: "user", id: "u1" } };
     expect(callPresentation({ resultProviderMetadata: { appstrate: { presentation } } })).toEqual(
       presentation,
     );
@@ -66,7 +67,9 @@ describe("callPresentation", () => {
   it("is undefined for a part without one, or a malformed one", () => {
     expect(callPresentation({ state: "input-available" })).toBeUndefined();
     expect(
-      callPresentation({ resultProviderMetadata: { appstrate: { presentation: { title: "" } } } }),
+      callPresentation({
+        resultProviderMetadata: { appstrate: { presentation: { title: "List agents" } } },
+      }),
     ).toBeUndefined();
     expect(callPresentation(undefined)).toBeUndefined();
   });
@@ -78,7 +81,7 @@ describe("showCall — an operation", () => {
       {
         toolName: "invoke_operation",
         args: { operation_id: "deleteAgent" },
-        presentation: { title: "Delete agent", method: "DELETE", tag: "Agents" },
+        presentation: { call: "operation", method: "DELETE", tag: "Agents" },
       },
       t,
     );
@@ -92,7 +95,7 @@ describe("showCall — an operation", () => {
         {
           toolName: "invoke_operation",
           args: { operation_id },
-          presentation: { title: "Anything", method: "POST", tag: "Agents" },
+          presentation: { call: "operation", method: "POST", tag: "Agents" },
         },
         t,
       );
@@ -107,7 +110,7 @@ describe("showCall — an operation", () => {
         {
           toolName: "invoke_operation",
           args: {},
-          presentation: { title: "x", method, tag: "Agents" },
+          presentation: { call: "operation", method, tag: "Agents" },
         },
         t,
       ).label;
@@ -121,7 +124,7 @@ describe("showCall — an operation", () => {
         toolName: "invoke_operation",
         args: { operation_id: "getIntegration" },
         presentation: {
-          title: "Get integration",
+          call: "operation",
           method: "GET",
           tag: "Integrations",
           subject: { kind: "integration", id: "@acme/crm" },
@@ -138,7 +141,7 @@ describe("showCall — an operation", () => {
       {
         toolName: "invoke_operation",
         args: {},
-        presentation: { title: "x", method: "GET", tag: "Brand New" },
+        presentation: { call: "operation", method: "GET", tag: "Brand New" },
       },
       t,
     );
@@ -160,16 +163,16 @@ describe("showCall — a call that reached an integration", () => {
 
   it("is identified by the path of the one request it sends, without origin or query", () => {
     const one = (target: string) =>
-      integrationCall({ requests: [{ method: "GET", target }] }, apiCall("GET")).idText;
+      integrationCall({ requests: [{ method: "GET", target }] }, apiCall("GET", 1)).idText;
     expect(one("https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread")).toBe(
       "/gmail/v1/users/me/messages",
     );
     expect(one("/users/me/labels?maxResults=5#top")).toBe("/users/me/labels");
-    expect(integrationCall({ requests: [{}] }, apiCall("GET")).idText).toBeUndefined();
+    expect(integrationCall({ requests: [{}] }, apiCall("GET", 1)).idText).toBeUndefined();
   });
 
-  it("names a batch by the number of requests its arguments send", () => {
-    const shown = integrationCall({ requests: [{}, {}, {}] }, apiCall());
+  it("names a batch by the number of requests the server counted", () => {
+    const shown = integrationCall({ requests: [{}, {}, {}] }, apiCall(undefined, 3));
     expect(shown.label).toBe("Gmail · 3 requêtes");
     expect(shown.idText).toBeUndefined();
   });
@@ -177,7 +180,7 @@ describe("showCall — a call that reached an integration", () => {
   it("never shows the server's English text for a proxied request", () => {
     for (const shown of [
       integrationCall({ method: "GET" }, apiCall("GET")),
-      integrationCall({ requests: [{}] }, apiCall()),
+      integrationCall({ requests: [{}] }, apiCall(undefined, 1)),
       // Neither a method nor readable requests: the tool's own label, never the server's text.
       integrationCall({}, apiCall()),
       integrationCall({ requests: "garbled" }, apiCall()),
@@ -195,6 +198,7 @@ describe("showCall — a call that reached an integration", () => {
         // A remote tool's own `requests` argument is not a batch.
         args: { tool: "acme_github__search_issues", arguments: { requests: [1, 2] } },
         presentation: {
+          call: "remote_tool",
           title: "Search issues",
           subject: { kind: "integration", id: "@acme/github", display_name: "GitHub" },
         },
@@ -203,6 +207,22 @@ describe("showCall — a call that reached an integration", () => {
     );
     expect(shown.label).toBe("GitHub · Search issues");
     expect(shown.idText).toBeUndefined();
+  });
+
+  it("keeps a remote tool's title whatever its name starts with", () => {
+    const shown = showCall(
+      {
+        toolName: "call_integration_tool",
+        args: { tool: "acme_github__api_search", arguments: {} },
+        presentation: {
+          call: "remote_tool",
+          title: "Search code",
+          subject: { kind: "integration", id: "@acme/github", display_name: "GitHub" },
+        },
+      },
+      t,
+    );
+    expect(shown.label).toBe("GitHub · Search code");
   });
 });
 
@@ -240,7 +260,7 @@ describe("showCall — any other tool", () => {
           toolName: "get_me",
           args: {},
           presentation: {
-            title: "Who am I",
+            call: "caller",
             subject: { kind: "user", id: "u1", display_name: "Ada" },
           },
         },
@@ -249,17 +269,27 @@ describe("showCall — any other tool", () => {
     ).toMatchObject({ label: "Identité", idText: "Ada" });
   });
 
-  it("falls back to the presented title, then the tool's name, for a tool with no label", () => {
-    expect(
-      showCall({ toolName: "brand_new", args: {}, presentation: { title: "New" } }, t).label,
-    ).toBe("New");
+  it("falls back to the tool's name for a tool with no label", () => {
     expect(showCall({ toolName: "brand_new", args: {} }, t).label).toBe("brand_new");
+  });
+
+  it("names a search by its own tool", () => {
+    expect(
+      showCall(
+        {
+          toolName: "search",
+          args: { query: "crm" },
+          presentation: { call: "search", count: 2, items: [] },
+        },
+        t,
+      ),
+    ).toMatchObject({ idText: "crm" });
   });
 });
 
 describe("isLookupCall", () => {
   const stamped = { appstrate: { lookup: true } };
-  const presented = (method: string): ToolPresentation => ({ title: "x", method });
+  const presented = (method: string): ToolPresentation => ({ call: "operation", method });
 
   it("is a call stamped a lookup that has not failed", () => {
     for (const standing of ["running", "success"] as const) {
@@ -281,7 +311,9 @@ describe("isLookupCall", () => {
 
   it("is never an unstamped call presented without a read", () => {
     expect(isLookupCall(undefined, undefined, "success")).toBe(false);
-    expect(isLookupCall({ appstrate: { lookup: false } }, { title: "x" }, "success")).toBe(false);
+    expect(isLookupCall({ appstrate: { lookup: false } }, presented("POST"), "success")).toBe(
+      false,
+    );
     expect(isLookupCall({ appstrate: { spaceId: "spc_a" } }, undefined, "success")).toBe(false);
   });
 });

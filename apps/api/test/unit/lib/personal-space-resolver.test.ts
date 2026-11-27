@@ -18,6 +18,7 @@ import {
   personalSpaceDefaultRef,
   resolveSpaceRole,
   spacePermissions,
+  spaceShowsStudio,
   type PersonalSpaceDefaultColumns,
   type SpaceAccessRow,
   type SpaceRoleRef,
@@ -268,14 +269,14 @@ describe("resolveSpaceRole for a GUEST owner: never more than operator, never mo
     }
   });
 
-  it("takes an authoring custom default restricted to operator: no agents:write, no studio:read", () => {
+  it("takes an authoring custom default restricted to operator: no agents:write, no Studio", () => {
     const ref = resolveSpaceRole("guest", personal, null, OWNER, customDefault(AUTHORING));
     expect(ref?.kind).toBe("custom");
     expect(ref).toMatchObject({ plus: FLOOR });
     expect((ref as { within?: unknown }).within).toBeDefined();
     const held = spacePermissions(ref);
     expect(held.has("agents:write")).toBe(false);
-    expect(held.has("studio:read")).toBe(false);
+    expect(spaceShowsStudio(ref)).toBe(false);
     expect<string[]>([...held].sort()).toEqual(
       ["agents:read", "agents:run", "runs:read", "integrations:connect", ...FLOOR].sort(),
     );
@@ -358,19 +359,22 @@ describe("personalSpaceDefaultRef", () => {
   });
 });
 
-describe("studio:read on a custom role: resolved from shows_studio, never from the bundle", () => {
-  it("resolves it when the role shows the Studio, not otherwise", () => {
-    expect(spacePermissions(CUSTOM_STUDIO).has("studio:read")).toBe(true);
-    expect(spacePermissions(CUSTOM).has("studio:read")).toBe(false);
+describe("shows_studio on a custom role: a display attribute, never a permission", () => {
+  it("shows the Studio when the role says so, not otherwise; a preset always does", () => {
+    expect(spaceShowsStudio(CUSTOM_STUDIO)).toBe(true);
+    expect(spaceShowsStudio(CUSTOM)).toBe(false);
+    expect(spaceShowsStudio({ kind: "preset", preset: "viewer" })).toBe(true);
+    expect(spaceShowsStudio(null)).toBe(false);
   });
 
-  it("never grants it from a stored array that spells it", () => {
+  it("never grants a permission for it, even from a stored array that spells it", () => {
     if (CUSTOM.kind !== "custom") throw new Error("unreachable");
     const spelled: SpaceRoleRef = {
       kind: "custom",
       role: { ...CUSTOM.role, permissions: [...CUSTOM.role.permissions, "studio:read"] },
     };
-    expect(spacePermissions(spelled).has("studio:read")).toBe(false);
+    expect(spacePermissions(spelled).has("studio:read" as never)).toBe(false);
+    expect(spacePermissions(CUSTOM_STUDIO).has("studio:read" as never)).toBe(false);
   });
 
   it("follows the role as the org default and as an override, for a member", () => {
@@ -380,22 +384,15 @@ describe("studio:read on a custom role: resolved from shows_studio, never from t
     ] as const) {
       const byDefault = resolveSpaceRole("member", personal, null, OWNER, customDefault(ref));
       const byOverride = resolveSpaceRole("member", personal, { ref }, OWNER, ADMIN_DEFAULT);
-      expect(spacePermissions(byDefault).has("studio:read")).toBe(studio);
-      expect(spacePermissions(byOverride).has("studio:read")).toBe(studio);
+      expect(spaceShowsStudio(byDefault)).toBe(studio);
+      expect(spaceShowsStudio(byOverride)).toBe(studio);
     }
   });
 
-  it("keeps it under the guest cap when the role shows the Studio, and keeps it hidden otherwise", () => {
-    // `operator` holds `studio:read`, so a role showing the Studio stays inside it.
-    expect(resolveSpaceRole("guest", personal, null, OWNER, customDefault(CUSTOM_STUDIO))).toEqual({
-      ...CUSTOM_STUDIO,
-      plus: FLOOR,
-    });
+  it("keeps the role's flag under the guest cap", () => {
     for (const ref of [CUSTOM_STUDIO, CUSTOM]) {
-      const guest = spacePermissions(
-        resolveSpaceRole("guest", personal, { ref }, OWNER, ADMIN_DEFAULT),
-      );
-      expect(guest.has("studio:read")).toBe(ref === CUSTOM_STUDIO);
+      const guest = resolveSpaceRole("guest", personal, { ref }, OWNER, ADMIN_DEFAULT);
+      expect(spaceShowsStudio(guest)).toBe(ref === CUSTOM_STUDIO);
     }
   });
 });

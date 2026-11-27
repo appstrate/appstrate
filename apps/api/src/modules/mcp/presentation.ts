@@ -64,7 +64,12 @@ function presentOperation(args: Record<string, unknown>): ToolPresentation | und
   if (!op) return undefined;
   const tag = op.tags[0];
   const subject = packageSubject(op.pathTemplate, args);
-  return { ...(tag ? { tag } : {}), method: op.method, ...(subject ? { subject } : {}) };
+  return {
+    call: "operation",
+    ...(tag ? { tag } : {}),
+    method: op.method,
+    ...(subject ? { subject } : {}),
+  };
 }
 
 /** `get_me`: the caller it answered for (`/api/me/context`, relayed as `{ status, body }`). */
@@ -72,7 +77,10 @@ function presentCaller(result: CallToolResult): ToolPresentation | undefined {
   const user = asRecord(asRecord(asRecord(unwrapMcpResult(result))?.body)?.user);
   if (!user || typeof user.id !== "string" || !user.id) return undefined;
   const name = typeof user.name === "string" && user.name ? user.name : undefined;
-  return { subject: { kind: "user", id: user.id, ...(name ? { display_name: name } : {}) } };
+  return {
+    call: "caller",
+    subject: { kind: "user", id: user.id, ...(name ? { display_name: name } : {}) },
+  };
 }
 
 function withIcons(descriptor: Tool): Tool {

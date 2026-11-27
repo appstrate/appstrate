@@ -95,11 +95,33 @@ export function formatBudgetDuration(ms: number): string {
   return minutes > 0 ? `${minutes}m${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
 }
 
-const TURN_BUDGET_NOTE_PREFIX = "[turn budget]";
+/** `_meta` key marking the text block that carries the chat's budget note. */
+export const TURN_BUDGET_NOTE_META_KEY = "dev.appstrate/turn-budget";
 
-/** Whether a tool result's text part is the budget note, which is the model's, not the reader's. */
-export function isTurnBudgetNote(text: string): boolean {
-  return text.startsWith(`${TURN_BUDGET_NOTE_PREFIX} `);
+/** The note's text block: marked structurally, and for the model alone (MCP `audience`). */
+export function turnBudgetNoteBlock(text: string) {
+  return {
+    type: "text" as const,
+    text,
+    annotations: { audience: ["assistant" as const] },
+    _meta: { [TURN_BUDGET_NOTE_META_KEY]: true as const },
+  };
+}
+
+/** Whether a content block is the budget note, which is the model's, not the reader's. */
+export function isTurnBudgetNoteBlock(block: unknown): boolean {
+  const meta = (block as { _meta?: Record<string, unknown> } | null | undefined)?._meta;
+  return meta?.[TURN_BUDGET_NOTE_META_KEY] === true;
+}
+
+/** A tool result (or its bare content array) without the budget note block. */
+export function omitTurnBudgetNote(value: unknown): unknown {
+  if (Array.isArray(value)) return value.filter((b) => !isTurnBudgetNoteBlock(b));
+  const content = (value as { content?: unknown } | null | undefined)?.content;
+  if (Array.isArray(content) && content.some(isTurnBudgetNoteBlock)) {
+    return { ...(value as object), content: omitTurnBudgetNote(content) };
+  }
+  return value;
 }
 
 /**
@@ -121,7 +143,7 @@ export function isTurnBudgetNote(text: string): boolean {
 export function formatTurnBudgetNote(input: { remainingMs: number; stepsUsed: number }): string {
   const launchThreshold = formatBudgetDuration(CHAT_LAUNCH_THRESHOLD_MS);
   return (
-    `${TURN_BUDGET_NOTE_PREFIX} ${formatBudgetDuration(input.remainingMs)} left in this turn, ` +
+    `[turn budget] ${formatBudgetDuration(input.remainingMs)} left in this turn, ` +
     `step ${input.stepsUsed}/${CHAT_MAX_STEPS}. ` +
     `A run_and_wait launch needs at least ${launchThreshold} left or it is refused; ` +
     `anything not written into your reply before the turn ends is lost.`

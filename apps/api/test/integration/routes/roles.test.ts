@@ -217,7 +217,7 @@ describe("custom space roles", () => {
       expect(offered).toContain("agents:write");
       expect(offered).not.toContain("members:invite");
       expect(offered).not.toContain("roles:write");
-      // `studio:read` is resolved from `shows_studio`, never stored, so it is not offered.
+      // The Studio is a display attribute of a role (`shows_studio`), not a permission.
       expect(offered).not.toContain("studio:read");
 
       // Grantability is the API-key allowlist, not a second hand-kept table:
@@ -246,7 +246,6 @@ describe("custom space roles", () => {
     it("defaults to true on create, is stored when false, and a preset always shows it", async () => {
       const shown = await createRole({ key: "shown" });
       expect(shown.shows_studio).toBe(true);
-      expect(shown.permissions).not.toContain("studio:read");
 
       const hidden = await createRole({ key: "hidden", shows_studio: false });
       expect(hidden.shows_studio).toBe(false);
@@ -256,7 +255,6 @@ describe("custom space roles", () => {
       const { data } = (await (await req("GET", "/api/roles")).json()) as { data: RoleWire[] };
       for (const preset of data.filter((r) => r.kind === "preset")) {
         expect(preset.shows_studio, preset.key).toBe(true);
-        expect(preset.permissions, preset.key).not.toContain("studio:read");
       }
     });
 
@@ -276,13 +274,12 @@ describe("custom space roles", () => {
       expect((await listed(role.id)).shows_studio).toBe(true);
     });
 
-    it("refuses studio:read inside permissions on create and on update", async () => {
+    it("refuses studio:read inside permissions as any unknown permission, on create and on update", async () => {
       const created = await post(
         validBody({ key: "studio-in-list", permissions: ["agents:read", "studio:read"] }),
       );
       const problem = await expectProblem(created, 400, { param: "permissions" });
-      expect(problem.detail).toContain("studio:read");
-      expect(problem.detail).toContain("shows_studio");
+      expect(problem.detail).toContain("Unknown space-level permission 'studio:read'");
 
       const role = await createRole({ key: "studio-patched" });
       await expectProblem(

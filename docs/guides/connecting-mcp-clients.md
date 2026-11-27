@@ -707,21 +707,32 @@ result's `content`; the schema is `toolPresentationSchema` in
 - **Presentation.** A result carries `_meta["dev.appstrate/presentation"]`
   when the server knows more of the call than its tool's descriptor, a failed
   call's included (a tool that fails unexpectedly answers `isError` with the
-  error's message, not a JSON-RPC error):
-  - `title` (`call_integration_tool` of a remote server's tool): the server's
-    title for it, else its name there, never the call's arguments;
-  - `tag`: an operation's first OpenAPI tag; `method`: its HTTP method, or the
-    method of an `{ns}__api_call` holding one request (none for a batch of
-    several);
-  - `subject` (`{ kind, id, display_name?, icon? }`, `kind` one of `agent`,
-    `skill`, `integration`, `user`): the package an operation's path names by
-    its `agents`, `skills` or `integrations` segment (so a run or schedule
-    operation under `/api/agents/{scope}/{name}` names that agent), whether
-    the operation succeeds or fails: it is what the call aimed at; the
-    integration `call_integration_tool` reached, its refusal of the arguments
-    included; the caller `get_me` answered for;
-  - `count` and `items` (`search`): `count` is the sum of its sections'
-    `total`, what each kind matched before `limit` (an agent or an integration
-    tool once, an operation you may invoke once, a skill once per space it is
-    listed in); `items` the distinct agents, skills and integrations its shown
-    items name, at most 8.
+  error's message, not a JSON-RPC error). It always has a `call` field naming
+  the kind of call, and carries only that kind's fields; a client switches on
+  `call`, never on a tool's name. A result from another server has no such
+  entry, and one without `call` is malformed (`readToolPresentation` answers
+  `undefined`):
+  - `operation` (`invoke_operation`): `method`, its HTTP method; `tag`, its
+    first OpenAPI tag; `subject`, the package its path names by its `agents`,
+    `skills` or `integrations` segment (so a run or schedule operation under
+    `/api/agents/{scope}/{name}` names that agent), whether the operation
+    succeeds or fails: it is what the call aimed at;
+  - `proxied_request` (`call_integration_tool` of an `{ns}__api_call`):
+    `subject`, the integration it reached, its refusal of the arguments
+    included; `method`, that of its one request (none for a batch of several);
+    `requests`, the number of requests its arguments hold (absent when they
+    carry no readable `requests` array);
+  - `remote_tool` (`call_integration_tool` of a remote server's tool): `title`,
+    the server's title for it, else its name there, never the call's
+    arguments; `subject`, the integration;
+  - `search`: `count`, the sum of its sections' `total`, what each kind matched
+    before `limit` (an agent or an integration tool once, an operation you may
+    invoke once, a skill once per space it is listed in); `items`, the distinct
+    agents, skills and integrations its shown items name, at most 8;
+  - `caller` (`get_me`): `subject`, the caller it answered for.
+
+  A `subject` is `{ kind, id, display_name?, icons? }`, `kind` one of `agent`,
+  `skill`, `integration`, `user`. An integration's `icons` are MCP `Icon`s
+  (`{ src, mimeType?, sizes?, theme? }`) a client draws from `src` alone: its
+  manifest image URL or data URI as it is, an Iconify id as its SVG on
+  `api.iconify.design`, an emoji as an inline SVG.

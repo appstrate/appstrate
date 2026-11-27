@@ -38,6 +38,7 @@
 
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
+import { omitTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 
 /** Lifecycle phase of a tool call, derived from status + result. */
 export type ToolPhase = "pending" | "running" | "success" | "error";
@@ -70,6 +71,11 @@ function isErrorPayload(unwrapped: unknown): boolean {
   return false;
 }
 
+/** `unwrapMcpResult` of a result without the model's turn-budget note block. */
+export function unwrapToolResult(result: unknown): unknown {
+  return unwrapMcpResult(omitTurnBudgetNote(result));
+}
+
 /**
  * Single source of truth for a tool call's phase. Combines assistant-ui status,
  * the part's `isError` flag, and the unwrapped payload (HTTP ≥ 400, embedded
@@ -81,7 +87,7 @@ export function deriveToolPhase(part: ToolPhaseInput): ToolPhase {
   if (type === "requires-action") return "pending";
   if (part.isError === true) return "error";
   if (type === "incomplete") return "error";
-  if (isErrorPayload(unwrapMcpResult(part.result))) return "error";
+  if (isErrorPayload(unwrapToolResult(part.result))) return "error";
   if (part.result === undefined) return type === "complete" ? "success" : "pending";
   return "success";
 }

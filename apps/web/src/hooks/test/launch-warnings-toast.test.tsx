@@ -22,6 +22,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { $api, client } = await import("../../api/client.ts");
 const { orgStore } = await import("../../stores/org-store.ts");
+const { spaceStore } = await import("../../stores/space-store.ts");
 const { loadIntegrationNames } = await import("../use-integrations.ts");
 const { render } = await import("../../test/render.tsx");
 const { useRunLauncher } = await import("../use-mutations.ts");
@@ -166,14 +167,34 @@ describe("the Connecter action", () => {
   const ORG_ID = "org_1";
   const CONNECTABLE = [{ field: "integrations.@acme/gmail", code: "not_connected", message: "x" }];
 
-  /** The action a launch's toast carries for a viewer holding `permissions` in the org. */
-  async function actionFor(permissions: string[]): Promise<unknown> {
+  /** The action a launch's toast carries for a viewer holding `permissions` in their space. */
+  async function actionFor(permissions: string[], showsStudio = true): Promise<unknown> {
     const qc = cachedClient();
     qc.setQueryData(
       ["orgs"],
-      [{ id: ORG_ID, name: "Acme", slug: "acme", role: "member", permissions }],
+      [{ id: ORG_ID, name: "Acme", slug: "acme", role: "member", permissions: [] }],
+    );
+    qc.setQueryData(
+      $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": ORG_ID } } })
+        .queryKey,
+      {
+        data: [
+          {
+            id: "spc_a",
+            object: "space",
+            access: "member",
+            personal: false,
+            permissions,
+            shows_studio: showsStudio,
+          },
+        ],
+      },
     );
     stubs.push(
+      spyOn(spaceStore, "getInitialState").mockReturnValue({
+        ...spaceStore.getInitialState(),
+        id: "spc_a",
+      }),
       spyOn(orgStore, "getInitialState").mockReturnValue({
         ...orgStore.getInitialState(),
         id: ORG_ID,
@@ -188,11 +209,11 @@ describe("the Connecter action", () => {
   }
 
   it("is offered when the viewer reaches the agent's page and sees its Connexions tab", async () => {
-    expect(await actionFor(["studio:read", "agents:read", "integrations:read"])).toBeDefined();
+    expect(await actionFor(["agents:read", "integrations:read"])).toBeDefined();
   });
 
   it("is withheld from a role without the Studio, where the agent's page is", async () => {
-    expect(await actionFor(["agents:read", "integrations:read"])).toBeUndefined();
+    expect(await actionFor(["agents:read", "integrations:read"], false)).toBeUndefined();
   });
 
   it("is withheld when the page shows the viewer no Connexions tab", async () => {

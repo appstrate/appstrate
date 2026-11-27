@@ -35,7 +35,7 @@ import {
   TOOL_PRESENTATION_META_KEY,
   type ToolPresentation,
 } from "@appstrate/core/mcp-presentation";
-import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
+import { formatTurnBudgetNote, turnBudgetNoteBlock } from "@appstrate/core/chat-turn-metadata";
 import { parseSkillUri, SKILL_URI_PREFIX } from "@appstrate/core/skill-address";
 import {
   createMcpHttpClient,
@@ -70,11 +70,12 @@ const READ_RESOURCE_TOOL = "read_resource";
 /** Pi `AgentToolResult`-shaped payload (text content + structured details). */
 interface PiToolResult {
   content: Array<
-    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+    | { type: "text"; text: string; annotations?: unknown; _meta?: unknown }
+    | { type: "image"; data: string; mimeType: string }
   >;
   isError?: true;
   /** Local receipts replacing live file contents on SSE and in replay. */
-  persistedContent?: Array<{ type: "text"; text: string }>;
+  persistedContent?: Array<{ type: "text"; text: string; annotations?: unknown; _meta?: unknown }>;
   details: unknown;
   /**
    * Typed connect offers for the UI cards — one per connect URL the payload
@@ -344,9 +345,10 @@ type BuildPlatformMcpToolsOptions = {
  * the cache still hits.
  *
  * The note lands in `content`, which the UI parses too (nothing reads `details`),
- * so the payload stops being the only text part. `unwrapMcpResult` (`@appstrate/core/mcp-result`) on the UI side is
- * deliberately tolerant of trailing non-payload text — do not append here without
- * checking it still is.
+ * so the payload stops being the only text part. The block is marked
+ * (`isTurnBudgetNoteBlock`); readers that want the payload alone drop it by that marker.
+ * `unwrapMcpResult` (`@appstrate/core/mcp-result`) on the UI side tolerates trailing
+ * non-payload text.
  */
 export function withTurnBudgetNote(result: PiToolResult, budget: PiTurnBudget): PiToolResult {
   const now = (budget.now ?? Date.now)();
@@ -354,11 +356,11 @@ export function withTurnBudgetNote(result: PiToolResult, budget: PiTurnBudget): 
     remainingMs: budget.deadlineAt - now,
     stepsUsed: budget.stepCount(),
   });
-  const note = { type: "text" as const, text };
+  const note = turnBudgetNoteBlock(text);
   return {
     ...result,
     content: [...result.content, note],
-    // What is stored ends with the note too: readers drop the LAST block alone as the note.
+    // What is stored ends with the note too: readers drop the note by its marker.
     ...(result.persistedContent && { persistedContent: [...result.persistedContent, note] }),
   };
 }

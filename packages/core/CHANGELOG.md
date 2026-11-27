@@ -16,12 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`CREDENTIAL_DEATH_CAUSES`, `@appstrate/core/sidecar-types`).
 - **`@appstrate/core/mcp-presentation`**: how a client shows one MCP tool call.
   `TOOL_PRESENTATION_META_KEY` (`dev.appstrate/presentation`) names the `_meta` entry the platform
-  stamps on a tool result, `toolPresentationSchema` describes it (types `ToolPresentation`,
-  `PresentationSubject`; a search lists at most `MAX_PRESENTED_ITEMS`) and `readToolPresentation`
-  reads it. `isLookupTool` tells a tool whose calls only look things up: it declares the standard
-  `annotations.readOnlyHint: true`.
-- **`isTurnBudgetNote`** (`@appstrate/core/chat-turn-metadata`): whether a tool result's text part
-  is the chat's model-facing turn-budget line (`formatTurnBudgetNote`).
+  stamps on a tool result and `toolPresentationSchema` describes it: a union discriminated by the
+  required `call` (`operation`, `proxied_request`, `remote_tool`, `search`, `caller`), each variant
+  with only its own fields (`proxied_request` carries the `requests` batch size; a search lists at
+  most `MAX_PRESENTED_ITEMS`). A subject's `icons` are MCP `Icon`s (`PresentationIcon`). Types
+  `ToolPresentation`, `PresentationSubject`. `readToolPresentation` reads it, `undefined` when the
+  entry is absent or malformed (a result without `call` included). `isLookupTool` tells a tool
+  whose calls only look things up: it declares the standard `annotations.readOnlyHint: true`.
+- **`TURN_BUDGET_NOTE_META_KEY`, `turnBudgetNoteBlock`, `isTurnBudgetNoteBlock`,
+  `omitTurnBudgetNote`** (`@appstrate/core/chat-turn-metadata`): the chat's model-facing
+  turn-budget line (`formatTurnBudgetNote`) is a text block marked
+  `_meta["dev.appstrate/turn-budget"]` (audience `assistant`); readers recognise it by the marker,
+  never by its text.
 - `SPACE_ROLE_ID_REGEX` and `isSpaceRolePreset` in `@appstrate/core/permissions`.
 - `personalSpaceRoleSettingSchema` (a preset key or a custom space role id: the wire value of
   `personal_space_role`) and `orgSettingsWireSchema` (`orgSettingsReadSchema` with
@@ -33,13 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`unwrapMcpResult`** (`@appstrate/core/mcp-result`) leaves the turn-budget line, the last
-  block, out of a plain-text result: a failed call's message no longer ends with the model's `[turn budget] …`.
-- **New core resource `studio`, permission `studio:read`** — BREAKING. The `CoreResource` and
-  `Permission` unions widen (`CoreResources.studio`; the `Permission` type gains `studio:read`), and
-  a module that declares a `studio` permission resource is refused at load
-  (`cannot redefine core resource`). The permission is space-level, opens the Studio's screens in the dashboard and gates
-  no API route.
 - **`orgSettingsReadSchema.personal_space_role`** — BREAKING. The output type widens from
   `"admin" | "operator"` to a space-role preset key (`admin`, `builder`, `operator`, `runner`,
   `viewer`), and `orgSettingsSchema` accepts the same values on input. The stored key holds a

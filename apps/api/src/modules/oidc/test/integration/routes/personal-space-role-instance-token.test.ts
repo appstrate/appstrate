@@ -90,7 +90,7 @@ describe("personal-space override through an MCP instance token", () => {
   });
 
   it("reports the override and the floor, and withholds what the bundle does not grant", async () => {
-    // A bundle, not `viewer`: every preset grants `studio:read`, a custom role can hide it.
+    // A bundle, not `viewer`: every preset shows the Studio, a custom role can hide it.
     const role = await seedSpaceRole({
       orgId: owner.orgId,
       key: "reader",
@@ -119,7 +119,12 @@ describe("personal-space override through an MCP instance token", () => {
     expect(res.status, await res.clone().text()).toBe(200);
     const own = (
       (await res.json()) as {
-        data: { personal: boolean; role: { kind: string; key: string }; permissions: string[] }[];
+        data: {
+          personal: boolean;
+          role: { kind: string; key: string };
+          permissions: string[];
+          shows_studio: boolean;
+        }[];
       }
     ).data.filter((s) => s.personal);
     expect(own).toHaveLength(1);
@@ -127,7 +132,8 @@ describe("personal-space override through an MCP instance token", () => {
     for (const permission of ["agents:read", ...DELETES]) {
       expect(own[0]!.permissions).toContain(permission);
     }
-    for (const permission of ["studio:read", "agents:write", "agents:run"]) {
+    expect(own[0]!.shows_studio).toBe(false);
+    for (const permission of ["agents:write", "agents:run"]) {
       expect(own[0]!.permissions).not.toContain(permission);
     }
   });

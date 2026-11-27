@@ -16,7 +16,12 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { organizations, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
-import { partitionSpacePermissions, presetPermissions, type Permission } from "./permissions.ts";
+import {
+  partitionSpacePermissions,
+  presetPermissions,
+  SPACE_PRESET_SHOWS_STUDIO,
+  type Permission,
+} from "./permissions.ts";
 
 export interface SpaceAccessRow {
   id: string;
@@ -31,7 +36,7 @@ export interface CustomSpaceRole {
   key: string;
   name: string;
   permissions: readonly string[];
-  /** Resolves `studio:read` (RBAC spec §3.3). */
+  /** Whether holders see the Studio (RBAC spec §3.3): a display attribute, not a permission. */
   showsStudio: boolean;
 }
 
@@ -192,13 +197,12 @@ export function resolveSpaceRole(
  */
 export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   if (!ref) return new Set<Permission>();
-  // (base ∩ within) ∪ plus. A custom role's `studio:read` comes from its column, never its array.
+  // (base ∩ within) ∪ plus.
   let granted: Set<Permission>;
   if (ref.kind === "preset") {
     granted = presetPermissions(ref.preset);
   } else {
     granted = partitionSpacePermissions(ref.role.permissions).granted;
-    if (ref.role.showsStudio) granted.add("studio:read");
   }
   if (ref.within) {
     const within = new Set(ref.within);
@@ -206,6 +210,12 @@ export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   }
   for (const permission of ref.plus ?? []) granted.add(permission);
   return granted;
+}
+
+/** Whether the holder of `ref` sees the Studio in that space; no role, no Studio. */
+export function spaceShowsStudio(ref: SpaceRoleRef | null): boolean {
+  if (!ref) return false;
+  return ref.kind === "preset" ? SPACE_PRESET_SHOWS_STUDIO[ref.preset] : ref.role.showsStudio;
 }
 
 /** One org custom role, share-locked until commit against `deleteSpaceRole`; 404 when none. */

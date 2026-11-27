@@ -54,7 +54,12 @@ import {
   personaFor,
   personaMemberships,
 } from "../lib/view-as.ts";
-import { resolveSpaceRole, toSpaceRoleWire, type SpaceRoleRef } from "../lib/space-role.ts";
+import {
+  resolveSpaceRole,
+  spaceShowsStudio,
+  toSpaceRoleWire,
+  type SpaceRoleRef,
+} from "../lib/space-role.ts";
 import { enterSpaceById } from "../middleware/space-context.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
@@ -137,6 +142,7 @@ function spaceWireForCaller(
     access: role ? ("member" as const) : ("none" as const),
     role: toSpaceRoleWire(role),
     permissions: [...effectiveInSpace(c, role)].sort(),
+    shows_studio: spaceShowsStudio(role),
   };
 }
 

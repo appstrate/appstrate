@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
-import { isTurnBudgetNote } from "./chat-turn-metadata.ts";
 
 /** Bound a single MCP resources/read response before materializing any of its files. */
 export const MCP_RESOURCE_MAX_BYTES = 32 * 1024 * 1024;
@@ -71,14 +70,12 @@ function isTextPart(value: unknown): value is { type: "text"; text: string } {
  * payload (parsed when it arrives as a JSON string). Depth-bounded so a
  * pathological structure can't loop.
  *
- * A content array may carry text parts that are NOT part of the payload: the Pi
- * engine appends a model-facing `[turn budget] …` line to every tool result, so
- * the payload is no longer the only text part and the concatenation
- * `{"id":"run_…"}[turn budget] …` is not JSON. Hence the rule for an array: the
- * first text part that parses on its own wins — producers put the payload in
- * one block, anything after it is prose. When no part parses, the joined text
- * is returned, so a plain-text result still reads verbatim, less the budget
- * note. Without this the
+ * A content array may carry text parts that are NOT part of the payload (a
+ * prose line after it), so the concatenation need not be JSON. Hence the rule
+ * for an array: the first text part that parses on its own wins — producers put
+ * the payload in one block, anything after it is prose. When no part parses, the
+ * joined text is returned, so a plain-text result still reads verbatim. Without
+ * this the
  * payload reads as a string, and every consumer reading a record out of it (run
  * id/status, error shapes) silently degrades — a failed call would read as a success.
  */
@@ -103,9 +100,6 @@ export function unwrapMcpResult(value: unknown, depth = 0): unknown {
     const parts = value.filter(isTextPart);
     if (parts.length > 0) {
       const texts = parts.map((p) => p.text);
-      // The chat's turn-budget note, always the last block, is the model's: one earlier is not it.
-      const last: unknown = value[value.length - 1];
-      if (isTextPart(last) && isTurnBudgetNote(last.text)) texts.pop();
       for (const text of texts) {
         const part = unwrapMcpResult(text, depth + 1);
         if (typeof part === "object" && part !== null) return part;

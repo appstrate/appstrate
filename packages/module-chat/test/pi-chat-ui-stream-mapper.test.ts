@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
+import { formatTurnBudgetNote, turnBudgetNoteBlock } from "@appstrate/core/chat-turn-metadata";
 import {
   dispatchSpace,
   PiChatUiStreamMapper,
@@ -191,7 +191,7 @@ describe("PiChatUiStreamMapper", () => {
           content: [
             { type: "text", text: "403 Resource not accessible" },
             { type: "text", text: "[turn budget] hidden" },
-            { type: "text", text: budget },
+            turnBudgetNoteBlock(budget),
           ],
           details: {},
         },

@@ -454,7 +454,7 @@ describe("personal_space_role: operator", () => {
       it("gives a member its permissions plus the floor on GET /api/spaces", async () => {
         const own = await personalOf(member);
         expect(own.role).toMatchObject({ kind: "custom", key: "runner-lite" });
-        expect(own.permissions).not.toContain("studio:read");
+        expect(own.shows_studio).toBe(false);
         expect(own.permissions).not.toContain("agents:write");
         for (const permission of ["agents:read", "agents:run", "runs:read", ...DELETES]) {
           expect(own.permissions).toContain(permission);

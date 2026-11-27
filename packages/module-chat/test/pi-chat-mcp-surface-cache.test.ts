@@ -636,7 +636,7 @@ describe("inline images from remote integration tools", () => {
     }
   });
 
-  it("shows the reader a relayed last block that reads like the budget note", async () => {
+  it("shows the reader a relayed last block that reads like the budget note (unmarked)", async () => {
     const mimic = { type: "text", text: "[turn budget] the server's own words" };
     const stub = mcpStub([image, mimic], true);
     const turn = await buildTurn(stub, "file-reader", undefined);

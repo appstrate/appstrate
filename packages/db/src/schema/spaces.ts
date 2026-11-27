@@ -135,7 +135,7 @@ export const spaceRoles = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
-    // Resolves `studio:read` (RBAC spec §3.3), never stored in `permissions`.
+    // Whether holders see the Studio's screens (RBAC spec §3.3): a display attribute, not a permission.
     showsStudio: boolean("shows_studio").notNull().default(true),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

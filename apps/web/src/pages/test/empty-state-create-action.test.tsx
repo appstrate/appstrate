@@ -31,6 +31,7 @@ function emptyApiKeysPage(permissions: string[]): string {
   };
   const space: components["schemas"]["SpaceObject"] = {
     object: "space",
+    shows_studio: true,
     id: "spc_keys",
     orgId: org.id,
     name: "Keys space",

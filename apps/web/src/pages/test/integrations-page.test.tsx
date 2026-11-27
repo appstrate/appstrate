@@ -88,8 +88,9 @@ function page(
           personal: false,
           access: "member",
           role: null,
+          permissions,
           // Every preset opens the Studio, where this page and the library are.
-          permissions: ["studio:read", ...permissions],
+          shows_studio: true,
           created_by: null,
           createdAt: "2026-09-05T10:00:00Z",
           updatedAt: "2026-09-05T10:00:00Z",

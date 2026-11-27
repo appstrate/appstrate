@@ -134,7 +134,7 @@ function toolPart(
     state = "output-available",
     durationMs,
     integration = false,
-    presentation = integration ? { title: "API call", subject: GMAIL } : undefined,
+    presentation = integration ? { call: "proxied_request", subject: GMAIL } : undefined,
   }: {
     lookup?: boolean;
     state?: string;
@@ -270,7 +270,7 @@ describe("the summary, open", () => {
         toolPart("call_s", { lookup: true }),
         // An operation on an integration package is the platform's, its subject notwithstanding.
         toolPart("call_o", {
-          presentation: { title: "Get", tag: "Integrations", method: "GET", subject: GMAIL },
+          presentation: { call: "operation", tag: "Integrations", method: "GET", subject: GMAIL },
         }),
       ],
       [],
@@ -454,7 +454,7 @@ describe("the Tools tab, open", () => {
     const html = tools([
       [
         toolPart("call_a", {
-          presentation: { title: "Run", tag: "Agents", method: "POST", subject: agent },
+          presentation: { call: "operation", tag: "Agents", method: "POST", subject: agent },
         }),
       ],
     ]);

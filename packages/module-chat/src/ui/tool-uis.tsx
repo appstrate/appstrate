@@ -53,7 +53,6 @@ import {
   packagePageHref,
   type CreatedPackage,
 } from "./package-created.ts";
-import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { showCall } from "./tool-presentation.ts";
 import { cardSpaceOf, type StoredResult } from "./use-call-presentation.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
@@ -64,6 +63,7 @@ import {
   extractErrorMessage,
   httpStatusOf,
   type ToolPhase,
+  unwrapToolResult,
 } from "./tool-result.ts";
 
 /**
@@ -166,7 +166,7 @@ export function ToolCallCard({
   // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on
   // every render of this card — and during a stream the thread re-renders per
   // chunk, so a tool-heavy conversation paid it once per card per frame.
-  const unwrapped = React.useMemo(() => unwrapMcpResult(result), [result]);
+  const unwrapped = React.useMemo(() => unwrapToolResult(result), [result]);
   const status = httpStatusOf(unwrapped);
   const durationMs = readDurationMs(timing);
   const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
@@ -283,7 +283,7 @@ function RunLaunchCard(props: ToolCardProps): React.ReactNode {
   const runId = extractRunId(props.result);
   const initialFiles = React.useMemo(() => extractRunFiles(props.result), [props.result]);
   // Same reason as `ToolCallCard` — see the note there.
-  const unwrapped = React.useMemo(() => unwrapMcpResult(props.result), [props.result]);
+  const unwrapped = React.useMemo(() => unwrapToolResult(props.result), [props.result]);
   const meta = definedEntries({
     tool_call_id: props.toolCallId,
     is_error: props.isError,
@@ -358,7 +358,7 @@ export function InvokeOperationTool(props: ToolCardProps) {
           packageId={args?.path_params?.packageId}
           toolCallId={props.toolCallId}
           errorText={
-            phase === "error" && !offer ? extractErrorMessage(unwrapMcpResult(result)) : undefined
+            phase === "error" && !offer ? extractErrorMessage(unwrapToolResult(result)) : undefined
           }
         />
       );
@@ -376,7 +376,7 @@ export function InvokeOperationTool(props: ToolCardProps) {
   const shown = showCall({ toolName: "invoke_operation", args, presentation }, t);
   const spaceId = cardSpaceOf(props);
   const created =
-    phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;
+    phase === "success" ? packageCreatedByOperation(opId, unwrapToolResult(result)) : null;
   return (
     <ToolCallCard
       phase={phase}
@@ -438,7 +438,7 @@ export function ImportPackageFileTool(props: ToolCardProps) {
   const phase = deriveToolPhase(props);
   const spaceId = cardSpaceOf(props);
   const created =
-    phase === "success" ? packageCreatedByImport(unwrapMcpResult(props.result)) : null;
+    phase === "success" ? packageCreatedByImport(unwrapToolResult(props.result)) : null;
   return (
     <ToolCallCard
       phase={phase}
@@ -466,9 +466,9 @@ export function SearchTool(props: ToolCardProps) {
       phase={deriveToolPhase(props)}
       {...showCall({ ...props, presentation }, t)}
       aside={
-        presentation?.count !== undefined ? (
+        presentation?.call === "search" ? (
           <span className="text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs">
-            <SubjectStack subjects={presentation.items ?? []} />
+            <SubjectStack subjects={presentation.items} />
             {t("tool.search.count", { count: presentation.count })}
           </span>
         ) : null

@@ -4625,7 +4625,7 @@ export interface paths {
         put?: never;
         /**
          * Create a custom space role
-         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop, and so is `studio:read`, which a custom role holds through `shows_studio` instead. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.
+         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.
          */
         post: operations["createRole"];
         delete?: never;
@@ -4643,7 +4643,7 @@ export interface paths {
         };
         /**
          * List the permissions a custom role may hold
-         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold. `studio:read` is not listed: a custom role holds it through `shows_studio`.
+         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold. Whether a role shows the Studio is not a permission: it is the role's `shows_studio`.
          */
         get: operations["listRoleVocabulary"];
         put?: never;
@@ -7513,9 +7513,9 @@ export interface components {
             key: string;
             name: string;
             description: string | null;
-            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back: never `studio:read`, which `shows_studio` carries. */
+            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back. */
             permissions: string[];
-            /** @description Whether holders of the role see the Studio (they resolve `studio:read`). A display setting, not a boundary: the REST API and an MCP client answer the role's other permissions either way. Always `true` for a preset. */
+            /** @description Whether holders of the role see the Studio's screens in the interface. A display attribute, not a permission and not a boundary: the REST API and an MCP client answer the role's permissions either way. Always `true` for a preset. */
             shows_studio: boolean;
             /** @description Entries stored on the bundle that this deployment cannot name — their module is no longer loaded — sorted. They grant nothing and are never part of `permissions`; sending a `permissions` array without them is what drops them from the row. Always empty for a preset. */
             unavailable_permissions: string[];
@@ -7990,6 +7990,8 @@ export interface components {
             } | null;
             /** @description The caller's effective permission set in this space, ceiling applied */
             permissions: string[];
+            /** @description Whether the caller's role in this space shows the Studio's screens in the interface (`false` when they have no role). A display attribute of the role, not a permission and not a boundary: the REST API and an MCP client answer the role's permissions either way. */
+            shows_studio: boolean;
             /** @description ID of the user who created the space */
             created_by: string | null;
             /** Format: date-time */
@@ -26217,10 +26219,10 @@ export interface operations {
                     key: string;
                     name: string;
                     description?: string | null;
-                    /** @description Space-level permission strings the role grants (at least one). Never `studio:read`: a 400, the role resolves it from `shows_studio`. */
+                    /** @description Space-level permission strings the role grants (at least one). */
                     permissions: string[];
                     /**
-                     * @description Whether holders see the Studio (they resolve `studio:read`). Default `true`. A display setting, not a boundary: the API answers the role's other permissions either way.
+                     * @description Whether holders see the Studio's screens in the interface. Default `true`. A display attribute, not a permission and not a boundary: the API answers the role's permissions either way.
                      * @default true
                      */
                     shows_studio?: boolean;
@@ -26353,7 +26355,7 @@ export interface operations {
                     name?: string;
                     description?: string | null;
                     permissions?: string[];
-                    /** @description Whether holders see the Studio (they resolve `studio:read`). Absent = unchanged. */
+                    /** @description Whether holders see the Studio's screens in the interface. Absent = unchanged. */
                     shows_studio?: boolean;
                 };
             };
@@ -28392,6 +28394,7 @@ export interface operations {
                      *             "agents:read",
                      *             "agents:run"
                      *           ],
+                     *           "shows_studio": true,
                      *           "created_by": null,
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
@@ -28419,6 +28422,7 @@ export interface operations {
                      *             "org:read",
                      *             "spaces:read"
                      *           ],
+                     *           "shows_studio": false,
                      *           "created_by": "usr_k7x9m2p4q1",
                      *           "createdAt": "2026-01-15T10:30:00Z",
                      *           "updatedAt": "2026-01-15T10:30:00Z"
@@ -28503,6 +28507,7 @@ export interface operations {
                      *         "agents:read",
                      *         "agents:run"
                      *       ],
+                     *       "shows_studio": true,
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-15T10:30:00Z",
                      *       "updatedAt": "2026-01-15T10:30:00Z"

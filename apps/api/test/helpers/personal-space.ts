@@ -15,6 +15,7 @@ export interface ListedSpace {
   personal: boolean;
   role: { kind: string; key: string; name: string } | null;
   permissions: string[];
+  shows_studio: boolean;
 }
 
 /** The four delete permissions an owner holds on top of a role short of `admin`. */

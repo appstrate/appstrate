@@ -6,6 +6,8 @@
  */
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { parseIcon } from "@appstrate/core/appearance";
+import type { PresentationIcon } from "@appstrate/core/mcp-presentation";
 import type { McpToolName } from "./tools.ts";
 
 const SHAPES = {
@@ -49,4 +51,38 @@ export function toolIcons(name: string): Tool["icons"] {
     },
     { src: svgDataUri(shape, "#fafafa"), mimeType: "image/svg+xml", sizes: ["any"], theme: "dark" },
   ];
+}
+
+/** Where the Iconify API serves one icon as an SVG file: the host a client's own Iconify loader asks. */
+const ICONIFY_SVG_BASE = "https://api.iconify.design";
+
+/**
+ * A manifest `icon` (`parseIcon`'s grammar) as MCP icons a client draws from `src` alone: an image
+ * URL or data URI as it is, an Iconify id as its SVG file on the Iconify API, an emoji as an inline
+ * SVG. `undefined` for a value no surface can draw.
+ */
+export function manifestIcons(value: unknown): PresentationIcon[] | undefined {
+  const icon = parseIcon(value);
+  if (!icon) return undefined;
+  switch (icon.kind) {
+    case "url": {
+      const mime = /^data:(image\/[a-z0-9.+-]+)[;,]/i.exec(icon.src)?.[1];
+      return [{ src: icon.src, ...(mime ? { mimeType: mime.toLowerCase() } : {}) }];
+    }
+    case "lucide":
+      return [{ src: `${ICONIFY_SVG_BASE}/lucide/${icon.name}.svg`, mimeType: "image/svg+xml" }];
+    case "iconify": {
+      const [prefix, name] = icon.id.split(":");
+      return [{ src: `${ICONIFY_SVG_BASE}/${prefix}/${name}.svg`, mimeType: "image/svg+xml" }];
+    }
+    case "emoji": {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><text x="12" y="12" font-size="18" text-anchor="middle" dominant-baseline="central">${icon.emoji}</text></svg>`;
+      return [
+        {
+          src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+          mimeType: "image/svg+xml",
+        },
+      ];
+    }
+  }
 }

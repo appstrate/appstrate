@@ -27,7 +27,7 @@ const NO_FEATURES: Features = {};
 function sectionsFor(features: Features, granted: string[], inPersonalSpace = false) {
   const can = (permission: string) => granted.includes(permission);
   return visibleSettingsSections(
-    (path) => routeVerdict(path, can, features, inPersonalSpace) === "granted",
+    (path) => routeVerdict(path, can, true, features, inPersonalSpace) === "granted",
   );
 }
 

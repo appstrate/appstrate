@@ -149,8 +149,9 @@ describe("member personal-space role override", () => {
     });
     const own = await personalOf(member);
     expect(own.role).toMatchObject({ kind: "custom", key: "reader", name: "Reader" });
-    // Created without a choice, the role shows the Studio: `studio:read` is resolved, not stored.
-    for (const permission of ["agents:read", "studio:read", ...DELETES]) {
+    // Created without a choice, the role shows the Studio.
+    expect(own.shows_studio).toBe(true);
+    for (const permission of ["agents:read", ...DELETES]) {
       expect(own.permissions).toContain(permission);
     }
     for (const permission of ["agents:run", "agents:write", "runs:read"]) {
@@ -251,9 +252,9 @@ describe("member personal-space role override", () => {
     expect(allowed.status, await allowed.clone().text()).toBe(200);
   });
 
-  // A custom override, not `viewer`: every preset grants `studio:read`, so only a custom role
-  // (`shows_studio: false`) can show the Studio withheld.
-  it("an override withholding studio:read reads the same through the chat's loopback bearer", async () => {
+  // A custom override, not `viewer`: every preset shows the Studio, so only a custom role
+  // (`shows_studio: false`) can show it withheld.
+  it("an override hiding the Studio reads the same through the chat's loopback bearer", async () => {
     const role = await seedSpaceRole({
       orgId: owner.orgId,
       key: "reader",
@@ -276,7 +277,8 @@ describe("member personal-space role override", () => {
     for (const permission of ["agents:read", ...DELETES]) {
       expect(own[0]!.permissions).toContain(permission);
     }
-    for (const permission of ["studio:read", "agents:write", "agents:run"]) {
+    expect(own[0]!.shows_studio).toBe(false);
+    for (const permission of ["agents:write", "agents:run"]) {
       expect(own[0]!.permissions).not.toContain(permission);
     }
   });

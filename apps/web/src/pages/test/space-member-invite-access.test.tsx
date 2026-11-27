@@ -46,6 +46,7 @@ function pageFor(
   };
   const space: components["schemas"]["SpaceObject"] = {
     object: "space",
+    shows_studio: true,
     id: "spc_inviter",
     orgId: org.id,
     name: "Inviter space",

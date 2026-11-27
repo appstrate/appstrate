@@ -79,6 +79,7 @@ interface ListedSpace {
   personal: boolean;
   role: { kind: string; key: string } | null;
   permissions: string[];
+  shows_studio: boolean;
 }
 
 interface ListedOrg {
@@ -317,6 +318,21 @@ describe("view as role", () => {
     expect(previewedOrg?.permissions).not.toContain("members:remove");
     const realOrgPermissions = new Set(realOrg?.permissions);
     expect(previewedOrg?.permissions.filter((p) => !realOrgPermissions.has(p))).toEqual([]);
+  });
+
+  it("carries the previewed role's shows_studio, a preset's and a custom bundle's", async () => {
+    const hiding = await seedSpaceRole({
+      orgId: owner.orgId,
+      key: "no-studio",
+      permissions: ["agents:read"],
+      showsStudio: false,
+    });
+    const [real] = await listedSpaces();
+    expect(real?.shows_studio).toBe(true);
+    const [asViewer] = await listedSpaces(persona("member", "preset:viewer"));
+    expect(asViewer?.shows_studio).toBe(true);
+    const [asHidden] = await listedSpaces(persona("member", `custom:${hiding.id}`));
+    expect(asHidden?.shows_studio).toBe(false);
   });
 
   // ─── 4. Refusals, never a fall-back ───────────────────────────────

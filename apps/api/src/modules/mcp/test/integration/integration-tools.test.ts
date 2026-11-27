@@ -1116,6 +1116,7 @@ describe("mcp integration tools", () => {
         arguments: { ...where, kinds: ["integration_tool"], query: "search" },
       });
       expect(readToolPresentation(searchedEnvelope.result?._meta)).toMatchObject({
+        call: "search",
         count: 1,
         items: [{ kind: "integration", id: REMOTE_ID }],
       });
@@ -1172,6 +1173,7 @@ describe("mcp integration tools", () => {
       expect(result._meta?.["dev.appstrate/relayed"]).toBe(true);
       // Its card: the integration it reached and the server's title for the tool.
       expect(readToolPresentation(result._meta)).toEqual({
+        call: "remote_tool",
         title: "Search documents",
         subject: { kind: "integration", id: REMOTE_ID, display_name: expect.any(String) },
       });

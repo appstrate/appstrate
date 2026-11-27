@@ -27,12 +27,12 @@ import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import {
-  assignableSpaceLevelPermissions,
+  knownSpaceLevelPermissions,
   describeMissingRead,
   missingReadGrants,
   partitionSpacePermissions,
   presetPermissions,
-  RESOLVED_SPACE_PERMISSIONS,
+  SPACE_PRESET_SHOWS_STUDIO,
 } from "../lib/permissions.ts";
 
 /** One entry of `GET /api/roles`; `id` is null for a preset (it has no row). */
@@ -44,7 +44,7 @@ export interface SpaceRoleWire {
   name: string;
   description: string | null;
   permissions: string[];
-  /** Whether the role resolves `studio:read`, never listed in `permissions`; `true` on a preset. */
+  /** Whether holders of the role see the Studio: a display attribute, not a permission. */
   shows_studio: boolean;
   /**
    * Stored entries this deployment cannot name — always empty for a preset.
@@ -101,11 +101,8 @@ function presetWire(preset: SpaceRolePreset): SpaceRoleWire {
     key: preset,
     name: preset,
     description: null,
-    // Without the resolved grants `shows_studio` carries, so it is what a write accepts back.
-    permissions: [...presetPermissions(preset)]
-      .filter((permission) => !RESOLVED_SPACE_PERMISSIONS.has(permission))
-      .sort(),
-    shows_studio: true,
+    permissions: [...presetPermissions(preset)].sort(),
+    shows_studio: SPACE_PRESET_SHOWS_STUDIO[preset],
     // A preset is code, not a row: nothing can be stored on it that the
     // deployment does not name.
     unavailable_permissions: [],
@@ -141,7 +138,7 @@ export async function listSpaceRoles(orgId: string): Promise<SpaceRoleWire[]> {
  * named, never added: that would grant what the author did not pick.
  */
 function normalizePermissions(permissions: string[]): string[] {
-  const known = assignableSpaceLevelPermissions();
+  const known = knownSpaceLevelPermissions();
   if (permissions.length > known.size) {
     throw invalidRequest(
       `A role can hold at most ${known.size} permissions — the whole vocabulary — ` +
@@ -154,11 +151,8 @@ function normalizePermissions(permissions: string[]): string[] {
   for (const permission of permissions) {
     if (!known.has(permission)) {
       throw invalidRequest(
-        RESOLVED_SPACE_PERMISSIONS.has(permission)
-          ? `'${permission}' is not stored in a role's permissions: it follows the role's ` +
-              `shows_studio. See GET /api/roles/vocabulary for the permissions a role can hold.`
-          : `Unknown space-level permission '${permission}'. ` +
-              `See GET /api/roles/vocabulary for the permissions a role can hold.`,
+        `Unknown space-level permission '${permission}'. ` +
+          `See GET /api/roles/vocabulary for the permissions a role can hold.`,
         "permissions",
       );
     }

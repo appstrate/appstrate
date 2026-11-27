@@ -731,7 +731,11 @@ function buildSearchTool(
         ...sections,
         ...(readSpaceIds.length > 0 ? { searched_spaces: readSpaceIds } : {}),
       }),
-      { count: found, items: [...subjects.values()].slice(0, MAX_PRESENTED_ITEMS) },
+      {
+        call: "search",
+        count: found,
+        items: [...subjects.values()].slice(0, MAX_PRESENTED_ITEMS),
+      },
     );
   };
 

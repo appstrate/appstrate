@@ -57,11 +57,14 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
   const { data: spaces } = useSpaces();
   const workingSpaceId = useCurrentSpaceId();
 
-  const admits = (gate: SpaceGate, space: { id: string; personal: boolean }) =>
+  const admits = (
+    gate: SpaceGate,
+    space: { id: string; personal: boolean; shows_studio: boolean },
+  ) =>
     (!among || among.includes(space.id)) &&
     ("permission" in need
       ? gate(need.permission)
-      : routeVerdict(need.route, gate, features, space.personal) === "granted");
+      : routeVerdict(need.route, gate, space.shows_studio, features, space.personal) === "granted");
   const eligible = on ? spacesWhere(spaces, admits) : [];
   const offered = on
     ? eligible.length > 0

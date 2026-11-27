@@ -7,10 +7,9 @@
  */
 
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
-import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
-import { deriveToolPhase, extractErrorMessage } from "./tool-result.ts";
-import { callOutcome, callPresentation } from "./tool-presentation.ts";
+import { deriveToolPhase, extractErrorMessage, unwrapToolResult } from "./tool-result.ts";
+import { callOutcome, callPresentation, presentationMethod } from "./tool-presentation.ts";
 import { callSpaceOf } from "./conversation-scope.ts";
 import { extractRunId } from "./run-events.ts";
 
@@ -110,7 +109,7 @@ export function isLookupCall(
 ): boolean {
   if (status === "error" || status === "denied") return false;
   if (stampedLookup(callMetadata)) return true;
-  const method = presentation?.method?.toUpperCase();
+  const method = presentationMethod(presentation);
   return method === "GET" || method === "HEAD";
 }
 
@@ -150,7 +149,7 @@ function messageCalls(message: UIMessage, turn: number, turnRuns: boolean): Conv
   for (const part of message.parts) {
     if (!isToolUIPart(part)) continue;
     const toolName = getToolName(part);
-    const output = "output" in part ? unwrapMcpResult(part.output) : undefined;
+    const output = "output" in part ? unwrapToolResult(part.output) : undefined;
     const status = statusOf(part, output, turnRuns);
     const error =
       status !== "error"

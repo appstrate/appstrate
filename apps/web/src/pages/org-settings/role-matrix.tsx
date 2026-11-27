@@ -14,7 +14,6 @@ import {
   permissionLabel,
   permissionResourceLabel,
 } from "../../lib/permission-labels";
-import { STUDIO_PERMISSION } from "../../lib/route-access";
 
 export function RoleMatrix({ roles }: { roles: RoleObject[] }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -56,12 +55,11 @@ export function RoleMatrix({ roles }: { roles: RoleObject[] }) {
             })),
           })),
           {
-            label: permissionResourceLabel("studio", t),
+            label: t("products.studio", { ns: "common" }),
             rows: [
               {
-                key: STUDIO_PERMISSION,
+                key: "shows_studio",
                 label: t("roles.showsStudio"),
-                title: STUDIO_PERMISSION,
                 cell: (column: string) => (
                   <PermissionMark granted={showsStudio.get(column) === true} />
                 ),

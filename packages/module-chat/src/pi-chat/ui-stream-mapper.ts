@@ -25,7 +25,7 @@
  */
 
 import type { ProviderMetadata, UIMessageChunk } from "ai";
-import { isTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
+import { omitTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import type {
   AgentSessionEvent,
@@ -532,11 +532,10 @@ function stringifyToolResult(result: unknown): string {
   if (result && typeof result === "object") {
     const content = (result as { content?: unknown }).content;
     if (Array.isArray(content)) {
-      const texts = content.map((c) =>
+      // The model's turn-budget note is marked: it is not the reader's.
+      const texts = (omitTurnBudgetNote(content) as unknown[]).map((c) =>
         c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : "",
       );
-      // The model's turn-budget note, always the last block: a block earlier is a server's text.
-      if (isTurnBudgetNote(texts.at(-1) ?? "")) texts.pop();
       return texts.join("");
     }
     return JSON.stringify(result);

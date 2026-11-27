@@ -114,15 +114,24 @@ export function subjectName(subject: PresentationSubject): string {
   return subject.display_name ?? subject.id;
 }
 
-/** `{ns}__api_call` or its upload twin: a proxied request. */
-function isProxiedRequest(input: unknown): boolean {
-  return integrationToolName(input)?.startsWith("api_") === true;
+/** What the call acted on, for the variants that name one. */
+export function presentationSubject(
+  presentation: ToolPresentation | undefined,
+): PresentationSubject | undefined {
+  return presentation && "subject" in presentation ? presentation.subject : undefined;
 }
 
-function proxiedRequests(input: unknown): unknown[] | undefined {
-  if (!isProxiedRequest(input)) return undefined;
-  const requests = asRecordOrNull(asRecordOrNull(input)?.arguments)?.requests;
-  return Array.isArray(requests) ? requests : undefined;
+/** The HTTP method of a call that has one (an operation, a proxied request), upper-cased. */
+export function presentationMethod(presentation: ToolPresentation | undefined): string | undefined {
+  return presentation?.call === "operation" || presentation?.call === "proxied_request"
+    ? presentation.method?.toUpperCase()
+    : undefined;
+}
+
+/** The image a client draws for a subject: the light one, else the first. */
+export function subjectIconSrc(subject: PresentationSubject): string | undefined {
+  const icons = subject.icons;
+  return (icons?.find((icon) => icon.theme !== "dark") ?? icons?.[0])?.src;
 }
 
 /** The path a proxied request targets, without origin, query or fragment. */
@@ -146,44 +155,59 @@ export function showCall(
   t: ChatTranslate,
 ): ShownCall {
   const own = ownTarget(call.toolName, call.args);
+  const ownLabel = t(`tool.name.${call.toolName}`, { defaultValue: call.toolName });
   const p = call.presentation;
-  const ownLabel = t(`tool.name.${call.toolName}`, { defaultValue: p?.title ?? call.toolName });
-  if (!p) return { Icon: own.Icon, label: ownLabel, ...(own.target ? { idText: own.target } : {}) };
-
-  const subject = p.subject;
-  const method = p.method?.toUpperCase();
-  const Icon = (method ? methodIcon(method) : undefined) ?? own.Icon;
-  if (p.tag && method) {
-    const idText = subject ? subjectName(subject) : own.target;
-    return {
-      Icon,
-      label: `${t(`tool.tag.${p.tag}`, { defaultValue: p.tag })} · ${verbOf(method, t)}`,
-      ...(idText ? { idText } : {}),
-      ...(subject ? { subject } : {}),
-    };
-  }
-  if (subject?.kind === "integration") {
-    const requests = proxiedRequests(call.args);
-    const path = method && requests?.length === 1 ? targetPath(requests[0]) : undefined;
-    const what = method
-      ? verbOf(method, t)
-      : requests !== undefined && requests.length > 1
-        ? t("tool.requests", { count: requests.length })
-        : integrationToolName(call.args) !== undefined && !isProxiedRequest(call.args)
-          ? p.title
-          : t("tool.name.call_integration_tool");
-    return {
-      Icon,
-      label: `${subjectName(subject)} · ${what}`,
-      ...(path ? { idText: path } : {}),
-      subject,
-    };
-  }
-  const idText = subject ? subjectName(subject) : own.target;
-  return {
-    Icon,
+  const plain = (): ShownCall => ({
+    Icon: own.Icon,
     label: ownLabel,
-    ...(idText ? { idText } : {}),
-    ...(subject ? { subject } : {}),
-  };
+    ...(own.target ? { idText: own.target } : {}),
+  });
+  if (!p) return plain();
+  switch (p.call) {
+    case "operation": {
+      const method = p.method.toUpperCase();
+      const Icon = methodIcon(method) ?? own.Icon;
+      const idText = p.subject ? subjectName(p.subject) : own.target;
+      return {
+        Icon,
+        label: p.tag
+          ? `${t(`tool.tag.${p.tag}`, { defaultValue: p.tag })} · ${verbOf(method, t)}`
+          : ownLabel,
+        ...(idText ? { idText } : {}),
+        ...(p.subject ? { subject: p.subject } : {}),
+      };
+    }
+    case "proxied_request": {
+      const method = p.method?.toUpperCase();
+      const requests = asRecordOrNull(asRecordOrNull(call.args)?.arguments)?.requests;
+      const path =
+        method && p.requests === 1 && Array.isArray(requests) ? targetPath(requests[0]) : undefined;
+      const what = method
+        ? verbOf(method, t)
+        : p.requests !== undefined && p.requests > 1
+          ? t("tool.requests", { count: p.requests })
+          : t("tool.name.call_integration_tool");
+      return {
+        Icon: (method ? methodIcon(method) : undefined) ?? own.Icon,
+        label: `${subjectName(p.subject)} · ${what}`,
+        ...(path ? { idText: path } : {}),
+        subject: p.subject,
+      };
+    }
+    case "remote_tool":
+      return {
+        Icon: own.Icon,
+        label: `${subjectName(p.subject)} · ${p.title}`,
+        subject: p.subject,
+      };
+    case "caller":
+      return {
+        Icon: own.Icon,
+        label: ownLabel,
+        idText: subjectName(p.subject),
+        subject: p.subject,
+      };
+    case "search":
+      return plain();
+  }
 }

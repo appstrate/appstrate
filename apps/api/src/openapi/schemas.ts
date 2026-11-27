@@ -2991,6 +2991,7 @@ export const schemas = {
       "access",
       "role",
       "permissions",
+      "shows_studio",
       "created_by",
       "createdAt",
       "updatedAt",
@@ -3057,6 +3058,11 @@ export const schemas = {
         type: "array",
         items: { type: "string" },
         description: "The caller's effective permission set in this space, ceiling applied",
+      },
+      shows_studio: {
+        type: "boolean",
+        description:
+          "Whether the caller's role in this space shows the Studio's screens in the interface (`false` when they have no role). A display attribute of the role, not a permission and not a boundary: the REST API and an MCP client answer the role's permissions either way.",
       },
       created_by: {
         type: ["string", "null"],
@@ -3143,15 +3149,14 @@ export const schemas = {
         description:
           "Space-level permission strings the role grants on this deployment, sorted. " +
           "A custom bundle is projected through the same vocabulary enforcement uses, so " +
-          "this array is always one a `PATCH` accepts back: never `studio:read`, which " +
-          "`shows_studio` carries.",
+          "this array is always one a `PATCH` accepts back.",
       },
       shows_studio: {
         type: "boolean",
         description:
-          "Whether holders of the role see the Studio (they resolve `studio:read`). A display " +
-          "setting, not a boundary: the REST API and an MCP client answer the role's other " +
-          "permissions either way. Always `true` for a preset.",
+          "Whether holders of the role see the Studio's screens in the interface. A display " +
+          "attribute, not a permission and not a boundary: the REST API and an MCP client answer " +
+          "the role's permissions either way. Always `true` for a preset.",
       },
       unavailable_permissions: {
         type: "array",
