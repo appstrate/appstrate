@@ -164,7 +164,7 @@ export function SharePackageDialog({
           {t("packages.shareUseLabel")}
         </Label>
         <div className="flex gap-2">
-          <Select value={target || undefined} onValueChange={setTarget}>
+          <Select value={target} onValueChange={setTarget}>
             <SelectTrigger id="share-target" className="w-full">
               <SelectValue placeholder={t("packages.shareUsePlaceholder")} />
             </SelectTrigger>
