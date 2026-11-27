@@ -317,15 +317,16 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       return next();
     }
 
-    // Fallback: cookie session
-    const { session, setCookies } = await readSessionWithCookies(c);
+    // Fallback: Better Auth session — from the presented bearer, else the cookie
+    const { session, setCookies, viaBearer } = await readSessionWithCookies(c);
     if (!session?.user) {
       // Bury the stale BA cookie before bouncing the request. Without this,
       // a cookie left behind by a redeploy (rotated `BETTER_AUTH_SECRET`,
       // wiped `session` rows, …) keeps re-arriving on every subsequent
       // request and the SPA loops between `/login` and `/auth/callback`
-      // with no surfaceable error.
-      clearStaleAuthCookies(c);
+      // with no surfaceable error. Never when a bearer failed: the cookie
+      // was not the credential judged, and may be a live session.
+      if (!viaBearer) clearStaleAuthCookies(c);
       throw unauthorized("Invalid or missing session");
     }
 
