@@ -843,6 +843,7 @@
   "integration.auth.scopeChoice.extra": "Additional permissions",
   "integration.auth.scopeChoice.defaultsOnly": "Nothing ticked: the connection gets the integration's default permissions.",
   "integration.admin.access.title": "Connection management",
+  "integration.connection.replace": "Create a replacement connection",
   "integration.connection.scope.org": "Multi-space use",
   "integration.connection.scope.space": "Use limited to one space",
   "integration.connection.scope.orgHelp": "Usable in your spaces of this organization where the integration is active.",

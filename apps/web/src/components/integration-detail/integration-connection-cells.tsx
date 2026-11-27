@@ -283,7 +283,7 @@ export function ConnectionActionsCell({
           },
           {
             id: "replacement",
-            label: t("detail.integrationMemberPicker.addConnection", { ns: "agents" }),
+            label: t("integration.connection.replace"),
             icon: Plus,
             onSelect: () => void openPopup({ packageId, authKey, forceAccountSelect: true, space }),
             hidden: !(needsRepair && canCreate && !canRenew),

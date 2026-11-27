@@ -844,6 +844,7 @@
   "integration.auth.scopeChoice.extra": "Permissions supplémentaires",
   "integration.auth.scopeChoice.defaultsOnly": "Aucune permission cochée : la connexion reçoit les permissions par défaut de l'intégration.",
   "integration.admin.access.title": "Gestion des connexions",
+  "integration.connection.replace": "Créer une connexion de remplacement",
   "integration.connection.scope.org": "Usage multi-espace",
   "integration.connection.scope.space": "Usage limité à un espace",
   "integration.connection.scope.orgHelp": "Utilisable dans vos espaces de cette organisation où l’intégration est activée.",
