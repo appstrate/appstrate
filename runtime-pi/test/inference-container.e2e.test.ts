@@ -325,10 +325,16 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
         expect(body.model).toBe(MODEL_ID);
         expect(body.store).toBe(false);
         expect(body.stream).toBe(true);
-        expect(typeof body.instructions).toBe("string");
-        expect(body.instructions.length).toBeGreaterThan(0);
+        // Pi ≥ 1.6 sends the system prompt as the leading `developer` item of
+        // `input`, not as top-level `instructions` (Codex's own shape — the
+        // backend appends `instructions` after `input`, which defeated the
+        // prompt cache). Pinned so a further move is re-examined, not missed.
+        expect(body.instructions).toBeUndefined();
         expect(Array.isArray(body.input)).toBe(true);
-        expect(body.input.length).toBeGreaterThan(0);
+        expect(body.input.length).toBeGreaterThan(1);
+        expect(body.input[0].role).toBe("developer");
+        expect(typeof body.input[0].content).toBe("string");
+        expect(body.input[0].content.length).toBeGreaterThan(0);
 
         // The turn actually completed — the canned SSE frame was parsed by the
         // real runner, not just accepted at the socket.
