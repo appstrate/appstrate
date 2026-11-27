@@ -2723,6 +2723,31 @@ export async function saveIntegrationConnection(
 }
 
 /**
+ * The actions `caller` holds on a listed row from `scope`'s space: {@link connectionActions}, with
+ * `reconnect` only where `methodAvailable` (by default, the methods of `scope`'s space) renews it.
+ */
+export async function listedConnectionActions(
+  scope: SpaceScope,
+  packageId: string,
+  caller: ConnectionCaller,
+  orgRole: OrgRole | null,
+  methodAvailable?: ReturnType<typeof reconnectMethods>,
+) {
+  let renews = methodAvailable;
+  if (!renews) {
+    const [read, registrations] = await Promise.all([
+      readIntegrationManifestForConnect(scope, packageId),
+      readOAuthClientRegistrations(scope.orgId, [packageId], [scope.spaceId]),
+    ]);
+    renews = reconnectMethods(new Map(read.ok ? [[packageId, read.manifest]] : []), registrations);
+  }
+  return (row: SelectableRow, rowShares: readonly string[]) =>
+    connectionActions(row, caller, rowShares.includes(scope.spaceId), orgRole).filter(
+      (action) => action !== "reconnect" || renews(packageId, row.authKey, row.spaceId),
+    );
+}
+
+/**
  * The resolver's `usable` set, each row projected for `caller` with the actions it holds and, for
  * its owner, the spaces it may share it into (`orgRole` `null`: none). `locked_by`: what a 409 would
  * refuse — an own row's delete, another's withdrawal from this space.
@@ -2740,16 +2765,13 @@ export async function listIntegrationConnections(
     packageId,
   ]);
   if (rows.length === 0) return [];
-  if (!methodAvailable) {
-    const [read, registrations] = await Promise.all([
-      readIntegrationManifestForConnect(scope, packageId),
-      readOAuthClientRegistrations(scope.orgId, [packageId], [scope.spaceId]),
-    ]);
-    methodAvailable = reconnectMethods(
-      new Map(read.ok ? [[packageId, read.manifest]] : []),
-      registrations,
-    );
-  }
+  const actionsOf = await listedConnectionActions(
+    scope,
+    packageId,
+    caller,
+    orgRole,
+    methodAvailable,
+  );
   const ownerName = await resolveConnectionOwnerNames(rows);
   const own = rows.filter((row) => actorOwns(actor, row)).map((row) => row.id);
   const others = rows.filter((row) => !actorOwns(actor, row)).map((row) => row.id);
@@ -2773,14 +2795,7 @@ export async function listIntegrationConnections(
       ...serializeIntegrationConnection(row, view),
       owner_name: ownerName(row),
       locked_by: locks.get(row.id) ?? null,
-      allowed_actions: connectionActions(
-        row,
-        caller,
-        rowShares.includes(scope.spaceId),
-        orgRole,
-      ).filter(
-        (action) => action !== "reconnect" || methodAvailable(packageId, row.authKey, row.spaceId),
-      ),
+      allowed_actions: actionsOf(row, rowShares),
       ...(view.owner && row.userId !== null
         ? { shareable_spaces: shareable.get(row.id) ?? [] }
         : {}),

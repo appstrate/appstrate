@@ -8,7 +8,6 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
 import {
   integrationConnections,
   integrationOrgDefaults,
@@ -81,14 +80,16 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
   }
 
   let seq = 0;
-  async function seedConnection(over: { authKey?: string; dead?: boolean } = {}) {
+  async function seedConnection(
+    over: { authKey?: string; dead?: boolean; accountId?: string } = {},
+  ) {
     seq += 1;
     const [row] = await db
       .insert(integrationConnections)
       .values({
         integrationId: INTEG,
         authKey: over.authKey ?? "primary",
-        accountId: `acct-${seq}`,
+        accountId: over.accountId ?? `acct-${seq}`,
         orgId: ctx.orgId,
         spaceId: null,
         originSpaceId: ctx.defaultSpaceId,
@@ -123,16 +124,15 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
     });
   }
 
-  async function entryOf(integrationId = INTEG) {
+  async function entryOf(integrationId = INTEG, caller: { canConnect?: boolean } = {}) {
     const readiness = await resolveAgentConnectionReadiness({
       scope,
       agentPackageId: AGENT,
       caller: testCaller(
         { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
-        { spaceId: scope.spaceId },
+        { spaceId: scope.spaceId, governs: true, ...caller },
       ),
       orgRole: null,
-      canConfigureIntegrations: true,
       version: "draft",
     });
     return readiness.integrations.find((i) => i.integration_package_id === integrationId)!;
@@ -394,30 +394,20 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
     });
   });
 
-  it("candidates carry the connection list's actions: `reconnect` for the owner of an identified row, healthy or not", async () => {
+  it("candidates carry `reconnect` for the owner of an identified row, healthy or not", async () => {
     await seedAgentDeclaring({ auth_key: "primary" });
-    const healthy = await seedConnection();
-    const dead = await seedConnection({ dead: true });
-    const anonymous = await seedConnection();
-    await db
-      .update(integrationConnections)
-      .set({ accountId: "default" })
-      .where(eq(integrationConnections.id, anonymous));
-    const actionsBy = async (canConnect: boolean) => {
-      const readiness = await resolveAgentConnectionReadiness({
-        scope,
-        agentPackageId: AGENT,
-        caller: testCaller(
-          { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
-          { spaceId: scope.spaceId, canConnect },
-        ),
-        orgRole: null,
-        canConfigureIntegrations: true,
-        version: "draft",
-      });
-      const entry = readiness.integrations.find((i) => i.integration_package_id === INTEG)!;
-      return new Map(entry.resolution.candidates.map((c) => [c.id, c.allowed_actions]));
-    };
+    const [healthy, dead, anonymous] = [
+      await seedConnection(),
+      await seedConnection({ dead: true }),
+      await seedConnection({ accountId: "default" }),
+    ];
+    const actionsBy = async (canConnect: boolean) =>
+      new Map(
+        (await entryOf(INTEG, { canConnect })).resolution.candidates.map((c) => [
+          c.id,
+          c.allowed_actions,
+        ]),
+      );
     const actions = await actionsBy(true);
     expect(actions.get(healthy)).toContain("reconnect");
     expect(actions.get(dead)).toContain("reconnect");

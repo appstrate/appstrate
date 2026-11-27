@@ -442,12 +442,9 @@ export function createAgentsRouter() {
           scope,
           dependencyOverrides,
           agentPackageId: agent.id,
-          // The connection doors' own caller: `can_add_connection` uses the connect routes'
-          // guard and exemption, and each candidate's `allowed_actions` the connection list's
-          // rule, so the picker cannot promise what the mutation refuses.
+          // The connection doors' own caller, so the picker cannot promise what they refuse.
           caller: connectionCaller(c, scope.spaceId),
           orgRole: c.get("orgRole") ?? null,
-          canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
           // The ROUTER decides which definition readiness judges, and it is
           // EXACTLY the one the detail page rendered: an explicit selector (a
           // `draft` one only for a caller who may write the agent), else
