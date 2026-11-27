@@ -294,12 +294,22 @@ export function usePackageActivation(
 /** How an offer to the organization reaches the spaces holding no row of their own. */
 export type OrgOfferMode = NonNullable<LibraryPackageItem["org_offer"]>;
 
-/** Offers `packageId` to the organization in `mode` (`PUT …/org-offer`), or withdraws the offer when `mode` is `null` (`DELETE`). */
+/**
+ * Offers `packageId` to the organization in `mode` (`PUT …/org-offer`) and answers its `warnings[]`
+ * (the integrations an offered agent declares that the organization does not offer), or withdraws
+ * the offer when `mode` is `null` (`DELETE`).
+ */
 export async function setOrgOffer(packageId: string, mode: OrgOfferMode | null) {
   const params = { params: { path: splitPackageRef(packageId) } };
-  if (mode)
-    await client.PUT("/api/packages/{scope}/{name}/org-offer", { ...params, body: { mode } });
-  else await client.DELETE("/api/packages/{scope}/{name}/org-offer", params);
+  if (!mode) {
+    await client.DELETE("/api/packages/{scope}/{name}/org-offer", params);
+    return [];
+  }
+  const { data } = await client.PUT("/api/packages/{scope}/{name}/org-offer", {
+    ...params,
+    body: { mode },
+  });
+  return data?.warnings ?? [];
 }
 
 /** The offer changes where the package runs in every space without a row of its own: both libraries and every package cache refresh. */
@@ -308,6 +318,17 @@ export function useSetOrgOffer() {
   return useMutation({
     mutationFn: ({ packageId, mode }: { packageId: string; mode: OrgOfferMode | null }) =>
       setOrgOffer(packageId, mode),
+    onSettled: invalidate,
+  });
+}
+
+/** Offers each package of `requests` in turn (one `PUT …/org-offer` each), then refreshes like {@link useSetOrgOffer}. */
+export function useOfferOrgClosure() {
+  const invalidate = useInvalidatePackageActivation();
+  return useMutation({
+    mutationFn: async (requests: { packageId: string; mode: OrgOfferMode }[]) => {
+      for (const { packageId, mode } of requests) await setOrgOffer(packageId, mode);
+    },
     onSettled: invalidate,
   });
 }

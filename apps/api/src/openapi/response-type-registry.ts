@@ -283,9 +283,9 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   LaunchWarnings:
     "`warnings` envelope merged by allOf into the launch success bodies; its items are ConnectionResolutionWarning, no shared-type",
   ActivationWarnings:
-    "`warnings` envelope merged by allOf into the activation and share success bodies; its items are ActivationWarning, no shared-type",
+    "`warnings` envelope merged by allOf into the activation, share and org-offer success bodies; its items are ActivationWarning, no shared-type",
   ActivationWarning:
-    "ResolutionFieldError narrowed to `integration_not_active` plus the agent's `required` flag; built by activationWarnings in services/space-packages.ts, no shared-type",
+    "ResolutionFieldError narrowed to `integration_not_active` | `integration_not_offered` plus the agent's `required` flag; built by activationWarnings in services/space-packages.ts and offerClosureWarnings in services/package-org-offers.ts, no shared-type",
   RunAndWaitResult:
     "MCP `run_and_wait` structuredContent and outputSchema; projected by @appstrate/core/run-and-wait-client, no shared-type",
   RunAndWaitPending: "RunAndWaitResult branch for `done: false`; no shared-type",

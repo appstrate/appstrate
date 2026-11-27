@@ -176,6 +176,22 @@ describe("setOrgOffer", () => {
     }
   });
 
+  it("answers the warnings of the offer, and none for a withdrawal", async () => {
+    const warning = {
+      field: "integrations.@acme/slack",
+      code: "integration_not_offered" as const,
+      message: "m",
+      required: true,
+    };
+    spyOn(client, "PUT").mockResolvedValue({
+      data: { warnings: [warning] },
+      response: new Response(),
+    });
+    spyOn(client, "DELETE").mockResolvedValue(ok);
+    expect(await setOrgOffer("@acme/agent", "available")).toEqual([warning]);
+    expect(await setOrgOffer("@acme/agent", null)).toEqual([]);
+  });
+
   it("withdraws with DELETE …/org-offer", async () => {
     const put = spyOn(client, "PUT").mockResolvedValue(ok);
     const del = spyOn(client, "DELETE").mockResolvedValue(ok);

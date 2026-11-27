@@ -28,7 +28,11 @@ import {
   assertHasPublishedVersion,
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
-import { offerPackageToOrg, withdrawOrgOffer } from "../services/package-org-offers.ts";
+import {
+  offerClosureWarnings,
+  offerPackageToOrg,
+  withdrawOrgOffer,
+} from "../services/package-org-offers.ts";
 import { reconcilePlacementsAfterRehome } from "../services/package-placement.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
@@ -2170,7 +2174,7 @@ export function createPackagesRouter() {
   router.put(`/${SCOPED_PACKAGE_ROUTE}/org-offer`, async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
-    const { authorizeHome } = await assertPackageOfferAccess(c, packageId);
+    const { pkg, authorizeHome } = await assertPackageOfferAccess(c, packageId);
     const { mode } = await readJsonBody(c, packageOrgOfferSchema);
     const { created, changed, previousMode } = await offerPackageToOrg({
       orgId,
@@ -2195,7 +2199,12 @@ export function createPackagesRouter() {
         after: { orgId, mode },
       });
     }
-    return c.json({ object: "package_org_offer", packageId, org_offer: mode });
+    return c.json({
+      object: "package_org_offer",
+      packageId,
+      org_offer: mode,
+      warnings: await offerClosureWarnings(orgId, packageId, pkg.type),
+    });
   });
 
   router.delete(`/${SCOPED_PACKAGE_ROUTE}/org-offer`, async (c) => {

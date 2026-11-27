@@ -292,6 +292,7 @@
   "apiError.missing_skill": "A skill the agent depends on cannot be found or is not active in this space: {{message}}",
   "apiError.integration_not_found": "An integration the agent depends on cannot be found: {{message}}",
   "apiError.integration_not_active": "An integration the agent depends on is not active in this space.",
+  "apiError.integration_not_offered": "An integration the agent depends on is not offered to the organization: a personal space cannot switch it on.",
   "apiError.integration_wrong_type": "A dependency declared as an integration is not one: {{message}}",
   "apiError.integration_invalid_manifest": "The manifest of an integration the agent depends on is invalid: {{message}}",
   "apiError.not_an_mcp_server": "This address does not answer as an MCP server (Streamable HTTP or SSE).",

@@ -17,9 +17,12 @@ import type { OrgOfferMode } from "@appstrate/db/schema";
 import { orgPackageOffers, schedules, spacePackages, spaces } from "@appstrate/db/schema";
 import { forbidden, invalidRequest } from "../lib/errors.ts";
 import { assertHasPublishedVersion, loadPlaceablePackage } from "./space-packages.ts";
-import type { PlacementAuthority } from "./space-packages.ts";
-import { isActiveEverywhereByDefault } from "./package-activation.ts";
-import { disableArmedSchedules, withdrawPlacement } from "./package-placement.ts";
+import type { ActivationWarning, PlacementAuthority } from "./space-packages.ts";
+import { isActiveByDefault, isActiveEverywhereByDefault } from "./package-activation.ts";
+import { disableArmedSchedules, listOrgOffers, withdrawPlacement } from "./package-placement.ts";
+import { selectorlessAgentManifest } from "./agent-version-resolver.ts";
+import { usedIntegrations } from "./integration-connection-resolver.ts";
+import type { PackageType } from "@appstrate/core/validation";
 import type { Tx } from "../lib/db-helpers.ts";
 
 /** The locked package, after the home rule is re-asked against it. */
@@ -76,6 +79,46 @@ export async function offerPackageToOrg(params: {
       .returning({ packageId: orgPackageOffers.packageId });
     return { created: inserted.length > 0, changed: false, previousMode: null };
   });
+}
+
+/**
+ * The integrations an offered AGENT declares that a personal space cannot switch on: neither
+ * offered to the organization nor active by default (`[]` for any other `type`). Offering
+ * activates nothing by cascade (credentials stay a per-space decision); it only names them.
+ * An integration the organization cannot see is not declared as far as the manifest loader
+ * knows, so it is skipped and its existence never leaks.
+ */
+export async function offerClosureWarnings(
+  orgId: string,
+  packageId: string,
+  type: PackageType,
+): Promise<ActivationWarning[]> {
+  if (type !== "agent") return [];
+  const manifest = await selectorlessAgentManifest(packageId);
+  if (!manifest) return [];
+  const [used] = await usedIntegrations([manifest], orgId);
+  const declared = used!;
+  const offers = await listOrgOffers(
+    orgId,
+    declared.map((req) => req.integrationId),
+  );
+  return declared
+    .filter(
+      (req) =>
+        !offers.has(req.integrationId) &&
+        !isActiveByDefault({ id: req.integrationId, type: "integration", source: null }),
+    )
+    .map(({ integrationId, required }) => ({
+      field: `integrations.${integrationId}`,
+      code: "integration_not_offered",
+      title: "Integration Not Offered",
+      message: `'${integrationId}' is not offered to the organization: a personal space cannot switch it on; ${
+        required
+          ? "a launch of this agent there is refused until it is offered."
+          : "a run there proceeds without it."
+      }`,
+      required,
+    }));
 }
 
 /**

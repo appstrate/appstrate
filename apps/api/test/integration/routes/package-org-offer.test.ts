@@ -43,7 +43,14 @@ import { sharePackage } from "../../../src/services/package-shares.ts";
 import { reconcilePlacementsAfterRehome } from "../../../src/services/package-placement.ts";
 import { emptyAndDeletePersonalSpace } from "../../../src/services/spaces.ts";
 import { isPackageReadableInSpace } from "../../../src/lib/package-access.ts";
-import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
+import {
+  __resetSystemIntegrationsForTest,
+  initSystemIntegrations,
+} from "../../../src/services/integration-client-registry.ts";
+import {
+  httpHeaderDelivery,
+  localIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
 
@@ -200,6 +207,7 @@ describe("PUT/DELETE /api/packages/{scope}/{name}/org-offer", () => {
       object: "package_org_offer",
       packageId: AGENT,
       org_offer: "on_by_default",
+      warnings: [],
     });
     const second = await offer(admin.headers(teamId), AGENT);
     expect(second.status).toBe(200);
@@ -298,6 +306,7 @@ describe("the offer mode", () => {
         object: "package_org_offer",
         packageId: AGENT,
         org_offer: mode,
+        warnings: [],
       });
       expect((await offerRows(AGENT))[0]?.mode).toBe(mode);
     }
@@ -691,5 +700,104 @@ describe("a row created under the offer is a decision about the offer, not a pla
     const [pkg] = await db.select().from(packages).where(eq(packages.id, "@offers/personal"));
     expect(pkg?.homeSpaceId).toBe(ctx.defaultSpaceId);
     expect(await offerRows("@offers/personal")).toHaveLength(1);
+  });
+});
+
+describe("offering an agent names the integrations it leaves behind", () => {
+  const DEPS_AGENT = "@offers/with-deps";
+  const NOT_OFFERED = "@offers/not-offered";
+  const OFFERED = "@offers/already-offered";
+  const LISTED = "@offers/listed";
+
+  type Warnings = { warnings: { field: string; code: string; required: boolean }[] };
+
+  const integrationManifest = (name: string) =>
+    localIntegrationManifest({
+      name,
+      auths: {
+        primary: {
+          type: "api_key",
+          authorizedUris: ["https://api.example.com/**"],
+          credentialFields: ["api_key"],
+          delivery: httpHeaderDelivery({ name: "Authorization", field: "api_key" }),
+        },
+      },
+      tools_policy: { search: {} },
+    });
+
+  beforeEach(async () => {
+    initSystemIntegrations([{ id: LISTED, clients: [] }]);
+    for (const id of [NOT_OFFERED, OFFERED, LISTED]) {
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        type: "integration",
+        homeSpaceId: teamId,
+        draftManifest: integrationManifest(id),
+      });
+      await seedPublishedVersion(id, "1.0.0");
+    }
+    await seedOrgOffer(ctx.orgId, OFFERED, "available");
+    await seedPackage({
+      id: DEPS_AGENT,
+      orgId: ctx.orgId,
+      type: "agent",
+      homeSpaceId: teamId,
+      draftManifest: { name: DEPS_AGENT, version: "0.1.0", type: "agent", description: "Deps" },
+    });
+    await seedPublishedVersion(DEPS_AGENT, "0.1.0", {
+      manifest: {
+        name: DEPS_AGENT,
+        version: "0.1.0",
+        type: "agent",
+        schema_version: "0.2",
+        dependencies: {
+          integrations: { [NOT_OFFERED]: "^1.0.0", [OFFERED]: "^1.0.0", [LISTED]: "^1.0.0" },
+        },
+        integrations_configuration: {
+          [NOT_OFFERED]: { tools: ["search"], required: true },
+          [OFFERED]: { tools: ["search"], required: true },
+          [LISTED]: { tools: ["search"], required: true },
+        },
+      },
+      content: "Do the thing.",
+    });
+  });
+
+  it("names only the integration that is neither offered nor active by default", async () => {
+    const res = await offer(admin.headers(teamId), DEPS_AGENT);
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as Warnings;
+    expect(body.warnings).toEqual([
+      expect.objectContaining({
+        field: `integrations.${NOT_OFFERED}`,
+        code: "integration_not_offered",
+        required: true,
+      }),
+    ]);
+    expect(await offerRows(NOT_OFFERED)).toHaveLength(0);
+  });
+
+  it("carries no warning for a skill", async () => {
+    await seedPackage({
+      id: "@offers/notes",
+      orgId: ctx.orgId,
+      type: "skill",
+      homeSpaceId: teamId,
+      draftManifest: { name: "@offers/notes", version: "0.1.0", type: "skill" },
+    });
+    await seedPublishedVersion("@offers/notes", "0.1.0");
+    const res = await offer(admin.headers(teamId), "@offers/notes");
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(((await res.json()) as Warnings).warnings).toEqual([]);
+  });
+
+  it("still names them when the mode of an existing offer changes", async () => {
+    expect((await offer(admin.headers(teamId), DEPS_AGENT, "available")).status).toBe(200);
+    const res = await offer(admin.headers(teamId), DEPS_AGENT, "on_by_default");
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(((await res.json()) as Warnings).warnings).toEqual([
+      expect.objectContaining({ code: "integration_not_offered" }),
+    ]);
   });
 });

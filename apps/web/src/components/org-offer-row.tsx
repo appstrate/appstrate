@@ -7,6 +7,8 @@ import { useSetOrgOffer, type OrgOfferMode } from "../hooks/use-library";
 import { offerChangeStep, type OfferChoice } from "../lib/org-offer-change";
 import { OptionSelect } from "./app-ui/option-select";
 import { ConfirmModal } from "./confirm-modal";
+import { OrgOfferClosureDialog } from "./org-offer-closure-dialog";
+import type { OfferWarning } from "../lib/org-offer-closure";
 
 /** Same box for the two rows. */
 const ROW_CLASS =
@@ -89,6 +91,20 @@ export function OrgOfferRow({
   const { t } = useTranslation("settings");
   const setOffer = useSetOrgOffer();
   const [pendingChoice, setPendingChoice] = useState<"none" | "available" | null>(null);
+  const [closure, setClosure] = useState<{
+    mode: OrgOfferMode;
+    warnings: OfferWarning[];
+  } | null>(null);
+  const offerIn = (mode: OrgOfferMode, onDone?: () => void) =>
+    setOffer.mutate(
+      { packageId: item.id, mode },
+      {
+        onSuccess: (warnings) => {
+          if (warnings && warnings.length > 0) setClosure({ mode, warnings });
+          onDone?.();
+        },
+      },
+    );
   if (item.active_by_default && !item.org_offer) {
     return (
       <div className={cn(ROW_CLASS, className)}>
@@ -108,8 +124,7 @@ export function OrgOfferRow({
     const step = offerChangeStep(choice, next);
     if (step === "confirm_withdraw") setPendingChoice("none");
     else if (step === "confirm_available") setPendingChoice("available");
-    else if (step === "apply" && next !== "none")
-      setOffer.mutate({ packageId: item.id, mode: next });
+    else if (step === "apply" && next !== "none") offerIn(next);
   };
   return (
     <>
@@ -141,13 +156,15 @@ export function OrgOfferRow({
         description={t("catalogue.orgOffer.availableConfirm")}
         confirmLabel={t("catalogue.orgOffer.availableAction")}
         isPending={setOffer.isPending}
-        onConfirm={() =>
-          setOffer.mutate(
-            { packageId: item.id, mode: "available" },
-            { onSuccess: () => setPendingChoice(null) },
-          )
-        }
+        onConfirm={() => offerIn("available", () => setPendingChoice(null))}
       />
+      {closure && (
+        <OrgOfferClosureDialog
+          warnings={closure.warnings}
+          mode={closure.mode}
+          onClose={() => setClosure(null)}
+        />
+      )}
     </>
   );
 }

@@ -682,21 +682,21 @@ export const schemas = {
       warnings: {
         type: "array",
         description:
-          "Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
+          "Always present. On an organization offer of an AGENT (`PUT …/org-offer`): one item per integration it declares that is neither offered to the organization nor active by default (`code: integration_not_offered`), `[]` for any other type. Otherwise, when the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
         items: { $ref: "#/components/schemas/ActivationWarning" },
       },
     },
   },
   ActivationWarning: {
     description:
-      "A declared integration of the agent that is not active in the space, in the launch `warnings[]` vocabulary (`field: integrations.<id>`, `code: integration_not_active`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item).",
+      "A declared integration of the agent that is not active in the space (`code: integration_not_active`) or, on an organization offer, not offered to the organization (`code: integration_not_offered`), in the launch `warnings[]` vocabulary (`field: integrations.<id>`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item).",
     allOf: [
       { $ref: "#/components/schemas/ResolutionFieldError" },
       {
         type: "object",
         required: ["required"],
         properties: {
-          code: { type: "string", enum: ["integration_not_active"] },
+          code: { type: "string", enum: ["integration_not_active", "integration_not_offered"] },
           required: {
             type: "boolean",
             description: "Whether the agent declares the integration `required`.",
