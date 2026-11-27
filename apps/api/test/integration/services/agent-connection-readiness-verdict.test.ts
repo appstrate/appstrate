@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
 import {
   integrationConnections,
   integrationOrgDefaults,
@@ -19,7 +20,7 @@ import { activatePackage, deactivatePackage } from "../../../src/services/space-
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage } from "../../helpers/seed.ts";
-import { seedShares } from "../../helpers/connection-shares.ts";
+import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 import {
   httpHeaderDelivery,
   localIntegrationManifest,
@@ -126,8 +127,11 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
     const readiness = await resolveAgentConnectionReadiness({
       scope,
       agentPackageId: AGENT,
-      principal: { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
-      canConnect: true,
+      caller: testCaller(
+        { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
+        { spaceId: scope.spaceId },
+      ),
+      orgRole: null,
       canConfigureIntegrations: true,
       version: "draft",
     });
@@ -388,6 +392,39 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
         candidates: [],
       });
     });
+  });
+
+  it("candidates carry the connection list's actions: `reconnect` for the owner of an identified row, healthy or not", async () => {
+    await seedAgentDeclaring({ auth_key: "primary" });
+    const healthy = await seedConnection();
+    const dead = await seedConnection({ dead: true });
+    const anonymous = await seedConnection();
+    await db
+      .update(integrationConnections)
+      .set({ accountId: "default" })
+      .where(eq(integrationConnections.id, anonymous));
+    const actionsBy = async (canConnect: boolean) => {
+      const readiness = await resolveAgentConnectionReadiness({
+        scope,
+        agentPackageId: AGENT,
+        caller: testCaller(
+          { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
+          { spaceId: scope.spaceId, canConnect },
+        ),
+        orgRole: null,
+        canConfigureIntegrations: true,
+        version: "draft",
+      });
+      const entry = readiness.integrations.find((i) => i.integration_package_id === INTEG)!;
+      return new Map(entry.resolution.candidates.map((c) => [c.id, c.allowed_actions]));
+    };
+    const actions = await actionsBy(true);
+    expect(actions.get(healthy)).toContain("reconnect");
+    expect(actions.get(dead)).toContain("reconnect");
+    // Nothing proves a renewal is the same account: the replacement flow stays the way out.
+    expect(actions.get(anonymous)).not.toContain("reconnect");
+    // Without `integrations:connect` the owner holds no action at all.
+    expect([...(await actionsBy(false)).values()].flat()).toEqual([]);
   });
 
   it("no verdict — a declared integration whose manifest cannot load → both null", async () => {

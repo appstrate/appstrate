@@ -29,6 +29,7 @@ import {
 import type { IntegrationPinRow as PinRow } from "@appstrate/db/schema";
 import type {
   AccessibleIntegrationConnection,
+  ConnectionAction,
   ConsumingAgentSummary,
   IntegrationAgentResolution,
   IntegrationCandidate,
@@ -45,10 +46,16 @@ import { conflict, notFound } from "../lib/errors.ts";
 import type { Tx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
+import type { OrgRole } from "@appstrate/core/permissions";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
-import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integration-service.ts";
+import {
+  fetchIntegrationManifest,
+  readIntegrationManifestForConnect,
+  resolveRunIntegrationVersions,
+} from "./integration-service.ts";
+import { readOAuthClientRegistrations, reconnectMethods } from "./reconnect-methods.ts";
 import { getOrgDefault, isDefaultEnforced } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import {
@@ -57,7 +64,12 @@ import {
   loadConnectionShares,
   listReachableConnections,
 } from "./integration-connections.ts";
-import { sharedInSpace, usableInSpace } from "./connection-reach.ts";
+import {
+  connectionActions,
+  sharedInSpace,
+  usableInSpace,
+  type ConnectionCaller,
+} from "./connection-reach.ts";
 import {
   additionsOpen,
   resolveConnectionsForRun,
@@ -766,6 +778,59 @@ export async function listAccessibleConnections(
 // ─────────────────────────── Agent-page picker resolution ─────────────────────
 
 /**
+ * Each candidate's actions, by the integration connection list's rule (`listIntegrationConnections`):
+ * {@link connectionActions}, with `reconnect` kept only where the current connect manifest declares
+ * the method and an OAuth one has a client at the row's scope. The connect manifest and the clients
+ * are read only when some row would hold `reconnect`.
+ */
+async function candidateActions(
+  scope: SpaceScope,
+  integrationId: string,
+  rows: readonly AccessibleIntegrationConnection[],
+  caller: ConnectionCaller,
+  orgRole: OrgRole | null,
+): Promise<Map<string, ConnectionAction[]>> {
+  const actions = new Map(
+    rows.map((c) => [
+      c.id,
+      connectionActions(
+        {
+          orgId: scope.orgId,
+          userId: c.owner_user_id,
+          endUserId: c.owner_end_user_id,
+          spaceId: c.spaceId,
+          accountId: c.account_id,
+        },
+        caller,
+        c.shared_here,
+        orgRole,
+      ),
+    ]),
+  );
+  if (![...actions.values()].some((a) => a.includes("reconnect"))) return actions;
+  const [read, registrations] = await Promise.all([
+    readIntegrationManifestForConnect(scope, integrationId),
+    readOAuthClientRegistrations(scope.orgId, [integrationId], [scope.spaceId]),
+  ]);
+  const methodAvailable = reconnectMethods(
+    new Map(read.ok ? [[integrationId, read.manifest]] : []),
+    registrations,
+  );
+  for (const c of rows) {
+    actions.set(
+      c.id,
+      actions
+        .get(c.id)!
+        .filter(
+          (action) =>
+            action !== "reconnect" || methodAvailable(integrationId, c.auth_key, c.spaceId),
+        ),
+    );
+  }
+  return actions;
+}
+
+/**
  * The single-source verdict for the agent-page connection picker: which
  * connection the next run would use for this (agent, integration, actor),
  * plus the candidate list and pin/blocked state the dropdown renders.
@@ -788,8 +853,10 @@ async function resolveAgentIntegrationPick(args: {
   scope: SpaceScope;
   agentPackageId: string;
   integrationId: string;
-  principal: ConnectionPrincipal;
-  canConnect: boolean;
+  /** Who reads the picker, from this space: its candidates' `allowed_actions` are computed for it. */
+  caller: ConnectionCaller;
+  /** The caller's org role, which `share_all_spaces` requires (`null`: none). */
+  orgRole: OrgRole | null;
   canConfigureIntegrations: boolean;
   /** The manifest of the version under inspection — never re-read from the package. */
   agentManifest: Record<string, unknown>;
@@ -806,12 +873,13 @@ async function resolveAgentIntegrationPick(args: {
     scope,
     agentPackageId,
     integrationId,
-    principal,
-    canConnect,
+    caller,
+    orgRole,
     canConfigureIntegrations,
     agentManifest,
     resolution,
   } = args;
+  const { principal, canConnect } = caller;
   const actor = principal.actor;
 
   const agentEntry = parseManifestIntegrations(agentManifest).find((e) => e.id === integrationId);
@@ -879,6 +947,13 @@ async function resolveAgentIntegrationPick(args: {
   const ranked = manifest
     ? rankByLeastPrivilege(requirement ?? { manifest, agentTools: [], agentScopes: [] }, scoped)
     : scoped.map((row) => ({ row, scopeFit: "unjudged" as const, missingScopes: [] }));
+  const actionsOf = await candidateActions(
+    scope,
+    integrationId,
+    ranked.map(({ row }) => row.c),
+    caller,
+    orgRole,
+  );
   const candidates: IntegrationCandidate[] = ranked.map(({ row, scopeFit, missingScopes }) => ({
     ...row.c,
     missing_scopes: missingScopes,
@@ -887,6 +962,7 @@ async function resolveAgentIntegrationPick(args: {
       actor.type === "user"
         ? row.c.owner_user_id === actor.id
         : row.c.owner_end_user_id === actor.id,
+    allowed_actions: actionsOf.get(row.c.id) ?? [],
   }));
 
   // `[]` (bound to none, or switched off here) has no member to name a source.
@@ -957,9 +1033,14 @@ export async function resolveAgentConnectionReadiness(args: {
   dependencyOverrides?: Record<string, string> | null;
   scope: SpaceScope;
   agentPackageId: string;
-  principal: ConnectionPrincipal;
-  /** `integrations:connect` and `integrations:configure`: together they drive `can_add_connection`. */
-  canConnect: boolean;
+  /**
+   * Who reads the readiness, from `scope`'s space. Its `canConnect` (`integrations:connect`) and
+   * `canConfigureIntegrations` together drive `can_add_connection`; the candidates' `allowed_actions`
+   * are computed for it.
+   */
+  caller: ConnectionCaller;
+  /** The caller's org role, which `share_all_spaces` requires (`null`: none). */
+  orgRole: OrgRole | null;
   canConfigureIntegrations: boolean;
   /**
    * Version selector (`draft` | `published` | concrete semver | dist-tag) —
@@ -972,8 +1053,8 @@ export async function resolveAgentConnectionReadiness(args: {
    */
   version: string;
 }): Promise<AgentConnectionReadiness> {
-  const { scope, agentPackageId, principal, canConnect, canConfigureIntegrations, version } = args;
-  const actor = principal.actor;
+  const { scope, agentPackageId, caller, orgRole, canConfigureIntegrations, version } = args;
+  const actor = caller.principal.actor;
   const loaded = await getPackage(agentPackageId, scope.orgId);
   if (!loaded) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
   // The SPACE's own switch, asked here and reported rather than thrown. The run
@@ -1060,8 +1141,8 @@ export async function resolveAgentConnectionReadiness(args: {
         scope,
         agentPackageId: agent.id,
         integrationId: e.id,
-        principal,
-        canConnect,
+        caller,
+        orgRole,
         canConfigureIntegrations,
         agentManifest,
         resolution: pickResolution,

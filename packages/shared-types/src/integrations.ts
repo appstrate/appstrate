@@ -274,6 +274,8 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
   missing_scopes: string[];
   scope_fit: ConnectionScopeFit;
   is_own: boolean;
+  /** What the caller may do with this connection, as on the integration's connection list. */
+  allowed_actions: ConnectionAction[];
 }
 
 /**

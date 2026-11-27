@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { connectionPrincipal } from "../lib/connection-principal.ts";
+import { connectionCaller } from "./integrations.ts";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
@@ -442,10 +442,11 @@ export function createAgentsRouter() {
           scope,
           dependencyOverrides,
           agentPackageId: agent.id,
-          principal: connectionPrincipal(c),
-          // Drive `can_add_connection` with the connect routes' own guard and
-          // exemption, so the badge cannot promise what the mutation refuses.
-          canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
+          // The connection doors' own caller: `can_add_connection` uses the connect routes'
+          // guard and exemption, and each candidate's `allowed_actions` the connection list's
+          // rule, so the picker cannot promise what the mutation refuses.
+          caller: connectionCaller(c, scope.spaceId),
+          orgRole: c.get("orgRole") ?? null,
           canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
           // The ROUTER decides which definition readiness judges, and it is
           // EXACTLY the one the detail page rendered: an explicit selector (a

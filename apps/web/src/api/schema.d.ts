@@ -6626,6 +6626,8 @@ export interface components {
                  */
                 scope_fit: "exact" | "unjudged" | "broader" | "missing";
                 is_own: boolean;
+                /** @description What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). */
+                allowed_actions: ("rename" | "reconnect" | "share" | "share_all_spaces" | "unshare_here")[];
             }[];
         };
         /** @description Live credentials + per-auth HTTP delivery plans + per-auth expiries for an active integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default). */

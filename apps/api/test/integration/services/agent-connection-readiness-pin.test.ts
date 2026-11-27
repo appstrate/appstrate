@@ -25,6 +25,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 
 import { eq } from "drizzle-orm";
+import { testCaller } from "../../helpers/connection-shares.ts";
 import { integrationConnections, packages } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
@@ -151,8 +152,11 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const readiness = await resolveAgentConnectionReadiness({
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
-      principal: { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
-      canConnect: true,
+      caller: testCaller(
+        { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
+        { spaceId: ctx.defaultSpaceId },
+      ),
+      orgRole: null,
       canConfigureIntegrations: true,
       // The selector is the ROUTER's decision now, and the service takes it as
       // given. `draft` is what the route hands over for a caller who may write
@@ -195,12 +199,11 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const base = {
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
-      principal: {
-        kind: "person",
-        binding: null,
-        actor: { type: "user", id: ctx.user.id },
-      } as const,
-      canConnect: true,
+      caller: testCaller(
+        { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
+        { spaceId: ctx.defaultSpaceId },
+      ),
+      orgRole: null,
       canConfigureIntegrations: true,
     };
 
@@ -256,8 +259,11 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const readiness = await resolveAgentConnectionReadiness({
       scope,
       agentPackageId: AGENT,
-      principal: { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
-      canConnect: true,
+      caller: testCaller(
+        { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
+        { spaceId: scope.spaceId },
+      ),
+      orgRole: null,
       canConfigureIntegrations: true,
       version: "draft",
     });

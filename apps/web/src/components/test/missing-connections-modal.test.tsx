@@ -218,6 +218,7 @@ describe("MissingRow", () => {
               missing_scopes: [],
               scope_fit: "unjudged",
               is_own: true,
+              allowed_actions: [],
             },
           ],
         }),
