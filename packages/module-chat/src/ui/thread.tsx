@@ -39,19 +39,19 @@ import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
-import { LoadingLine, ReasoningGroup } from "./reasoning.tsx";
-import { ToolFallback } from "./tool-fallback.tsx";
+import { LoadingLine, ReasoningStep } from "./reasoning.tsx";
+import { useActivityMode } from "./activity-line.tsx";
 import { ActivityGroup } from "./activity-group.tsx";
 import { activityGroupOf } from "./conversation-tools.ts";
 import { useStoredResults } from "./use-call-presentation.ts";
 import {
-  ImportPackageFileTool,
-  InvokeOperationTool,
+  ImportPackageBreakout,
+  InvokeOperationBreakout,
   RunAndWaitTool,
-  SearchTool,
+  ToolStep,
   type ToolCardProps,
 } from "./tool-uis.tsx";
-import { ResourceReadTool } from "./skill-load.tsx";
+import { SkillReadBreakout } from "./skill-load.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import {
@@ -961,16 +961,43 @@ export function MessageError() {
  * Memoized: GroupedParts renders every part on each chunk, while a settled part's state, and so
  * its props, keep their identity.
  */
-const ToolFallbackCard = React.memo(ToolFallback);
-const ResourceReadCard = React.memo(ResourceReadTool);
-const TOOL_CARDS: Partial<Record<string, React.ComponentType<ToolCardProps>>> = {
-  invoke_operation: React.memo(InvokeOperationTool),
-  run_and_wait: React.memo(RunAndWaitTool),
-  search: React.memo(SearchTool),
-  import_package_file: React.memo(ImportPackageFileTool),
-  read_resource: ResourceReadCard,
-  read: ResourceReadCard,
+const Step = React.memo(ToolStep);
+const RunAndWaitCard = React.memo(RunAndWaitTool);
+const SkillBreakout = React.memo(SkillReadBreakout);
+/** What a call keeps in view under its group's line, by tool name; most calls keep nothing. */
+const BREAKOUTS: Partial<Record<string, React.ComponentType<ToolCardProps>>> = {
+  invoke_operation: React.memo(InvokeOperationBreakout),
+  import_package_file: React.memo(ImportPackageBreakout),
+  read_resource: SkillBreakout,
+  read: SkillBreakout,
 };
+
+/** A tool call: a step of its activity group and what it keeps in view, or a card of its own. */
+function ToolPart(props: ToolCardProps) {
+  const activity = useActivityMode();
+  if (activity?.mode === "breakout") {
+    const Breakout = BREAKOUTS[props.toolName];
+    return Breakout ? <Breakout {...props} /> : null;
+  }
+  if (activity === null && props.toolName === "run_and_wait") return <RunAndWaitCard {...props} />;
+  return <Step {...props} />;
+}
+
+/** A run of reasoning: a step of its activity group. */
+function ReasoningPart({
+  indices,
+  children,
+}: {
+  indices: readonly number[];
+  children: React.ReactNode;
+}) {
+  if (useActivityMode()?.mode === "breakout") return null;
+  return (
+    <ReasoningStep startIndex={indices[0] ?? 0} endIndex={indices[indices.length - 1] ?? 0}>
+      {children}
+    </ReasoningStep>
+  );
+}
 
 function AssistantParts() {
   const stored = useStoredResults();
@@ -985,22 +1012,13 @@ function AssistantParts() {
               </ActivityGroup>
             );
           case "group-reasoning":
-            return (
-              <ReasoningGroup
-                startIndex={part.indices[0] ?? 0}
-                endIndex={part.indices[part.indices.length - 1] ?? 0}
-              >
-                {children}
-              </ReasoningGroup>
-            );
+            return <ReasoningPart indices={part.indices}>{children}</ReasoningPart>;
           case "text":
             return <MarkdownText />;
           case "reasoning":
             return <ReasoningText />;
-          case "tool-call": {
-            const Card = TOOL_CARDS[part.toolName] ?? ToolFallbackCard;
-            return <Card {...part} stored={stored.get(part.toolCallId)} />;
-          }
+          case "tool-call":
+            return <ToolPart {...part} stored={stored.get(part.toolCallId)} />;
           // While the message runs and its last part is neither text nor reasoning.
           case "indicator":
             return <LoadingLine />;

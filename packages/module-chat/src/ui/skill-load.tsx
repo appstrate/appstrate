@@ -2,9 +2,9 @@
 
 /**
  * A skill the assistant read (its `SKILL.md`), drawn with the chip a user message draws for a
- * cited skill. The read serves the turn that made it and pins nothing; an « Épingler » action
+ * cited skill, in view under its activity group's line. The read serves the turn that made it and pins nothing; an « Épingler » action
  * pins the skill to the conversation. A failed read is a muted chip whose error is written for
- * the model, never shown. Any other read keeps the generic tool row.
+ * the model, never shown.
  */
 
 import { useId } from "react";
@@ -22,8 +22,6 @@ import {
 } from "./chat-skills.ts";
 import { DirectiveChip } from "./directive-chip.tsx";
 import { useChatHost } from "./runtime-context.ts";
-import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
-import { ToolFallback } from "./tool-fallback.tsx";
 import type { ToolCardProps } from "./tool-uis.tsx";
 import { deriveToolPhase } from "./tool-result.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
@@ -88,17 +86,10 @@ function SkillLoad({
   props: ResourceReadProps;
 }) {
   const { t } = useChatHost();
-  const anchor = useRevealAnchor(props.toolCallId);
   const phase = deriveToolPhase(props);
   const state = skillLoadState(phase);
   return (
-    <div
-      {...anchor}
-      data-testid="skill-load"
-      data-phase={phase}
-      data-state={state}
-      className={`my-1.5 rounded-md text-sm ${REVEAL_RING_CLASS}`}
-    >
+    <div data-testid="skill-load" data-phase={phase} data-state={state} className="my-1 text-sm">
       <span className="flex flex-wrap items-center gap-1.5">
         <DirectiveChip
           directiveType={SKILL_DIRECTIVE}
@@ -125,8 +116,8 @@ function SkillLoad({
   );
 }
 
-/** A resource read: a skill's chip when it reads one, the generic tool row otherwise. */
-export function ResourceReadTool(props: ResourceReadProps) {
+/** The chip of the skill a read loaded, in view under its group's line; nothing for any other read. */
+export function SkillReadBreakout(props: ResourceReadProps) {
   const skill = skillLoadOf(props.args);
-  return skill ? <SkillLoad skill={skill} props={props} /> : <ToolFallback {...props} />;
+  return skill ? <SkillLoad skill={skill} props={props} /> : null;
 }

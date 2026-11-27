@@ -110,8 +110,8 @@ export function ChatRunProgressCard({
   modalTitle,
   details,
 }: {
-  /** The call the card stands for: the context panel reveals it by this id. */
-  toolCallId: string;
+  /** The call the card stands for, when the context panel reveals it by this card. */
+  toolCallId?: string | undefined;
   runId: string | undefined;
   initialStatus?: string;
   agentLabel?: string;

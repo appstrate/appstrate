@@ -32,6 +32,7 @@ import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
 import { CallSpace } from "./call-space.tsx";
+import { ActivityId, ActivityLine } from "./activity-line.tsx";
 import {
   extractAgentLabel,
   extractRunFiles,
@@ -126,7 +127,7 @@ function LeadIcon({
  * (+ the muted inline error on failure). Click opens a modal with the raw input / output /
  * metadata JSON.
  */
-export function ToolCallCard({
+function ToolCallCard({
   phase,
   Icon,
   subject,
@@ -139,7 +140,6 @@ export function ToolCallCard({
   toolCallId,
   timing,
   spaceId,
-  footer,
 }: {
   phase: ToolPhase;
   Icon: LucideIcon;
@@ -157,8 +157,6 @@ export function ToolCallCard({
   timing?: unknown;
   /** Where the call acted: the space stamped on it. */
   spaceId?: string;
-  /** Under the header, e.g. the link to the package the call created. */
-  footer?: React.ReactNode;
 }) {
   const { t, lang } = useChatHost();
   const anchor = useRevealAnchor(toolCallId);
@@ -214,7 +212,6 @@ export function ToolCallCard({
           {errorMsg}
         </div>
       ) : null}
-      {footer}
       {open ? (
         <Modal
           title={
@@ -278,7 +275,13 @@ function RunOutputDetails({
  * extraction. Hooks need a component, and `InvokeOperationTool` reaches this
  * branch conditionally, so the `useMemo` cannot live in its body.
  */
-function RunLaunchCard(props: ToolCardProps): React.ReactNode {
+function RunLaunchCard({
+  anchorsCall,
+  ...props
+}: ToolCardProps & {
+  /** The card is the call's whole display, so the context panel reveals the call by it. */
+  anchorsCall: boolean;
+}): React.ReactNode {
   const { t } = useChatHost();
   const runId = extractRunId(props.result);
   const initialFiles = React.useMemo(() => extractRunFiles(props.result), [props.result]);
@@ -310,7 +313,7 @@ function RunLaunchCard(props: ToolCardProps): React.ReactNode {
   const spaceId = cardSpaceOf(props);
   return (
     <ChatRunProgressCard
-      toolCallId={props.toolCallId}
+      toolCallId={anchorsCall ? props.toolCallId : undefined}
       runId={runId}
       initialStatus={extractRunStatus(props.result)}
       agentLabel={agentLabel}
@@ -328,72 +331,83 @@ function RunLaunchCard(props: ToolCardProps): React.ReactNode {
 /** `invoke_operation`'s arguments, as its cards read them. */
 type InvokeOperationArgs = { operation_id?: string; path_params?: { packageId?: string } };
 
-export function InvokeOperationTool(props: ToolCardProps) {
+/**
+ * A tool call as a step of its activity group: named as the context panel names it (`showCall`),
+ * with what a search found beside it.
+ */
+export function ToolStep(props: ToolCardProps) {
   const { t } = useChatHost();
-  const { result } = props;
-  const args = props.args as InvokeOperationArgs | undefined;
   const presentation = props.stored?.presentation;
-  const opId = args?.operation_id ?? "";
-  const phase = deriveToolPhase(props);
-
-  // Connect kickoff → the interactive connect card, mounted from the FIRST
-  // frame (before the result carries the connect/auth url) so the generic row
-  // never swaps into the card mid-stream — a swap changes the block's height
-  // and makes the transcript jump. On failure the card shows the error in
-  // place (same geometry). Only the anomalous success-without-offer shape
-  // falls through to the generic row.
-  if (opId === INITIATE_CONNECT_OP) {
-    // One card: the route behind this operation mints a single `connect_url`.
-    const offer = extractAuthOffers(result)[0];
-    if (offer || phase !== "success") {
-      return (
-        <OAuthConnectCard
-          anchorsCall
-          // It reads the integration where the call acted.
-          spaceId={cardSpaceOf(props)}
-          authUrl={offer?.authUrl}
-          state={offer?.state}
-          // The session route returns no `packageId`; the call's own path
-          // param is the integration this card connects.
-          packageId={args?.path_params?.packageId}
-          toolCallId={props.toolCallId}
-          errorText={
-            phase === "error" && !offer ? extractErrorMessage(unwrapMcpResult(result)) : undefined
-          }
-        />
-      );
-    }
-  }
-
-  // Run launch (runAgent / runInline) → rich in-chat run progress, mounted for
-  // the tool call's whole life (launch, stream, terminal, and launch failure —
-  // the error renders inside the panel). Never falls back to the generic card:
-  // a component swap would change the block's height mid-stream.
-  if (isRunLaunchOp(opId)) {
-    return <RunLaunchCard {...props} />;
-  }
-
-  const shown = showCall({ toolName: "invoke_operation", args, presentation }, t);
-  const spaceId = cardSpaceOf(props);
-  const created =
-    phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;
   return (
     <ToolCallCard
-      phase={phase}
-      {...shown}
-      args={args}
-      result={result}
+      phase={deriveToolPhase(props)}
+      {...showCall({ ...props, presentation }, t)}
+      aside={
+        presentation?.count !== undefined ? (
+          <span className="text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs">
+            <SubjectStack subjects={presentation.items ?? []} />
+            {t("tool.search.count", { count: presentation.count })}
+          </span>
+        ) : null
+      }
+      args={props.args}
+      result={props.result}
       isError={props.isError}
       toolCallId={props.toolCallId}
       timing={props.timing}
-      spaceId={spaceId}
-      footer={
-        created ? (
-          <CreatedPackageLink created={created} toolCallId={props.toolCallId} spaceId={spaceId} />
-        ) : null
-      }
+      spaceId={cardSpaceOf(props)}
     />
   );
+}
+
+/**
+ * What an `invoke_operation` keeps in view under its group's line, whatever the fold: the connect
+ * card of a connect kickoff, a launched run's progress, the link to a package it created. Nothing
+ * for any other operation: its step says it all.
+ */
+export function InvokeOperationBreakout(props: ToolCardProps) {
+  const { result } = props;
+  const args = props.args as InvokeOperationArgs | undefined;
+  const opId = args?.operation_id ?? "";
+  const phase = deriveToolPhase(props);
+
+  // Mounted from the kickoff's first frame (before the result carries the connect url), so the
+  // card does not appear mid-stream; a failure shows in place. A success without an offer draws
+  // none.
+  if (opId === INITIATE_CONNECT_OP) {
+    // One card: the route behind this operation mints a single `connect_url`.
+    const offer = extractAuthOffers(result)[0];
+    if (!offer && phase === "success") return null;
+    return (
+      <OAuthConnectCard
+        // It reads the integration where the call acted.
+        spaceId={cardSpaceOf(props)}
+        authUrl={offer?.authUrl}
+        state={offer?.state}
+        // The session route returns no `packageId`; the call's own path
+        // param is the integration this card connects.
+        packageId={args?.path_params?.packageId}
+        toolCallId={props.toolCallId}
+        errorText={
+          phase === "error" && !offer ? extractErrorMessage(unwrapMcpResult(result)) : undefined
+        }
+      />
+    );
+  }
+
+  // Run launch (runAgent / runInline): the run's progress, for the call's whole life (launch,
+  // stream, terminal, and launch failure, shown inside the panel).
+  if (isRunLaunchOp(opId)) return <RunLaunchCard {...props} anchorsCall={false} />;
+
+  const created =
+    phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;
+  return created ? (
+    <CreatedPackageLink
+      created={created}
+      toolCallId={props.toolCallId}
+      spaceId={cardSpaceOf(props)}
+    />
+  ) : null;
 }
 
 /** Tool calls whose package write the host was already told about, this page life. */
@@ -421,66 +435,31 @@ function CreatedPackageLink({
   const href = linkInSpace(packagePageHref(created), spaceId);
   if (!href) return null;
   return (
-    <a
-      href={href}
-      className="text-primary hover:bg-muted/50 flex items-center gap-1.5 border-t px-3 py-2 text-xs font-medium"
-    >
-      <ArrowUpRightIcon className="size-3.5 shrink-0" />
-      {t("tool.packageCreated.open")}
-      <code className="text-muted-foreground truncate font-normal">{created.packageId}</code>
-    </a>
+    <ActivityLine lead={<ArrowUpRightIcon aria-hidden className="text-primary" />}>
+      <a
+        href={href}
+        className="text-primary flex min-w-0 items-center gap-1.5 font-medium hover:underline"
+      >
+        {t("tool.packageCreated.open")}
+        <ActivityId>{created.packageId}</ActivityId>
+      </a>
+    </ActivityLine>
   );
 }
 
-export function ImportPackageFileTool(props: ToolCardProps) {
-  const { t } = useChatHost();
-  const presentation = props.stored?.presentation;
-  const phase = deriveToolPhase(props);
-  const spaceId = cardSpaceOf(props);
+/** The link to the package an import created, in view under its group's line. */
+export function ImportPackageBreakout(props: ToolCardProps) {
   const created =
-    phase === "success" ? packageCreatedByImport(unwrapMcpResult(props.result)) : null;
-  return (
-    <ToolCallCard
-      phase={phase}
-      {...showCall({ ...props, presentation }, t)}
-      args={props.args}
-      result={props.result}
-      isError={props.isError}
+    deriveToolPhase(props) === "success"
+      ? packageCreatedByImport(unwrapMcpResult(props.result))
+      : null;
+  return created ? (
+    <CreatedPackageLink
+      created={created}
       toolCallId={props.toolCallId}
-      timing={props.timing}
-      spaceId={spaceId}
-      footer={
-        created ? (
-          <CreatedPackageLink created={created} toolCallId={props.toolCallId} spaceId={spaceId} />
-        ) : null
-      }
-    />
-  );
-}
-
-export function SearchTool(props: ToolCardProps) {
-  const { t } = useChatHost();
-  const presentation = props.stored?.presentation;
-  return (
-    <ToolCallCard
-      phase={deriveToolPhase(props)}
-      {...showCall({ ...props, presentation }, t)}
-      aside={
-        presentation?.count !== undefined ? (
-          <span className="text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs">
-            <SubjectStack subjects={presentation.items ?? []} />
-            {t("tool.search.count", { count: presentation.count })}
-          </span>
-        ) : null
-      }
-      args={props.args}
-      result={props.result}
-      isError={props.isError}
-      toolCallId={props.toolCallId}
-      timing={props.timing}
       spaceId={cardSpaceOf(props)}
     />
-  );
+  ) : null;
 }
 
 // `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its own
@@ -500,7 +479,7 @@ export function SearchTool(props: ToolCardProps) {
 export function RunAndWaitTool(props: ToolCardProps) {
   return (
     <>
-      <RunLaunchCard {...props} />
+      <RunLaunchCard {...props} anchorsCall />
       {extractRunAndWaitAuthOffers(props).map((offer) => (
         <OAuthConnectCard
           key={offer.authUrl}

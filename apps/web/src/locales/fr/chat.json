@@ -69,6 +69,8 @@
   "tool.reads.done_other": "{{count}} consultations",
   "tool.reads.failed_one": "{{count}} en échec",
   "tool.reads.failed_other": "{{count}} en échec",
+  "tool.actions.done_one": "{{count}} action",
+  "tool.actions.done_other": "{{count}} actions",
   "tool.failed": "Échec",
   "tool.failedHttp": "Échec · HTTP {{status}}",
   "tool.verb.GET": "Lecture",

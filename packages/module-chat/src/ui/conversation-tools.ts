@@ -58,6 +58,7 @@ function stampedLookup(callMetadata: unknown): boolean {
 
 export interface GroupablePart {
   readonly type: string;
+  readonly toolName?: string;
   readonly toolCallId?: string;
   readonly providerMetadata?: unknown;
   readonly status?: { readonly type: string } | undefined;
@@ -65,20 +66,29 @@ export interface GroupablePart {
   readonly isError?: boolean | undefined;
 }
 
-/** The thread's group path of an assistant part (`groupBy`, drawn by `activity-group.tsx`). */
+/**
+ * Tools whose call is a card of its own in the thread, never a step of an activity group: the
+ * card is the call's whole display (a run's progress).
+ */
+const STANDALONE_TOOLS: ReadonlySet<string> = new Set(["run_and_wait"]);
+
+/**
+ * The thread's group path of an assistant part (`groupBy`, drawn by `activity-group.tsx`):
+ * reasoning and tool calls that follow one another are one activity, which a text part ends. A
+ * call joins on its tool's name, known from its first chunk, so no step moves once drawn.
+ */
 export function activityGroupOf(
   part: GroupablePart,
 ): readonly ("group-activity" | "group-reasoning")[] | null {
   if (part.type === "reasoning") return ["group-activity", "group-reasoning"];
-  if (part.type === "tool-call" && stampedLookup(part.providerMetadata)) return ["group-activity"];
+  if (part.type === "tool-call" && !STANDALONE_TOOLS.has(part.toolName ?? "")) {
+    return ["group-activity"];
+  }
   return null;
 }
 
-/** A group holding this many lookups folds into one line (`activity-group.tsx`). */
-export const FOLD_AT = 2;
-
-/** The lookups among `parts` at `indices`: the tool calls an activity group counts. */
-export function lookupsAt<P extends GroupablePart>(
+/** The tool calls among `parts` at `indices`: the steps an activity group counts. */
+export function callsAt<P extends GroupablePart>(
   parts: readonly P[],
   indices: readonly number[],
 ): P[] {
@@ -88,18 +98,15 @@ export function lookupsAt<P extends GroupablePart>(
   });
 }
 
-/**
- * The message ends in a folded activity group: the trailing parts {@link activityGroupOf} groups
- * hold {@link FOLD_AT} lookups or more. That group's header then carries the turn's status region.
- */
-export function endsFolded(parts: readonly GroupablePart[]): boolean {
-  let lookups = 0;
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const part = parts[i];
-    if (!part || activityGroupOf(part) === null) break;
-    if (part.type === "tool-call" && part.toolCallId) lookups += 1;
-  }
-  return lookups >= FOLD_AT;
+/** The engine stamped the part's call a lookup: counted as a consultation, the others as actions. */
+export function isStampedLookup(part: GroupablePart): boolean {
+  return stampedLookup(part.providerMetadata);
+}
+
+/** The message ends in an activity group, whose header then carries the turn's status region. */
+export function endsInActivity(parts: readonly GroupablePart[]): boolean {
+  const last = parts[parts.length - 1];
+  return last !== undefined && activityGroupOf(last) !== null;
 }
 
 /** A lookup, unless it failed: a stamped one, or presented as a read once its result landed. */
