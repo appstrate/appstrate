@@ -7,7 +7,7 @@ import { keyedWidth } from "@/lib/panel-resize-keys";
 /**
  * A vertical separator on a panel's `edge`: drag (pointer capture), arrow
  * keys, Home/End, double-click to reset. The panel grows toward that edge (the
- * chat's context panel from its left one, the chat's sidebar from its right).
+ * chat's context panel from its left one, the app's sidebar from its right).
  * `onDraggingChange` lets the panel drop its width transition while the pointer
  * drives it. `clamp` may be tighter than `width` (a window narrowed since it was
  * stored): drags and keys start from the clamped width, the one on screen.

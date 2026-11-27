@@ -7,7 +7,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 const widthOf = async (locator: Locator) => Math.round((await locator.boundingBox())!.width);
 
-test("the chat sidebar resizes by drag, keys and double-click, and keeps its width", async ({
+test("the sidebar resizes by drag, keys and double-click, and keeps its width", async ({
   authedPage: page,
 }) => {
   await page.goto("/chat");
@@ -42,6 +42,13 @@ test("the chat sidebar resizes by drag, keys and double-click, and keeps its wid
   await page.keyboard.press("End");
   await expect(handle).toHaveAttribute("aria-valuenow", "432");
   await expect.poll(() => widthOf(sidebar)).toBe(432);
+});
+
+test("the Studio sidebar has the same resize handle", async ({ authedPage: page }) => {
+  await page.goto("/dashboard");
+  const handle = page.getByRole("separator", { name: "Redimensionner le menu latéral" });
+  await expect(handle).toHaveAttribute("aria-valuenow", "256");
+  await expect.poll(() => widthOf(page.locator("#app-sidebar"))).toBe(256);
 });
 
 test("a date group folds from its heading, stays folded, and keeps the open conversation", async ({

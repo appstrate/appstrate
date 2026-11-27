@@ -30,10 +30,10 @@ import { KEYBOARD_VIEWPORT_CLASS } from "@appstrate/ui/use-keyboard-viewport";
 import { cn } from "@appstrate/ui/cn";
 import { PanelResizeHandle } from "@/components/panel-resize";
 import {
-  CHAT_SIDEBAR_WIDTH,
-  chatSidebarMaxWidth,
-  clampChatSidebarWidth,
-  useChatSidebarWidthStore,
+  SIDEBAR_WIDTH,
+  clampSidebarWidth,
+  sidebarMaxWidth,
+  useSidebarWidthStore,
 } from "@/stores/sidebar-store";
 import {
   Sidebar,
@@ -202,7 +202,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
         </SidebarFooter>
       </div>
       {/* After the scroll wrapper so the separator is not the first tab stop (it is absolute). */}
-      {product === "chat" && <ChatSidebarResizeHandle />}
+      <SidebarResizeHandle />
     </Sidebar>
   );
 }
@@ -221,29 +221,30 @@ function useWindowWidth(): number {
 }
 
 /**
- * The chat sidebar's edge, dragged to widen or narrow it on desktop: conversation titles are worth
- * the room. Remembered per browser; double-click resets it. A phone's drawer is the whole screen
- * and a collapsed sidebar is off screen: neither has an edge to drag, nor does a touch screen (the
- * handle shows under a fine pointer only). It straddles the border.
+ * The sidebar's edge, dragged to widen or narrow it on desktop, in both products: conversation
+ * titles and space names are worth the room. Remembered per browser; double-click resets it. A
+ * phone's drawer is the whole screen and a collapsed sidebar is off screen: neither has an edge to
+ * drag, nor does a touch screen (the handle shows under a fine pointer only). It straddles the
+ * border.
  */
-function ChatSidebarResizeHandle() {
+function SidebarResizeHandle() {
   const { t } = useTranslation();
   const { isMobile, state } = useSidebar();
-  const width = useChatSidebarWidthStore((store) => store.width);
-  const setLive = useChatSidebarWidthStore((store) => store.setLive);
-  const commit = useChatSidebarWidthStore((store) => store.commit);
-  const setDragging = useChatSidebarWidthStore((store) => store.setDragging);
-  const max = chatSidebarMaxWidth(useWindowWidth());
+  const width = useSidebarWidthStore((store) => store.width);
+  const setLive = useSidebarWidthStore((store) => store.setLive);
+  const commit = useSidebarWidthStore((store) => store.commit);
+  const setDragging = useSidebarWidthStore((store) => store.setDragging);
+  const max = sidebarMaxWidth(useWindowWidth());
   if (isMobile || state === "collapsed") return null;
   return (
     <PanelResizeHandle
       edge="right"
       controls={APP_SIDEBAR_ID}
       label={t("nav.resizeSidebar")}
-      width={Math.min(width ?? CHAT_SIDEBAR_WIDTH.default, max)}
-      min={CHAT_SIDEBAR_WIDTH.min}
+      width={Math.min(width ?? SIDEBAR_WIDTH.default, max)}
+      min={SIDEBAR_WIDTH.min}
       max={max}
-      clamp={(next) => clampChatSidebarWidth(next, max)}
+      clamp={(next) => clampSidebarWidth(next, max)}
       onLive={setLive}
       onCommit={commit}
       onDraggingChange={setDragging}

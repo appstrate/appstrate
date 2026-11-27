@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, useState, type Dispatch, type ReactNode } from "react";
+import { useRef, type Dispatch, type ReactNode } from "react";
 import { ActivityIcon, FilesIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ConversationToolCall } from "@appstrate/module-chat/conversation-tools";
@@ -40,7 +40,7 @@ import {
   type StoredSidebarFile,
 } from "./conversation-sidebar-state";
 import { PanelResizeHandle } from "@/components/panel-resize";
-import { usePanelWidth, type PanelView } from "./use-panel-width";
+import { useContextPanelWidth } from "./use-context-panel-width";
 import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
@@ -303,14 +303,14 @@ function ConversationContext({
   }
 
   return (
-    <div className="flex min-h-0 flex-col p-3">
+    <div className="flex min-h-0 flex-1 flex-col p-3">
       <Tabs
         value={activeTab.id}
         onValueChange={(tab) =>
           dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })
         }
         className={cn(
-          "bg-card text-card-foreground flex min-h-0 flex-col gap-0 border",
+          "bg-card text-card-foreground flex min-h-0 flex-1 flex-col gap-0 border",
           FLOATING_FRAME,
         )}
       >
@@ -409,10 +409,8 @@ export function ConversationSidebar({
   const { t } = useTranslation("chat");
   const desktop = useMediaQuery(LG_AND_UP);
   const panelRef = useRef<HTMLElement>(null);
-  const [dragging, setDragging] = useState(false);
   // The call "See in the thread" waits to reveal until the phone's sheet has closed.
   const pendingReveal = useRef<ConversationToolCall | null>(null);
-  const { activeTab } = useConversationTabs(state.activeTab);
   const reveal = (call: ConversationToolCall) =>
     // Missed, the panel opens again on the call to say so.
     dispatch({ type: "revealed", toolCallId: call.toolCallId, found: revealToolCall(call) });
@@ -427,13 +425,7 @@ export function ConversationSidebar({
     pendingReveal.current = call;
     dispatch({ type: "toggle" });
   };
-  // The summary and a tool call's detail take a little more than a list.
-  const view: PanelView = shownFile(state)
-    ? "file"
-    : activeTab.id === "summary" || shownToolCallId(state)
-      ? "detail"
-      : "list";
-  const size = usePanelWidth(panelRef, view);
+  const size = useContextPanelWidth(panelRef);
 
   // Desktop: the panel floats over the thread's right side, inside the conversation. The thread
   // keeps the whole width, so its scrollbar stays at the right edge, outside the panel (`right-4`,
@@ -451,7 +443,7 @@ export function ConversationSidebar({
     >
       {/* While the panel is resized, the thread's padding follows the pointer, not its transition.
           `isolate` keeps the thread's raised layers (a card's space name is `z-10`) under the panel. */}
-      <div className={cn("isolate min-w-0 flex-1", dragging && "[&_*]:transition-none")}>
+      <div className={cn("isolate min-w-0 flex-1", size.dragging && "[&_*]:transition-none")}>
         {children}
       </div>
       {desktop ? (
@@ -461,9 +453,8 @@ export function ConversationSidebar({
           aria-label={t("context.label")}
           inert={!state.expanded}
           className={cn(
-            "ease-surface absolute top-0 right-4 flex max-h-full flex-col transition-[opacity,translate]",
-            // A file takes the whole height; the tabs' block is as tall as its content.
-            view === "file" && "bottom-0",
+            // The whole height whatever the tab: switching tabs never resizes the panel.
+            "ease-surface absolute top-0 right-4 bottom-0 flex flex-col transition-[opacity,translate]",
             state.expanded
               ? "duration-base translate-x-0 opacity-100"
               : "duration-fast pointer-events-none translate-x-6 opacity-0",
@@ -479,7 +470,7 @@ export function ConversationSidebar({
             clamp={size.clamp}
             onLive={size.setLive}
             onCommit={size.commit}
-            onDraggingChange={setDragging}
+            onDraggingChange={size.setDragging}
           />
           <ConversationContext
             conversationId={conversationId}

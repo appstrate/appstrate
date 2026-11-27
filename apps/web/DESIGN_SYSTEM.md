@@ -904,11 +904,11 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 The chat is `@appstrate/module-chat` (UI in `packages/module-chat/src/ui/`, built
 on assistant-ui). Its lightweight `@appstrate/module-chat/conversation-skeleton`
 is shared by the route fallback and the history wait. The chat sits inside the
-shared shell (its list: `modules/chat/chat-sidebar.tsx`). On desktop the chat sidebar
-resizes from 224 to 480 px, capped at 30% of the window and never below 16rem, starts at 16rem
-(256 px) and keeps its width per browser (`appstrate-chat-sidebar-width`); the handle shows only
-under a fine pointer (a phone, a touch screen and a collapsed sidebar have no handle). Studio's
-sidebar keeps a fixed width. The list's date groups fold from their heading, a button with
+shared shell (its list: `modules/chat/chat-sidebar.tsx`). On desktop the shell's sidebar, the
+chat's and Studio's alike, resizes from 224 to 480 px, capped at 30% of the window and never below
+16rem, starts at 16rem (256 px) and keeps one width per browser for both products
+(`appstrate-sidebar-width`); the handle shows only under a fine pointer (a phone, a touch screen
+and a collapsed sidebar have no handle). The list's date groups fold from their heading, a button with
 `aria-expanded` whose chevron turns when folded and which fills on hover under a fine pointer; its
 text is 14 px on touch and 11 px under a fine pointer. A folded group holding the open
 conversation still shows that one row under its heading, the others hidden (as Slack does); folded groups are remembered per browser (`appstrate-chat-collapsed-groups`). Search results are
@@ -939,10 +939,12 @@ calls as the open chat holds them, the turn in flight included, else as stored
 (`@appstrate/module-chat/conversation-tools`, `live-conversation`), named as their cards
 name them (`tool-presentation.ts`), lookups behind a switch the panel keeps; a call's
 detail is the card's (`tool-call-detail`). A file or a call opened from the Summary leads
-back to it. Its width follows what it shows (a list, the details or a call, a file), each
-remembered per browser. `PanelResizeHandle` (`components/panel-resize.tsx`) is the one resize
+back to it. It has one size whatever it shows: the conversation's whole height, and one width
+(400 px by default, from 300 px to 60% of the chat area) remembered per browser
+(`appstrate-chat-context-width`), so switching tabs never resizes it. Both widths, the sidebar's
+and this one, are a `createPanelWidthStore` (`stores/panel-width-store.ts`). `PanelResizeHandle` (`components/panel-resize.tsx`) is the one resize
 handle for a panel's edge: `edge="left"` for a panel that grows leftward (this context panel),
-`edge="right"` for one that grows rightward (the chat sidebar). The arrow pointing past the edge
+`edge="right"` for one that grows rightward (the shell's sidebar). The arrow pointing past the edge
 widens the panel, Home and End go to the bounds, a double-click restores the default.
 
 ## 14. Modules and feature gating

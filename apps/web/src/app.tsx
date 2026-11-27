@@ -58,10 +58,10 @@ import { useOverviewRules } from "./hooks/use-overview-mode";
 import { useHome, useStudioReach } from "./hooks/use-can-reach";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
 import {
-  chatSidebarWidthCss,
+  sidebarWidthCss,
   useChatSidebarStore,
-  useChatSidebarWidthStore,
   useSidebarStore,
+  useSidebarWidthStore,
 } from "./stores/sidebar-store";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
@@ -481,10 +481,10 @@ function MainLayout({ search }: { search: string }) {
   // chat's navigation, the only one the reader has.
   const navProduct = product === "chat" || (home === "chat" && !studio) ? "chat" : "studio";
   const sidebar = navProduct === "chat" ? chatSidebar : studioSidebar;
-  // The chat's sidebar is resizable on desktop (`ChatSidebarResizeHandle`); a phone's drawer sets
-  // its own width over this one.
-  const chatWidth = useChatSidebarWidthStore((state) => state.width);
-  const resizing = useChatSidebarWidthStore((state) => state.dragging);
+  // The sidebar is resizable on desktop in both products (`SidebarResizeHandle`); a phone's drawer
+  // sets its own width over this one.
+  const sidebarWidth = useSidebarWidthStore((state) => state.width);
+  const resizing = useSidebarWidthStore((state) => state.dragging);
   useSpaceResolver(search);
   useOverviewRules();
   useGlobalRunSync();
@@ -495,18 +495,12 @@ function MainLayout({ search }: { search: string }) {
       <SidebarProvider
         open={sidebar.open}
         onOpenChange={sidebar.setOpen}
-        style={
-          navProduct === "chat"
-            ? ({
-                "--sidebar-width": chatSidebarWidthCss(chatWidth),
-              } as CSSProperties)
-            : undefined
-        }
+        style={{ "--sidebar-width": sidebarWidthCss(sidebarWidth) } as CSSProperties}
         className={cn(
           product === "chat" && `relative min-h-0 overflow-hidden ${KEYBOARD_VIEWPORT_CLASS}`,
           // While dragged, the sidebar's gap and frame (both `[data-side] > div`) follow the
           // pointer instead of easing toward it.
-          navProduct === "chat" && resizing && "[&>[data-side]>div]:transition-none",
+          resizing && "[&>[data-side]>div]:transition-none",
         )}
       >
         <AppSidebar product={navProduct} />
