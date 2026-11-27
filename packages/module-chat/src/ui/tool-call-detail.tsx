@@ -20,9 +20,7 @@ function hasContent(value: unknown): boolean {
 function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-1">
-      <h4 className="text-muted-foreground text-[0.65rem] font-semibold tracking-wide uppercase">
-        {title}
-      </h4>
+      <h4 className="text-muted-foreground text-xs font-medium">{title}</h4>
       {children}
     </section>
   );

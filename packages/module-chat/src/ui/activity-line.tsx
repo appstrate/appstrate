@@ -11,8 +11,12 @@ import * as React from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 
-/** The room around a line that stands in the message's flow (the loading line, a group). */
-export const ACTIVITY_BLOCK_CLASS = "my-1";
+/**
+ * The room around a line that stands in the message's flow (the loading line, a group).
+ * `isolate`: what the host draws on a step (a space's tile) layers inside the block, not over
+ * the sticky composer the block scrolls behind.
+ */
+export const ACTIVITY_BLOCK_CLASS = "isolate my-1";
 
 /** A thumb's height on touch, a compact row under a mouse. */
 const LINE_CLASS =
@@ -45,7 +49,7 @@ export const ActivityTrigger = React.forwardRef<
       ref={ref}
       type={type}
       className={cn(
-        "group hover:text-foreground ring-offset-background focus-visible:ring-ring duration-fast ease-surface flex h-full min-w-0 items-center gap-1.5 rounded-sm text-left transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
+        "group hover:text-foreground ring-offset-background focus-visible:ring-ring duration-fast ease-surface flex h-full min-w-0 items-center gap-1.5 rounded-sm text-left font-normal transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
         className,
       )}
       {...props}

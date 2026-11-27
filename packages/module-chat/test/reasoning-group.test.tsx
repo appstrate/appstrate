@@ -152,9 +152,10 @@ describe("the reasoning of an assistant turn", () => {
     expect(html).not.toContain(REASONING_BODY);
   });
 
-  it("reads « thinking » until the reasoning has a first line", () => {
-    const html = render([reasoning("**", "streaming")]);
-    expect(groupTrigger(html)).toContain("reasoning.running");
+  it("reads « thinking » until the reasoning's first line is whole", () => {
+    const trigger = groupTrigger(render([reasoning("Lister les", "streaming")]));
+    expect(trigger).toContain("reasoning.running");
+    expect(trigger).not.toContain("Lister les");
   });
 
   it("keeps the spark on the line between the end of the reasoning and the next part", () => {
@@ -190,7 +191,7 @@ describe("the reasoning of an assistant turn", () => {
     expect(html).not.toContain("reasoning.running");
   });
 
-  it("keeps reasoning split by a tool call on one line, reading the reasoning in progress", () => {
+  it("keeps reasoning split by a tool call on one line, the model thinking again", () => {
     const html = render([
       reasoning(REASONING, "done"),
       pendingToolCall,
@@ -198,7 +199,7 @@ describe("the reasoning of an assistant turn", () => {
     ]);
     expect(disclosures(html)).toBe(1);
     expect(statusRegions(html)).toBe(1);
-    expect(groupTrigger(html)).toContain(REASONING_AFTER_TOOL);
+    expect(groupTrigger(html)).toContain("reasoning.running");
     expect(html).not.toContain(REASONING_BODY);
   });
 

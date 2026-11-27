@@ -232,7 +232,7 @@ export function ChatRunProgressCard({
   return (
     <div
       {...anchor}
-      className={`bg-card text-card-foreground relative isolate my-3 w-full rounded-lg border ${REVEAL_RING_CLASS}`}
+      className={`bg-card text-card-foreground relative isolate my-2 w-full rounded-lg border ${REVEAL_RING_CLASS}`}
     >
       {/* Full-card click target (opens the detail modal). Behind the content so
           the run-page link can re-enable pointer events for itself — avoids

@@ -336,7 +336,7 @@ export function OAuthConnectCard({
   return (
     <div
       {...anchor}
-      className={`bg-card text-card-foreground my-3 flex w-full flex-col gap-2 rounded-lg border px-3 py-3 text-sm ${REVEAL_RING_CLASS}`}
+      className={`bg-card text-card-foreground my-2 flex w-full flex-col gap-2 rounded-lg border px-3 py-3 text-sm ${REVEAL_RING_CLASS}`}
     >
       <div className="flex h-5 items-center gap-2">
         <IntegrationIcon src={meta?.icon} className="size-4 shrink-0" />

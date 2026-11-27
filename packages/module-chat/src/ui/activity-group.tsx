@@ -237,7 +237,7 @@ export function ActivityGroup({
 
 /**
  * What the running turn is on, read off the group's last part: the reasoning it writes (its first
- * line once it has one), the call that runs, or the model thinking after a call's result.
+ * line once written), the call that runs, or the model thinking after a call's result.
  */
 function stepInProgress(
   message: StepMessage,
@@ -247,7 +247,9 @@ function stepInProgress(
 ): { label: string; idText?: string } {
   const part = lastIndex === undefined ? undefined : (message.parts[lastIndex] as StepPart);
   if (part?.type === "reasoning") {
-    return { label: reasoningTitle(part.text ?? "") || t("reasoning.running") };
+    // Its first line once that line is whole: a label that grows word by word pushes the clock.
+    const text = (part.text ?? "").trimStart();
+    return { label: (text.includes("\n") && reasoningTitle(text)) || t("reasoning.running") };
   }
   const phase = part?.type === "tool-call" ? deriveToolPhase(part) : undefined;
   if (part && (phase === "running" || phase === "pending")) {

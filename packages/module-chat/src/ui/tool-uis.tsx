@@ -322,9 +322,12 @@ export function InvokeOperationBreakout(props: ToolCardProps) {
     );
   }
 
-  // Run launch (runAgent / runInline): the run's progress, for the call's whole life (launch,
-  // stream, terminal, and launch failure, shown inside the panel).
-  if (isRunLaunchOp(opId)) return <RunLaunchCard {...props} anchorsCall={false} />;
+  // Run launch (runAgent / runInline): the run's progress, from the launch to its terminal
+  // status. A launch refused started no run: its step says so, and no card stands for it.
+  if (isRunLaunchOp(opId)) {
+    if (phase === "error" && !extractRunId(result)) return null;
+    return <RunLaunchCard {...props} anchorsCall={false} />;
+  }
 
   const created =
     phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;

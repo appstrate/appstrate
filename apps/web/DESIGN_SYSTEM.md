@@ -902,13 +902,24 @@ on assistant-ui). Its lightweight `@appstrate/module-chat/conversation-skeleton`
 is shared by the route fallback and the history wait. The chat sits inside the
 shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
-import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`); a failed one is softened, never hidden: no red border or lead icon, its message stays visible under the header in muted text, and a small red cross (`FailedGlyph`, named « Échec · HTTP 404 » for assistive tech) ends the row, the same cross, decorative, preceding the muted failed count of a folded lookups group, running or settled; only what ends the turn stays red. The HTTP status is no badge: it is in the call's detail. Reasoning is
-a collapsible group (`reasoning.tsx`), the working indicator
-(`ThinkingStatus`, same file) the spark: four coral balls swapping diagonals, pure
-CSS (`.spark` in `styles.css`), still under reduced motion. A running turn holds one spark,
-on one line: the loading line (« Réflexion en cours… », the turn's clock from 1 s), the reasoning
-row it is thinking in, or the header of the folded lookups it ends in, which then reads the step
-in progress, the count, any failure and the clock; a settled reasoning row reads its first line. A run started from the chat is a
+import from `apps/web`. What the assistant does between two texts is ONE line (`activity-group.tsx`, drawn with the
+primitives of `activity-line.tsx`): its reasoning and its tool calls are a group from the first
+step on, so a second call changes nothing but the label. The line has no box: a 16px lead slot on
+the text column's edge, a label, a chevron. While it ends the running turn it is the turn's status:
+the spark (`ThinkingStatus`, `reasoning.tsx`: four coral balls swapping diagonals, pure CSS,
+`.spark` in `styles.css`, still under reduced motion), the step in progress in shimmering text
+(`.shimmer-text`, plain under reduced motion) and the turn's clock from 1 s. Settled, it names its
+one call or counts them (« 3 consultations · 1 action »), failures apart; reasoning alone reads its
+first line. A running turn holds one spark: on that line, or on the loading line
+(« Réflexion en cours… ») of the same shape before any step exists. Opened, the group is a rail
+of steps (`ToolStep` in `tool-uis.tsx`, `ReasoningStep`), each a line of the same height whose
+detail (a call's raw input / output, a reasoning's text) opens under it: no dialog. A failed call
+is softened, never hidden: no red border or lead icon, its message stays under its step in muted
+text, and a small red cross (`FailedGlyph`, named « Échec · HTTP 404 » for assistive tech) ends
+the step; the same cross, decorative, precedes the muted failed count on the group's line; only
+what ends the turn stays red. The HTTP status is no badge: it is in the call's detail. What needs
+the reader stays in view under the line whatever the fold: a connect card, a launched run, a
+created package's link, a read skill's chip. A run started from the chat is a
 `ChatRunProgressCard`, the model picker `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
 The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that
