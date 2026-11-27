@@ -1,42 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** What the responsive menus (`DropdownMenu`, `Popover`) do to a call site's props. */
+/** What the responsive menus (`DropdownMenu`, `Popover`) do to a call site's props on a phone. */
 
-/** The props of an anchored popup's positioner: where it sits against its anchor. */
-const ANCHORED_PROPS = [
-  "side",
-  "sideOffset",
-  "align",
-  "alignOffset",
-  "anchor",
-  "collisionAvoidance",
-  "collisionBoundary",
-  "collisionPadding",
-  "arrowPadding",
-  "sticky",
-  "positionMethod",
-  "disableAnchorTracking",
-] as const;
-
-type AnchoredKey = (typeof ANCHORED_PROPS)[number];
-
-/**
- * A popup's props split in two: what its positioner takes, and the rest for the popup itself
- * (Base UI draws them as separate elements).
- */
-export function splitAnchoring<P extends object>(
-  props: P,
-): [Pick<P, Extract<keyof P, AnchoredKey>>, Omit<P, AnchoredKey>] {
-  const anchoring: Record<string, unknown> = {};
-  const rest = { ...props } as Record<string, unknown>;
-  for (const key of ANCHORED_PROPS) {
-    if (key in rest) {
-      anchoring[key] = rest[key];
-      delete rest[key];
-    }
-  }
-  return [anchoring as Pick<P, Extract<keyof P, AnchoredKey>>, rest as Omit<P, AnchoredKey>];
-}
+import { type AnchoredKey, splitAnchoring } from "./primitive-props.ts";
 
 /** A bottom sheet has no anchor to place itself against: the positioning props are dropped. */
 export function withoutAnchoring<P extends object>(props: P): Omit<P, AnchoredKey> {

@@ -4,14 +4,14 @@ import * as React from "react";
 import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area";
 
 import { cn } from "../cn.ts";
+import type { WithClassName } from "./primitive-props.ts";
 
 function ScrollArea({
   className,
   children,
   viewportProps,
   ...props
-}: Omit<ScrollAreaPrimitive.Root.Props, "className"> & {
-  className?: string;
+}: WithClassName<ScrollAreaPrimitive.Root.Props> & {
   viewportProps?: Pick<React.ComponentProps<"div">, "ref" | "onScroll">;
 }) {
   return (
@@ -33,7 +33,7 @@ function ScrollBar({
   className,
   orientation = "vertical",
   ...props
-}: Omit<ScrollAreaPrimitive.Scrollbar.Props, "className"> & { className?: string }) {
+}: WithClassName<ScrollAreaPrimitive.Scrollbar.Props>) {
   return (
     <ScrollAreaPrimitive.Scrollbar
       orientation={orientation}

@@ -4,9 +4,8 @@ import * as React from "react";
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
 
 import { cn } from "../cn.ts";
+import type { WithClassName } from "./primitive-props.ts";
 import { buttonVariants } from "./button.tsx";
-
-type WithClassName<P> = Omit<P, "className"> & { className?: string };
 
 const AlertDialog = AlertDialogPrimitive.Root;
 

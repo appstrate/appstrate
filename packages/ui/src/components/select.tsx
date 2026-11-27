@@ -9,9 +9,7 @@ import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 
 import { cn } from "../cn.ts";
-import { splitAnchoring } from "./sheet-menu-props.ts";
-
-type WithClassName<P> = Omit<P, "className"> & { className?: string };
+import { splitAnchoring, type WithClassName } from "./primitive-props.ts";
 
 /**
  * A single choice that is never cleared: `onValueChange` gets a value, not Base UI's `null` (sent

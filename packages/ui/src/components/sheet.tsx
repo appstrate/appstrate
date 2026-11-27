@@ -6,6 +6,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { X } from "lucide-react";
 
 import { cn } from "../cn.ts";
+import type { WithClassName } from "./primitive-props.ts";
 import { useUiLabels } from "./ui-labels.ts";
 
 const Sheet = SheetPrimitive.Root;
@@ -15,8 +16,6 @@ const SheetTrigger = SheetPrimitive.Trigger;
 const SheetClose = SheetPrimitive.Close;
 
 const SheetPortal = SheetPrimitive.Portal;
-
-type WithClassName<P> = Omit<P, "className"> & { className?: string };
 
 function SheetOverlay({ className, ...props }: WithClassName<SheetPrimitive.Backdrop.Props>) {
   return (

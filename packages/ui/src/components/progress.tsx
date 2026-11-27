@@ -3,20 +3,16 @@
 import { Progress as ProgressPrimitive } from "@base-ui/react/progress";
 
 import { cn } from "../cn.ts";
+import type { WithClassName } from "./primitive-props.ts";
 
 /** The indicator's width is the primitive's own (`value` over `max`). */
 function Progress({
   className,
   indicatorClassName,
-  max = 100,
   ...props
-}: Omit<ProgressPrimitive.Root.Props, "className"> & {
-  className?: string;
-  indicatorClassName?: string;
-}) {
+}: WithClassName<ProgressPrimitive.Root.Props> & { indicatorClassName?: string }) {
   return (
     <ProgressPrimitive.Root
-      max={max}
       className={cn("bg-muted relative h-2 w-full overflow-hidden rounded-full", className)}
       {...props}
     >

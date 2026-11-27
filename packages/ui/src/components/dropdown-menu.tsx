@@ -13,10 +13,11 @@ import { useRender } from "@base-ui/react/use-render";
 import { Check, ChevronRight } from "lucide-react";
 
 import { cn } from "../cn.ts";
+import { splitAnchoring, type WithClassName } from "./primitive-props.ts";
 import { useIsMobile } from "../use-mobile.ts";
 import { Sheet, SheetTrigger } from "./sheet.tsx";
 import { SHEET_LABEL_CLASS, SHEET_ROW_CLASS, SheetMenuContent } from "./sheet-menu.tsx";
-import { splitAnchoring, triggerName, withoutAnchoring } from "./sheet-menu-props.ts";
+import { triggerName, withoutAnchoring } from "./sheet-menu-props.ts";
 
 /** Below `md`: the menu is a sheet, named after its trigger, closed by a selected row. */
 interface MenuSheet {
@@ -29,8 +30,6 @@ const MenuSheetContext = React.createContext<MenuSheet | null>(null);
 
 /** On a sheet, the id of the sub-menu's heading: its rows are a group named by it. */
 const SubSheetContext = React.createContext<string | undefined>(undefined);
-
-type WithClassName<P> = Omit<P, "className"> & { className?: string };
 
 interface DropdownMenuProps {
   open?: boolean;
@@ -49,7 +48,7 @@ function DropdownMenu({ open, defaultOpen, onOpenChange, modal, children }: Drop
       <MenuPrimitive.Root
         open={open}
         defaultOpen={defaultOpen}
-        onOpenChange={onOpenChange ? (next) => onOpenChange(next) : undefined}
+        onOpenChange={onOpenChange}
         modal={modal}
       >
         {children}
@@ -90,8 +89,9 @@ function DropdownMenuSub(props: MenuPrimitive.SubmenuRoot.Props) {
   return <SubSheetContext.Provider value={headingId}>{props.children}</SubSheetContext.Provider>;
 }
 
+/** A highlighted menu item, or a sheet row with the keyboard focus. */
 const DESTRUCTIVE_ITEM =
-  "text-destructive focus:bg-destructive/10 focus:text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive";
+  "text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive focus-visible:bg-destructive/10";
 
 function DropdownMenuSubTrigger({
   className,
@@ -227,7 +227,8 @@ interface SheetRowProps {
 /**
  * An item as a sheet's row: a button (or its `render` element) whose press runs `onClick`, then
  * closes the sheet unless the item says `closeOnClick={false}`, as Base UI's items do (a checkbox
- * item stays open by default). No call site holds an item's ref, so a row takes none.
+ * item stays open by default, and an `onClick` that prevents the default closes it all the same).
+ * No call site holds an item's ref, so a row takes none.
  */
 function SheetRow({
   sheet,
@@ -257,7 +258,6 @@ function SheetRow({
       onClick: (event: React.MouseEvent<HTMLElement>) => {
         if (disabled) return;
         onClick?.(event);
-        if (event.defaultPrevented) return;
         if (checkable) onCheckedChange?.(!checked);
         if (closes) sheet.close();
       },
@@ -305,6 +305,42 @@ function DropdownMenuItem({
         variant === "destructive" && DESTRUCTIVE_ITEM,
         className,
       )}
+      {...props}
+    />
+  );
+}
+
+/**
+ * A link among the items, an `<a>` (or its `render` element, a router link). The menu closes when
+ * it is followed, as after any other item: the page it opens usually leaves the menu on screen.
+ */
+function DropdownMenuLinkItem({
+  className,
+  variant,
+  closeOnClick = true,
+  render,
+  ...props
+}: WithClassName<MenuPrimitive.LinkItem.Props> & { variant?: "default" | "destructive" }) {
+  const sheet = React.useContext(MenuSheetContext);
+  if (sheet)
+    return (
+      <SheetRow
+        sheet={sheet}
+        closeOnClick={closeOnClick}
+        className={cn(variant === "destructive" && DESTRUCTIVE_ITEM, className)}
+        {...({ ...props, render: render ?? <a /> } as Omit<SheetRowProps, "sheet">)}
+      />
+    );
+  return (
+    <MenuPrimitive.LinkItem
+      className={cn(
+        ITEM_CLASS,
+        "gap-2 px-2 py-1.5 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+        variant === "destructive" && DESTRUCTIVE_ITEM,
+        className,
+      )}
+      closeOnClick={closeOnClick}
+      render={render}
       {...props}
     />
   );
@@ -379,6 +415,7 @@ export {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLinkItem,
   DropdownMenuCheckboxItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,

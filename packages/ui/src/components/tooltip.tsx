@@ -3,11 +3,10 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 
 import { cn } from "../cn.ts";
+import type { WithClassName } from "./primitive-props.ts";
 
-type TooltipContentProps = Omit<TooltipPrimitive.Popup.Props, "className"> &
-  Pick<TooltipPrimitive.Positioner.Props, "side" | "sideOffset" | "align" | "alignOffset"> & {
-    className?: string;
-  };
+type TooltipContentProps = WithClassName<TooltipPrimitive.Popup.Props> &
+  Pick<TooltipPrimitive.Positioner.Props, "side" | "sideOffset" | "align" | "alignOffset">;
 
 const TooltipProvider = TooltipPrimitive.Provider;
 

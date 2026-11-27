@@ -5,9 +5,8 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { X } from "lucide-react";
 
 import { cn } from "../cn.ts";
+import type { WithClassName } from "./primitive-props.ts";
 import { useUiLabels } from "./ui-labels.ts";
-
-type WithClassName<P> = Omit<P, "className"> & { className?: string };
 
 const Dialog = DialogPrimitive.Root;
 

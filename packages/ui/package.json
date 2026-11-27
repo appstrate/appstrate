@@ -1,7 +1,7 @@
 {
   "name": "@appstrate/ui",
   "version": "1.0.1",
-  "description": "Shared React UI components for Appstrate surfaces — schema-driven forms, upload widget, RJSF templates",
+  "description": "Shared React UI components for Appstrate surfaces \u2014 schema-driven forms, upload widget, RJSF templates",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",

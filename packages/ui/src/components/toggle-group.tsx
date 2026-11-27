@@ -6,6 +6,7 @@ import { ToggleGroup as ToggleGroupPrimitive } from "@base-ui/react/toggle-group
 import { type VariantProps } from "class-variance-authority";
 
 import { cn } from "../cn.ts";
+import type { WithClassName } from "./primitive-props.ts";
 import { toggleVariants } from "./toggle.tsx";
 
 const ToggleGroupContext = React.createContext<VariantProps<typeof toggleVariants>>({
@@ -14,14 +15,13 @@ const ToggleGroupContext = React.createContext<VariantProps<typeof toggleVariant
 });
 
 /** The pressed values are an array, one entry at most unless `multiple`. */
-function ToggleGroup({
+function ToggleGroup<Value extends string = string>({
   className,
   variant,
   size,
   children,
   ...props
-}: Omit<ToggleGroupPrimitive.Props, "className"> &
-  VariantProps<typeof toggleVariants> & { className?: string }) {
+}: WithClassName<ToggleGroupPrimitive.Props<Value>> & VariantProps<typeof toggleVariants>) {
   return (
     <ToggleGroupPrimitive
       className={cn("flex items-center justify-center gap-1", className)}
@@ -34,13 +34,12 @@ function ToggleGroup({
   );
 }
 
-function ToggleGroupItem({
+function ToggleGroupItem<Value extends string = string>({
   className,
   variant,
   size,
   ...props
-}: Omit<TogglePrimitive.Props, "className"> &
-  VariantProps<typeof toggleVariants> & { className?: string }) {
+}: WithClassName<TogglePrimitive.Props<Value>> & VariantProps<typeof toggleVariants>) {
   const context = React.useContext(ToggleGroupContext);
   return (
     <TogglePrimitive

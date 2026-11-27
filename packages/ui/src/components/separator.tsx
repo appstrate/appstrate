@@ -3,12 +3,13 @@
 import { Separator as SeparatorPrimitive } from "@base-ui/react/separator";
 
 import { cn } from "../cn.ts";
+import type { WithClassName } from "./primitive-props.ts";
 
 function Separator({
   className,
   orientation = "horizontal",
   ...props
-}: Omit<SeparatorPrimitive.Props, "className"> & { className?: string }) {
+}: WithClassName<SeparatorPrimitive.Props>) {
   return (
     <SeparatorPrimitive
       orientation={orientation}

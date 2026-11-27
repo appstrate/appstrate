@@ -239,7 +239,6 @@ export function ModelPicker({
             type="button"
             variant="outline"
             role="combobox"
-            aria-expanded={open}
             disabled={disabled}
             className="text-foreground w-full justify-between font-normal"
           />

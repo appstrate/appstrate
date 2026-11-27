@@ -3,8 +3,7 @@
 import { Avatar as AvatarPrimitive } from "@base-ui/react/avatar";
 
 import { cn } from "../cn.ts";
-
-type WithClassName<P> = Omit<P, "className"> & { className?: string };
+import type { WithClassName } from "./primitive-props.ts";
 
 function Avatar({ className, ...props }: WithClassName<AvatarPrimitive.Root.Props>) {
   return (

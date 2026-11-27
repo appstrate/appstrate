@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A dropdown menu and a popover pick their container from the width: from `md` up the Radix menu
+ * A dropdown menu and a popover pick their container from the width: from `md` up the menu
  * and popover, below a panel from the bottom. A portal renders nothing under
  * `renderToStaticMarkup`, so what shows is the trigger and, on a phone, the rows (a sheet's rows
- * need no menu context, a Radix item does).
+ * need no menu context, a menu item does).
  */
 
 import { afterEach, describe, expect, it } from "bun:test";

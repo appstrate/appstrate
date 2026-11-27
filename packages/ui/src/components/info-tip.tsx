@@ -11,7 +11,7 @@
  * `aria-describedby` at a copy of its own.
  */
 
-import * as React from "react";
+import type * as React from "react";
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { InfoIcon } from "lucide-react";
 
@@ -19,35 +19,18 @@ import { useUiLabels } from "./ui-labels.ts";
 
 export function InfoTip({ children, testId }: { children: React.ReactNode; testId?: string }) {
   const { moreInfo } = useUiLabels();
-  const [open, setOpen] = React.useState(false);
-  // Opened by a click, a tap or a key: the pointer leaving the button no longer closes it.
-  const pinned = React.useRef(false);
   return (
-    <PopoverPrimitive.Root
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) pinned.current = false;
-        setOpen(next);
-      }}
-    >
+    <PopoverPrimitive.Root>
       <PopoverPrimitive.Trigger
         aria-label={moreInfo}
         className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 desktop-pointer:size-5 inline-flex size-7 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-[3px]"
         data-testid={testId}
-        onPointerEnter={(event) => {
-          if (event.pointerType === "mouse") setOpen(true);
-        }}
-        onPointerLeave={(event) => {
-          if (event.pointerType === "mouse" && !pinned.current) setOpen(false);
-        }}
-        onClick={(event) => {
-          // The trigger would toggle: a click on what a hover opened pins it instead of closing it.
-          // Inside a `<label>`, it also keeps the click from reaching the labelled control.
-          event.preventBaseUIHandler();
-          event.preventDefault();
-          pinned.current = !(open && pinned.current);
-          setOpen(pinned.current);
-        }}
+        // A mouse hover opens it; a click on what a hover opened pins it open.
+        openOnHover
+        delay={0}
+        closeDelay={0}
+        // Inside a `<label>`, the click must not reach the labelled control.
+        onClick={(event) => event.preventDefault()}
       >
         {/* Important: a menu row sizes every icon inside it, this one included, for a row's glyph. */}
         <InfoIcon aria-hidden className="desktop-pointer:size-3.5! size-4!" />

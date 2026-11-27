@@ -10,10 +10,11 @@ import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { useRender } from "@base-ui/react/use-render";
 
 import { cn } from "../cn.ts";
+import { splitAnchoring, type WithClassName } from "./primitive-props.ts";
 import { useIsMobile } from "../use-mobile.ts";
 import { Sheet, SheetTrigger } from "./sheet.tsx";
 import { SheetMenuContent } from "./sheet-menu.tsx";
-import { splitAnchoring, triggerName, withoutAnchoring } from "./sheet-menu-props.ts";
+import { triggerName, withoutAnchoring } from "./sheet-menu-props.ts";
 
 /** Below `md`: the popover is a sheet, and its accessible name is its trigger's. */
 interface PopoverSheet {
@@ -31,13 +32,15 @@ interface PopoverAnchoring {
 
 const PopoverAnchorContext = React.createContext<PopoverAnchoring | null>(null);
 
-function Popover({
-  open,
-  defaultOpen,
-  onOpenChange,
-  modal,
-  children,
-}: PopoverPrimitive.Root.Props) {
+interface PopoverProps {
+  open?: boolean;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean, details: PopoverPrimitive.Root.ChangeEventDetails) => void;
+  modal?: PopoverPrimitive.Root.Props["modal"];
+  children?: React.ReactNode;
+}
+
+function Popover({ open, defaultOpen, onOpenChange, modal, children }: PopoverProps) {
   const mobile = useIsMobile();
   const [name, setName] = React.useState("");
   const [anchor, setAnchor] = React.useState<Element | null>(null);
@@ -60,12 +63,12 @@ function Popover({
       <Sheet
         open={open}
         defaultOpen={defaultOpen}
-        // A sheet's reasons are a subset of a popover's (escape, outside press, close press).
+        // Every reason a sheet (a dialog) closes for is also a popover reason.
         onOpenChange={(next, details) =>
           onOpenChange?.(next, details as unknown as PopoverPrimitive.Root.ChangeEventDetails)
         }
       >
-        {children as React.ReactNode}
+        {children}
       </Sheet>
     </PopoverSheetContext.Provider>
   );
@@ -96,17 +99,10 @@ function PopoverAnchor({ render, ref, ...props }: useRender.ComponentProps<"div"
   });
 }
 
-type PopoverContentProps = Omit<PopoverPrimitive.Popup.Props, "className"> &
-  Omit<PopoverPrimitive.Positioner.Props, "className" | "render" | "style" | "children"> & {
-    className?: string;
-  };
+type PopoverContentProps = WithClassName<PopoverPrimitive.Popup.Props> &
+  Omit<PopoverPrimitive.Positioner.Props, "className" | "render" | "style" | "children">;
 
-function PopoverContent({
-  className,
-  align = "center",
-  sideOffset = 4,
-  ...props
-}: PopoverContentProps) {
+function PopoverContent({ className, sideOffset = 4, ...props }: PopoverContentProps) {
   const sheet = React.useContext(PopoverSheetContext);
   const anchoring = React.useContext(PopoverAnchorContext);
   if (sheet) {
@@ -122,7 +118,6 @@ function PopoverContent({
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Positioner
-        align={align}
         sideOffset={sideOffset}
         anchor={anchoring?.anchor ?? undefined}
         {...positioning}

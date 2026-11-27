@@ -5,11 +5,9 @@ import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group";
 import { Circle } from "lucide-react";
 
 import { cn } from "../cn.ts";
+import type { WithClassName } from "./primitive-props.ts";
 
-function RadioGroup({
-  className,
-  ...props
-}: Omit<RadioGroupPrimitive.Props, "className"> & { className?: string }) {
+function RadioGroup({ className, ...props }: WithClassName<RadioGroupPrimitive.Props>) {
   return <RadioGroupPrimitive className={cn("grid gap-2", className)} {...props} />;
 }
 
@@ -17,9 +15,7 @@ function RadioGroup({
 function RadioGroupItem({
   className,
   ...props
-}: Omit<RadioPrimitive.Root.Props, "className" | "render" | "nativeButton"> & {
-  className?: string;
-}) {
+}: WithClassName<Omit<RadioPrimitive.Root.Props, "render" | "nativeButton">>) {
   return (
     <RadioPrimitive.Root
       nativeButton
