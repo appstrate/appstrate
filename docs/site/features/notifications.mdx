@@ -11,11 +11,10 @@ Each notification belongs to one **recipient** and one space, and has its own re
 
 The feed holds what needs the recipient's attention, decided when the notification is written.
 
-| Type             | When                                                                                                      | Recipient                                                                                                        |
-| ---------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `run_failed`     | A run ends `failed` or `timeout`. The payload carries the `packageId`, the `agent_name` and the `status`. | The member or end-user who launched it. A run with no actor is notified to the organization's owners and admins. |
-| `package_shared` | A package is shared **with a person**. The payload names the package, its type and who shared it.         | The person, in their personal space.                                                                             |
-| `agent_message`  | A running agent calls the `notify` [platform tool](/features/tools#platform-tools).                       | The run's recipients, as for `run_failed`, at most once per run.                                                 |
+| Type            | When                                                                                                      | Recipient                                                                                                        |
+| --------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `run_failed`    | A run ends `failed` or `timeout`. The payload carries the `packageId`, the `agent_name` and the `status`. | The member or end-user who launched it. A run with no actor is notified to the organization's owners and admins. |
+| `agent_message` | A running agent calls the `notify` [platform tool](/features/tools#platform-tools).                       | The run's recipients, as for `run_failed`, at most once per run.                                                 |
 
 An `agent_message` payload carries the `packageId`, the `title` and the `message` the agent wrote, and its `runId` is the run that sent it. The `notify` call of an inline agent's run is refused. An agent has `notify` only when its manifest selects it under `integrations_configuration["@appstrate/platform"].tools`; it is not one of the integration's default tools. The message is not instant: the bell shows it at its next refresh, which happens when the run ends, when the live connection reconnects, and every five minutes. Opening the run reads it, like a `run_failed`.
 
