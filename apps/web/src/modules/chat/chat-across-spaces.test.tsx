@@ -225,12 +225,12 @@ describe("the conversation panel", () => {
     );
   }
 
-  it("lists the runs and files tabs where some space admits them, beside Summary and Tools", () => {
-    expect(renderOverview(<Tabs />, spaces).html).toContain("<p>summary,runs,tools</p>");
+  it("lists the runs and files tabs where some space admits them, beside Summary, Tools and Info", () => {
+    expect(renderOverview(<Tabs />, spaces).html).toContain("<p>summary,runs,tools,info</p>");
     const files = [space("spc_a", ["chat:read"]), space("spc_b", ["chat:read", "files:read"])];
-    expect(renderOverview(<Tabs />, files).html).toContain("<p>summary,files,tools</p>");
+    expect(renderOverview(<Tabs />, files).html).toContain("<p>summary,files,tools,info</p>");
     expect(renderOverview(<Tabs />, [space("spc_a", ["chat:read"])]).html).toContain(
-      "<p>summary,tools</p>",
+      "<p>summary,tools,info</p>",
     );
   });
 
@@ -238,7 +238,9 @@ describe("the conversation panel", () => {
     const chatOnly = [
       testSpace("spc_a", ["chat:read", "runs:read", "files:read"], "spc_a", { studio: false }),
     ];
-    expect(renderOverview(<Tabs />, chatOnly).html).toContain("<p>summary,runs,files,tools</p>");
+    expect(renderOverview(<Tabs />, chatOnly).html).toContain(
+      "<p>summary,runs,files,tools,info</p>",
+    );
   });
 
   it("lists a run of a space without the Studio, unlinked: its page is a Studio screen", () => {

@@ -359,8 +359,8 @@ export function ToolsChoice({
           <PendingButton type="button" variant="outline" onClick={onRetry} pending={refetching}>
             {t("integrationWizard.tools.retry")}
           </PendingButton>
-          <Button type="button" variant="outline" asChild>
-            <Link to={detailPath}>{t("integrationWizard.open")}</Link>
+          <Button type="button" variant="outline" render={<Link to={detailPath} />}>
+            {t("integrationWizard.open")}
           </Button>
         </div>
       </div>
@@ -452,11 +452,11 @@ export function ToolsChoice({
             label={t("integrationWizard.tools.docs")}
           />
           <Collapsible>
-            <CollapsibleTrigger asChild>
-              <Button type="button" variant="ghost" size="sm" className="group">
-                <ChevronDown className="transition-transform group-data-[state=open]:rotate-180" />
-                {t("integrationWizard.tools.docsPreview")}
-              </Button>
+            <CollapsibleTrigger
+              render={<Button type="button" variant="ghost" size="sm" className="group" />}
+            >
+              <ChevronDown className="transition-transform group-data-panel-open:rotate-180" />
+              {t("integrationWizard.tools.docsPreview")}
             </CollapsibleTrigger>
             <CollapsibleContent>
               <pre className="bg-muted mt-2 max-h-80 overflow-auto rounded-md p-3 text-xs">

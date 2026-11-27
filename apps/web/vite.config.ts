@@ -211,7 +211,7 @@ export default defineConfig({
             // Icons are imported by nearly every route; one shared chunk beats
             // the same icon module being duplicated across route chunks.
             { name: "icons", test: /node_modules\/lucide-react\// },
-            // Deliberately NO `@radix-ui` group: the primitives are imported
+            // Deliberately NO `@base-ui` group: the primitives are imported
             // per-component, so natural chunking already places each one with
             // the route that uses it. Forcing them together built one large
             // chunk that every route had to fetch to render any dialog.

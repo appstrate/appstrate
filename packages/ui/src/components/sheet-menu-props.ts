@@ -1,32 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** What the responsive menus (`DropdownMenu`, `Popover`) do to a call site's props on a sheet. */
+/** What the responsive menus (`DropdownMenu`, `Popover`) do to a call site's props on a phone. */
 
-/**
- * The positioning props of a popover's or a dropdown's content: a bottom sheet has no anchor to
- * place itself against, so they are dropped there (and `loop`, the menu's arrow-key wrap).
- */
-const ANCHORED_PROPS = [
-  "side",
-  "sideOffset",
-  "align",
-  "alignOffset",
-  "avoidCollisions",
-  "collisionBoundary",
-  "collisionPadding",
-  "arrowPadding",
-  "sticky",
-  "hideWhenDetached",
-  "updatePositionStrategy",
-  "loop",
-] as const;
+import { type AnchoredKey, splitAnchoring } from "./primitive-props.ts";
 
-export function withoutAnchoring<P extends object>(
-  props: P,
-): Omit<P, (typeof ANCHORED_PROPS)[number]> {
-  const rest = { ...props } as Record<string, unknown>;
-  for (const key of ANCHORED_PROPS) delete rest[key];
-  return rest as Omit<P, (typeof ANCHORED_PROPS)[number]>;
+/** A bottom sheet has no anchor to place itself against: the positioning props are dropped. */
+export function withoutAnchoring<P extends object>(props: P): Omit<P, AnchoredKey> {
+  return splitAnchoring(props)[1];
 }
 
 /**

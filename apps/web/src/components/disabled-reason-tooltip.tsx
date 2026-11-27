@@ -18,11 +18,9 @@ export function DisabledReasonTooltip({
   if (!reason) return children;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={0} className="relative inline-flex">
-          {children}
-          <span className="sr-only">{reason}</span>
-        </span>
+      <TooltipTrigger render={<span tabIndex={0} className="relative inline-flex" />}>
+        {children}
+        <span className="sr-only">{reason}</span>
       </TooltipTrigger>
       <TooltipContent className="max-w-xs">{reason}</TooltipContent>
     </Tooltip>

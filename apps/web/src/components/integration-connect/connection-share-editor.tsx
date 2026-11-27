@@ -112,24 +112,26 @@ export function ConnectionShareEditor({
     const names = targets.filter((s) => sharedSpaceIds.includes(s.id)).map((s) => s.name);
     return (
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 max-w-full min-w-0 justify-between gap-1 px-1.5 text-xs font-normal"
-            disabled={pending}
-            title={names.join(", ") || t("integration.connection.share.help")}
-            data-testid={`share-editor-${connectionId}`}
-          >
-            <span className="truncate">
-              {shareAllSpaces
-                ? t("integration.connection.share.all")
-                : sharedSpaceIds.length === 0
-                  ? t("integration.connection.share.none")
-                  : t("integration.connection.share.count", { count: sharedSpaceIds.length })}
-            </span>
-            <ChevronsUpDown className="shrink-0 opacity-50" />
-          </Button>
+        <PopoverTrigger
+          render={
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 max-w-full min-w-0 justify-between gap-1 px-1.5 text-xs font-normal"
+              disabled={pending}
+              title={names.join(", ") || t("integration.connection.share.help")}
+              data-testid={`share-editor-${connectionId}`}
+            />
+          }
+        >
+          <span className="truncate">
+            {shareAllSpaces
+              ? t("integration.connection.share.all")
+              : sharedSpaceIds.length === 0
+                ? t("integration.connection.share.none")
+                : t("integration.connection.share.count", { count: sharedSpaceIds.length })}
+          </span>
+          <ChevronsUpDown className="shrink-0 opacity-50" />
         </PopoverTrigger>
         <PopoverContent className="w-80 p-0" align="start">
           <div className="flex flex-col gap-2 p-3">

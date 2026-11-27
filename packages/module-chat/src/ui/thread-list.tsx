@@ -338,29 +338,25 @@ export function ChatConversationList({
                 return (
                   <Collapsible
                     key={group.key}
-                    asChild
+                    render={<li className="flex flex-col gap-1" />}
                     open={!folded}
                     onOpenChange={(open) => setFolded(group.key, !open)}
                   >
-                    <li className="flex flex-col gap-1">
-                      <SidebarGroupLabel
-                        asChild
-                        className="group/label desktop-pointer:hover:bg-sidebar-accent desktop-pointer:hover:text-sidebar-accent-foreground desktop-pointer:h-6 desktop-pointer:text-[11px] mt-1 h-10 justify-start gap-1 px-2 text-left text-sm [&>svg]:size-3"
-                      >
-                        <CollapsibleTrigger>
-                          {t(GROUP_LABEL_KEY[group.key])}
-                          <ChevronDownIcon
-                            aria-hidden
-                            className="transition-transform group-data-[state=closed]/label:-rotate-90"
-                          />
-                        </CollapsibleTrigger>
-                      </SidebarGroupLabel>
-                      <CollapsibleContent asChild>
-                        <ul className="flex flex-col gap-1">{group.sessions.map(row)}</ul>
-                      </CollapsibleContent>
-                      {/* A folded group still shows the open conversation, alone under its heading. */}
-                      {active && <ul className="flex flex-col gap-1">{row(active)}</ul>}
-                    </li>
+                    <SidebarGroupLabel
+                      render={<CollapsibleTrigger />}
+                      className="group/label desktop-pointer:hover:bg-sidebar-accent desktop-pointer:hover:text-sidebar-accent-foreground desktop-pointer:h-6 desktop-pointer:text-[11px] mt-1 h-10 justify-start gap-1 px-2 text-left text-sm [&>svg]:size-3"
+                    >
+                      {t(GROUP_LABEL_KEY[group.key])}
+                      <ChevronDownIcon
+                        aria-hidden
+                        className="-rotate-90 transition-transform group-data-panel-open/label:rotate-0"
+                      />
+                    </SidebarGroupLabel>
+                    <CollapsibleContent render={<ul className="flex flex-col gap-1" />}>
+                      {group.sessions.map(row)}
+                    </CollapsibleContent>
+                    {/* A folded group still shows the open conversation, alone under its heading. */}
+                    {active && <ul className="flex flex-col gap-1">{row(active)}</ul>}
                   </Collapsible>
                 );
               })}
@@ -457,7 +453,7 @@ function ConversationRow({
               wide as the « … ». */}
           <span
             data-testid="chat-session-trailing"
-            className="desktop-pointer:min-w-6 desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0 desktop-pointer:group-has-[[data-state=open]]/menu-item:opacity-0 flex shrink-0 items-center justify-end gap-2 transition-opacity"
+            className="desktop-pointer:min-w-6 desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0 desktop-pointer:group-has-[[data-popup-open]]/menu-item:opacity-0 flex shrink-0 items-center justify-end gap-2 transition-opacity"
           >
             {session.space_ids.length > 0 && (
               <span data-testid="chat-session-space-tiles" className="flex items-center">
@@ -497,7 +493,7 @@ function ConversationRow({
           aria-label={t(canWrite ? "threads.actions.openFor" : "threads.actions.spacesFor", {
             title: session.title ?? t("threads.new"),
           })}
-          className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-2 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
+          className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-2 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-popup-open:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
         >
           <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
         </button>
@@ -561,10 +557,7 @@ function ConversationActionsMenu({
   // Closing a dialog opened from the menu hands the focus back to its trigger. A trigger gone with
   // its deleted conversation takes nothing: the next conversation's composer keeps its autofocus.
   const menuTrigger = useRef<HTMLButtonElement>(null);
-  const restoreDialogFocus = (event: Event) => {
-    event.preventDefault();
-    if (menuTrigger.current?.isConnected) menuTrigger.current.focus();
-  };
+  const restoreDialogFocus = () => (menuTrigger.current?.isConnected ? menuTrigger.current : false);
   const title = session.title ?? t("threads.new");
 
   // The dialog stays open while the delete is in flight and on failure (it says
@@ -591,20 +584,18 @@ function ConversationActionsMenu({
     <>
       {canWrite ? (
         <DropdownMenu>
-          <DropdownMenuTrigger asChild ref={menuTrigger}>
-            {children}
-          </DropdownMenuTrigger>
+          <DropdownMenuTrigger ref={menuTrigger} render={children} />
           <DropdownMenuContent align="end" className="min-w-40" sheetTitle={title}>
             <DropdownMenuLabel data-testid="chat-menu-spaces" className={CONVERSATION_SPACES_CLASS}>
               <ConversationSpaces session={session} t={t} renderSpaces={renderSpaces} />
             </DropdownMenuLabel>
-            <DropdownMenuItem onSelect={() => setRenaming(true)}>
+            <DropdownMenuItem onClick={() => setRenaming(true)}>
               <PencilIcon />
               {t("threads.rename")}
             </DropdownMenuItem>
             <DropdownMenuItem
               variant="destructive"
-              onSelect={() => {
+              onClick={() => {
                 setDeleteFailed(false);
                 setConfirmingDelete(true);
               }}
@@ -618,7 +609,7 @@ function ConversationActionsMenu({
         // A reader has no action: a menu would be empty for assistive tech, so the spaces open
         // in a popover (a panel from the bottom on a phone, as the menu's).
         <Popover>
-          <PopoverTrigger asChild>{children}</PopoverTrigger>
+          <PopoverTrigger render={children} />
           <PopoverContent align="end" className="w-auto min-w-40 p-2">
             <div
               data-testid="chat-menu-spaces"
@@ -634,10 +625,7 @@ function ConversationActionsMenu({
           open={confirmingDelete}
           onOpenChange={(open) => !deleting && setConfirmingDelete(open)}
         >
-          <AlertDialogContent
-            data-testid="chat-delete-confirm"
-            onCloseAutoFocus={restoreDialogFocus}
-          >
+          <AlertDialogContent data-testid="chat-delete-confirm" finalFocus={restoreDialogFocus}>
             <AlertDialogHeader>
               <AlertDialogTitle>{t("threads.delete.title")}</AlertDialogTitle>
               <AlertDialogDescription>
@@ -668,7 +656,7 @@ function ConversationActionsMenu({
         <ConversationRenameDialog
           session={session}
           t={t}
-          onCloseAutoFocus={restoreDialogFocus}
+          finalFocus={restoreDialogFocus}
           onClose={() => setRenaming(false)}
         />
       )}
@@ -731,12 +719,12 @@ function ConversationRenameDialog({
   session,
   t,
   onClose,
-  onCloseAutoFocus,
+  finalFocus,
 }: {
   session: SessionSummary;
   t: ChatTranslate;
   onClose: () => void;
-  onCloseAutoFocus?: (event: Event) => void;
+  finalFocus?: () => HTMLElement | boolean;
 }) {
   const transport = useChatTransport();
   const queryClient = useQueryClient();
@@ -766,7 +754,7 @@ function ConversationRenameDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && !saving && onClose()}>
-      <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
+      <DialogContent finalFocus={finalFocus}>
         <DialogHeader>
           <DialogTitle>{t("threads.renameDialog.title")}</DialogTitle>
           <DialogDescription>{t("threads.renameDialog.description")}</DialogDescription>

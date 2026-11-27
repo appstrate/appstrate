@@ -421,16 +421,16 @@ export function ClientsTable({
     if (!canManageOrg) return trigger;
     return (
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+        <DropdownMenuTrigger render={trigger} />
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => setNewTier("space")}>
+          <DropdownMenuItem onClick={() => setNewTier("space")}>
             {spaceWording(
               "integration.clients.registerSpace",
               "integration.clients.registerSpaceIn",
             )}
           </DropdownMenuItem>
           <DropdownMenuItem
-            onSelect={() => setNewTier("org")}
+            onClick={() => setNewTier("org")}
             data-testid={inEmpty ? undefined : `org-oauth-client-register-${authKey}`}
           >
             {t("integration.clients.registerOrg")}

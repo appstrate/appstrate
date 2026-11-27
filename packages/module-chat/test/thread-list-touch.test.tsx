@@ -100,7 +100,7 @@ describe("a conversation row's « … »", () => {
     expect(trailing).toContain("desktop-pointer:min-w-6");
     expect(trailing).toContain("desktop-pointer:group-hover/menu-item:opacity-0");
     expect(trailing).toContain("desktop-pointer:group-focus-within/menu-item:opacity-0");
-    expect(trailing).toContain("desktop-pointer:group-has-[[data-state=open]]/menu-item:opacity-0");
+    expect(trailing).toContain("desktop-pointer:group-has-[[data-popup-open]]/menu-item:opacity-0");
   });
 });
 

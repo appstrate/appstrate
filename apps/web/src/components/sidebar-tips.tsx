@@ -299,14 +299,12 @@ function TipCard({
         <TipVisual id={id} />
       </div>
       <Button
-        asChild
         variant="outline"
         size="sm"
         className="bg-muted/40 mt-auto h-8 w-full shadow-xs"
+        render={<Link to={target} {...overlayIntent(target)} />}
       >
-        <Link to={target} {...overlayIntent(target)}>
-          {t(copy.action)}
-        </Link>
+        {t(copy.action)}
       </Button>
     </div>
   );

@@ -8,7 +8,7 @@ import { render } from "../../test/render.tsx";
 
 await i18nReady;
 
-// A Radix dialog renders into a portal, which `renderToStaticMarkup` drops: a
+// A dialog renders into a portal, which `renderToStaticMarkup` drops: a
 // panel that opened a dialog of its own would come out empty here. These
 // assertions therefore pin the invariant #2008 broke — the panes are plain
 // content, so the one dialog (`OverlayFrame`) stays open while they change.

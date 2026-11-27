@@ -23,7 +23,7 @@ export async function openAddKeyDialog(page: Page): Promise<Locator> {
   await page.goto(MODELS_SETTINGS_PATH);
   await page.getByRole("button", { name: "Actions", exact: true }).click();
   await page.getByRole("menuitem", { name: ADD_KEY }).click();
-  // Named, because a Radix select's popper is a `dialog` too.
+  // Named, because the settings overlay around it is a `dialog` too.
   const dialog = page.getByRole("dialog", { name: ADD_KEY });
   await expect(dialog).toBeVisible();
   return dialog;

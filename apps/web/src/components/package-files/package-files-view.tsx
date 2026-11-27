@@ -206,16 +206,18 @@ export function PackageFilesView({
                 </Button>
               ))}
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={t("agents:detail.files.compareWith")}
-                    title={t("agents:detail.files.compareWith")}
-                  >
-                    <GitCompareArrows />
-                  </Button>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t("agents:detail.files.compareWith")}
+                      title={t("agents:detail.files.compareWith")}
+                    />
+                  }
+                >
+                  <GitCompareArrows />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
                   {publishedVersions.length > 0 ? (
@@ -223,7 +225,7 @@ export function PackageFilesView({
                       <DropdownMenuItem
                         key={version.version}
                         disabled={version.version === selectedVersion}
-                        onSelect={() => compareParam.open(version.version)}
+                        onClick={() => compareParam.open(version.version)}
                       >
                         v{version.version}
                       </DropdownMenuItem>

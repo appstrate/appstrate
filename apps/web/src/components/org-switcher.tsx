@@ -297,33 +297,35 @@ export function OrgSwitcher() {
         }
       }}
     >
-      <PopoverTrigger asChild>
-        {/* It replaces the whole context, which the coloured avatar and the up/down chevron
-            (never a right chevron) say. The workspace stays visible even when there is only
-            one: a level nobody ever sees is a level nobody learns. */}
-        <button
-          type="button"
-          data-testid="org-switcher-button"
-          aria-label={t("switcher.ariaLabel", { current: contextNames })}
-          className={cn(
-            // No hover fill: the chevron answers the pointer, a focus ring the keyboard.
-            "group/trigger focus-visible:ring-ring flex items-center gap-2 rounded-lg px-2 text-sm outline-none focus-visible:ring-2",
-            TRIGGER_BOX,
-          )}
-        >
-          {/* The organization's tile, the space's as a badge on its corner. */}
-          <OrgSpaceTile ring="ring-sidebar" className="mr-1" />
-          {/* Two lines, each truncating by itself: a long organization name never hides the space. */}
-          <span className="flex min-w-0 flex-col text-left leading-tight md:flex-1">
-            <span className="truncate font-semibold" title={currentOrg.name}>
-              {currentOrg.name}
-            </span>
-            {spaceName && (
-              <span className="text-muted-foreground flex min-w-0 text-xs">{spaceName}</span>
+      {/* It replaces the whole context, which the coloured avatar and the up/down chevron
+          (never a right chevron) say. The workspace stays visible even when there is only
+          one: a level nobody ever sees is a level nobody learns. */}
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            data-testid="org-switcher-button"
+            aria-label={t("switcher.ariaLabel", { current: contextNames })}
+            className={cn(
+              // No hover fill: the chevron answers the pointer, a focus ring the keyboard.
+              "group/trigger focus-visible:ring-ring flex items-center gap-2 rounded-lg px-2 text-sm outline-none focus-visible:ring-2",
+              TRIGGER_BOX,
             )}
+          />
+        }
+      >
+        {/* The organization's tile, the space's as a badge on its corner. */}
+        <OrgSpaceTile ring="ring-sidebar" className="mr-1" />
+        {/* Two lines, each truncating by itself: a long organization name never hides the space. */}
+        <span className="flex min-w-0 flex-col text-left leading-tight md:flex-1">
+          <span className="truncate font-semibold" title={currentOrg.name}>
+            {currentOrg.name}
           </span>
-          <ChevronsUpDown className="text-muted-foreground group-hover/trigger:text-foreground group-data-[state=open]/trigger:text-foreground size-3.5 shrink-0 transition-colors" />
-        </button>
+          {spaceName && (
+            <span className="text-muted-foreground flex min-w-0 text-xs">{spaceName}</span>
+          )}
+        </span>
+        <ChevronsUpDown className="text-muted-foreground group-hover/trigger:text-foreground group-data-popup-open/trigger:text-foreground size-3.5 shrink-0 transition-colors" />
       </PopoverTrigger>
       <PopoverContent
         align="start"
@@ -331,7 +333,7 @@ export function OrgSwitcher() {
         sideOffset={6}
         // Beside the sidebar the panel takes what the viewport leaves it, never more. Below `md`
         // the primitive draws a bottom sheet, which scrolls: only the popover clips.
-        className="w-[660px] max-w-[min(calc(100vw-2rem),calc(var(--radix-popover-content-available-width)-0.5rem))] rounded-xl p-0 md:overflow-hidden"
+        className="w-[660px] max-w-[min(calc(100vw-2rem),calc(var(--available-width)-0.5rem))] rounded-xl p-0 md:overflow-hidden"
       >
         {/* The lists filter themselves (`matchesSearch`); cmdk only supplies the field. */}
         <Command shouldFilter={false} className="h-auto overflow-visible">

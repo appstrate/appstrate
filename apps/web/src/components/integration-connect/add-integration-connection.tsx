@@ -153,14 +153,14 @@ function AddButton({
     );
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <AddConnectionButton icon={<Plus />} label={label} chevron disabled={isPending} />
-      </DropdownMenuTrigger>
+      <DropdownMenuTrigger
+        render={<AddConnectionButton icon={<Plus />} label={label} chevron disabled={isPending} />}
+      />
       <DropdownMenuContent align="end">
         {offered.map((auth) => (
           <DropdownMenuItem
             key={auth.auth_key}
-            onSelect={() =>
+            onClick={() =>
               allowed.has(auth.auth_key) ? connect(auth) : onConfigure(auth.auth_key)
             }
           >

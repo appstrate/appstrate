@@ -47,10 +47,8 @@ describe("IntegrationToolPicker — required switch", () => {
   });
 
   it("is checked only for an entry marked required", () => {
-    expect(renderPicker({ id: ID, version: "*", required: true })).toContain(
-      'data-state="checked"',
-    );
-    expect(renderPicker({ id: ID, version: "*" })).not.toContain('data-state="checked"');
+    expect(renderPicker({ id: ID, version: "*", required: true })).toContain('data-checked=""');
+    expect(renderPicker({ id: ID, version: "*" })).not.toContain('data-checked=""');
   });
 });
 
@@ -107,7 +105,7 @@ describe("IntegrationToolPicker — inferred scopes", () => {
 
   it("shows none for tools inherited from `default_tools`, which stay shown as selected", () => {
     const html = renderOver({}, ["search"]);
-    expect(html).toContain('data-state="checked"');
+    expect(html).toContain('data-checked=""');
     expect(html).not.toContain(INFERRED);
     // The agent's explicit scopes are all the run requires then.
     const pinned = renderOver({ scopes: ["extra"] }, ["search"]);
@@ -143,7 +141,7 @@ describe("IntegrationToolPicker — inferred scopes", () => {
       );
       expect(html).toContain(`integ-wildcard-${ID}`);
       expect(html.includes(WILDCARD_NOTICE)).toBe(selected);
-      expect(html.includes('data-state="checked"')).toBe(selected);
+      expect(html.includes('data-checked=""')).toBe(selected);
     }
   });
 });

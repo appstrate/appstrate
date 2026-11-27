@@ -109,10 +109,10 @@ function GrantingSpaces({ spaceIds }: { spaceIds: readonly string[] }) {
   const names = spaceLabels(spaces, t);
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={0} role="img" aria-label={names} className="ml-auto shrink-0">
-          <SpaceTileStack spaces={spaces} />
-        </span>
+      <TooltipTrigger
+        render={<span tabIndex={0} role="img" aria-label={names} className="ml-auto shrink-0" />}
+      >
+        <SpaceTileStack spaces={spaces} />
       </TooltipTrigger>
       <TooltipContent>{names}</TooltipContent>
     </Tooltip>

@@ -155,7 +155,7 @@ export function PinFormModal({
   );
 }
 
-/** The fields, without the dialog chrome (a Radix dialog renders nothing without a DOM). */
+/** The fields, without the dialog chrome (a dialog renders nothing without a DOM). */
 export function PinFormFields({
   agentFixed,
   agents,

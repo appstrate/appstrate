@@ -491,6 +491,9 @@ function AddSpaceMemberModal({
             ) : (
               <Select
                 value={userId}
+                items={Object.fromEntries(
+                  candidates.map((member) => [member.userId, memberLabel(member)]),
+                )}
                 onValueChange={(value) => {
                   setUserId(value);
                   setFormError(null);

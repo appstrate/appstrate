@@ -33,7 +33,9 @@ function turn(index: number, contextTokens: number, contextWindow?: number): Run
 const TURNS = [turn(0, 40_000, 200_000), turn(1, 187_000, 200_000), turn(2, 128_000, 200_000)];
 
 const nbsp = "\u00a0";
-const text = (html: string) => html.replace(/<[^>]*>/g, "");
+// Base UI's progressbar carries a visually hidden "x" of its own: not part of the readout.
+const text = (html: string) =>
+  html.replace(/<span role="presentation"[^>]*>x<\/span>/g, "").replace(/<[^>]*>/g, "");
 // The window renders as "128 k" (nbsp) in the hint; only the part before it is stable here.
 const assumedHint = agentsFr["run.contextGaugeWindowAssumed"].split("{{window}}")[0]!.trim();
 const valueText = (html: string) => /aria-valuetext="([^"]*)"/.exec(html)?.[1] ?? "";

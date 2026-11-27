@@ -727,11 +727,12 @@ export function LogViewer({
           <div className="flex items-center gap-2">
             {headerActions}
             <PageActionsMenu>
-              <DropdownMenuItem onSelect={handleCopy}>
+              <DropdownMenuItem onClick={handleCopy}>
                 {copied ? <Check /> : <Copy />}
                 {copied ? t("common:btn.copied") : t("log.copyLogs")}
               </DropdownMenuItem>
               <DropdownMenuCheckboxItem
+                closeOnClick
                 checked={autoScroll}
                 onCheckedChange={(checked) => (checked ? followLatest() : setAutoScroll(false))}
               >

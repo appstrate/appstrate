@@ -47,32 +47,36 @@ export function ProviderPicker({
 
   const rows = buildProviderPickerRows(registry);
 
-  const renderRow = (row: (typeof rows)[number]) => {
+  type Row = (typeof rows)[number];
+  const rowValue = (row: Row) =>
+    row.kind === "customEndpoint" ? CUSTOM_ENDPOINT_ID : row.entry.providerId;
+  const rowLabel = (row: Row) => {
     if (row.kind === "customEndpoint") {
       return (
-        <SelectItem key={CUSTOM_ENDPOINT_ID} value={CUSTOM_ENDPOINT_ID}>
-          <span className="flex items-center gap-2">
-            <Server className="size-4" />
-            {t("models.form.customEndpoint")}
-          </span>
-        </SelectItem>
+        <span className="flex items-center gap-2">
+          <Server className="size-4" />
+          {t("models.form.customEndpoint")}
+        </span>
       );
     }
     const Icon = getProviderIcon(row.entry);
     return (
-      <SelectItem key={row.entry.providerId} value={row.entry.providerId}>
-        <span className="flex items-center gap-2">
-          {Icon && <Icon className="size-4" />}
-          {row.entry.displayName}
-          {row.entry.authMode === "oauth2" && (
-            <span className="text-muted-foreground ml-1 text-[0.7rem] uppercase">
-              {t("credentials.oauth.badgeOauth")}
-            </span>
-          )}
-        </span>
-      </SelectItem>
+      <span className="flex items-center gap-2">
+        {Icon && <Icon className="size-4" />}
+        {row.entry.displayName}
+        {row.entry.authMode === "oauth2" && (
+          <span className="text-muted-foreground ml-1 text-[0.7rem] uppercase">
+            {t("credentials.oauth.badgeOauth")}
+          </span>
+        )}
+      </span>
     );
   };
+  const renderRow = (row: Row) => (
+    <SelectItem key={rowValue(row)} value={rowValue(row)}>
+      {rowLabel(row)}
+    </SelectItem>
+  );
 
   const group = (items: typeof rows, label: string) =>
     items.length > 0 && (
@@ -85,6 +89,7 @@ export function ProviderPicker({
   return (
     <Select
       value={overridable ? CUSTOM_ENDPOINT_ID : providerId}
+      items={Object.fromEntries(rows.map((row) => [rowValue(row), rowLabel(row)]))}
       disabled={disabled}
       onValueChange={(picked) => onChange(pickedProviderId(picked, registry))}
     >

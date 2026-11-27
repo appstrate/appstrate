@@ -6,7 +6,7 @@
  * gating on the `roles:*` permissions.
  *
  * What is asserted here is what this harness can see. The dialog itself is a
- * Radix `Dialog`, and its selects are Radix `Select`s — both render through
+ * `Dialog`, and its selects are `Select`s — both render through
  * portals, so `renderToStaticMarkup` returns an empty string for the whole
  * dialog. Its interactive half (the radio options, the space defaulting to the
  * current one, the role list) is therefore covered by

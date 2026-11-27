@@ -100,9 +100,9 @@ for (const appearance of [
       return route.fulfill({ json: { ...image, preview_url: "/api/files/file_grid/content" } });
     });
     await page.goto("/files");
-    const cards = page.getByRole("radio", { name: "Vue cartes", exact: true });
-    const table = page.getByRole("radio", { name: "Vue tableau", exact: true });
-    await expect(cards).toBeChecked();
+    const cards = page.getByRole("button", { name: "Vue cartes", exact: true });
+    const table = page.getByRole("button", { name: "Vue tableau", exact: true });
+    await expect(cards).toHaveAttribute("aria-pressed", "true");
     const tile = page.getByRole("link", { name: "Ouvrir: capture.png", exact: true });
     await expect(tile).toBeVisible();
     await expect
@@ -142,10 +142,10 @@ for (const appearance of [
     await table.click();
     await expect(page.getByRole("table", { name: "Documents", exact: true })).toBeVisible();
     await page.reload();
-    await expect(table).toBeChecked();
+    await expect(table).toHaveAttribute("aria-pressed", "true");
     await cards.click();
     await page.reload();
-    await expect(cards).toBeChecked();
+    await expect(cards).toHaveAttribute("aria-pressed", "true");
     const search = page.getByRole("textbox", { name: /Rechercher des fichiers/ });
     await search.fill("absent");
     await expect(
@@ -198,7 +198,7 @@ for (const view of ["Vue cartes", "Vue tableau"]) {
         await route.fulfill({ json: { object: "list", data: [], hasMore: false } });
       });
       await page.goto("/files");
-      await page.getByRole("radio", { name: view, exact: true }).click();
+      await page.getByRole("button", { name: view, exact: true }).click();
       await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
       const pending = page.waitForRequest(
         (request) => new URL(request.url()).pathname === "/api/files",
