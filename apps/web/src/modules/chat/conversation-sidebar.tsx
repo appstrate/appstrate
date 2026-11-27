@@ -304,35 +304,36 @@ function ConversationContext({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col p-3">
+    <div className="flex min-h-0 flex-col p-3">
       <Tabs
         value={activeTab.id}
         onValueChange={(tab) =>
           dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })
         }
         className={cn(
-          "bg-card text-card-foreground flex min-h-0 flex-1 flex-col gap-0 border",
+          "bg-card text-card-foreground flex min-h-0 flex-col gap-0 border",
           FLOATING_FRAME,
         )}
       >
-        {/* Every tab keeps its name in words: a narrow panel drops the icons and tightens the
-            tabs (as a detail page's do below `sm`), and scrolls them sideways if they still do
-            not fit. 40 px tabs on touch, denser under a mouse. */}
-        <AgentDetailPaneHeader className="@container justify-end gap-2">
-          <div className="no-scrollbar scroll-fade-x min-w-0 overflow-x-auto">
-            <TabsList className="h-auto w-max p-1" aria-label={t("context.label")}>
-              {tabs.map(({ id, Icon, label }) => (
-                <TabsTrigger
-                  key={id}
-                  value={id}
-                  className="desktop-pointer:h-7 h-10 gap-1.5 px-2 @sm:px-3"
-                >
-                  <Icon aria-hidden="true" className="hidden size-4 shrink-0 @sm:block" />
-                  {label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
+        {/* One icon per tab, its name as the accessible name and in a tooltip: the tabs fit
+            any panel width. 40 px targets on touch, denser under a mouse. */}
+        <AgentDetailPaneHeader className="justify-between gap-2">
+          <TabsList className="h-auto p-1" aria-label={t("context.label")}>
+            {tabs.map(({ id, Icon, label }) => (
+              <Tooltip key={id}>
+                <TooltipTrigger asChild>
+                  <TabsTrigger
+                    value={id}
+                    aria-label={label}
+                    className="desktop-pointer:size-7 size-10 px-0"
+                  >
+                    <Icon aria-hidden="true" className="size-4" />
+                  </TabsTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{label}</TooltipContent>
+              </Tooltip>
+            ))}
+          </TabsList>
           {closable ? (
             <Button
               variant="ghost"
@@ -457,8 +458,9 @@ export function ConversationSidebar({
           aria-label={t("context.label")}
           inert={!state.expanded}
           className={cn(
-            // The whole height whatever the tab: switching tabs never resizes the panel.
-            "ease-surface absolute top-0 right-4 bottom-0 flex flex-col transition-[opacity,translate]",
+            "ease-surface absolute top-0 right-4 flex max-h-full flex-col transition-[opacity,translate]",
+            // A file takes the whole height; the tabs' block is as tall as its content.
+            shownFile(state) && "bottom-0",
             state.expanded
               ? "duration-base translate-x-0 opacity-100"
               : "duration-fast pointer-events-none translate-x-6 opacity-0",

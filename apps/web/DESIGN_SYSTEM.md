@@ -931,8 +931,8 @@ without scrolling: the title and its gist, then the activity in one view (its ru
 files and its integration calls, lookups included, the latest of each on one line, a
 failure on its own line, each group leading to its tab); with nothing yet, an `EmptyState`
 saying what will show there, and an unsaved conversation's `EmptyState` as on the other tabs.
-Beside it, Runs, Files, Tools and Info, each named in words on every format: a narrow panel drops the
-tabs' icons, tightens them and scrolls them sideways past its width. Each group of the
+Beside it, Runs, Files, Tools and Info. Each tab is an icon, named by its accessible name and a
+tooltip, so the tabs fit any width of the panel. Each group of the
 Summary stands on its own read (waiting in its shape, or saying its failure in its place);
 the calls, held by the conversation, show at once. Info (`conversation-info.tsx`) shows the
 models and tokens, the reader's access and the details as titled sections, always open; for an
@@ -941,9 +941,9 @@ calls as the open chat holds them, the turn in flight included, else as stored
 (`@appstrate/module-chat/conversation-tools`, `live-conversation`), named as their cards
 name them (`tool-presentation.ts`), lookups behind a switch the panel keeps; a call's
 detail is the card's (`tool-call-detail`). A file or a call opened from the Summary leads
-back to it. It has one size whatever it shows: the conversation's whole height, and one width
-(400 px by default, from 300 px to 60% of the chat area) remembered per browser
-(`appstrate-chat-context-width`), so switching tabs never resizes it. Both widths, the sidebar's
+back to it. Its height follows its content (the conversation's whole height for a previewed file); its
+width is one for every tab (400 px by default, from 300 px to 60% of the chat area), remembered
+per browser (`appstrate-chat-context-width`), so switching tabs never changes it. Both widths, the sidebar's
 and this one, are a `createPanelWidthStore` (`stores/panel-width-store.ts`). `PanelResizeHandle` (`components/panel-resize.tsx`) is the one resize
 handle for a panel's edge: `edge="left"` for a panel that grows leftward (this context panel),
 `edge="right"` for one that grows rightward (the shell's sidebar). The arrow pointing past the edge
