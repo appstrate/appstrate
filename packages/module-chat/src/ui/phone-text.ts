@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // A landscape phone can cross md. Editable fields stay at 1rem on touch (iOS zooms into smaller
-// ones); the pointer decides, never the width. The composer and the user's bubble share one size.
+// ones): their font size follows the pointer, never the width. The composer and the user's bubble
+// share one size.
 
 /** The composer's Lexical editor, styled through the library's `aui-lexical-*` classes. */
 export const COMPOSER_INPUT_CLASS =

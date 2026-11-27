@@ -75,11 +75,12 @@ describe("the conversation list", () => {
     expect(html).toContain('aria-label="threads.actions.openFor"');
   });
 
-  it("offers a reader no new conversation, and no row action", () => {
+  it("offers a reader no new conversation, and rows naming their spaces alone", () => {
     const html = render(["chat:read"]);
     expect(html).toContain("Budget");
     expect(html).not.toContain("<span>threads.new</span>");
     expect(html).not.toContain('aria-label="threads.actions.openFor"');
+    expect(html).toContain('aria-label="threads.actions.spacesFor"');
   });
 
   it("loads more with a plain button, which leaves the phone's drawer open", () => {

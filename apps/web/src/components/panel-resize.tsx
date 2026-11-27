@@ -62,6 +62,8 @@ export function PanelResizeHandle({
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    // No text selection while a fast drag outruns the handle.
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     drag.current = { x: event.clientX, width: clamp(width) };
     latest.current = drag.current.width;
@@ -102,6 +104,7 @@ export function PanelResizeHandle({
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
+      onLostPointerCapture={endDrag}
       onKeyDown={onKeyDown}
       onDoubleClick={() => onCommit(null)}
     />

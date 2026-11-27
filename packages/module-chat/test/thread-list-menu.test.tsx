@@ -78,8 +78,10 @@ describe("the open conversation's « … » in the header", () => {
     expect(button).toContain("desktop-pointer:size-8");
   });
 
-  it("is there for a reader too, opening a popover, not an (empty) menu", () => {
-    const button = trigger(header("chs_1", reader), "threads\\.actions\\.conversation");
+  it("is there for a reader too, named for the spaces it opens in a popover, not an (empty) menu", () => {
+    const html = header("chs_1", reader);
+    expect(trigger(html, "threads\\.actions\\.conversation")).toBeUndefined();
+    const button = trigger(html, "threads\\.actions\\.spaces");
     expect(button).toContain('aria-haspopup="dialog"');
     expect(button).toContain('data-testid="chat-conversation-menu"');
   });

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useSyncExternalStore } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { LibraryBig, Menu, PanelLeft, Settings, X, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -207,12 +207,24 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   );
 }
 
+function subscribeToResize(onChange: () => void) {
+  window.addEventListener("resize", onChange);
+  return () => window.removeEventListener("resize", onChange);
+}
+
+const readWindowWidth = () => window.innerWidth;
+
+/** The window's width, live. */
+function useWindowWidth(): number {
+  // Also the server snapshot: the shell's tests render it to a string.
+  return useSyncExternalStore(subscribeToResize, readWindowWidth, readWindowWidth);
+}
+
 /**
  * The chat sidebar's edge, dragged to widen or narrow it on desktop: conversation titles are worth
  * the room. Remembered per browser; double-click resets it. A phone's drawer is the whole screen
  * and a collapsed sidebar is off screen: neither has an edge to drag, nor does a touch screen (the
- * handle shows under a fine pointer only). It straddles the border by 2 px to stay clear of the
- * scroll wrapper's scrollbar.
+ * handle shows under a fine pointer only). It straddles the border.
  */
 function ChatSidebarResizeHandle() {
   const { t } = useTranslation();
@@ -221,9 +233,8 @@ function ChatSidebarResizeHandle() {
   const setLive = useChatSidebarWidthStore((store) => store.setLive);
   const commit = useChatSidebarWidthStore((store) => store.commit);
   const setDragging = useChatSidebarWidthStore((store) => store.setDragging);
+  const max = chatSidebarMaxWidth(useWindowWidth());
   if (isMobile || state === "collapsed") return null;
-  // The window's width is read when used, not followed: the CSS width does that (`app.tsx`).
-  const max = chatSidebarMaxWidth(window.innerWidth);
   return (
     <PanelResizeHandle
       edge="right"
@@ -232,7 +243,7 @@ function ChatSidebarResizeHandle() {
       width={Math.min(width ?? CHAT_SIDEBAR_WIDTH.default, max)}
       min={CHAT_SIDEBAR_WIDTH.min}
       max={max}
-      clamp={(next) => clampChatSidebarWidth(next, chatSidebarMaxWidth(window.innerWidth))}
+      clamp={(next) => clampChatSidebarWidth(next, max)}
       onLive={setLive}
       onCommit={commit}
       onDraggingChange={setDragging}

@@ -105,10 +105,20 @@ describe("a date group's heading", () => {
     expect(html).not.toContain("Budget");
   });
 
-  it("keeps a folded group open while it holds the active conversation", () => {
+  it("shows only the active row under a folded group's heading, still folded", () => {
     stubStorage({ [COLLAPSED_GROUPS_KEY]: JSON.stringify(["today"]) });
-    expect(heading(render("chs_2"))).toContain('aria-expanded="true"');
-    expect(heading(render("chs_other"))).toContain('aria-expanded="false"');
+    const html = render("chs_2");
+    expect(heading(html)).toContain('aria-expanded="false"');
+    expect(html).toContain("Roadmap");
+    expect(html).not.toContain("Budget");
+  });
+
+  it("shows no row under a folded group that does not hold the active conversation", () => {
+    stubStorage({ [COLLAPSED_GROUPS_KEY]: JSON.stringify(["today"]) });
+    const html = render("chs_other");
+    expect(heading(html)).toContain('aria-expanded="false"');
+    expect(html).not.toContain("Roadmap");
+    expect(html).not.toContain("Budget");
   });
 
   it("ignores garbage and unknown keys in the storage", () => {

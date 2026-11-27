@@ -49,9 +49,28 @@ describe("the title derived from a first message", () => {
     expect(titleFromText("ibrahim")).toBe("Ibrahim");
   });
 
-  it("keeps a brand-style lowercase start (second letter a capital)", () => {
-    expect(titleFromText("iPhone ne marche plus")).toBe("iPhone ne marche plus");
-    expect(titleFromText("eBay")).toBe("eBay");
+  it("upper-cases a plain lowercase first word ending on punctuation", () => {
+    expect(titleFromText("quel temps")).toBe("Quel temps");
+    expect(titleFromText("salut, ça va")).toBe("Salut, ça va");
+    expect(titleFromText("c'est urgent")).toBe("C'est urgent");
+    expect(titleFromText("j’ai une question")).toBe("J’ai une question");
+    expect(titleFromText("merci!")).toBe("Merci!");
+    expect(titleFromText("bon… alors")).toBe("Bon… alors");
+  });
+
+  it("keeps a first word holding a capital, a digit or a symbol as typed", () => {
+    for (const text of [
+      "iPhone ne marche plus",
+      "eBay",
+      "macOS bug",
+      "https://x.com/page",
+      "node_modules trop gros",
+      "v2 bug",
+      "e-mail perdu",
+      "user@example.com",
+    ]) {
+      expect(titleFromText(text)).toBe(text);
+    }
   });
 
   it("leaves a capital or a non-letter start unchanged", () => {

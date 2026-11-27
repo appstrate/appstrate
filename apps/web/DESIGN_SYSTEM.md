@@ -910,8 +910,8 @@ resizes from 224 to 480 px, capped at 30% of the window and never below 16rem, s
 under a fine pointer (a phone, a touch screen and a collapsed sidebar have no handle). Studio's
 sidebar keeps a fixed width. The list's date groups fold from their heading, a button with
 `aria-expanded` whose chevron turns when folded and which fills on hover under a fine pointer; its
-text is 14 px on touch and 11 px under a fine pointer, and the group holding the open
-conversation stays open; folded groups are remembered per browser (`appstrate-chat-collapsed-groups`). Search results are
+text is 14 px on touch and 11 px under a fine pointer. A folded group holding the open
+conversation still shows that one row under its heading, the others hidden (as Slack does); folded groups are remembered per browser (`appstrate-chat-collapsed-groups`). Search results are
 never grouped, so never folded. The chat
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
 import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`); a failed one is softened, never hidden: no red border or lead icon, its message stays visible under the header in muted text, and a small red cross (`FailedGlyph`, named « Échec · HTTP 404 » for assistive tech) ends the row, the same cross, decorative, preceding the muted failed count of a folded lookups group, running or settled; only what ends the turn stays red. The HTTP status is no badge: it is in the call's detail. Reasoning is

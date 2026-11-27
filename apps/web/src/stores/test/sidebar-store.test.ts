@@ -44,10 +44,6 @@ describe("the chat sidebar's width", () => {
     expect(chatSidebarWidthCss(null)).toBe("min(256px, max(256px, 30vw))");
   });
 
-  it("defaults to shadcn's 16rem sidebar", () => {
-    expect(CHAT_SIDEBAR_WIDTH.default).toBe(256);
-  });
-
   it("reads a stored width back, clamped", () => {
     expect(parseChatSidebarWidth(320)).toBe(320);
     expect(parseChatSidebarWidth(100)).toBe(CHAT_SIDEBAR_WIDTH.min);

@@ -21,7 +21,7 @@
  * fill as Studio's, or the two products would not read as one app.
  */
 
-import { useEffect, useRef, useState, type ElementType, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -148,8 +148,8 @@ function useDebouncedTerm(input: string, delay: number): string {
  *
  * Every row is one line, for a writer as for a reader: the title, then one block
  * on the right — the tiles of the spaces the conversation touched (their names in
- * `title`, and in a writer's « … » menu), then its status when it has one
- * (generating, unread); a writer's « … » takes the whole block's place on hover.
+ * `title`, and in the row's « … »), then its status when it has one (generating,
+ * unread); the « … » takes the whole block's place on hover.
  * The date is the group's (« Aujourd'hui », …), not the row's.
  *
  * A conversation whose reply arrived while the user was elsewhere reads as
@@ -329,38 +329,41 @@ export function ChatConversationList({
               : undefined
           }
         >
-          {isLoading && <ConversationGroupSkeleton canWrite={canWrite} dated={!searching} />}
+          {isLoading && <ConversationGroupSkeleton dated={!searching} />}
           {searching
             ? list.map(row)
-            : groups.map((group) => (
-                <Collapsible
-                  key={group.key}
-                  asChild
-                  // Never folded over the open conversation: it must stay visible.
-                  open={
-                    !collapsedGroups.has(group.key) || group.sessions.some((s) => s.id === activeId)
-                  }
-                  onOpenChange={(open) => setFolded(group.key, !open)}
-                >
-                  <li className="flex flex-col gap-1">
-                    <SidebarGroupLabel
-                      asChild
-                      className="group/label desktop-pointer:hover:bg-sidebar-accent desktop-pointer:hover:text-sidebar-accent-foreground desktop-pointer:h-6 desktop-pointer:text-[11px] mt-1 h-10 justify-start gap-1 px-2 text-left text-sm [&>svg]:size-3"
-                    >
-                      <CollapsibleTrigger>
-                        {t(GROUP_LABEL_KEY[group.key])}
-                        <ChevronDownIcon
-                          aria-hidden
-                          className="transition-transform group-data-[state=closed]/label:-rotate-90"
-                        />
-                      </CollapsibleTrigger>
-                    </SidebarGroupLabel>
-                    <CollapsibleContent asChild>
-                      <ul className="flex flex-col gap-1">{group.sessions.map(row)}</ul>
-                    </CollapsibleContent>
-                  </li>
-                </Collapsible>
-              ))}
+            : groups.map((group) => {
+                const folded = collapsedGroups.has(group.key);
+                const active = folded ? group.sessions.find((s) => s.id === activeId) : undefined;
+                return (
+                  <Collapsible
+                    key={group.key}
+                    asChild
+                    open={!folded}
+                    onOpenChange={(open) => setFolded(group.key, !open)}
+                  >
+                    <li className="flex flex-col gap-1">
+                      <SidebarGroupLabel
+                        asChild
+                        className="group/label desktop-pointer:hover:bg-sidebar-accent desktop-pointer:hover:text-sidebar-accent-foreground desktop-pointer:h-6 desktop-pointer:text-[11px] mt-1 h-10 justify-start gap-1 px-2 text-left text-sm [&>svg]:size-3"
+                      >
+                        <CollapsibleTrigger>
+                          {t(GROUP_LABEL_KEY[group.key])}
+                          <ChevronDownIcon
+                            aria-hidden
+                            className="transition-transform group-data-[state=closed]/label:-rotate-90"
+                          />
+                        </CollapsibleTrigger>
+                      </SidebarGroupLabel>
+                      <CollapsibleContent asChild>
+                        <ul className="flex flex-col gap-1">{group.sessions.map(row)}</ul>
+                      </CollapsibleContent>
+                      {/* A folded group still shows the open conversation, alone under its heading. */}
+                      {active && <ul className="flex flex-col gap-1">{row(active)}</ul>}
+                    </li>
+                  </Collapsible>
+                );
+              })}
           {/* A plain button, not a menu row: a menu row closes the phone's
               drawer, and loading more must leave it open on the list. */}
           {hasNextPage && (
@@ -430,13 +433,12 @@ function ConversationRow({
         isActive={active}
         onClick={() => select?.(session.id)}
         size="lg"
-        // One line: a thumb's 48px on touch, Studio's 32px rows under a mouse. On touch a writer's
-        // « … » is always there, at the right of the row: the padding keeps the row clear of it.
+        // One line: a thumb's 48px on touch, Studio's 32px rows under a mouse. On touch the « … » is
+        // always there, at the right of the row: the padding keeps the row clear of it.
         // The host's space tiles ring themselves in `--tile-ring`: the row's background in each
         // of its states.
         className={cn(
-          "desktop-pointer:h-8",
-          canWrite && "desktop-pointer:pr-2 pr-11",
+          "desktop-pointer:h-8 desktop-pointer:pr-2 pr-11",
           "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
         )}
       >
@@ -450,93 +452,80 @@ function ConversationRow({
             {session.title ?? t("threads.new")}
           </span>
           {/* The right side, one block: the tiles of the spaces it touched, then its status when
-              it has one (generating, unread). Under a mouse a writer's « … » takes the place of
-              the whole block on hover, on focus and while its menu is open, so the block is at
-              least as wide as the « … »; a reader has none, so for them hover changes nothing. */}
-          {(canWrite || session.space_ids.length > 0 || session.generating || unread) && (
-            <span
-              data-testid="chat-session-trailing"
-              className={cn(
-                "flex shrink-0 items-center justify-end gap-2",
-                canWrite &&
-                  "desktop-pointer:min-w-6 desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0 desktop-pointer:group-has-[[data-state=open]]/menu-item:opacity-0 transition-opacity",
-              )}
-            >
-              {session.space_ids.length > 0 && (
-                <span data-testid="chat-session-space-tiles" className="flex items-center">
-                  {renderSpaces(session.space_ids, { tilesOnly: true })}
-                </span>
-              )}
-              {session.generating ? (
-                <Spinner
+              it has one (generating, unread). Under a mouse the « … » takes the place of the whole
+              block on hover, on focus and while its popup is open, so the block is at least as
+              wide as the « … ». */}
+          <span
+            data-testid="chat-session-trailing"
+            className="desktop-pointer:min-w-6 desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0 desktop-pointer:group-has-[[data-state=open]]/menu-item:opacity-0 flex shrink-0 items-center justify-end gap-2 transition-opacity"
+          >
+            {session.space_ids.length > 0 && (
+              <span data-testid="chat-session-space-tiles" className="flex items-center">
+                {renderSpaces(session.space_ids, { tilesOnly: true })}
+              </span>
+            )}
+            {session.generating ? (
+              <Spinner
+                data-testid="chat-session-status"
+                className="text-sidebar-foreground/70 size-3.5"
+                aria-label={t("threads.generating")}
+              />
+            ) : (
+              unread && (
+                <span
                   data-testid="chat-session-status"
-                  className="text-sidebar-foreground/70 size-3.5"
-                  aria-label={t("threads.generating")}
+                  className="bg-primary size-2 rounded-full"
+                  aria-label={t("threads.unread")}
+                  title={t("threads.unread")}
                 />
-              ) : (
-                unread && (
-                  <span
-                    data-testid="chat-session-status"
-                    className="bg-primary size-2 rounded-full"
-                    aria-label={t("threads.unread")}
-                    title={t("threads.unread")}
-                  />
-                )
-              )}
-            </span>
-          )}
+              )
+            )}
+          </span>
         </span>
       </SidebarMenuButton>
       {/* One « … », the same items on every format: always there and a thumb's size on touch,
-          revealed by hover or focus under a mouse. */}
-      {canWrite && (
-        <ConversationActionsMenu
-          session={session}
-          active={active}
-          t={t}
-          canWrite
-          renderSpaces={renderSpaces}
+          revealed by hover or focus under a mouse. A reader's names the spaces alone. */}
+      <ConversationActionsMenu
+        session={session}
+        active={active}
+        t={t}
+        canWrite={canWrite}
+        renderSpaces={renderSpaces}
+      >
+        <button
+          type="button"
+          aria-label={t(canWrite ? "threads.actions.openFor" : "threads.actions.spacesFor", {
+            title: session.title ?? t("threads.new"),
+          })}
+          className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-2 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
         >
-          <button
-            type="button"
-            aria-label={t("threads.actions.openFor", {
-              title: session.title ?? t("threads.new"),
-            })}
-            className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-2 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
-          >
-            <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
-          </button>
-        </ConversationActionsMenu>
-      )}
+          <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
+        </button>
+      </ConversationActionsMenu>
     </SidebarMenuItem>
   );
 }
 
-/** The spaces a conversation reaches, by name, in a menu's label or a popover's body. */
+/** The classes of the element holding a conversation's spaces, in a menu's label or a popover. */
+const CONVERSATION_SPACES_CLASS = cn(
+  "text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)]",
+  NOTE_TEXT_CLASS,
+);
+
+/** The spaces a conversation reaches, by name; the caller wraps them. */
 function ConversationSpaces({
-  as: Comp,
   session,
   t,
   renderSpaces,
 }: {
-  as: ElementType;
   session: SessionSummary;
   t: ChatTranslate;
   renderSpaces: RenderSpaces;
 }) {
   // A row shows their tiles alone, and a touch has no hover to read their `title`.
-  return (
-    <Comp
-      data-testid="chat-menu-spaces"
-      className={cn(
-        "text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)]",
-        NOTE_TEXT_CLASS,
-        Comp === "div" && "px-2 py-1.5",
-      )}
-    >
-      {session.space_ids.length > 0 ? renderSpaces(session.space_ids) : t("common:overview.title")}
-    </Comp>
-  );
+  return session.space_ids.length > 0
+    ? renderSpaces(session.space_ids)
+    : t("common:overview.title");
 }
 
 /**
@@ -569,13 +558,12 @@ function ConversationActionsMenu({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteFailed, setDeleteFailed] = useState(false);
-  // Closing a dialog opened from the menu hands the focus back to its trigger.
+  // Closing a dialog opened from the menu hands the focus back to its trigger. A trigger gone with
+  // its deleted conversation takes nothing: the next conversation's composer keeps its autofocus.
   const menuTrigger = useRef<HTMLButtonElement>(null);
   const restoreDialogFocus = (event: Event) => {
-    if (menuTrigger.current?.isConnected) {
-      event.preventDefault();
-      menuTrigger.current.focus();
-    }
+    event.preventDefault();
+    if (menuTrigger.current?.isConnected) menuTrigger.current.focus();
   };
   const title = session.title ?? t("threads.new");
 
@@ -607,12 +595,9 @@ function ConversationActionsMenu({
             {children}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-40" sheetTitle={title}>
-            <ConversationSpaces
-              as={DropdownMenuLabel}
-              session={session}
-              t={t}
-              renderSpaces={renderSpaces}
-            />
+            <DropdownMenuLabel data-testid="chat-menu-spaces" className={CONVERSATION_SPACES_CLASS}>
+              <ConversationSpaces session={session} t={t} renderSpaces={renderSpaces} />
+            </DropdownMenuLabel>
             <DropdownMenuItem onSelect={() => setRenaming(true)}>
               <PencilIcon />
               {t("threads.rename")}
@@ -635,7 +620,12 @@ function ConversationActionsMenu({
         <Popover>
           <PopoverTrigger asChild>{children}</PopoverTrigger>
           <PopoverContent align="end" className="w-auto min-w-40 p-2">
-            <ConversationSpaces as="div" session={session} t={t} renderSpaces={renderSpaces} />
+            <div
+              data-testid="chat-menu-spaces"
+              className={cn(CONVERSATION_SPACES_CLASS, "px-2 py-1.5")}
+            >
+              <ConversationSpaces session={session} t={t} renderSpaces={renderSpaces} />
+            </div>
           </PopoverContent>
         </Popover>
       )}
@@ -706,21 +696,24 @@ export function ChatConversationMenu({
   const transport = useChatTransport() ?? undefined;
   const session = useActiveSession(transport, activeId ?? "", activeId !== null);
   if (!session) return null;
+  const canWrite = can("chat:write");
+  // Named after what it opens: a reader's lists the spaces alone.
+  const label = t(canWrite ? "threads.actions.conversation" : "threads.actions.spaces");
   return (
     <ConversationActionsMenu
       key={session.id}
       session={session}
       active
       t={t}
-      canWrite={can("chat:write")}
+      canWrite={canWrite}
       renderSpaces={renderSpaces}
     >
       <Button
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label={t("threads.actions.conversation")}
-        title={t("threads.actions.conversation")}
+        aria-label={label}
+        title={label}
         data-testid="chat-conversation-menu"
       >
         <EllipsisIcon className="size-4" />
