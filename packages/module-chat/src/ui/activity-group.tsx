@@ -111,32 +111,34 @@ export function ActivityGroup({
           <span className="text-muted-foreground flex h-6 w-4 shrink-0 items-center justify-center">
             {running ? <ThinkingStatus /> : <EyeIcon aria-hidden className="size-4" />}
           </span>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className={`min-w-0 ${DISCLOSURE_TRIGGER_CLASS}`}>
-              {running ? (
-                <>
-                  <span className="text-foreground min-w-0 truncate">{stepLabel}</span>
-                  {stepIdText ? <span className="min-w-0 truncate">{stepIdText}</span> : null}
-                </>
-              ) : null}
-              <span className="shrink-0">{t("tool.reads.done", { count: reads })}</span>
-              {failed > 0 ? (
-                <>
-                  <FailedGlyph />
-                  <span className="shrink-0">{t("tool.reads.failed", { count: failed })}</span>
-                </>
-              ) : null}
-              {running && clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
-              {running ? null : <SubjectStack subjects={subjects} />}
-              <ChevronRightIcon className="duration-fast ease-surface transition-transform group-data-[state=open]:rotate-90" />
-            </Button>
+          <CollapsibleTrigger
+            render={
+              <Button variant="ghost" size="sm" className={`min-w-0 ${DISCLOSURE_TRIGGER_CLASS}`} />
+            }
+          >
+            {running ? (
+              <>
+                <span className="text-foreground min-w-0 truncate">{stepLabel}</span>
+                {stepIdText ? <span className="min-w-0 truncate">{stepIdText}</span> : null}
+              </>
+            ) : null}
+            <span className="shrink-0">{t("tool.reads.done", { count: reads })}</span>
+            {failed > 0 ? (
+              <>
+                <FailedGlyph />
+                <span className="shrink-0">{t("tool.reads.failed", { count: failed })}</span>
+              </>
+            ) : null}
+            {running && clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
+            {running ? null : <SubjectStack subjects={subjects} />}
+            <ChevronRightIcon className="duration-fast ease-surface transition-transform group-data-panel-open:rotate-90" />
           </CollapsibleTrigger>
         </div>
       ) : null}
       <CollapsibleContent
         className={
           folded
-            ? "duration-base ease-surface motion-safe:data-[state=open]:animate-collapsible-down motion-safe:data-[state=closed]:animate-collapsible-up overflow-hidden"
+            ? "duration-base ease-surface h-(--collapsible-panel-height) overflow-hidden data-ending-style:h-0 data-starting-style:h-0 motion-safe:transition-[height]"
             : undefined
         }
       >

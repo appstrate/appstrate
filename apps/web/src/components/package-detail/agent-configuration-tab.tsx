@@ -305,11 +305,9 @@ function NoProxyState() {
       hint={t("detail.configuration.proxyEmptyHint")}
     >
       {canReach("/org-settings/proxies") && can("proxies:write") && (
-        <Button asChild variant="outline" size="sm">
-          <Link to="/org-settings/proxies?newProxy=1">
-            <Plus />
-            {t("proxies.add", { ns: "settings" })}
-          </Link>
+        <Button variant="outline" size="sm" render={<Link to="/org-settings/proxies?newProxy=1" />}>
+          <Plus />
+          {t("proxies.add", { ns: "settings" })}
         </Button>
       )}
     </EmptyState>

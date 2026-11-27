@@ -142,7 +142,7 @@ function emojiLocale(language: string | undefined): string {
 
 /** Ring of a swatch when its radio — visually hidden, the preceding sibling — is checked or focused. */
 const SWATCH_RING =
-  "peer-data-[state=checked]:ring-ring peer-data-[state=checked]:ring-2 peer-data-[state=checked]:ring-offset-2 peer-focus-visible:ring-ring peer-focus-visible:ring-2 peer-focus-visible:ring-offset-2 peer-disabled:opacity-50";
+  "peer-data-checked:ring-ring peer-data-checked:ring-2 peer-data-checked:ring-offset-2 peer-focus-visible:ring-ring peer-focus-visible:ring-2 peer-focus-visible:ring-offset-2 peer-disabled:opacity-50";
 
 /** A colour choice: a dot of the hue on its tile tint, or `children` in its place. */
 function Swatch({ color, children }: { color: AppearanceColor; children?: ReactNode }) {

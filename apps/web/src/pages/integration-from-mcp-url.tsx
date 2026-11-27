@@ -182,8 +182,8 @@ function NewIntegrationWizard() {
         />
       )}
       <div>
-        <Button variant="outline" asChild>
-          <Link to="/integrations">{t("btn.cancel", { ns: "common" })}</Link>
+        <Button variant="outline" render={<Link to="/integrations" />}>
+          {t("btn.cancel", { ns: "common" })}
         </Button>
       </div>
     </>
@@ -238,9 +238,7 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
           description={t("integrationWizard.notRemote.description", { name })}
         >
           <div>
-            <Button asChild>
-              <Link to={detailPath}>{t("integrationWizard.open")}</Link>
-            </Button>
+            <Button render={<Link to={detailPath} />}>{t("integrationWizard.open")}</Button>
           </div>
         </WizardSection>
       )}
@@ -263,11 +261,11 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
       )}
       {step !== "ready" && step !== "notRemote" && (
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" asChild>
-            <Link to="/integrations">{t("integrationWizard.resume.later")}</Link>
+          <Button variant="outline" render={<Link to="/integrations" />}>
+            {t("integrationWizard.resume.later")}
           </Button>
-          <Button variant="ghost" asChild>
-            <Link to={detailPath}>{t("integrationWizard.open")}</Link>
+          <Button variant="ghost" render={<Link to={detailPath} />}>
+            {t("integrationWizard.open")}
           </Button>
         </div>
       )}
@@ -335,14 +333,12 @@ function ReadyStep({
       <div className="flex flex-wrap gap-2">
         {/* The agent creation hand-off; it opens only for a caller who may create one. */}
         {can("agents:write") && (
-          <Button asChild>
-            <Link to={agentCreationWithIntegrationPath(packageId)}>
-              {t("integrationWizard.ready.useInAgent")}
-            </Link>
+          <Button render={<Link to={agentCreationWithIntegrationPath(packageId)} />}>
+            {t("integrationWizard.ready.useInAgent")}
           </Button>
         )}
-        <Button variant="outline" asChild>
-          <Link to={detailPath}>{t("integrationWizard.ready.open")}</Link>
+        <Button variant="outline" render={<Link to={detailPath} />}>
+          {t("integrationWizard.ready.open")}
         </Button>
       </div>
     </WizardSection>

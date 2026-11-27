@@ -27,11 +27,9 @@ function DeeplinkTab({ label, href, fallback }: { label: string; href: string; f
   const { t } = useTranslation("settings");
   return (
     <div className="flex flex-col gap-3">
-      <Button asChild variant="default" size="sm" className="self-start">
-        <a href={href}>
-          <ExternalLink />
-          {label}
-        </a>
+      <Button variant="default" size="sm" className="self-start" render={<a href={href} />}>
+        <ExternalLink />
+        {label}
       </Button>
       <p className="text-muted-foreground text-xs">{t("orgSettings.mcpManualFallback")}</p>
       <CopyBlock value={fallback} multiline />

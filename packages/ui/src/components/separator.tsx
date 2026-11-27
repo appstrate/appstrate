@@ -1,26 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import * as React from "react";
-import * as SeparatorPrimitive from "@radix-ui/react-separator";
+import { Separator as SeparatorPrimitive } from "@base-ui/react/separator";
 
 import { cn } from "../cn.ts";
 
-const Separator = React.forwardRef<
-  React.ElementRef<typeof SeparatorPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof SeparatorPrimitive.Root>
->(({ className, orientation = "horizontal", decorative = true, ...props }, ref) => (
-  <SeparatorPrimitive.Root
-    ref={ref}
-    decorative={decorative}
-    orientation={orientation}
-    className={cn(
-      "bg-border shrink-0",
-      orientation === "horizontal" ? "h-[1px] w-full" : "h-full w-[1px]",
-      className,
-    )}
-    {...props}
-  />
-));
-Separator.displayName = SeparatorPrimitive.Root.displayName;
+function Separator({
+  className,
+  orientation = "horizontal",
+  ...props
+}: Omit<SeparatorPrimitive.Props, "className"> & { className?: string }) {
+  return (
+    <SeparatorPrimitive
+      orientation={orientation}
+      className={cn(
+        "bg-border shrink-0",
+        orientation === "horizontal" ? "h-[1px] w-full" : "h-full w-[1px]",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
 
 export { Separator };

@@ -471,7 +471,7 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
             className="group text-muted-foreground hover:text-foreground -mx-1 flex items-center gap-1 px-1 py-0.5 text-xs font-semibold"
             data-testid={`integ-advanced-toggle-${packageId}`}
           >
-            <ChevronRight className="size-3 group-data-[state=open]:rotate-90" />
+            <ChevronRight className="size-3 group-data-panel-open:rotate-90" />
             {t("agentEditor.integrations.scopes.advancedToggle")}
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-2">

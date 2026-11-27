@@ -119,21 +119,23 @@ export const ReasoningGroup: ReasoningGroupComponent = ({ startIndex, endIndex, 
   return (
     <Collapsible open={open} onOpenChange={setReaderOpen} className="my-2">
       <div className="flex min-w-0 items-center gap-2">
-        <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="sm" className={`min-w-0 ${DISCLOSURE_TRIGGER_CLASS}`}>
-            <BrainIcon />
-            <span className="min-w-0 truncate">
-              {streaming ? t("reasoning.running") : title || t("reasoning.done")}
-            </span>
-            <ChevronRightIcon className="duration-fast ease-surface transition-transform group-data-[state=open]:rotate-90" />
-          </Button>
+        <CollapsibleTrigger
+          render={
+            <Button variant="ghost" size="sm" className={`min-w-0 ${DISCLOSURE_TRIGGER_CLASS}`} />
+          }
+        >
+          <BrainIcon />
+          <span className="min-w-0 truncate">
+            {streaming ? t("reasoning.running") : title || t("reasoning.done")}
+          </span>
+          <ChevronRightIcon className="duration-fast ease-surface transition-transform group-data-panel-open:rotate-90" />
         </CollapsibleTrigger>
         {/* A sibling of the trigger, not a child: a button's content is
             presentational, so a live region inside it is not exposed. It keeps
             something moving between the end of the reasoning and the next part. */}
         {ownsStatus ? <ThinkingStatus /> : null}
       </div>
-      <CollapsibleContent className="duration-base ease-surface motion-safe:data-[state=open]:animate-collapsible-down motion-safe:data-[state=closed]:animate-collapsible-up overflow-hidden">
+      <CollapsibleContent className="duration-base ease-surface h-(--collapsible-panel-height) overflow-hidden data-ending-style:h-0 data-starting-style:h-0 motion-safe:transition-[height]">
         <div className="border-border ml-2 border-l pl-4">{children}</div>
       </CollapsibleContent>
     </Collapsible>

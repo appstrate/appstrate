@@ -116,12 +116,11 @@ export function CreateVersionModal({
         <Field>
           <Label id="version-bump">{t("version.bumpLabel")}</Label>
           <ToggleGroup
-            type="single"
             variant="outline"
             aria-labelledby="version-bump"
             className="grid grid-cols-3"
-            value={selectedBump}
-            onValueChange={(next) => next && setSelectedBump(next as VersionBump)}
+            value={[selectedBump]}
+            onValueChange={([next]) => next && setSelectedBump(next as VersionBump)}
           >
             {bumpOptions.map((opt) => (
               <ToggleGroupItem
