@@ -51,7 +51,7 @@ import {
 } from "../../helpers/seed.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { memberLoopbackHeaders } from "../../helpers/loopback.ts";
-import { createPackageShareNotification } from "../../../src/services/state/notifications.ts";
+import { createCredentialNeedsReconnectionNotification } from "../../../src/services/state/notifications.ts";
 import { addMemory } from "../../../src/services/state/package-persistence.ts";
 
 const app = getTestApp();
@@ -150,13 +150,16 @@ describe("lists spanning the organization's spaces: the shared reach", () => {
       sha256: "0".repeat(64),
     });
     for (const recipient of [owner.user.id, member.user.id]) {
-      await createPackageShareNotification({
+      await createCredentialNeedsReconnectionNotification({
         orgId: owner.orgId,
         spaceId,
-        recipientUserId: recipient,
-        packageId: agent.id,
-        packageType: "agent",
-        sharedByName: "Ada",
+        recipient: { type: "user", id: recipient },
+        payload: {
+          packageId: agent.id,
+          integration_name: "Ada's integration",
+          label: "work",
+          cause: "refresh_token_revoked",
+        },
       });
     }
   }

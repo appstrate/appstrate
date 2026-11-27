@@ -32,6 +32,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { onDispatchSpaces } from "../../../src/lib/internal-dispatch.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { downloadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { postInstallPackage } from "../../../src/services/post-install-package.ts";
@@ -260,6 +261,36 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(await importIn(ctx.defaultSpaceId)).toEqual([]);
     expect(await importIn(destination.id)).toEqual([ctx.defaultSpaceId, destination.id]);
     expect(await importIn(destination.id)).toEqual([]);
+  });
+
+  it("never places a root homed elsewhere into a personal space", async () => {
+    const { bytes } = await seedAndExportBundle({
+      ctx,
+      rootId: "@importorg/agent-root",
+      skillA: "@importorg/skill-a",
+      skillB: "@importorg/skill-b",
+    });
+    const personal = await ensurePersonalSpaceFor(ctx.orgId, ctx.user.id);
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "bundle.afps-bundle");
+    const response = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      headers: authHeaders(ctx, { "X-Space-Id": personal.id }),
+      body: form,
+    });
+    expect(response.status, await response.clone().text()).toBe(201);
+    expect(await response.json()).toMatchObject({ root_active: false });
+    expect(
+      await db
+        .select()
+        .from(spacePackages)
+        .where(
+          and(
+            eq(spacePackages.packageId, "@importorg/agent-root"),
+            eq(spacePackages.spaceId, personal.id),
+          ),
+        ),
+    ).toHaveLength(0);
   });
 
   it("imports a multi-package .afps-bundle and installs the root", async () => {

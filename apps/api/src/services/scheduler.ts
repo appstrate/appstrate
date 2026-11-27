@@ -12,6 +12,7 @@ import {
   endUsers,
   runs,
   packages,
+  spaces,
   type ScheduleDisabledReason,
 } from "@appstrate/db/schema";
 import { activeRunStatusValues } from "@appstrate/core/run-status";
@@ -538,11 +539,22 @@ export async function triggerScheduledRun(
         spaceId,
         block: executionBlock,
       });
+      const [space] =
+        executionBlock === "not_placed"
+          ? await db
+              .select({ ownerUserId: spaces.ownerUserId })
+              .from(spaces)
+              .where(eq(spaces.id, spaceId))
+              .limit(1)
+          : [];
       await failSchedule(
         executionBlock === "not_placed"
           ? `Agent '${packageId}' is not placed in space '${spaceId}'. ` +
-              `Share it into that space via POST /api/packages/${packageId}/shares, ` +
-              `or move this schedule to a space the agent is placed in.`
+              (space?.ownerUserId
+                ? `Ask an organization owner or admin to offer it (PUT /api/packages/${packageId}/org-offer), ` +
+                  `or move this schedule to a space the agent is placed in.`
+                : `Share it into that space via POST /api/packages/${packageId}/shares, ` +
+                  `or move this schedule to a space the agent is placed in.`)
           : `Agent '${packageId}' is not active in space '${spaceId}'. ` +
               `Activate it via POST /api/spaces/${spaceId}/packages to resume this schedule.`,
       );

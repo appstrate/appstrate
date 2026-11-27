@@ -3,7 +3,7 @@
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { integrationIdOfField } from "../lib/connection-choice";
-import { useSpacesOf } from "./use-spaces";
+import { useSpaces, useSpacesOf } from "./use-spaces";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type paths } from "../api/client";
@@ -12,7 +12,7 @@ import { agentsKeys, invalidatePaths, packageKeys } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { splitPackageRef } from "../lib/package-paths";
-import { activationGate, mayRemoveFromSpace } from "../lib/catalogue-gates";
+import { activationGate, mayRemoveFromSpace, type ActivationGate } from "../lib/catalogue-gates";
 
 /** `GET /api/library`: every package and where it is PLACED. The space form (`/api/spaces/{id}/library`) is the same shape narrowed to one space. */
 export type LibraryResponse =
@@ -263,13 +263,21 @@ export function usePackageActivation(
   const spaceId = useCurrentSpaceId();
   const { data: library, isLoading: libraryLoading } = useSpaceLibrary({ enabled });
   const spaceRow = libraryRow(library, packageId);
-  // Homed elsewhere and not placed here, a package is absent from a personal space's library:
-  // the org-wide library's per-space `activation` verdict answers then.
+  const { data: spaces } = useSpaces();
+  const personal = !!spaces?.find((space) => space.id === spaceId)?.personal;
+  // A team space not holding the package lacks it from its library: the org-wide library's
+  // per-space `activation` verdict answers then. A personal space holds only what it creates
+  // and what the organization offers, so the package's absence there is the refusal.
   const { data: orgLibrary, isLoading: orgLoading } = useCatalogueLibrary({
-    enabled: enabled && !!library && !spaceRow,
+    enabled: enabled && !!library && !spaceRow && !personal,
   });
-  const row = spaceRow ?? libraryRow(orgLibrary, packageId);
-  const gate = spaceId && row ? activationGate(row, spaceId, true) : null;
+  const row = spaceRow ?? (personal ? undefined : libraryRow(orgLibrary, packageId));
+  const gate: ActivationGate | null =
+    spaceId && row
+      ? activationGate(row, spaceId, true)
+      : personal && library && !spaceRow
+        ? { allowed: false, refusal: "notOffered" }
+        : null;
   return {
     mayActivate: !!gate?.allowed,
     /** Why the server refuses; `null` when allowed or no verdict names a reason. */

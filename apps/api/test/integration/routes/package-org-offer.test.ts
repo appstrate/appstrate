@@ -581,19 +581,18 @@ describe("a row created under the offer is a decision about the offer, not a pla
   });
 
   it("keeps an opt-out when a share is revoked while the package is offered", async () => {
-    await seedSpacePackage(member.personalSpaceId, AGENT, { enabled: false });
+    const third = (await seedSpace({ orgId: ctx.orgId, name: "Third", visibility: "closed" })).id;
+    await seedSpacePackage(third, AGENT, { enabled: false });
     await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
-    const res = await app.request(`/api/packages/${AGENT}/shares/${member.personalSpaceId}`, {
+    const res = await app.request(`/api/packages/${AGENT}/shares/${third}`, {
       method: "DELETE",
-      headers: member.headers(),
+      headers: authHeaders(ctx, { "X-Space-Id": teamId }),
     });
     expect(res.status, await res.clone().text()).toBe(204);
-    const row = await rowIn(member.personalSpaceId, AGENT);
+    const row = await rowIn(third, AGENT);
     expect(row?.enabled).toBe(false);
     expect(row?.placedByOffer).toBe(true);
-    expect(
-      await isPackageActiveHere({ orgId: ctx.orgId, spaceId: member.personalSpaceId }, AGENT),
-    ).toBe(false);
+    expect(await isPackageActiveHere({ orgId: ctx.orgId, spaceId: third }, AGENT)).toBe(false);
   });
 
   it("keeps an opt-out through a home move that drops the old home's row", async () => {
@@ -642,20 +641,21 @@ describe("a row created under the offer is a decision about the offer, not a pla
   });
 
   it("a real share over an offer row survives the withdrawal", async () => {
+    const third = (await seedSpace({ orgId: ctx.orgId, name: "Third", visibility: "closed" })).id;
     await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
-    await configure(member.personalSpaceId, AGENT);
+    await configure(third, AGENT);
     const shared = await sharePackage({
       packageId: AGENT,
-      spaceId: member.personalSpaceId,
+      spaceId: third,
       orgId: ctx.orgId,
       placeAs: { sharedBy: ctx.user.id, authorizeHome: () => true },
       enabled: true,
     });
     expect(shared.created).toBe(true);
-    expect((await rowIn(member.personalSpaceId, AGENT))?.placedByOffer).toBe(false);
+    expect((await rowIn(third, AGENT))?.placedByOffer).toBe(false);
 
     await withdraw(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
-    expect(await rowIn(member.personalSpaceId, AGENT)).toBeDefined();
+    expect(await rowIn(third, AGENT)).toBeDefined();
     const listed = await app.request(`/api/packages/${AGENT}/shares`, {
       headers: authHeaders(ctx, { "X-Space-Id": teamId }),
     });

@@ -827,6 +827,13 @@
       "when": 1795800000000,
       "tag": "0117_org_package_offer_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1795886400000,
+      "tag": "0118_notifications_drop_package_shared",
+      "breakpoints": true
     }
   ]
 }

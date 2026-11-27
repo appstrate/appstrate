@@ -24,11 +24,13 @@ import {
   isActiveEverywhereByDefault,
   isActiveHere,
   placementVia,
+  type ActivatablePackage,
   type PlacementVia,
 } from "./package-activation.ts";
 import { notFound } from "../lib/errors.ts";
 import { listRuntimeBoundSystemIntegrationIds } from "./system-packages.ts";
 import { sharerView } from "./package-shares.ts";
+import { mayLandInPersonalSpace } from "./space-packages.ts";
 import type { AppEnv } from "../types/index.ts";
 import { callerPersonalOwnerId } from "../lib/view-as.ts";
 import { listOrgOffers } from "./package-placement.ts";
@@ -48,13 +50,16 @@ interface Placement {
 
 /**
  * Whether the caller may switch a package on/off in one space, as the
- * `…/packages` routes judge it: `not_shareable` = not placed there and no
- * `<type>:share` in its home; `forbidden` = the `activate`/`deactivate` grant is
+ * `…/packages` routes judge it: `not_offered` = a personal space, and the
+ * package is neither its own, offered to the organization nor on by the
+ * deployment's default (`mayLandInPersonalSpace`); `not_shareable` = not placed
+ * there and no `<type>:share` in its home; `forbidden` = the `activate`/`deactivate` grant is
  * missing (a personal space's owner needs none); `runtime_bound` = a deactivate
  * of a system integration serving the run's own tools, which stays active
  * everywhere whatever the role.
  */
-type ActivationVerdict = "allowed" | "not_shareable" | "forbidden" | "runtime_bound";
+type ActivationVerdict =
+  "allowed" | "not_offered" | "not_shareable" | "forbidden" | "runtime_bound";
 
 /** The two verdicts of one (package, space) pair, for every space the library lists. */
 interface ActivationCell {
@@ -117,14 +122,17 @@ async function readPackageLibrary(
   const personalOwnerId = callerPersonalOwnerId(c);
   const runtimeBound = new Set(listRuntimeBoundSystemIntegrationIds());
   const activationVerdict = (
-    type: PackageType,
+    pkg: ActivatablePackage & { homeSpaceId: string | null },
     space: (typeof accessible)[number],
     placed: boolean,
     shareable: boolean,
     next: boolean,
-    packageId: string,
   ): ActivationVerdict => {
-    if (!next && type === "integration" && runtimeBound.has(packageId)) return "runtime_bound";
+    const type = pkg.type as PackageType;
+    if (!next && type === "integration" && runtimeBound.has(pkg.id)) return "runtime_bound";
+    if (next && space.ownerUserId !== null && !mayLandInPersonalSpace(pkg, space.id)) {
+      return "not_offered";
+    }
     if (!placed && !shareable) return "not_shareable";
     const ownSpace = space.ownerUserId !== null && space.ownerUserId === personalOwnerId;
     if (ownSpace) return "allowed";
@@ -149,6 +157,7 @@ async function readPackageLibrary(
   // behalf, so it never makes an unplaced package a candidate (below). What the
   // space RUNS is not narrowed here: a system package is placed in every space,
   // personal ones included, and its `state` is the activation rule's answer.
+  // What it may switch on is the `activate` verdict (`not_offered`).
   const personalSpaceIds = new Set(
     accessible.filter((space) => space.ownerUserId !== null).map((space) => space.id),
   );
@@ -298,23 +307,28 @@ async function readPackageLibrary(
     if (placements.length === 0 && !(proposable && home.home_shareable)) continue;
 
     const placedIn = new Set(placements.map((placement) => placement.space_id));
+    const verdictPackage = {
+      id: row.id,
+      type,
+      source: row.source,
+      homeSpaceId: row.homeSpaceId,
+      orgOffer,
+    };
     const activation = visibleSpaces.map((space): ActivationCell => ({
       spaceId: space.id,
       activate: activationVerdict(
-        type,
+        verdictPackage,
         space,
         placedIn.has(space.id),
         home.home_shareable,
         true,
-        row.id,
       ),
       deactivate: activationVerdict(
-        type,
+        verdictPackage,
         space,
         placedIn.has(space.id),
         home.home_shareable,
         false,
-        row.id,
       ),
     }));
 

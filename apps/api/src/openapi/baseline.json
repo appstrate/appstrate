@@ -20833,64 +20833,6 @@
                               },
                               "type": {
                                 "type": "string",
-                                "const": "package_shared"
-                              },
-                              "runId": {
-                                "type": ["string", "null"],
-                                "description": "Originating run id, when the notification references one"
-                              },
-                              "payload": {
-                                "type": ["object", "null"],
-                                "additionalProperties": false,
-                                "description": "Render-without-join data.",
-                                "required": ["packageId", "package_type", "shared_by_name"],
-                                "properties": {
-                                  "packageId": {
-                                    "type": "string"
-                                  },
-                                  "package_type": {
-                                    "type": "string",
-                                    "enum": ["agent", "skill", "integration"]
-                                  },
-                                  "shared_by_name": {
-                                    "type": "string"
-                                  }
-                                }
-                              },
-                              "read_at": {
-                                "type": ["string", "null"],
-                                "format": "date-time",
-                                "description": "When the recipient marked it read; null if unread"
-                              },
-                              "createdAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              }
-                            }
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "id",
-                              "spaceId",
-                              "type",
-                              "runId",
-                              "payload",
-                              "read_at",
-                              "createdAt"
-                            ],
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "format": "uuid",
-                                "description": "Notification id"
-                              },
-                              "spaceId": {
-                                "type": "string",
-                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
-                              },
-                              "type": {
-                                "type": "string",
                                 "const": "agent_message"
                               },
                               "runId": {
@@ -21018,12 +20960,13 @@
                     {
                       "id": "550e8400-e29b-41d4-a716-446655440000",
                       "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
-                      "type": "package_shared",
-                      "runId": null,
+                      "type": "agent_message",
+                      "runId": "run_8f14e45fceea167a5a36dedd4bea2543",
                       "payload": {
                         "packageId": "@acme/email-sorter",
-                        "package_type": "agent",
-                        "shared_by_name": "Ada Lovelace"
+                        "agent_name": "Email sorter",
+                        "title": "Inbox sorted",
+                        "message": "42 messages filed."
                       },
                       "read_at": null,
                       "createdAt": "2026-01-15T10:31:12Z"
@@ -21201,64 +21144,6 @@
                               },
                               "type": {
                                 "type": "string",
-                                "const": "package_shared"
-                              },
-                              "runId": {
-                                "type": ["string", "null"],
-                                "description": "Originating run id, when the notification references one"
-                              },
-                              "payload": {
-                                "type": ["object", "null"],
-                                "additionalProperties": false,
-                                "description": "Render-without-join data.",
-                                "required": ["packageId", "package_type", "shared_by_name"],
-                                "properties": {
-                                  "packageId": {
-                                    "type": "string"
-                                  },
-                                  "package_type": {
-                                    "type": "string",
-                                    "enum": ["agent", "skill", "integration"]
-                                  },
-                                  "shared_by_name": {
-                                    "type": "string"
-                                  }
-                                }
-                              },
-                              "read_at": {
-                                "type": ["string", "null"],
-                                "format": "date-time",
-                                "description": "When the recipient marked it read; null if unread"
-                              },
-                              "createdAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              }
-                            }
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "id",
-                              "spaceId",
-                              "type",
-                              "runId",
-                              "payload",
-                              "read_at",
-                              "createdAt"
-                            ],
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "format": "uuid",
-                                "description": "Notification id"
-                              },
-                              "spaceId": {
-                                "type": "string",
-                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
-                              },
-                              "type": {
-                                "type": "string",
                                 "const": "agent_message"
                               },
                               "runId": {
@@ -21386,12 +21271,13 @@
                     {
                       "id": "550e8400-e29b-41d4-a716-446655440000",
                       "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
-                      "type": "package_shared",
-                      "runId": null,
+                      "type": "agent_message",
+                      "runId": "run_8f14e45fceea167a5a36dedd4bea2543",
                       "payload": {
                         "packageId": "@acme/email-sorter",
-                        "package_type": "agent",
-                        "shared_by_name": "Ada Lovelace"
+                        "agent_name": "Email sorter",
+                        "title": "Inbox sorted",
+                        "message": "42 messages filed."
                       },
                       "read_at": null,
                       "createdAt": "2026-01-15T10:31:12Z"
@@ -21612,64 +21498,6 @@
                             "status": {
                               "type": "string",
                               "enum": ["failed", "timeout"]
-                            }
-                          }
-                        },
-                        "read_at": {
-                          "type": ["string", "null"],
-                          "format": "date-time",
-                          "description": "When the recipient marked it read; null if unread"
-                        },
-                        "createdAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "id",
-                        "spaceId",
-                        "type",
-                        "runId",
-                        "payload",
-                        "read_at",
-                        "createdAt"
-                      ],
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "format": "uuid",
-                          "description": "Notification id"
-                        },
-                        "spaceId": {
-                          "type": "string",
-                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
-                        },
-                        "type": {
-                          "type": "string",
-                          "const": "package_shared"
-                        },
-                        "runId": {
-                          "type": ["string", "null"],
-                          "description": "Originating run id, when the notification references one"
-                        },
-                        "payload": {
-                          "type": ["object", "null"],
-                          "additionalProperties": false,
-                          "description": "Render-without-join data.",
-                          "required": ["packageId", "package_type", "shared_by_name"],
-                          "properties": {
-                            "packageId": {
-                              "type": "string"
-                            },
-                            "package_type": {
-                              "type": "string",
-                              "enum": ["agent", "skill", "integration"]
-                            },
-                            "shared_by_name": {
-                              "type": "string"
                             }
                           }
                         },
@@ -21938,64 +21766,6 @@
                             "status": {
                               "type": "string",
                               "enum": ["failed", "timeout"]
-                            }
-                          }
-                        },
-                        "read_at": {
-                          "type": ["string", "null"],
-                          "format": "date-time",
-                          "description": "When the recipient marked it read; null if unread"
-                        },
-                        "createdAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "id",
-                        "spaceId",
-                        "type",
-                        "runId",
-                        "payload",
-                        "read_at",
-                        "createdAt"
-                      ],
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "format": "uuid",
-                          "description": "Notification id"
-                        },
-                        "spaceId": {
-                          "type": "string",
-                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
-                        },
-                        "type": {
-                          "type": "string",
-                          "const": "package_shared"
-                        },
-                        "runId": {
-                          "type": ["string", "null"],
-                          "description": "Originating run id, when the notification references one"
-                        },
-                        "payload": {
-                          "type": ["object", "null"],
-                          "additionalProperties": false,
-                          "description": "Render-without-join data.",
-                          "required": ["packageId", "package_type", "shared_by_name"],
-                          "properties": {
-                            "packageId": {
-                              "type": "string"
-                            },
-                            "package_type": {
-                              "type": "string",
-                              "enum": ["agent", "skill", "integration"]
-                            },
-                            "shared_by_name": {
-                              "type": "string"
                             }
                           }
                         },
@@ -25285,7 +25055,7 @@
         "operationId": "listPackageShares",
         "tags": ["Packages"],
         "summary": "List the spaces a package is shared with",
-        "description": "The package's AUDIENCE — the spaces it is placed in outside its home, each with its `enabled` state there. Requires the package type's `share` permission in its home space; a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.",
+        "description": "The package's AUDIENCE — the spaces it is placed in outside its home, each with its `enabled` state there. Requires the package type's `share` permission in its home space; a package the caller cannot reach at all answers 404. Personal spaces never appear: they hold the package through the organization offer, not a share.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -25351,7 +25121,7 @@
         "operationId": "sharePackage",
         "tags": ["Packages"],
         "summary": "Share a package with a person or a space",
-        "description": "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.",
+        "description": "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller holds the type's activation grant in the target and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. The target is a team space the caller can reach (`target: {kind: \"space\", spaceId}`); a `user` target is a 400. A PERSONAL space is never a target: `409 personal_space_takes_offers_only` (a personal space receives packages only through the organization offer, `PUT …/org-offer`; another member's personal space still answers 404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -25422,7 +25192,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The target space is the package's own home (`share_target_is_home`), or the package has no published version to place (`package_has_no_version` — publish one, then share). RFC 9457 problem+json.",
+            "description": "The target space is the package's own home (`share_target_is_home`), the target is a personal space (`personal_space_takes_offers_only`), or the package has no published version to place (`package_has_no_version` — publish one, then share). RFC 9457 problem+json.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -25439,7 +25209,7 @@
         "operationId": "revokePackageShare",
         "tags": ["Packages"],
         "summary": "Withdraw a package share",
-        "description": "Remove the placement: the target's `space_packages` row is deleted, its settings with it, and the package is no longer readable or runnable there. In the same transaction, every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed). Either side may withdraw: the home side, holding the package type's `share` in its home space, or the recipient side, holding the type's deactivation permission in the target space (waived in the caller's own personal space). 404 when the package is not placed in that target outside its home, or when the target is another member's personal space addressed by its space id. Audited as `package.unshared`, with `authority` (`home` or `recipient`) naming the side that withdrew it.",
+        "description": "Remove the placement: the target's `space_packages` row is deleted, its settings with it, and the package is no longer readable or runnable there. In the same transaction, every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed). Either side may withdraw: the home side, holding the package type's `share` in its home space, or the recipient side, holding the type's deactivation permission in the target space. 404 when the package is not placed in that team space outside its home, or when the target is a personal space. Audited as `package.unshared`, with `authority` (`home` or `recipient`) naming the side that withdrew it.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -25460,7 +25230,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "The share's target exactly as `GET …/shares` published it: a space id (`spc_…`) for a `space` target, or the member's user id for a `user` target. A recipient names the space they act in: a team space by its id, their own personal space by its id or by their user id. The two are told apart by the space-id shape. The id of another member's personal space is never on the wire, so it is not a handle here: it answers 404."
+            "description": "The team space id (`spc_…`) exactly as `GET …/shares` published it. A user id is a 400."
           }
         ],
         "responses": {
@@ -27170,7 +26940,7 @@
         "operationId": "activatePackage",
         "tags": ["Space Packages"],
         "summary": "Activate a package in this space",
-        "description": "Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. Where the package is PLACED here — homed in this space, holding a row here (`POST /api/packages/{scope}/{name}/shares` creates one), or a system package, placed everywhere — the row is switched on. Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest switches on a package placed there for them. The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it. Activating an AGENT activates nothing else: each integration it declares that is not active here is a `warnings[]` item of the response (`code: integration_not_active`, `required` saying whether a launch here is refused until it is activated, or starts without it) — activate it with this same call and its `packageId`, or leave the agent on without it.",
+        "description": "Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. Where the package is PLACED here — homed in this space, holding a row here (`POST /api/packages/{scope}/{name}/shares` creates one), or a system package, placed everywhere — the row is switched on. Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a member switches on a package the organization offers. A PERSONAL space takes only what is homed there, what the organization offers (`PUT /api/packages/{scope}/{name}/org-offer`, either mode) and what the platform activates by default: any other package answers `409 personal_space_takes_offers_only`, and the call never places one there. The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it. Activating an AGENT activates nothing else: each integration it declares that is not active here is a `warnings[]` item of the response (`code: integration_not_active`, `required` saying whether a launch here is refused until it is activated, or starts without it) — activate it with this same call and its `packageId`, or leave the agent on without it.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27260,6 +27030,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The space is a personal space and the package is neither homed there, offered by the organization nor active by default (`personal_space_takes_offers_only`), or the package has no published version to place (`package_has_no_version`). RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -40884,7 +40664,7 @@
             },
             "activation": {
               "type": "array",
-              "description": "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance.",
+              "description": "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_offered` — `activate` only, in a personal space: the package is not the space's own, is not offered to the organization and is not on by the deployment's default, so a personal space cannot switch it on (an organization owner or admin can offer it); `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance.",
               "items": {
                 "type": "object",
                 "required": ["spaceId", "activate", "deactivate"],
@@ -40894,7 +40674,7 @@
                   },
                   "activate": {
                     "type": "string",
-                    "enum": ["allowed", "not_shareable", "forbidden"]
+                    "enum": ["allowed", "not_offered", "not_shareable", "forbidden"]
                   },
                   "deactivate": {
                     "type": "string",
@@ -40999,61 +40779,36 @@
       },
       "ShareTarget": {
         "type": "object",
-        "description": "Where a package is placed outside its home. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
-        "required": ["kind"],
-        "oneOf": [
-          {
-            "type": "object",
-            "required": ["kind", "userId"],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": ["user"]
-              },
-              "userId": {
-                "type": "string",
-                "description": "Organization member's user id."
-              }
-            },
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "required": ["kind", "spaceId"],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": ["space"]
-              },
-              "spaceId": {
-                "type": "string",
-                "description": "Space id (`spc_…`) the caller can reach."
-              }
-            },
-            "additionalProperties": false
-          }
-        ]
-      },
-      "ShareTargetView": {
-        "type": "object",
-        "description": "A share's subject as the server renders it back. A personal-space target comes back as its OWNER — never as a space id, which is the one fact a personal space withholds.",
-        "required": ["kind", "name"],
+        "description": "Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only. A person is not a target either: `kind: \"user\"` is a 400.",
+        "required": ["kind", "spaceId"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["user", "space"]
-          },
-          "userId": {
-            "type": "string",
-            "description": "Present when `kind` is `user`."
+            "enum": ["space"]
           },
           "spaceId": {
             "type": "string",
-            "description": "Present when `kind` is `space`."
+            "description": "Team space id (`spc_…`) the caller can reach."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ShareTargetView": {
+        "type": "object",
+        "description": "A share's subject as the server renders it back: a team space.",
+        "required": ["kind", "spaceId", "name"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["space"]
+          },
+          "spaceId": {
+            "type": "string",
+            "description": "Space id (`spc_…`)."
           },
           "name": {
             "type": "string",
-            "description": "The member's display name, or the space's name."
+            "description": "The space's name."
           }
         }
       },

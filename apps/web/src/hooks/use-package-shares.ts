@@ -9,9 +9,9 @@ import { useInvalidatePackageActivation } from "./use-library";
 
 export type PackageShare = components["schemas"]["PackageShare"];
 
-/** The `target` a revoke addresses: the space id, or the member's user id. */
+/** The `target` a revoke addresses: the space id. */
 export function shareTargetHandle(share: PackageShare): string {
-  return share.target.kind === "user" ? (share.target.userId ?? "") : (share.target.spaceId ?? "");
+  return share.target.spaceId;
 }
 
 /** A package's audience; only a holder of the type's `share` in its home space may read it, so `enabled` avoids a 403 for anyone else. */

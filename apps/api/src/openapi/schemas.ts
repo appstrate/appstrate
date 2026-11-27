@@ -3346,13 +3346,16 @@ export const schemas = {
         activation: {
           type: "array",
           description:
-            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance.",
+            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_offered` — `activate` only, in a personal space: the package is not the space's own, is not offered to the organization and is not on by the deployment's default, so a personal space cannot switch it on (an organization owner or admin can offer it); `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance.",
           items: {
             type: "object",
             required: ["spaceId", "activate", "deactivate"],
             properties: {
               spaceId: { type: "string" },
-              activate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
+              activate: {
+                type: "string",
+                enum: ["allowed", "not_offered", "not_shareable", "forbidden"],
+              },
               deactivate: {
                 type: "string",
                 enum: ["allowed", "not_shareable", "forbidden", "runtime_bound"],
@@ -3411,42 +3414,22 @@ export const schemas = {
   ShareTarget: {
     type: "object",
     description:
-      "Where a package is placed outside its home. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
-    required: ["kind"],
-    oneOf: [
-      {
-        type: "object",
-        required: ["kind", "userId"],
-        properties: {
-          kind: { type: "string", enum: ["user"] },
-          userId: { type: "string", description: "Organization member's user id." },
-        },
-        additionalProperties: false,
-      },
-      {
-        type: "object",
-        required: ["kind", "spaceId"],
-        properties: {
-          kind: { type: "string", enum: ["space"] },
-          spaceId: { type: "string", description: "Space id (`spc_…`) the caller can reach." },
-        },
-        additionalProperties: false,
-      },
-    ],
+      'Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only. A person is not a target either: `kind: "user"` is a 400.',
+    required: ["kind", "spaceId"],
+    properties: {
+      kind: { type: "string", enum: ["space"] },
+      spaceId: { type: "string", description: "Team space id (`spc_…`) the caller can reach." },
+    },
+    additionalProperties: false,
   },
   ShareTargetView: {
     type: "object",
-    description:
-      "A share's subject as the server renders it back. A personal-space target comes back as its OWNER — never as a space id, which is the one fact a personal space withholds.",
-    required: ["kind", "name"],
+    description: "A share's subject as the server renders it back: a team space.",
+    required: ["kind", "spaceId", "name"],
     properties: {
-      kind: { type: "string", enum: ["user", "space"] },
-      userId: { type: "string", description: "Present when `kind` is `user`." },
-      spaceId: { type: "string", description: "Present when `kind` is `space`." },
-      name: {
-        type: "string",
-        description: "The member's display name, or the space's name.",
-      },
+      kind: { type: "string", enum: ["space"] },
+      spaceId: { type: "string", description: "Space id (`spc_…`)." },
+      name: { type: "string", description: "The space's name." },
     },
   },
   PackageShare: {

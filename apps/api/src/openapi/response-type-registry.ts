@@ -320,7 +320,7 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   PackageAvailability:
     "package detail sub-object (integration, agent, skill); mirrored by the optional `availability` of the AgentDetail / OrgPackageItemDetail shared-types",
   PackageShare:
-    "share-audience wire projected by `listPackageShares` (a space rendered as its owner when personal); no persisted row shape and no shared-type — the SPA consumes the generated spec type",
+    "share-audience wire projected by `listPackageShares` (team spaces only); no persisted row shape and no shared-type — the SPA consumes the generated spec type",
   PackageOrgOffer:
     "offer acknowledgement of `PUT …/org-offer`; no persisted row shape and no shared-type — the SPA consumes the generated spec type",
   ShareTarget:

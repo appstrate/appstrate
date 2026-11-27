@@ -56,6 +56,7 @@ describe("activationGate", () => {
     activation: [
       { spaceId: "spc_a", activate: "allowed", deactivate: "forbidden" },
       { spaceId: "spc_b", activate: "not_shareable", deactivate: "not_shareable" },
+      { spaceId: "spc_p", activate: "not_offered", deactivate: "allowed" },
     ],
   });
 
@@ -66,6 +67,11 @@ describe("activationGate", () => {
 
   it("blames the home's share right when the package is not placed there", () => {
     expect(activationGate(pkg, "spc_b", true)).toEqual({ allowed: false, refusal: "notPlaced" });
+  });
+
+  it("blames the missing organization offer in a personal space", () => {
+    expect(activationGate(pkg, "spc_p", true)).toEqual({ allowed: false, refusal: "notOffered" });
+    expect(activationGate(pkg, "spc_p", false)).toEqual(ALLOWED);
   });
 
   it("words a missing grant by direction", () => {

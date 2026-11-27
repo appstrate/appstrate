@@ -15,7 +15,7 @@ import { walkLinkPages } from "../../helpers/pagination.ts";
 import Ajv from "ajv";
 import {
   createAgentMessageNotifications,
-  createPackageShareNotification,
+  createCredentialNeedsReconnectionNotification,
 } from "../../../src/services/state/notifications.ts";
 import { recordRunFinished } from "../../../src/services/state/run-reads.ts";
 import { notificationsPaths } from "../../../src/openapi/paths/notifications.ts";
@@ -30,8 +30,7 @@ interface NotificationDto {
   runId: string | null;
   payload: {
     packageId?: string;
-    package_type?: string;
-    shared_by_name?: string;
+    integration_name?: string;
     status?: string;
   } | null;
   read_at: string | null;
@@ -39,7 +38,7 @@ interface NotificationDto {
 }
 
 // The feed (the dashboard bell) holds every notification of the caller: a
-// package share, and a run that failed or timed out. A run's read state is a
+// dead connection, and a run that failed or timed out. A run's read state is a
 // separate `run_reads` row served by the run surfaces — see run-reads.test.ts.
 
 describe("Notifications feed API (per-recipient)", () => {
@@ -61,15 +60,18 @@ describe("Notifications feed API (per-recipient)", () => {
     };
   }
 
-  /** Seed one `package_shared` feed entry for `recipientUserId` (default: ctx.user). */
-  async function seedShare(name = "shared", recipientUserId = ctx.user.id): Promise<void> {
-    await createPackageShareNotification({
+  /** Seed one `credential_needs_reconnection` feed entry (it has no run) for `recipientUserId` (default: ctx.user). */
+  async function seedNotice(name = "notice", recipientUserId = ctx.user.id): Promise<void> {
+    await createCredentialNeedsReconnectionNotification({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
-      recipientUserId,
-      packageId: `@notiforg/${name}`,
-      packageType: "skill",
-      sharedByName: "Ada",
+      recipient: { type: "user", id: recipientUserId },
+      payload: {
+        packageId: `@notiforg/${name}`,
+        integration_name: "Ada's integration",
+        label: "work",
+        cause: "refresh_token_revoked",
+      },
     });
   }
 
@@ -121,19 +123,19 @@ describe("Notifications feed API (per-recipient)", () => {
 
   describe("GET /api/notifications", () => {
     it("returns the recipient's notifications with payload", async () => {
-      await seedShare("pkg-a");
+      await seedNotice("pkg-a");
 
       const data = await listNotifications(authHeaders(ctx));
       expect(data).toHaveLength(1);
-      expect(data[0]!.type).toBe("package_shared");
+      expect(data[0]!.type).toBe("credential_needs_reconnection");
       expect(data[0]!.runId).toBeNull();
       expect(data[0]!.payload?.packageId).toBe("@notiforg/pkg-a");
-      expect(data[0]!.payload?.shared_by_name).toBe("Ada");
+      expect(data[0]!.payload?.integration_name).toBe("Ada's integration");
       expect(data[0]!.read_at).toBeNull();
     });
 
     it("answers each kind in the shape its OpenAPI branch declares", async () => {
-      await seedShare();
+      await seedNotice();
       await seedNotifiedRun("branch-agent", "failed");
       const item =
         notificationsPaths["/api/notifications"].get.responses["200"].content["application/json"]
@@ -141,7 +143,10 @@ describe("Notifications feed API (per-recipient)", () => {
       const validate = new Ajv({ strict: false, validateFormats: false }).compile(item);
 
       const data = await listNotifications(authHeaders(ctx));
-      expect(data.map((n) => n.type).sort()).toEqual(["package_shared", "run_failed"]);
+      expect(data.map((n) => n.type).sort()).toEqual([
+        "credential_needs_reconnection",
+        "run_failed",
+      ]);
       for (const n of data)
         expect({ valid: validate(n), errors: validate.errors }).toEqual({
           valid: true,
@@ -152,7 +157,7 @@ describe("Notifications feed API (per-recipient)", () => {
       // The name stamped on the run rides along (null when the run has none).
       expect(failed.payload).toHaveProperty("agent_name");
       // A kind's payload does not validate under the other kind's branch.
-      expect(validate({ ...failed, type: "package_shared" })).toBe(false);
+      expect(validate({ ...failed, type: "credential_needs_reconnection" })).toBe(false);
       // A succeeded run is not a status the bell carries.
       expect(validate({ ...failed, payload: { ...failed.payload, status: "success" } })).toBe(
         false,
@@ -160,7 +165,7 @@ describe("Notifications feed API (per-recipient)", () => {
     });
 
     it("unread=true hides already-read notifications", async () => {
-      await seedShare();
+      await seedNotice();
       const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
 
       expect(await markRead(authHeaders(ctx), id)).toBe(204);
@@ -191,22 +196,22 @@ describe("Notifications feed API (per-recipient)", () => {
 
     it("never lists a successful run, nor counts it", async () => {
       await seedNotifiedRun("ok-agent", "success");
-      await seedShare();
+      await seedNotice();
 
       const data = await listNotifications(authHeaders(ctx), "");
-      expect(data.map((n) => n.type)).toEqual(["package_shared"]);
+      expect(data.map((n) => n.type)).toEqual(["credential_needs_reconnection"]);
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
     });
 
     it("a notification in another org is invisible", async () => {
-      await seedShare();
+      await seedNotice();
       const otherCtx = await createTestContext({ orgSlug: "othernotiforg" });
       expect(await listNotifications(authHeaders(otherCtx), "")).toHaveLength(0);
       expect(await unreadCount(authHeaders(otherCtx))).toBe(0);
     });
 
     it("a notification in space A is invisible from space B in the same org", async () => {
-      await seedShare();
+      await seedNotice();
       const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Space B" });
       const headersB = { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": spaceB.id };
 
@@ -226,9 +231,9 @@ describe("Notifications feed API (per-recipient)", () => {
     it("counts the caller's unread feed entries only", async () => {
       const userB = await createTestUser();
       await addOrgMember(ctx.orgId, userB.id, "member");
-      await seedShare("one");
-      await seedShare("two");
-      await seedShare("for-b", userB.id);
+      await seedNotice("one");
+      await seedNotice("two");
+      await seedNotice("for-b", userB.id);
 
       expect(await unreadCount(authHeaders(ctx))).toBe(2);
       expect(await unreadCount(headersFor(userB))).toBe(1);
@@ -278,7 +283,7 @@ describe("Notifications feed API (per-recipient)", () => {
     });
 
     it("is a pure read — the notification stays unread", async () => {
-      await seedShare();
+      await seedNotice();
       const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
 
       expect((await getOne(authHeaders(ctx), id)).status).toBe(200);
@@ -286,7 +291,7 @@ describe("Notifications feed API (per-recipient)", () => {
     });
 
     it("returns 404 for anything that is not the caller's notification", async () => {
-      await seedShare();
+      await seedNotice();
       const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
       const userB = await createTestUser();
       await addOrgMember(ctx.orgId, userB.id);
@@ -314,7 +319,7 @@ describe("Notifications feed API (per-recipient)", () => {
 
   describe("PUT /api/notifications/{id}/read", () => {
     it("marks the recipient's notification read (count drops)", async () => {
-      await seedShare();
+      await seedNotice();
       const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
 
       expect(await markRead(authHeaders(ctx), id)).toBe(204);
@@ -322,7 +327,7 @@ describe("Notifications feed API (per-recipient)", () => {
     });
 
     it("is idempotent — already-read returns 204", async () => {
-      await seedShare();
+      await seedNotice();
       const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
 
       expect(await markRead(authHeaders(ctx), id)).toBe(204);
@@ -337,8 +342,8 @@ describe("Notifications feed API (per-recipient)", () => {
       const userB = await createTestUser();
       await addOrgMember(ctx.orgId, userB.id);
 
-      // A share to user A → only A gets a notification.
-      await seedShare();
+      // A notice for user A → only A gets a notification.
+      await seedNotice();
       const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
 
       // User B (same org) cannot mark A's notification — 404, not a silent 204.
@@ -348,7 +353,7 @@ describe("Notifications feed API (per-recipient)", () => {
     });
 
     it("returns 404 for another org's notification", async () => {
-      await seedShare();
+      await seedNotice();
       const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
 
       const otherCtx = await createTestContext({ orgSlug: "wrongorg" });
@@ -382,8 +387,8 @@ describe("Notifications feed API (per-recipient)", () => {
     it("marks only the caller's notifications read", async () => {
       const userB = await createTestUser();
       await addOrgMember(ctx.orgId, userB.id, "member");
-      await seedShare("mine");
-      await seedShare("theirs", userB.id);
+      await seedNotice("mine");
+      await seedNotice("theirs", userB.id);
 
       const res = await app.request("/api/notifications/read-all", {
         method: "PUT",
@@ -407,8 +412,8 @@ describe("Notifications feed API (per-recipient)", () => {
     });
 
     it("counts only the still-unread notifications", async () => {
-      await seedShare("mix1");
-      await seedShare("mix2");
+      await seedNotice("mix1");
+      await seedNotice("mix2");
       // Mark one of the two read up front.
       const firstId = (await listNotifications(authHeaders(ctx)))[0]!.id;
       await markRead(authHeaders(ctx), firstId);
@@ -425,7 +430,7 @@ describe("Notifications feed API (per-recipient)", () => {
 
     it("reads a failed run's notification but leaves the run unread", async () => {
       await seedNotifiedRun("fail-all", "failed");
-      await seedShare();
+      await seedNotice();
 
       const res = await app.request("/api/notifications/read-all", {
         method: "PUT",
@@ -449,9 +454,9 @@ describe("Notifications feed API (per-recipient)", () => {
     }
 
     it("orders newest-first and exposes a next-page cursor when more remain", async () => {
-      await seedShare("p1");
-      await seedShare("p2");
-      await seedShare("p3");
+      await seedNotice("p1");
+      await seedNotice("p2");
+      await seedNotice("p3");
 
       const res = await app.request("/api/notifications?limit=2", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
@@ -468,7 +473,7 @@ describe("Notifications feed API (per-recipient)", () => {
 
     it("walks every page with no skip or duplicate, hasMore flips false at the end", async () => {
       // 5 notifications, paged 2 at a time → pages of [2, 2, 1].
-      for (let i = 0; i < 5; i++) await seedShare(`walk-${i}`);
+      for (let i = 0; i < 5; i++) await seedNotice(`walk-${i}`);
 
       const pages = await walkLinkPages<{ data: NotificationDto[]; hasMore: boolean }>(
         app,
@@ -493,11 +498,12 @@ describe("Notifications feed API (per-recipient)", () => {
           spaceId: ctx.defaultSpaceId,
           recipientType: "user",
           recipientId: ctx.user.id,
-          type: "package_shared",
+          type: "credential_needs_reconnection",
           payload: {
             packageId: `@notiforg/tie-${i}`,
-            package_type: "skill",
-            shared_by_name: "Ada",
+            integration_name: "Ada's integration",
+            label: "work",
+            cause: "refresh_token_revoked",
           },
           createdAt: fixed,
         });
@@ -514,7 +520,7 @@ describe("Notifications feed API (per-recipient)", () => {
     });
 
     it("an unknown/stale startingAfter cursor returns an empty page (not the head)", async () => {
-      await seedShare();
+      await seedNotice();
       const res = await app.request(
         "/api/notifications?limit=10&startingAfter=00000000-0000-0000-0000-000000000000",
         { headers: authHeaders(ctx) },
@@ -528,7 +534,7 @@ describe("Notifications feed API (per-recipient)", () => {
     it("hasMore is false on a final page that holds exactly `limit` rows", async () => {
       // 4 rows, limit 2 → pages of [2, 2]; the second page is full yet last.
       // Exercises the limit+1 fetch probe at its boundary (fetch 3, get ≤2).
-      for (let i = 0; i < 4; i++) await seedShare(`bound-${i}`);
+      for (let i = 0; i < 4; i++) await seedNotice(`bound-${i}`);
       const r1 = await app.request("/api/notifications?limit=2", { headers: authHeaders(ctx) });
       const b1 = (await r1.json()) as { data: NotificationDto[]; hasMore: boolean };
       expect(b1.data).toHaveLength(2);
@@ -548,7 +554,7 @@ describe("Notifications feed API (per-recipient)", () => {
     });
 
     it("an unread filter paginates independently of read rows", async () => {
-      for (let i = 0; i < 3; i++) await seedShare(`uf-${i}`);
+      for (let i = 0; i < 3; i++) await seedNotice(`uf-${i}`);
       // Mark the newest one read.
       const firstId = (await listNotifications(authHeaders(ctx)))[0]!.id;
       await markRead(authHeaders(ctx), firstId);
@@ -580,19 +586,19 @@ describe("Notifications feed API (per-recipient)", () => {
     }
 
     it("read: a key without a run-read scope is refused", async () => {
-      await seedShare();
+      await seedNotice();
       const headers = await keyHeaders(["agents:run"]);
       const res = await app.request("/api/notifications", { headers });
       expect(res.status).toBe(403);
     });
 
     it("read: a key with runs:read lists the caller's notification", async () => {
-      await seedShare();
+      await seedNotice();
       expect(await listNotifications(await keyHeaders(["runs:read"]))).toHaveLength(1);
     });
 
     it("read: a cookie session, which carries no ceiling, lists it", async () => {
-      await seedShare();
+      await seedNotice();
       expect(await listNotifications(authHeaders(ctx))).toHaveLength(1);
     });
 
@@ -602,19 +608,19 @@ describe("Notifications feed API (per-recipient)", () => {
     }
 
     it("write: a key without a run-read scope is refused and nothing is marked", async () => {
-      await seedShare();
+      await seedNotice();
       expect(await markAll(await keyHeaders(["agents:run"]))).toBe(403);
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
     });
 
     it("write: a key with runs:read-all marks the caller's notification read", async () => {
-      await seedShare();
+      await seedNotice();
       expect(await markAll(await keyHeaders(["runs:read-all"]))).toBe(200);
       expect(await unreadCount(authHeaders(ctx))).toBe(0);
     });
 
     it("write: a cookie session, which carries no ceiling, marks it read", async () => {
-      await seedShare();
+      await seedNotice();
       expect(await markAll(authHeaders(ctx))).toBe(200);
       expect(await unreadCount(authHeaders(ctx))).toBe(0);
     });
