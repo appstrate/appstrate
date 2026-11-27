@@ -7,7 +7,7 @@
  */
 
 import type { Context } from "hono";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionCalls, integrationConnections } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -130,8 +130,12 @@ export async function recordConnectionCalls(rows: readonly ConnectionCall[]): Pr
           };
         }),
       )
-      // A sidecar batch sent twice (its retry) is stored once: `(run_id, call_id)` is unique.
-      .onConflictDoNothing({ target: [connectionCalls.runId, connectionCalls.callId] });
+      // A sidecar batch sent twice (its retry) is stored once: `(run_id, call_id)` is unique. The
+      // index is partial, so the conflict target repeats its predicate or Postgres matches none.
+      .onConflictDoNothing({
+        target: [connectionCalls.runId, connectionCalls.callId],
+        where: sql`${connectionCalls.callId} IS NOT NULL`,
+      });
   } catch (err) {
     logger.error("recordConnectionCalls failed (the calls are unaffected)", {
       records: rows.length,

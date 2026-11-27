@@ -751,6 +751,7 @@ describe("resolveLiveIntegrationCredentials", () => {
         BEGIN
           UPDATE integration_connections
             SET credentials_encrypted = 'reconnected', needs_reconnection = false,
+                needs_reconnection_cause = NULL, needs_reconnection_at = NULL,
                 refresh_failure_count = 0
             WHERE id = NEW.id;
           RETURN NULL;
