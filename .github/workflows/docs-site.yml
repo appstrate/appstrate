@@ -17,8 +17,9 @@ name: Docs site
 # Setup (repository settings > Secrets and variables > Actions):
 #   secret CLOUDFLARE_API_TOKEN   token with Account > Cloudflare Pages > Edit
 #   secret CLOUDFLARE_ACCOUNT_ID  the account that owns the `appstrate-docs` project
-# Without them the deploy step is skipped and the build still runs. Pull
-# requests from forks never receive secrets, so they only build.
+# A pull request without them only builds: forks and Dependabot never receive
+# Actions secrets. A push to main or a manual run without them fails, since a
+# green run that deploys nothing leaves docs.appstrate.com silently stale.
 on:
   pull_request:
     branches: [main]
@@ -54,6 +55,12 @@ jobs:
       HAS_CLOUDFLARE: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
 
     steps:
+      - name: Require the Cloudflare secrets outside pull requests
+        if: github.event_name != 'pull_request' && env.HAS_CLOUDFLARE != 'true'
+        run: |
+          echo "::error title=Docs site not deployed::CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set as repository secrets to deploy docs.appstrate.com."
+          exit 1
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
