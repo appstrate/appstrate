@@ -86,8 +86,15 @@ async function principal(orgRole: "admin" | "member"): Promise<Principal> {
   };
 }
 
-const offer = (headers: Headers, packageId: string) =>
-  app.request(`/api/packages/${packageId}/org-offer`, { method: "PUT", headers });
+const offerRaw = (headers: Headers, packageId: string, body: unknown) =>
+  app.request(`/api/packages/${packageId}/org-offer`, {
+    method: "PUT",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+const offer = (headers: Headers, packageId: string, mode = "on_by_default") =>
+  offerRaw(headers, packageId, { mode });
+const truncateOffers = () => db.delete(orgPackageOffers);
 const withdraw = (headers: Headers, packageId: string) =>
   app.request(`/api/packages/${packageId}/org-offer`, { method: "DELETE", headers });
 
@@ -138,7 +145,7 @@ async function libraryPlacement(p: Principal, packageId: string, type: string, s
       string,
       {
         id: string;
-        offered_to_org: boolean;
+        org_offer: "available" | "on_by_default" | null;
         org_offerable: boolean;
         placements: { space_id: string; via: string; state: string; shared_by: null }[];
       }[]
@@ -192,7 +199,7 @@ describe("PUT/DELETE /api/packages/{scope}/{name}/org-offer", () => {
     expect(await first.json()).toEqual({
       object: "package_org_offer",
       packageId: AGENT,
-      offered_to_org: true,
+      org_offer: "on_by_default",
     });
     const second = await offer(admin.headers(teamId), AGENT);
     expect(second.status).toBe(200);
@@ -258,6 +265,108 @@ describe("PUT/DELETE /api/packages/{scope}/{name}/org-offer", () => {
   });
 });
 
+describe("the offer mode", () => {
+  const auditsOf = (action: string) =>
+    db.select().from(auditEvents).where(eq(auditEvents.action, action));
+  const activate = (p: Principal, spaceId: string) =>
+    app.request(`/api/spaces/${spaceId}/packages`, {
+      method: "POST",
+      headers: { ...p.headers(spaceId), "Content-Type": "application/json" },
+      body: JSON.stringify({ packageId: AGENT }),
+    });
+
+  it("refuses a body without a mode, with an unknown mode and with an unknown member", async () => {
+    const headers = admin.headers(teamId);
+    for (const body of [{}, { mode: "everywhere" }, { mode: "available", extra: true }]) {
+      const res = await offerRaw(headers, AGENT, body);
+      expect(res.status, JSON.stringify(body)).toBe(400);
+    }
+    const empty = await app.request(`/api/packages/${AGENT}/org-offer`, {
+      method: "PUT",
+      headers,
+    });
+    expect(empty.status).toBe(400);
+    expect(await offerRows(AGENT)).toHaveLength(0);
+  });
+
+  it("records each mode and answers it", async () => {
+    for (const mode of ["available", "on_by_default"] as const) {
+      await truncateOffers();
+      const res = await offer(admin.headers(teamId), AGENT, mode);
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(await res.json()).toEqual({
+        object: "package_org_offer",
+        packageId: AGENT,
+        org_offer: mode,
+      });
+      expect((await offerRows(AGENT))[0]?.mode).toBe(mode);
+    }
+  });
+
+  it("audits a mode change with its previous mode and leaves a repeat in the same mode silent", async () => {
+    const headers = admin.headers(teamId);
+    await offer(headers, AGENT, "on_by_default");
+    await offer(headers, AGENT, "on_by_default");
+    expect(await auditsOf("package.offer_mode_changed")).toHaveLength(0);
+
+    expect((await offer(headers, AGENT, "available")).status).toBe(200);
+    expect(await offerRows(AGENT)).toHaveLength(1);
+    expect((await offerRows(AGENT))[0]?.mode).toBe("available");
+    const changed = await auditsOf("package.offer_mode_changed");
+    expect(changed).toHaveLength(1);
+    expect(changed[0]?.before).toEqual({ mode: "on_by_default" });
+    expect(changed[0]?.after).toEqual({ orgId: ctx.orgId, mode: "available" });
+    expect(await auditsOf("package.offered_to_org")).toHaveLength(1);
+
+    await offer(headers, AGENT, "available");
+    expect(await auditsOf("package.offer_mode_changed")).toHaveLength(1);
+  });
+
+  it("places an available offer in every space without activating it", async () => {
+    expect((await offer(admin.headers(teamId), AGENT, "available")).status).toBe(200);
+
+    const personal = await libraryPlacement(member, AGENT, "agent", member.personalSpaceId);
+    expect(personal?.org_offer).toBe("available");
+    expect(personal?.placements).toEqual([
+      { space_id: member.personalSpaceId, via: "organization", state: "none", shared_by: null },
+    ]);
+    expect(await isPackageReadableInSpace(member.personalSpaceId, AGENT)).toBe(true);
+    expect(
+      await isPackageActiveHere({ orgId: ctx.orgId, spaceId: member.personalSpaceId }, AGENT),
+    ).toBe(false);
+    const otherTeam = (await seedSpace({ orgId: ctx.orgId, name: "Other team" })).id;
+    expect(await isPackageReadableInSpace(otherTeam, AGENT)).toBe(true);
+    expect(await isPackageActiveHere({ orgId: ctx.orgId, spaceId: otherTeam }, AGENT)).toBe(false);
+  });
+
+  it("lets the personal-space owner switch an available offer on, which records an offer row", async () => {
+    await offer(admin.headers(teamId), AGENT, "available");
+    const res = await activate(member, member.personalSpaceId);
+    expect(res.status, await res.clone().text()).toBe(201);
+    expect(await rowIn(member.personalSpaceId, AGENT)).toMatchObject({
+      enabled: true,
+      placedByOffer: true,
+    });
+    expect(
+      await isPackageActiveHere({ orgId: ctx.orgId, spaceId: member.personalSpaceId }, AGENT),
+    ).toBe(true);
+    const library = await libraryPlacement(member, AGENT, "agent", member.personalSpaceId);
+    expect(library?.placements).toMatchObject([{ via: "organization", state: "active" }]);
+  });
+
+  it("keeps an on_by_default offer active without a row, and turns it off when switched to available", async () => {
+    await offer(admin.headers(teamId), AGENT, "on_by_default");
+    expect(
+      await isPackageActiveHere({ orgId: ctx.orgId, spaceId: member.personalSpaceId }, AGENT),
+    ).toBe(true);
+    await offer(admin.headers(teamId), AGENT, "available");
+    expect(
+      await isPackageActiveHere({ orgId: ctx.orgId, spaceId: member.personalSpaceId }, AGENT),
+    ).toBe(false);
+    expect(await isPackageReadableInSpace(member.personalSpaceId, AGENT)).toBe(true);
+  });
+});
+
 describe("an offered package is placed and active where no row says otherwise", () => {
   it("activates a catalog integration in a member's personal space, and lists it with a reachable connection", async () => {
     await seedOrgConnection(member.userId, CATALOG_SSH);
@@ -294,7 +403,7 @@ describe("an offered package is placed and active where no row says otherwise", 
   it("shows via organization in a space library, active, and the offer flags to an admin", async () => {
     expect((await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT)).status).toBe(200);
     const row = await libraryPlacement(member, AGENT, "agent", member.personalSpaceId);
-    expect(row?.offered_to_org).toBe(true);
+    expect(row?.org_offer).toBe("on_by_default");
     expect(row?.org_offerable).toBe(false);
     expect(row?.placements).toEqual([
       { space_id: member.personalSpaceId, via: "organization", state: "active", shared_by: null },
@@ -572,7 +681,7 @@ describe("a row created under the offer is a decision about the offer, not a pla
       homeSpaceId: member.personalSpaceId,
       draftManifest: { name: "@offers/personal", version: "0.1.0", type: "agent" },
     });
-    await seedOrgOffer(ctx.orgId, "@offers/personal");
+    await seedOrgOffer(ctx.orgId, "@offers/personal", "on_by_default");
     await db
       .update(spaces)
       .set({ orphanedAt: new Date(Date.now() - 90 * 86_400_000) })

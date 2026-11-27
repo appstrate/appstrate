@@ -16,6 +16,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { packageTypeEnum, packageSourceEnum } from "./enums.ts";
+import type { OrgOfferMode } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
@@ -109,10 +110,12 @@ export const spacePackages = pgTable(
 );
 
 /**
- * A package OFFERED to its organization: placed and active in every space of
- * the org, personal spaces included, wherever a space holds no row of its own
- * (a `space_packages` row always wins, `enabled = false` being the sticky
- * opt-out). Presence of the row = offered; there is no state column.
+ * A package OFFERED to its organization: placed in every space of the org,
+ * personal spaces included, wherever a space holds no row of its own. `mode`
+ * says what that placement is: `on_by_default` is ACTIVE there, `available` is
+ * placed but off until the space switches it on (a `space_packages` row always
+ * wins, `enabled = false` being the sticky opt-out). Presence of the row =
+ * offered.
  * `offered_by` is the admin who offered it (`NULL` once they are gone).
  * Written only by `services/package-org-offers.ts`; read through
  * `offeredToSpaceOrgSql` (`services/package-placement.ts`).
@@ -126,11 +129,13 @@ export const orgPackageOffers = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
+    mode: text("mode").$type<OrgOfferMode>().notNull(),
     offeredBy: text("offered_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.orgId, table.packageId] }),
+    check("org_package_offers_mode_known", sql`mode IN ('available', 'on_by_default')`),
     index("idx_org_package_offers_package_id").on(table.packageId),
     // Referencing-side index for the `user` SET NULL action.
     index("idx_org_package_offers_offered_by").on(table.offeredBy),

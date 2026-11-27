@@ -14,7 +14,7 @@ import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and } from "drizzle-orm";
-import { packages } from "@appstrate/db/schema";
+import { packages, orgOfferModeValues } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { parseStrictQuery } from "../lib/list-query.ts";
 import { listResponse } from "@appstrate/core/list-query";
@@ -302,6 +302,8 @@ export const githubImportSchema = z
     }),
   })
   .strict();
+
+export const packageOrgOfferSchema = z.object({ mode: z.enum(orgOfferModeValues) }).strict();
 
 export const forkSchema = z
   .object({
@@ -2260,10 +2262,12 @@ export function createPackagesRouter() {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
     const { authorizeHome } = await assertPackageOfferAccess(c, packageId);
-    const { created } = await offerPackageToOrg({
+    const { mode } = await readJsonBody(c, packageOrgOfferSchema);
+    const { created, changed, previousMode } = await offerPackageToOrg({
       orgId,
       packageId,
       offeredBy: c.get("user").id,
+      mode,
       authorizeHome,
     });
     if (created) {
@@ -2271,10 +2275,18 @@ export function createPackagesRouter() {
         action: "package.offered_to_org",
         resourceType: "package",
         resourceId: packageId,
-        after: { orgId },
+        after: { orgId, mode },
+      });
+    } else if (changed) {
+      await recordAuditFromContext(c, {
+        action: "package.offer_mode_changed",
+        resourceType: "package",
+        resourceId: packageId,
+        before: { mode: previousMode },
+        after: { orgId, mode },
       });
     }
-    return c.json({ object: "package_org_offer", packageId, offered_to_org: true });
+    return c.json({ object: "package_org_offer", packageId, org_offer: mode });
   });
 
   router.delete(`/${SCOPED_PACKAGE_ROUTE}/org-offer`, async (c) => {

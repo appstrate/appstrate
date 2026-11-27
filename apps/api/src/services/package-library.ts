@@ -32,6 +32,7 @@ import { sharerView } from "./package-shares.ts";
 import type { AppEnv } from "../types/index.ts";
 import { callerPersonalOwnerId } from "../lib/view-as.ts";
 import { listOrgOffers } from "./package-placement.ts";
+import type { OrgOfferMode } from "@appstrate/db/schema";
 
 /** Whether the space RUNS what it was placed. */
 type PlacementState = "active" | "inactive" | "none";
@@ -72,8 +73,8 @@ interface LibraryPackage {
   home_writable: boolean;
   home_deletable: boolean;
   home_shareable: boolean;
-  /** Offered to the organization: placed and active in every space holding no row of its own. */
-  offered_to_org: boolean;
+  /** The offer to the organization, placed in every space holding no row of its own: `on_by_default` is also active there, `available` waits for the space to switch it on. */
+  org_offer: OrgOfferMode | null;
   /** Whether THIS caller may offer it or withdraw the offer (`PUT|DELETE …/org-offer`). */
   org_offerable: boolean;
   /** Active in every space by the deployment's default: an offer would change nothing. */
@@ -212,7 +213,7 @@ async function readPackageLibrary(
     )
     .orderBy(packages.id);
 
-  const offeredIds = await listOrgOffers(orgId, packageIds);
+  const orgOffers = await listOrgOffers(orgId, packageIds);
 
   /** packageId → spaceId → the row's switches, for the rows the caller's spaces hold. */
   const placementRows = new Map<
@@ -272,18 +273,18 @@ async function readPackageLibrary(
     const home = homeWireForCaller(row, accessible);
     const rowsBySpace = placementRows.get(row.id);
 
-    const offered = offeredIds.has(row.id);
+    const orgOffer = orgOffers.get(row.id) ?? null;
     const activeByDefault = isActiveEverywhereByDefault({ id: row.id, type, source: row.source });
     const placements: Placement[] = [];
     for (const space of readable) {
       const placementRow = rowsBySpace?.get(space);
-      const via = placementVia({ ...row, offeredToOrg: offered }, space, placementRow);
+      const via = placementVia({ ...row, orgOffer }, space, placementRow);
       if (via === null) continue;
       placements.push({
         space_id: space,
         via,
         state: placementState(
-          { id: row.id, type, source: row.source, offeredToOrg: offered },
+          { id: row.id, type, source: row.source, orgOffer },
           placementRow?.enabled,
         ),
         shared_by: via === "shared" ? (placementRow?.sharedBy ?? null) : null,
@@ -326,15 +327,15 @@ async function readPackageLibrary(
       // §6.10): the home's id only when this caller reaches that space, and the
       // write, delete and share verdicts themselves.
       ...home,
-      offered_to_org: offered,
+      org_offer: orgOffer,
       // The offer door's verdict (`assertPackageOfferAccess`): the role and ceiling, the home's
       // `share` (`home_shareable`) and, when creating an offer for a homed package, a published
       // version; a system package already active by default takes no new offer.
       org_offerable:
         callerMayOffer(c, type) &&
         (row.source === "system"
-          ? offered || !activeByDefault
-          : home.home_shareable && (offered || published.has(row.id))),
+          ? orgOffer !== null || !activeByDefault
+          : home.home_shareable && (orgOffer !== null || published.has(row.id))),
       active_by_default: activeByDefault,
       name: typeof m.display_name === "string" ? m.display_name : row.id,
       description: typeof m.description === "string" ? m.description : "",
@@ -359,7 +360,7 @@ async function readPackageLibrary(
  * at all.
  */
 function placementState(
-  pkg: { id: string; type: PackageType; source: string; offeredToOrg: boolean },
+  pkg: { id: string; type: PackageType; source: string; orgOffer: OrgOfferMode | null },
   enabled: boolean | undefined,
 ): PlacementState {
   const row = enabled === undefined ? undefined : { enabled };
@@ -386,7 +387,7 @@ export async function packageAvailabilityIn(
   const { space_id: _space, ...here } = placement;
   return {
     ...here,
-    offered_to_org: entry.offered_to_org,
+    org_offer: entry.org_offer,
     org_offerable: entry.org_offerable,
     active_by_default: entry.active_by_default,
   };

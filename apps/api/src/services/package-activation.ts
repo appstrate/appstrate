@@ -8,8 +8,12 @@
  * once.
  *
  *   activeHere = the placement row's `enabled`, when there IS a row
- *              = the deployment's default OR an offer to the space's
- *                organization (`org_package_offers`), when there is none
+ *              = the deployment's default OR an `on_by_default` offer to the
+ *                space's organization (`org_package_offers`), when there is none
+ *
+ * An offer in either mode PLACES the package in every space of the
+ * organization; only `on_by_default` also activates it. An `available` offer
+ * leaves the package placed and off until the space switches it on.
  *
  * The ROW ALWAYS WINS. That is why a system package can be switched off per
  * space like any other: an explicit `false` is an operator decision the
@@ -39,6 +43,7 @@
 import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { packages, spacePackages } from "@appstrate/db/schema";
+import type { OrgOfferMode } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
 import { listSystemIntegrationIds } from "./integration-client-registry.ts";
 import { listRuntimeBoundSystemIntegrationIds } from "./system-packages.ts";
@@ -49,8 +54,8 @@ export interface ActivatablePackage {
   id: string;
   type: PackageType | string;
   source: string | null;
-  /** Offered to the organization of the space asked about (`org_package_offers`). */
-  offeredToOrg: boolean;
+  /** The mode of the offer to the organization of the space asked about (`org_package_offers`), or `null` when there is none. */
+  orgOffer: OrgOfferMode | null;
 }
 
 /** The integration ids active without a row: the offered ones and the runtime-bound ones. */
@@ -62,7 +67,7 @@ function activeWithoutRowIntegrationIds(): ReadonlySet<string> {
  * Is the package active in a space with no row and no offer: the deployment's
  * default alone? An offer to it would change nothing.
  */
-export function isActiveByDefault(pkg: Omit<ActivatablePackage, "offeredToOrg">): boolean {
+export function isActiveByDefault(pkg: Omit<ActivatablePackage, "orgOffer">): boolean {
   if (pkg.type === "integration") return activeWithoutRowIntegrationIds().has(pkg.id);
   return pkg.source === "system";
 }
@@ -74,20 +79,18 @@ export function isActiveByDefault(pkg: Omit<ActivatablePackage, "offeredToOrg">)
  * active-without-row by {@link isActiveByDefault} but placed only where it is
  * homed or shared, so an offer still changes something for it.
  */
-export function isActiveEverywhereByDefault(
-  pkg: Omit<ActivatablePackage, "offeredToOrg">,
-): boolean {
+export function isActiveEverywhereByDefault(pkg: Omit<ActivatablePackage, "orgOffer">): boolean {
   return pkg.source === "system" && isActiveByDefault(pkg);
 }
 
 /**
  * Is the package active in a space that holds NO placement row for it?
  *
- * The deployment's default or the organization's offer: the half of the rule
+ * The deployment's default or an `on_by_default` offer: the half of the rule
  * that looks at the package rather than at the space's decision.
  */
 export function isActiveWithoutRow(pkg: ActivatablePackage): boolean {
-  return pkg.offeredToOrg || isActiveByDefault(pkg);
+  return pkg.orgOffer === "on_by_default" || isActiveByDefault(pkg);
 }
 
 /**
@@ -112,9 +115,9 @@ export type PlacementVia = "home" | "shared" | "system" | "organization";
 /**
  * Where a package's presence in a space comes from, or `null` when it is not
  * placed there. `row` is the space's placement row, or `undefined` when it has
- * none; `pkg.offeredToOrg` is the offer to that space's organization. A row an
- * offer no longer explains (withdrawn) is a row outside the home: `shared`, as
- * `placementReadFilter` reads it. A system package reports `system` unless the
+ * none; `pkg.orgOffer` is the offer to that space's organization, in either
+ * mode. A row an offer no longer explains (withdrawn) is a row outside the
+ * home: `shared`, as `placementReadFilter` reads it. A system package reports `system` unless the
  * offer is what activates it and the space holds no row, or only an offer row.
  */
 export function placementVia(
@@ -122,20 +125,21 @@ export function placementVia(
   spaceId: string,
   row: { placedByOffer: boolean } | null | undefined,
 ): PlacementVia | null {
-  const activatedByOffer = pkg.offeredToOrg && !isActiveByDefault(pkg);
+  const offered = pkg.orgOffer !== null;
+  const activatedByOffer = offered && !isActiveByDefault(pkg);
   // A system package the offer alone activates is `organization`, with no row or only an offer row.
   const offerDecides = activatedByOffer && (!row || row.placedByOffer);
   if (pkg.source === "system" && !offerDecides) return "system";
   if (pkg.homeSpaceId === spaceId) return "home";
-  if (row && (!row.placedByOffer || !pkg.offeredToOrg)) return "shared";
-  return pkg.offeredToOrg ? "organization" : null;
+  if (row && (!row.placedByOffer || !offered)) return "shared";
+  return offered ? "organization" : null;
 }
 
 /**
  * The rule, in SQL. Expects a LEFT JOIN of `spacePackages` on (package, the
  * space asked about) — `placementRowJoin` (`services/package-placement.ts`) —
  * and takes that same space as `spaceId` (a value, or a column of the outer
- * query), against which the organization's offer is read. A query that omits it loses the row half silently rather than loudly: every
+ * query), against which the organization's `on_by_default` offer is read. A query that omits it loses the row half silently rather than loudly: every
  * package falls back to the deployment default, which is not the same question.
  *
  * The `IN (…)` list is the system-integration registry, read from memory at
@@ -154,6 +158,9 @@ export function activeHereSql(spaceId: string | AnyPgColumn) {
   );
   return or(
     and(isNotNull(spacePackages.packageId), eq(spacePackages.enabled, true)),
-    and(isNull(spacePackages.packageId), or(systemDefault, offeredToSpaceOrgSql(spaceId))),
+    and(
+      isNull(spacePackages.packageId),
+      or(systemDefault, offeredToSpaceOrgSql(spaceId, "on_by_default")),
+    ),
   );
 }

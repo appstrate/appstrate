@@ -644,7 +644,7 @@ export interface PackageAvailability {
   via: "home" | "shared" | "system" | "organization";
   state: "active" | "inactive" | "none";
   shared_by: { user_id: string; name: string } | null;
-  offered_to_org: boolean;
+  org_offer: "available" | "on_by_default" | null;
   org_offerable: boolean;
   /** A system package the deployment activates in every space: it takes no offer. */
   active_by_default: boolean;

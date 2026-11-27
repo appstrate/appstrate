@@ -2496,7 +2496,7 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "in this space, so a run there cannot use it until it is activated — `activatePackage`, or " +
       "for an organization owner or admin offered to the organization: from chat, in the " +
       "organization catalog; otherwise `offerPackageToOrg` with an unconfined user credential. An " +
-      "offer activates the integration, never a connection, and a space's own switched-off row " +
+      "offer made on by default activates the integration, an available one only lets a space switch it on, neither ever a connection, and a space's own switched-off row " +
       "still wins); `via` (`home`, `shared`, `system`, `organization`: why it is placed here, " +
       "`null` when the caller holds a connection but it is not placed); `version` and " +
       "`default_tools`, present only when active; `needs_reconnection` (no healthy connection: " +

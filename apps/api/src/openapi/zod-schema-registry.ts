@@ -85,6 +85,7 @@ import {
   packageJsonCreateWithContentSchema,
   packageJsonUpdateSchema,
   packageHomeSpaceSchema,
+  packageOrgOfferSchema,
   shareTargetSchema,
   createVersionBodySchema,
 } from "../routes/packages.ts";
@@ -527,6 +528,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/packages/{scope}/{name}/home",
     jsonSchema: toJsonSchema(packageHomeSpaceSchema),
     description: "Move a package to another home space",
+  },
+
+  {
+    method: "PUT",
+    path: "/api/packages/{scope}/{name}/org-offer",
+    jsonSchema: toJsonSchema(packageOrgOfferSchema),
+    description: "Offer a package to the organization",
   },
 
   {

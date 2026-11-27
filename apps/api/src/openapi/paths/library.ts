@@ -60,7 +60,7 @@ const PACKAGES_EXAMPLE = {
       home_writable: true,
       home_deletable: true,
       home_shareable: true,
-      offered_to_org: false,
+      org_offer: null,
       org_offerable: true,
       active_by_default: false,
       placements: [
@@ -103,7 +103,7 @@ const PACKAGES_EXAMPLE = {
       home_writable: false,
       home_deletable: false,
       home_shareable: false,
-      offered_to_org: false,
+      org_offer: null,
       org_offerable: false,
       active_by_default: true,
       placements: [

@@ -63,8 +63,9 @@ const ROWS = [
   { label: "no row", row: false },
 ] as const;
 const OFFERS = [
-  { label: "offered to the organization", offered: true },
-  { label: "not offered", offered: false },
+  { label: "offered on by default", offered: true, mode: "on_by_default" },
+  { label: "offered as available", offered: true, mode: "available" },
+  { label: "not offered", offered: false, mode: null },
 ] as const;
 
 /**
@@ -105,7 +106,7 @@ describe("the four statements of PLACED answer the same, cell for cell", () => {
   for (const source of SOURCES) {
     for (const { label: homeLabel, here } of HOMES) {
       for (const { label: rowLabel, row } of ROWS) {
-        for (const { label: offerLabel, offered } of OFFERS) {
+        for (const { label: offerLabel, offered, mode } of OFFERS) {
           it(`${source} / ${homeLabel} / ${rowLabel} / ${offerLabel}`, async () => {
             const id = `@placement/${source}`;
             const system = source === "system";
@@ -119,7 +120,7 @@ describe("the four statements of PLACED answer the same, cell for cell", () => {
               draftManifest: { name: id, version: "0.1.0", type: "agent" },
             });
             if (row) await seedPackageShare(ctx.defaultSpaceId, id);
-            if (offered) await seedOrgOffer(ctx.orgId, id);
+            if (mode) await seedOrgOffer(ctx.orgId, id, mode);
 
             // The rule itself, spelled out once here so the four forms are
             // compared against the RULE and not merely against each other —

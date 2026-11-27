@@ -4292,7 +4292,7 @@ export interface paths {
         get?: never;
         /**
          * Offer a package to the organization
-         * @description Offer the package to its organization: it is then placed and ACTIVE in every space of the organization that holds no `space_packages` row of its own, personal spaces included. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Idempotent: offering twice answers 200 and leaves the offer as it is. Audited as `package.offered_to_org` (once, when the offer is created).
+         * @description Offer the package to its organization in a `mode`: it is then PLACED in every space of the organization that holds no `space_packages` row of its own, personal spaces included. `on_by_default`: it is also ACTIVE there. `available`: it is placed and listed but off until a space (or the owner of a personal space) switches it on through `POST /api/spaces/{id}/packages`. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Idempotent: offering again in the same mode answers 200 and leaves the offer as it is; offering in the other mode rewrites it. `mode` is required: a body without it, with another value or with another member is a 400. Audited as `package.offered_to_org` when the offer is created and as `package.offer_mode_changed` (with the previous mode) when its mode changes.
          */
         put: operations["offerPackageToOrg"];
         post?: never;
@@ -6748,8 +6748,11 @@ export interface components {
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
-            /** @description Offered to the organization: placed and active in every space of it that holds no `space_packages` row of its own (a row always wins; `enabled = false` keeps it off). */
-            offered_to_org: boolean;
+            /**
+             * @description The offer to the organization, or `null` when there is none. An offer in either mode PLACES the package in every space of it that holds no `space_packages` row of its own. `on_by_default`: it is also ACTIVE there (a row always wins; `enabled = false` keeps it off). `available`: it is placed and listed but off until the space switches it on (`POST /api/spaces/{id}/packages`).
+             * @enum {string|null}
+             */
+            org_offer: "available" | "on_by_default" | null;
             /** @description Whether THIS caller may offer it, or withdraw the offer, through `PUT|DELETE /api/packages/{scope}/{name}/org-offer`: an owner or admin user credential unconfined to spaces whose scope ceiling leaves the type's `share`, and for a package homed in a space the type's `share` permission in that home. Creating an offer also requires a published version for a homed package. The route stays the authority; this is its verdict served in advance. */
             org_offerable: boolean;
             /** @description Active in every space by the deployment's default alone (a system-source package the deployment switches on; an organization-published integration named in `SYSTEM_INTEGRATIONS` is not): an offer would change nothing, so `PUT …/org-offer` refuses to create one (400) while an existing offer can still be withdrawn. */
@@ -7235,7 +7238,7 @@ export interface components {
              */
             via: "home" | "shared" | "system" | "organization";
             /**
-             * @description Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it.
+             * @description Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off — the package is not offered to the organization, or offered as `available` and not yet switched on here. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization as `on_by_default`, which activates it.
              * @enum {string}
              */
             state: "active" | "inactive" | "none";
@@ -7244,8 +7247,11 @@ export interface components {
                 user_id: string;
                 name: string;
             } | null;
-            /** @description Offered to the organization (`offered_to_org` of the library entry). */
-            offered_to_org: boolean;
+            /**
+             * @description The offer to the organization (`org_offer` of the library entry).
+             * @enum {string|null}
+             */
+            org_offer: "available" | "on_by_default" | null;
             /** @description Whether THIS caller may offer it or withdraw the offer (`org_offerable` of the library entry). */
             org_offerable: boolean;
             /** @description Active in every space by the deployment's default (`active_by_default` of the library entry). */
@@ -7329,8 +7335,11 @@ export interface components {
             object: "package_org_offer";
             /** @description Package id (`@scope/name`). */
             packageId: string;
-            /** @enum {boolean} */
-            offered_to_org: true;
+            /**
+             * @description The mode the offer now has.
+             * @enum {string}
+             */
+            org_offer: "available" | "on_by_default";
         };
         /** @description One (package, space) cell of the library map: why the package reaches that space, and whether the space runs it. */
         PackagePlacement: {
@@ -7342,7 +7351,7 @@ export interface components {
              */
             via: "home" | "shared" | "system" | "organization";
             /**
-             * @description Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it.
+             * @description Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off — the package is not offered to the organization, or offered as `available` and not yet switched on here. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization as `on_by_default`, which activates it.
              * @enum {string}
              */
             state: "active" | "inactive" | "none";
@@ -16252,7 +16261,7 @@ export interface operations {
                      *             "home_writable": true,
                      *             "home_deletable": true,
                      *             "home_shareable": true,
-                     *             "offered_to_org": false,
+                     *             "org_offer": null,
                      *             "org_offerable": true,
                      *             "active_by_default": false,
                      *             "placements": [
@@ -16298,7 +16307,7 @@ export interface operations {
                      *             "home_writable": false,
                      *             "home_deletable": false,
                      *             "home_shareable": false,
-                     *             "offered_to_org": false,
+                     *             "org_offer": null,
                      *             "org_offerable": false,
                      *             "active_by_default": true,
                      *             "placements": [
@@ -25406,9 +25415,19 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description `on_by_default`: placed and active in every space holding no row of its own. `available`: placed in every such space and off until the space switches it on.
+                     * @enum {string}
+                     */
+                    mode: "available" | "on_by_default";
+                };
+            };
+        };
         responses: {
-            /** @description The package is offered to the organization (new or already offered). */
+            /** @description The package is offered to the organization in that mode (new, changed or already so). */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -28841,7 +28860,7 @@ export interface operations {
                      *             "home_writable": true,
                      *             "home_deletable": true,
                      *             "home_shareable": true,
-                     *             "offered_to_org": false,
+                     *             "org_offer": null,
                      *             "org_offerable": true,
                      *             "active_by_default": false,
                      *             "placements": [
@@ -28887,7 +28906,7 @@ export interface operations {
                      *             "home_writable": false,
                      *             "home_deletable": false,
                      *             "home_shareable": false,
-                     *             "offered_to_org": false,
+                     *             "org_offer": null,
                      *             "org_offerable": false,
                      *             "active_by_default": true,
                      *             "placements": [

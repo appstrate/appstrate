@@ -50,8 +50,9 @@ const ROWS = [
 ] as const;
 
 const OFFERS = [
-  { label: "not offered", offered: false },
-  { label: "offered to the organization", offered: true },
+  { label: "not offered", offer: null },
+  { label: "offered as available", offer: "available" },
+  { label: "offered on by default", offer: "on_by_default" },
 ] as const;
 
 /**
@@ -92,7 +93,7 @@ beforeEach(async () => {
 describe("the SQL mirror and the in-memory twin answer the same, cell for cell", () => {
   for (const type of TYPES) {
     for (const source of ["local", "system"] as const) {
-      for (const { label: offerLabel, offered } of OFFERS) {
+      for (const { label: offerLabel, offer } of OFFERS) {
         for (const { label, row } of ROWS) {
           it(`${type} / ${source} / ${offerLabel} / ${label}`, async () => {
             const id = `@parity/${type}-${source}`;
@@ -110,23 +111,25 @@ describe("the SQL mirror and the in-memory twin answer the same, cell for cell",
             if (type === "integration" && source === "system") {
               initSystemIntegrations([{ id, clients: [] }]);
             }
-            if (offered) await seedOrgOffer(ctx.orgId, id);
+            if (offer) await seedOrgOffer(ctx.orgId, id, offer);
             if (row) await seedSpacePackage(ctx.defaultSpaceId, id, { enabled: row.enabled });
 
             const fromSql = await sqlSaysActive(ctx.defaultSpaceId, id);
-            const fromTs = isActiveHere({ id, type, source, offeredToOrg: offered }, row);
+            const fromTs = isActiveHere({ id, type, source, orgOffer: offer }, row);
             expect(fromTs).toBe(fromSql);
 
             // Placement agrees too: `placementVia` names a provenance exactly where
             // `placementReadFilter` places the package.
             const homeSpaceId = source === "system" ? null : elsewhere;
-            const pkg = { id, type, source, homeSpaceId, offeredToOrg: offered };
+            const pkg = { id, type, source, homeSpaceId, orgOffer: offer };
             const via = placementVia(pkg, ctx.defaultSpaceId, row && { placedByOffer: false });
             expect(via !== null).toBe(await sqlSaysPlaced(ctx.defaultSpaceId, id));
 
-            // And the rule itself: the row wins, and the default or the offer
-            // only decide where the space has said nothing.
-            expect(fromSql).toBe(row ? row.enabled : source === "system" || offered);
+            // And the rule itself: the row wins, and the default or an
+            // `on_by_default` offer only decide where the space has said nothing.
+            expect(fromSql).toBe(
+              row ? row.enabled : source === "system" || offer === "on_by_default",
+            );
           });
         }
       }
@@ -143,7 +146,7 @@ describe("the SQL mirror and the in-memory twin answer the same, cell for cell",
       homeSpaceId: elsewhere,
       draftManifest: { name: id, version: "0.1.0", type: "skill" },
     });
-    await seedOrgOffer(ctx.orgId, id);
+    await seedOrgOffer(ctx.orgId, id, "on_by_default");
     expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(true);
     expect(await sqlSaysActive(other.defaultSpaceId, id)).toBe(false);
   });
@@ -161,16 +164,16 @@ describe("the SQL mirror and the in-memory twin answer the same, cell for cell",
       draftManifest: { name: id, version: "0.1.0", type: "integration" },
     });
     expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(false);
-    expect(
-      isActiveHere({ id, type: "integration", source: "system", offeredToOrg: false }, null),
-    ).toBe(false);
+    expect(isActiveHere({ id, type: "integration", source: "system", orgOffer: null }, null)).toBe(
+      false,
+    );
 
     // …and an explicit row still wins, in both directions.
     await seedSpacePackage(ctx.defaultSpaceId, id, { enabled: true });
     expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(true);
     expect(
       isActiveHere(
-        { id, type: "integration", source: "system", offeredToOrg: false },
+        { id, type: "integration", source: "system", orgOffer: null },
         { enabled: true },
       ),
     ).toBe(true);
@@ -184,14 +187,14 @@ describe("the SQL mirror and the in-memory twin answer the same, cell for cell",
     try {
       expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(true);
       expect(
-        isActiveHere({ id, type: "integration", source: "system", offeredToOrg: false }, null),
+        isActiveHere({ id, type: "integration", source: "system", orgOffer: null }, null),
       ).toBe(true);
 
       await seedSpacePackage(ctx.defaultSpaceId, id, { enabled: false });
       expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(false);
       expect(
         isActiveHere(
-          { id, type: "integration", source: "system", offeredToOrg: false },
+          { id, type: "integration", source: "system", orgOffer: null },
           { enabled: false },
         ),
       ).toBe(false);
@@ -226,8 +229,8 @@ describe("the SQL mirror and the in-memory twin answer the same, cell for cell",
     // Discriminant: the other space has no row, so the deployment default
     // decides there — `true`. A leaking join would answer `false`.
     expect(await sqlSaysActive(elsewhere, id)).toBe(true);
-    expect(
-      isActiveHere({ id, type: "skill", source: "system", offeredToOrg: false }, undefined),
-    ).toBe(true);
+    expect(isActiveHere({ id, type: "skill", source: "system", orgOffer: null }, undefined)).toBe(
+      true,
+    );
   });
 });

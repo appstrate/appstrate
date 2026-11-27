@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A package OFFERED to its organization (RBAC spec §6.10): placed and active in
- * every space of the organization that holds no `space_packages` row of its own
- * (a row always wins, `enabled = false` being the sticky opt-out). Presence of
- * the `org_package_offers` row is the offer; there is no state.
+ * A package OFFERED to its organization (RBAC spec §6.10): placed in every space
+ * of the organization that holds no `space_packages` row of its own. The offer's
+ * `mode` says whether it is also active there (`on_by_default`) or waits for
+ * the space to switch it on (`available`). A row always wins, `enabled = false`
+ * being the sticky opt-out. Presence of the `org_package_offers` row is the offer.
  *
  * Authority is the route's (`assertPackageOfferAccess`), re-asked here against
  * the home locked by {@link loadPlaceablePackage}, exactly as `placePackage` does.
@@ -12,6 +13,7 @@
 
 import { and, eq, inArray, ne, notInArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import type { OrgOfferMode } from "@appstrate/db/schema";
 import { orgPackageOffers, schedules, spacePackages, spaces } from "@appstrate/db/schema";
 import { forbidden, invalidRequest } from "../lib/errors.ts";
 import { assertHasPublishedVersion, loadPlaceablePackage } from "./space-packages.ts";
@@ -37,8 +39,9 @@ async function loadOfferablePackage(
 }
 
 /**
- * Offer `packageId` to the organization. Idempotent: a repeat leaves the offer
- * as it is and returns `created: false`. A package homed in a space needs a
+ * Offer `packageId` to the organization in `mode`. Idempotent: a repeat in the
+ * same mode leaves the offer as it is (`created: false, changed: false`); a
+ * different mode rewrites it (`changed: true`, with the `previousMode`). A package homed in a space needs a
  * published version (`409 package_has_no_version`): outside its home it runs
  * its latest published version. A system package has no home and no such rule.
  */
@@ -46,24 +49,32 @@ export async function offerPackageToOrg(params: {
   orgId: string;
   packageId: string;
   offeredBy: string;
+  mode: OrgOfferMode;
   authorizeHome: PlacementAuthority["authorizeHome"];
-}): Promise<{ created: boolean }> {
-  const { orgId, packageId, offeredBy, authorizeHome } = params;
+}): Promise<{ created: boolean; changed: boolean; previousMode: OrgOfferMode | null }> {
+  const { orgId, packageId, offeredBy, mode, authorizeHome } = params;
   return db.transaction(async (tx) => {
     const pkg = await loadOfferablePackage(tx, orgId, packageId, authorizeHome);
-    if (pkg.offeredToOrg) return { created: false };
+    if (pkg.orgOffer === mode) return { created: false, changed: false, previousMode: mode };
     if (isActiveEverywhereByDefault(pkg)) {
       throw invalidRequest(
         `'${packageId}' is already active in every space by the deployment's default: an offer would change nothing.`,
       );
     }
+    if (pkg.orgOffer !== null) {
+      await tx
+        .update(orgPackageOffers)
+        .set({ mode })
+        .where(and(eq(orgPackageOffers.orgId, orgId), eq(orgPackageOffers.packageId, packageId)));
+      return { created: false, changed: true, previousMode: pkg.orgOffer };
+    }
     if (pkg.homeSpaceId !== null) await assertHasPublishedVersion(pkg.id, tx);
     const inserted = await tx
       .insert(orgPackageOffers)
-      .values({ orgId, packageId, offeredBy })
+      .values({ orgId, packageId, offeredBy, mode })
       .onConflictDoNothing()
       .returning({ packageId: orgPackageOffers.packageId });
-    return { created: inserted.length > 0 };
+    return { created: inserted.length > 0, changed: false, previousMode: null };
   });
 }
 

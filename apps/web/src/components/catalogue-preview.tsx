@@ -225,20 +225,28 @@ export function CataloguePreview({
   const viaOrganization = new Set(
     item.placements.filter((entry) => entry.via === "organization").map((entry) => entry.space_id),
   );
+  // Placed by an `available` offer and not yet switched on here.
+  const availableFromOrganization = new Set(
+    item.placements
+      .filter((entry) => entry.via === "organization" && entry.state === "none")
+      .map((entry) => entry.space_id),
+  );
   const stateLabel = (row: SheetSpaceRow) => {
     const base =
       row.state === "active"
         ? viaOrganization.has(row.id)
           ? t("catalogue.sheet.viaOrganization")
           : t("catalogue.filter.active")
-        : row.state === "inactive"
-          ? [
-              t("catalogue.filter.inactive"),
-              row.sharedBy && t("catalogue.sheet.sharedBy", { name: row.sharedBy }),
-            ]
-              .filter(Boolean)
-              .join(" · ")
-          : t("catalogue.sheet.absent");
+        : availableFromOrganization.has(row.id)
+          ? t("catalogue.sheet.availableOrganization")
+          : row.state === "inactive"
+            ? [
+                t("catalogue.filter.inactive"),
+                row.sharedBy && t("catalogue.sheet.sharedBy", { name: row.sharedBy }),
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : t("catalogue.sheet.absent");
     return row.home ? t("catalogue.sheet.atHome", { state: base }) : base;
   };
   const switchFor = (row: SheetSpaceRow) => (

@@ -283,10 +283,14 @@ export function usePackageActivation(
   };
 }
 
-/** Offers `packageId` to the organization (`PUT …/org-offer`), or withdraws the offer (`DELETE`). */
-export async function setOrgOffer(packageId: string, offered: boolean) {
+/** How an offer to the organization reaches the spaces holding no row of their own. */
+export type OrgOfferMode = NonNullable<LibraryPackageItem["org_offer"]>;
+
+/** Offers `packageId` to the organization in `mode` (`PUT …/org-offer`), or withdraws the offer when `mode` is `null` (`DELETE`). */
+export async function setOrgOffer(packageId: string, mode: OrgOfferMode | null) {
   const params = { params: { path: splitPackageRef(packageId) } };
-  if (offered) await client.PUT("/api/packages/{scope}/{name}/org-offer", params);
+  if (mode)
+    await client.PUT("/api/packages/{scope}/{name}/org-offer", { ...params, body: { mode } });
   else await client.DELETE("/api/packages/{scope}/{name}/org-offer", params);
 }
 
@@ -294,8 +298,8 @@ export async function setOrgOffer(packageId: string, offered: boolean) {
 export function useSetOrgOffer() {
   const invalidate = useInvalidatePackageActivation();
   return useMutation({
-    mutationFn: ({ packageId, offered }: { packageId: string; offered: boolean }) =>
-      setOrgOffer(packageId, offered),
+    mutationFn: ({ packageId, mode }: { packageId: string; mode: OrgOfferMode | null }) =>
+      setOrgOffer(packageId, mode),
     onSettled: invalidate,
   });
 }

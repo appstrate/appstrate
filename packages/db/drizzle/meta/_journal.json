@@ -820,6 +820,13 @@
       "when": 1795726657999,
       "tag": "0116_connection_calls_chat_session",
       "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1795800000000,
+      "tag": "0117_org_package_offer_mode",
+      "breakpoints": true
     }
   ]
 }

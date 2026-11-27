@@ -20,6 +20,7 @@ import {
   packageVersions,
   spaces,
 } from "@appstrate/db/schema";
+import type { OrgOfferMode } from "@appstrate/db/schema";
 import {
   conflict,
   forbidden,
@@ -107,16 +108,16 @@ export async function loadPlaceablePackage(
     .limit(1)
     .for(lock);
   if (!pkg) throw notFound(`Package '${packageId}' not found in this organization`);
-  const offeredToOrg = (await listOrgOffers(scope.orgId, [packageId], tx)).has(packageId);
-  return { ...pkg, offeredToOrg };
+  const orgOffer = (await listOrgOffers(scope.orgId, [packageId], tx)).get(packageId) ?? null;
+  return { ...pkg, orgOffer };
 }
 
 /** Placed here without a row — shipped with the deployment, homed here, or offered to the organization. */
 function placedWithoutRow(
-  pkg: { source: string | null; homeSpaceId: string | null; offeredToOrg: boolean },
+  pkg: { source: string | null; homeSpaceId: string | null; orgOffer: OrgOfferMode | null },
   spaceId: string,
 ): boolean {
-  return pkg.source === "system" || pkg.homeSpaceId === spaceId || pkg.offeredToOrg;
+  return pkg.source === "system" || pkg.homeSpaceId === spaceId || pkg.orgOffer !== null;
 }
 
 /** The agent and its local decision stay locked until the schedule insert or re-arm commits. */
@@ -1071,7 +1072,7 @@ export async function updateSpacePackage(
       return;
     }
     // The public settings door accepts a local row or a current organization offer.
-    if (opts?.requirePlacement ? !pkg.offeredToOrg : !placedWithoutRow(pkg, scope.spaceId)) {
+    if (opts?.requirePlacement ? pkg.orgOffer === null : !placedWithoutRow(pkg, scope.spaceId)) {
       throw notFound(`Package '${packageId}' is not placed in this space`);
     }
     await tx

@@ -115,7 +115,8 @@ describe("POST /api/runs/inline — a required integration inactive in the enter
       await expectInactive(await launch(headers));
       const offered = await app.request(`/api/packages/${INTEGRATION}/org-offer`, {
         method: "PUT",
-        headers: authHeaders(ctx),
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "on_by_default" }),
       });
       expect(offered.status).toBe(200);
       const result = await launch(headers);

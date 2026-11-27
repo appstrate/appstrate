@@ -2247,16 +2247,37 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Offer a package to the organization",
       description:
-        "Offer the package to its organization: it is then placed and ACTIVE in every space of the organization that holds no `space_packages` row of its own, personal spaces included. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Idempotent: offering twice answers 200 and leaves the offer as it is. Audited as `package.offered_to_org` (once, when the offer is created).",
+        "Offer the package to its organization in a `mode`: it is then PLACED in every space of the organization that holds no `space_packages` row of its own, personal spaces included. `on_by_default`: it is also ACTIVE there. `available`: it is placed and listed but off until a space (or the owner of a personal space) switches it on through `POST /api/spaces/{id}/packages`. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Idempotent: offering again in the same mode answers 200 and leaves the offer as it is; offering in the other mode rewrites it. `mode` is required: a body without it, with another value or with another member is a 400. Audited as `package.offered_to_org` when the offer is created and as `package.offer_mode_changed` (with the previous mode) when its mode changes.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["mode"],
+              properties: {
+                mode: {
+                  type: "string",
+                  enum: ["available", "on_by_default"],
+                  description:
+                    "`on_by_default`: placed and active in every space holding no row of its own. `available`: placed in every such space and off until the space switches it on.",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
       responses: {
         "200": {
-          description: "The package is offered to the organization (new or already offered).",
+          description:
+            "The package is offered to the organization in that mode (new, changed or already so).",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {

@@ -97,7 +97,7 @@ const PACKAGE_PLACEMENT_STATE_PROPERTIES = {
     type: "string",
     enum: ["active", "inactive", "none"],
     description:
-      "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it.",
+      "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off — the package is not offered to the organization, or offered as `available` and not yet switched on here. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization as `on_by_default`, which activates it.",
   },
   shared_by: {
     type: ["object", "null"],
@@ -3302,7 +3302,7 @@ export const schemas = {
         "home_writable",
         "home_deletable",
         "home_shareable",
-        "offered_to_org",
+        "org_offer",
         "org_offerable",
         "active_by_default",
         "placements",
@@ -3327,10 +3327,11 @@ export const schemas = {
             "Description from the package draft manifest; empty string when not provided.",
         },
         ...PACKAGE_HOME_PROPERTIES,
-        offered_to_org: {
-          type: "boolean",
+        org_offer: {
+          type: ["string", "null"],
+          enum: ["available", "on_by_default", null],
           description:
-            "Offered to the organization: placed and active in every space of it that holds no `space_packages` row of its own (a row always wins; `enabled = false` keeps it off).",
+            "The offer to the organization, or `null` when there is none. An offer in either mode PLACES the package in every space of it that holds no `space_packages` row of its own. `on_by_default`: it is also ACTIVE there (a row always wins; `enabled = false` keeps it off). `available`: it is placed and listed but off until the space switches it on (`POST /api/spaces/{id}/packages`).",
         },
         org_offerable: {
           type: "boolean",
@@ -3374,12 +3375,13 @@ export const schemas = {
     type: "object",
     description:
       "What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`) and the package's offer fields. A projection of `GET /api/spaces/{id}/library`, never a second computation, carried by the detail of every package type (`getIntegration`, `getAgentPackage`, `getSkill`, `getIntegrationPackage`).",
-    required: ["via", "state", "shared_by", "offered_to_org", "org_offerable", "active_by_default"],
+    required: ["via", "state", "shared_by", "org_offer", "org_offerable", "active_by_default"],
     properties: {
       ...PACKAGE_PLACEMENT_STATE_PROPERTIES,
-      offered_to_org: {
-        type: "boolean",
-        description: "Offered to the organization (`offered_to_org` of the library entry).",
+      org_offer: {
+        type: ["string", "null"],
+        enum: ["available", "on_by_default", null],
+        description: "The offer to the organization (`org_offer` of the library entry).",
       },
       org_offerable: {
         type: "boolean",
@@ -3481,11 +3483,15 @@ export const schemas = {
     type: "object",
     description:
       "The offer of a package to its organization, as it stands after `PUT …/org-offer`.",
-    required: ["object", "packageId", "offered_to_org"],
+    required: ["object", "packageId", "org_offer"],
     properties: {
       object: { type: "string", enum: ["package_org_offer"] },
       packageId: { type: "string", description: "Package id (`@scope/name`)." },
-      offered_to_org: { type: "boolean", enum: [true] },
+      org_offer: {
+        type: "string",
+        enum: ["available", "on_by_default"],
+        description: "The mode the offer now has.",
+      },
     },
   },
   PackageHome: {

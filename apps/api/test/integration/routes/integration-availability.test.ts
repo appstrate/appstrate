@@ -64,7 +64,7 @@ interface Availability {
   via: string;
   state: string;
   shared_by: { user_id: string; name: string } | null;
-  offered_to_org: boolean;
+  org_offer: "available" | "on_by_default" | null;
   org_offerable: boolean;
   active_by_default: boolean;
 }
@@ -83,7 +83,7 @@ async function read(as: TestContext, id: string) {
     packages: {
       integration: {
         id: string;
-        offered_to_org: boolean;
+        org_offer: "available" | "on_by_default" | null;
         org_offerable: boolean;
         active_by_default: boolean;
         placements: {
@@ -101,7 +101,7 @@ async function read(as: TestContext, id: string) {
     via: placement.via,
     state: placement.state,
     shared_by: placement.shared_by,
-    offered_to_org: entry.offered_to_org,
+    org_offer: entry.org_offer,
     org_offerable: entry.org_offerable,
     active_by_default: entry.active_by_default,
   };
@@ -133,7 +133,7 @@ beforeEach(async () => {
 describe("GET /api/integrations/{packageId} — availability", () => {
   it("reads `home` for an integration homed in the space", async () => {
     const a = await read(ctx, HOMED);
-    expect(a).toMatchObject({ via: "home", shared_by: null, offered_to_org: false });
+    expect(a).toMatchObject({ via: "home", shared_by: null, org_offer: null });
   });
 
   it("reads `shared`, with who shared it, for an integration homed elsewhere", async () => {
@@ -147,9 +147,9 @@ describe("GET /api/integrations/{packageId} — availability", () => {
   });
 
   it("reads `organization` and `active` for an offer with no row of the space's own", async () => {
-    await seedOrgOffer(ctx.orgId, OFFERED);
+    await seedOrgOffer(ctx.orgId, OFFERED, "on_by_default");
     const a = await read(ctx, OFFERED);
-    expect(a).toMatchObject({ via: "organization", state: "active", offered_to_org: true });
+    expect(a).toMatchObject({ via: "organization", state: "active", org_offer: "on_by_default" });
   });
 
   it("reads `inactive` once the space has switched the integration off", async () => {
@@ -162,7 +162,7 @@ describe("GET /api/integrations/{packageId} — availability", () => {
     // `placed_by_offer` row left behind after the offer was withdrawn.
     await seedSpacePackage(ctx.defaultSpaceId, OFFERED, { enabled: true, placedByOffer: true });
     const a = await read(ctx, OFFERED);
-    expect(a).toMatchObject({ via: "shared", state: "active", offered_to_org: false });
+    expect(a).toMatchObject({ via: "shared", state: "active", org_offer: null });
   });
 
   it("404s on an integration homed in another space and placed nowhere else", async () => {
@@ -172,7 +172,7 @@ describe("GET /api/integrations/{packageId} — availability", () => {
 
   it("gives an owner the offer verdict", async () => {
     // An offer already stands, so withdrawing it needs no published version.
-    await seedOrgOffer(ctx.orgId, OFFERED);
+    await seedOrgOffer(ctx.orgId, OFFERED, "on_by_default");
     const a = await read(ctx, OFFERED);
     expect(a.org_offerable).toBe(true);
   });
@@ -211,7 +211,7 @@ describe("GET /api/integrations/{packageId} — availability", () => {
       source: "system",
       draftManifest: manifestFor(id),
     });
-    await seedOrgOffer(ctx.orgId, id);
+    await seedOrgOffer(ctx.orgId, id, "on_by_default");
     expect((await read(ctx, id)).via).toBe("organization");
     const res = await app.request(`/api/integrations/${id}/settings`, {
       method: "PATCH",
@@ -225,7 +225,7 @@ describe("GET /api/integrations/{packageId} — availability", () => {
   });
 
   it("answers the same on PATCH …/settings, which returns the same resource", async () => {
-    await seedOrgOffer(ctx.orgId, OFFERED);
+    await seedOrgOffer(ctx.orgId, OFFERED, "on_by_default");
     const get = await app.request(`/api/integrations/${OFFERED}`, { headers: authHeaders(ctx) });
     const patch = await app.request(`/api/integrations/${OFFERED}/settings`, {
       method: "PATCH",
@@ -241,15 +241,15 @@ describe("GET /api/integrations/{packageId} — availability", () => {
 
 describe("GET /api/integrations/{packageId} — the same availability through every credential", () => {
   beforeEach(async () => {
-    await seedOrgOffer(ctx.orgId, OFFERED);
+    await seedOrgOffer(ctx.orgId, OFFERED, "on_by_default");
   });
 
   /** The placement half of `availability`: what a credential's ceiling cannot change. */
-  const placementOf = ({ via, state, shared_by, offered_to_org }: Availability) => ({
+  const placementOf = ({ via, state, shared_by, org_offer }: Availability) => ({
     via,
     state,
     shared_by,
-    offered_to_org,
+    org_offer,
   });
 
   it("answers the chat's loopback bearer what it answers the session", async () => {
