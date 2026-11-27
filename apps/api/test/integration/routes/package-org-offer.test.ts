@@ -282,7 +282,7 @@ describe("the offer mode", () => {
       body: JSON.stringify({ packageId: AGENT }),
     });
 
-  it("refuses a body without a mode, with an unknown mode and with an unknown member", async () => {
+  it("refuses a body without `org_offer`, with an unknown value and with an unknown member", async () => {
     const headers = admin.headers(teamId);
     for (const body of [
       {},
@@ -610,14 +610,14 @@ describe("a row created under the offer is a decision about the offer, not a pla
     const third = (await seedSpace({ orgId: ctx.orgId, name: "Third", visibility: "closed" })).id;
     await seedSpacePackage(teamId, AGENT, { enabled: false });
     await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
-    const ids = await db.transaction((tx) =>
+    const outcome = await db.transaction((tx) =>
       reconcilePlacementsAfterRehome(tx, {
         packageId: AGENT,
         newHomeSpaceId: third,
         previousHome: { spaceId: teamId, keep: false },
       }),
     );
-    expect(ids).toEqual([]);
+    expect(outcome).toEqual({ kept: false, disabledScheduleIds: [] });
     const row = await rowIn(teamId, AGENT);
     expect(row?.enabled).toBe(false);
     expect(row?.placedByOffer).toBe(true);

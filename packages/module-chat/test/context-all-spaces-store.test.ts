@@ -49,7 +49,7 @@ describe("the every-space context switch", () => {
     expect(data.size).toBe(0);
   });
 
-  it("reads a turning on stored under the former default as the default it now is", () => {
+  it("reads a stored `on` as on", () => {
     const data = installStorage();
     data.set("appstrate:chat:contextAllSpaces:u_1", "on");
     bindChatPreferencesUser("u_1");

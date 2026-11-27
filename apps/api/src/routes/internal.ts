@@ -25,7 +25,8 @@ import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { verifyRunToken } from "../lib/verify-run-token.ts";
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
-import { recordConnectionCalls } from "../services/credential-proxy/call-journal.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { insertConnectionCalls } from "../services/credential-proxy/call-journal.ts";
 import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { RUN_ROUTE_RATE_PER_MIN, rateLimitByBearer } from "../middleware/rate-limit.ts";
 import { recordRunDegradedIntegration } from "../services/state/runs.ts";
@@ -41,6 +42,7 @@ import {
   notFound,
   conflict,
   invalidRequest,
+  internalError,
   methodNotAllowed,
 } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
@@ -247,7 +249,7 @@ const integrationCallRecordSchema = z
   .object({
     // Minted by the sidecar: with the run, the key a retried batch is deduplicated on.
     call_id: z.uuid(),
-    started_at: z.iso.datetime({ offset: true }),
+    called_at: z.iso.datetime({ offset: true }),
     integration_id: z.string().min(1).max(214),
     connection_id: z.uuid().nullable(),
     // An HTTP method token (RFC 9110 §9.1).
@@ -617,28 +619,38 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
       });
       return c.body(null, 204);
     }
-    // One statement that keeps the batch's order; it never throws (a fault is logged).
-    await recordConnectionCalls(
-      calls.map((call, i) => ({
-        orgId: run.orgId,
-        spaceId: run.spaceId,
-        connectionId: connectionIds[i] ?? null,
-        integrationId: call.integration_id,
-        actor,
-        apiKeyId: run.apiKeyId,
-        authMethod: RUN_SIDECAR_AUTH_METHOD,
+    // One statement that keeps the batch's order. A database fault answers 500, so the sidecar
+    // retries the batch (`(run_id, call_id)` makes that safe).
+    try {
+      await insertConnectionCalls(
+        calls.map((call, i) => ({
+          orgId: run.orgId,
+          spaceId: run.spaceId,
+          connectionId: connectionIds[i] ?? null,
+          integrationId: call.integration_id,
+          actor,
+          apiKeyId: run.apiKeyId,
+          authMethod: RUN_SIDECAR_AUTH_METHOD,
+          runId,
+          chatSessionId: null,
+          method: call.method,
+          host: call.host,
+          outcome: call.outcome,
+          durationMs: call.duration_ms,
+          // The batch's `Request-Id` is not the call's: a sidecar row has none.
+          requestId: null,
+          calledAt: new Date(call.called_at),
+          callId: call.call_id,
+        })),
+      );
+    } catch (err) {
+      logger.error("integration calls not journaled — the insert failed", {
         runId,
-        chatSessionId: null,
-        method: call.method,
-        host: call.host,
-        outcome: call.outcome,
-        durationMs: call.duration_ms,
-        // The batch's `Request-Id` is not the call's: a sidecar row has none.
-        requestId: null,
-        calledAt: new Date(call.started_at),
-        callId: call.call_id,
-      })),
-    );
+        records: calls.length,
+        error: getErrorMessage(err),
+      });
+      throw internalError();
+    }
     // A record carrying `credential_revision` ends its connection's rejection streak.
     for (const [i, call] of calls.entries()) {
       const connectionId = connectionIds[i];

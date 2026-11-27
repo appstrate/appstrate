@@ -99,11 +99,11 @@ export function spaceRoleDescription(role: RoleObject, t: (key: string) => strin
 /** Never the head of the list — that is `admin`. */
 export const DEFAULT_SPACE_ROLE_VALUE = spaceRoleValue({ preset_role: "operator" });
 
+/** A role on the wire: exactly one of the two fields. */
+export type SpaceRoleReference = { preset_role: SpaceRolePreset } | { custom_role_id: string };
+
 /** Turn a select value back into the request body's role half. */
-export function spaceRoleAssignment(value: string): {
-  preset_role?: SpaceRolePreset;
-  custom_role_id?: string;
-} {
+export function spaceRoleAssignment(value: string): SpaceRoleReference {
   const [kind, ...rest] = value.split(":");
   const key = rest.join(":");
   return kind === "preset" ? { preset_role: key as SpaceRolePreset } : { custom_role_id: key };

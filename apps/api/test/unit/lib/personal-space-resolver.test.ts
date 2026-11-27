@@ -367,16 +367,6 @@ describe("shows_studio on a custom role: a display attribute, never a permission
     expect(spaceShowsStudio(null)).toBe(false);
   });
 
-  it("never grants a permission for it, even from a stored array that spells it", () => {
-    if (CUSTOM.kind !== "custom") throw new Error("unreachable");
-    const spelled: SpaceRoleRef = {
-      kind: "custom",
-      role: { ...CUSTOM.role, permissions: [...CUSTOM.role.permissions, "studio:read"] },
-    };
-    expect(spacePermissions(spelled).has("studio:read" as never)).toBe(false);
-    expect(spacePermissions(CUSTOM_STUDIO).has("studio:read" as never)).toBe(false);
-  });
-
   it("follows the role as the org default and as an override, for a member", () => {
     for (const [ref, studio] of [
       [CUSTOM_STUDIO, true],

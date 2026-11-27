@@ -123,6 +123,8 @@ export function isTurnBudgetNoteBlock(block: unknown): boolean {
 }
 
 /** A tool result (or its bare content array) without the budget note block. */
+export function omitTurnBudgetNote(blocks: unknown[]): unknown[];
+export function omitTurnBudgetNote(value: unknown): unknown;
 export function omitTurnBudgetNote(value: unknown): unknown {
   if (Array.isArray(value)) return value.filter((b) => !isTurnBudgetNoteBlock(b));
   const content = (value as { content?: unknown } | null | undefined)?.content;
@@ -249,7 +251,7 @@ export interface ChatMessageMetadata {
  * outcome, a failure's included). One shape, each side filling its own fields; camelCase like
  * `appstrate.turn` (CASING_CONVENTIONS 4o), but `presentation` is the MCP wire object, carried as is.
  */
-export const appstrateToolPartMetadataSchema = z.object({
+const appstrateToolPartMetadataSchema = z.object({
   /** Call side: the call is a lookup (a tool that only reads). */
   lookup: z.literal(true).optional().catch(undefined),
   /** Call side: the space the call's input named, when the turn can act in it. */

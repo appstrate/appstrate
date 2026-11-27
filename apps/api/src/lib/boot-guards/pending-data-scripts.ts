@@ -100,8 +100,7 @@ export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
     after: "0114",
     // EXACTLY `0058`'s scan: an unflagged model credential whose blob still says flagged. A blob
     // that cannot be decrypted is not counted, as `0058` leaves it alone. The column is the only
-    // authority on a model credential's death since migration 0118's release, so until this runs
-    // such a credential reads as alive.
+    // authority on a model credential's death, so until this runs such a credential reads as alive.
     pending: async (database) => {
       const rows = toRows<{ blob: string }>(
         await database.execute(
@@ -121,8 +120,8 @@ export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
     },
     consequence:
       "Model credentials flagged dead only inside their encrypted blob (migration 0114 added the " +
-      "column defaulting to false, `0058` not run). The column is now the only authority, so " +
-      "until it runs those credentials read as alive and are used again.",
+      "column defaulting to false, `0058` not run). The column is the only authority on a model credential's death, " +
+      "so until it runs those credentials read as alive and are used again.",
     removeWhen:
       "the release after the one that makes the column the only authority: delete this entry and its test case.",
   },

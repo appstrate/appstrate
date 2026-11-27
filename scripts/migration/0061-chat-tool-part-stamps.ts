@@ -125,12 +125,14 @@ async function scanToolPartStamps(
   const counts: Counts = { scanned: 0, parts: 0, blocks: 0, rows: 0 };
   let after: number | undefined;
   for (;;) {
-    const rows = await database
+    const page = database
       .select({ seq: chatMessages.seq, content: chatMessages.content })
       .from(chatMessages)
       .where(and(CANDIDATE, after === undefined ? undefined : gt(chatMessages.seq, after)))
       .orderBy(chatMessages.seq)
       .limit(100);
+    // A writing pass locks the page so a concurrent upsert cannot be overwritten by a stale copy.
+    const rows = await (write ? page.for("update") : page);
     for (const row of rows) {
       counts.scanned++;
       const stored: unknown = row.content.parts;
@@ -198,9 +200,7 @@ if (import.meta.main) {
     await runChatToolPartStamps({ apply, out });
     code = 0;
   } catch (error) {
-    process.stdout.write(
-      `0061: FAILED — ${getErrorMessage(error)}. The update is one transaction; a re-run with --apply finishes what is left.\n`,
-    );
+    process.stdout.write(`0061: FAILED, nothing committed — ${getErrorMessage(error)}\n`);
   } finally {
     await closeDb?.();
   }

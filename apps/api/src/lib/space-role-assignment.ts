@@ -35,9 +35,6 @@ export function exactlyOneRole<Shape extends z.ZodRawShape>(schema: z.ZodObject<
   );
 }
 
-/** A body (or query) that is nothing but one role reference. */
-export const spaceRoleAssignmentSchema = exactlyOneRole(z.object({ ...spaceRoleAssignmentShape }));
-
 export function toAssignment(data: {
   preset_role?: SpaceRolePreset;
   custom_role_id?: string;

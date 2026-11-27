@@ -24,7 +24,7 @@ export interface PackageShareView {
   space_name: string;
   /** `user_id`, not `userId`: one of the enumerated counter-exceptions of CASING_CONVENTIONS. */
   shared_by: { user_id: string; name: string } | null;
-  /** `space_packages.enabled` of the target's row. */
+  /** `space_packages.enabled` of that space's row. */
   enabled: boolean;
   createdAt: string;
 }

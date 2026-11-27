@@ -65,7 +65,7 @@ const ORG_ROLES = [...orgRoleEnum.enumValues];
 export const SPACE_ROLE_ID_PATTERN = SPACE_ROLE_ID_REGEX.source;
 
 /** The wire reference to one space role: exactly one of `preset_role` / `custom_role_id`, never a bare string. */
-const SPACE_ROLE_REFERENCE_ONE_OF = [
+export const SPACE_ROLE_REFERENCE_ONE_OF = [
   {
     type: "object",
     required: ["preset_role"],
@@ -2363,6 +2363,12 @@ export const schemas = {
       oauth_email: { type: ["string", "null"] },
       needs_reconnection: { type: "boolean" },
       ...NEEDS_RECONNECTION_RECORD_PROPERTIES,
+      needs_reconnection_cause: {
+        ...NEEDS_RECONNECTION_RECORD_PROPERTIES.needs_reconnection_cause,
+        description:
+          NEEDS_RECONNECTION_RECORD_PROPERTIES.needs_reconnection_cause.description +
+          " A credential whose stored secret cannot be decrypted reads `credentials_undecryptable`, derived rather than stored, with `needs_reconnection_at` `null`.",
+      },
       owner_type: {
         type: "string",
         enum: [...MODEL_CREDENTIAL_OWNERS],
@@ -3124,7 +3130,7 @@ export const schemas = {
       "updatedAt",
     ],
     description:
-      "A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle.",
+      "A space role: one of the platform presets (read-only, `id: null`) or an organization-defined bundle.",
     properties: {
       object: { type: "string", enum: ["role"] },
       kind: { type: "string", enum: ["preset", "custom"] },

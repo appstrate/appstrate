@@ -9,14 +9,14 @@
 import * as React from "react";
 import { getExternalStoreMessages, useAuiState, type ThreadMessage } from "@assistant-ui/react";
 import { isToolUIPart, type UIMessage } from "ai";
-import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
-import { callPresentation } from "./tool-presentation.ts";
-import { callSpaceOf } from "./conversation-scope.ts";
+import {
+  readAppstrateToolPartMetadata,
+  type AppstrateToolPartMetadata,
+} from "@appstrate/core/chat-turn-metadata";
+import { outcomeSpaceOf } from "./conversation-scope.ts";
 
-export interface StoredResult {
-  readonly resultProviderMetadata: unknown;
-  readonly presentation: ToolPresentation | undefined;
-}
+/** A call's outcome stamp, parsed once when its result lands. */
+export type StoredResult = AppstrateToolPartMetadata;
 
 export type StoredResults = ReadonlyMap<string, StoredResult>;
 
@@ -25,7 +25,7 @@ export function cardSpaceOf(card: {
   providerMetadata?: unknown;
   stored?: StoredResult | undefined;
 }): string | undefined {
-  return callSpaceOf({ ...card, ...card.stored });
+  return outcomeSpaceOf(card.stored, card.providerMetadata);
 }
 
 /** The stored parts' `resultProviderMetadata` of the tool calls behind `message`, by call id. */
@@ -67,10 +67,8 @@ export function useStoredResults(): StoredResults {
   return React.useMemo(() => {
     const results = new Map<string, StoredResult>();
     for (const [id, resultProviderMetadata] of metadata) {
-      results.set(id, {
-        resultProviderMetadata,
-        presentation: callPresentation({ resultProviderMetadata }),
-      });
+      const outcome = readAppstrateToolPartMetadata(resultProviderMetadata);
+      if (outcome) results.set(id, outcome);
     }
     return results;
   }, [metadata]);

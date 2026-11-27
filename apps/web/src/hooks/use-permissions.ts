@@ -71,7 +71,7 @@ export function usePermissions() {
 
   return {
     can,
-    /** The working space's role shows the Studio's screens (never in « Tous les espaces »). */
+    /** The working space's role shows the Studio's screens. */
     showsStudio,
     ready,
     orgRole: currentOrg?.role ?? null,

@@ -40,9 +40,12 @@ export type SpaceRoleRef = (
   { kind: "preset"; preset: SpaceRolePreset } | { kind: "custom"; role: CustomSpaceRole }
 ) & { within?: readonly Permission[]; plus?: readonly Permission[] };
 
+/** The preset an org default resolves to while none is stored. */
+export const ADMIN_PRESET = "admin" as const satisfies SpaceRolePreset;
+
 export const ADMIN_ROLE_REF: Readonly<SpaceRoleRef> = Object.freeze({
   kind: "preset",
-  preset: "admin",
+  preset: ADMIN_PRESET,
 });
 
 /**

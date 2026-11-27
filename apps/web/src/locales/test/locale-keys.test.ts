@@ -284,7 +284,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "permissions.label.", // lib/permission-labels.ts — permissionLabel()
   "permissions.resource.", // lib/permission-labels.ts — permissionResourceLabel()
   "purpose.", // components/document-columns.tsx — t(`purpose.${doc.purpose}`)
-  "roles.preset.", // hooks/use-roles.ts spaceRoleLabel(), pages/workspace-settings/general.tsx
+  "roles.preset.", // hooks/use-roles.ts spaceRoleLabel() (also reached by lib/personal-space-role.ts followLabel()), pages/workspace-settings/general.tsx
   "roles.presetDesc.", // hooks/use-roles.ts — spaceRoleDescription()
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
   "run.connSource.", // components/run-detail/run-snapshot-inspector.tsx

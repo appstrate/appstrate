@@ -217,8 +217,6 @@ describe("custom space roles", () => {
       expect(offered).toContain("agents:write");
       expect(offered).not.toContain("members:invite");
       expect(offered).not.toContain("roles:write");
-      // The Studio is a display attribute of a role (`shows_studio`), not a permission.
-      expect(offered).not.toContain("studio:read");
 
       // Grantability is the API-key allowlist, not a second hand-kept table:
       // `integrations:configure` is deliberately session-only.
@@ -274,16 +272,16 @@ describe("custom space roles", () => {
       expect((await listed(role.id)).shows_studio).toBe(true);
     });
 
-    it("refuses studio:read inside permissions as any unknown permission, on create and on update", async () => {
+    it("refuses an unknown permission, on create and on update", async () => {
       const created = await post(
-        validBody({ key: "studio-in-list", permissions: ["agents:read", "studio:read"] }),
+        validBody({ key: "unknown-in-list", permissions: ["agents:read", "nope:read"] }),
       );
       const problem = await expectProblem(created, 400, { param: "permissions" });
-      expect(problem.detail).toContain("Unknown space-level permission 'studio:read'");
+      expect(problem.detail).toContain("Unknown space-level permission 'nope:read'");
 
-      const role = await createRole({ key: "studio-patched" });
+      const role = await createRole({ key: "unknown-patched" });
       await expectProblem(
-        await patch(role.id, { permissions: ["agents:read", "studio:read"] }),
+        await patch(role.id, { permissions: ["agents:read", "nope:read"] }),
         400,
         { param: "permissions" },
       );

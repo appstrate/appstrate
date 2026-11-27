@@ -321,7 +321,7 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Journal the upstream calls a run's sidecar dispatched",
       description:
-        "Sidecar-only. Auth via Bearer run token. A batch of the upstream calls the run's sidecar dispatched for its integrations (the `api_call` tool, the MITM listener, a remote MCP server's operations, a local MCP server's `tools/call` when no MITM listener sees its upstream requests), one record per call that may have reached the upstream, taken from its final attempt. Each is written to the connection-call journal (`connection_calls`) with the run's organization, space, actor and API key, `auth_method` `run_token`, `run_id` set and a null `request_id` (the batch's request is not the call's); the sidecar sends none of those. A record carries its `call_id` and `started_at`, stored as the row's `call_id` and `called_at`: `(run_id, call_id)` is unique, so a batch sent twice is stored once and the second answers `204` as well. Every record is checked before any is written, against the run's frozen kickoff snapshot alone — never the live agent or the space's activation, so a call that left stays journaled when its integration is switched off or the agent edited or deleted mid-run: a non-null `connection_id` is one the run bound to that integration (else `400 connection_not_in_run`), and a record with a null `connection_id` names an integration the run resolved (else `400 invalid_request`); one record that fails refuses the whole batch. The text of a record is bounded at 2048 characters and stored truncated to the journal's own caps. A run with no actor writes nothing and answers `204`. A record carrying `credential_revision` (a 2xx answered with that credential) also ends the connection's rejection streak: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0, unless the connection no longer holds that credential, the run's actor can no longer reach it (deleted, unshared, moved to another space), or it is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. A token whose run is no longer `running` is refused (`403`).",
+        "Sidecar-only. Auth via Bearer run token. A batch of the upstream calls the run's sidecar dispatched for its integrations (the `api_call` tool, the MITM listener, a remote MCP server's operations, a local MCP server's `tools/call` when no MITM listener sees its upstream requests), one record per call that may have reached the upstream, taken from its final attempt. Each is written to the connection-call journal (`connection_calls`) with the run's organization, space, actor and API key, `auth_method` `run_token`, `run_id` set and a null `request_id` (the batch's request is not the call's); the sidecar sends none of those. A record carries its `call_id` and `called_at`, stored as the row's `call_id` and `called_at`: `(run_id, call_id)` is unique, so a batch sent twice is stored once and the second answers `204` as well. Every record is checked before any is written, against the run's frozen kickoff snapshot alone — never the live agent or the space's activation, so a call that left stays journaled when its integration is switched off or the agent edited or deleted mid-run: a non-null `connection_id` is one the run bound to that integration (else `400 connection_not_in_run`), and a record with a null `connection_id` names an integration the run resolved (else `400 invalid_request`); one record that fails refuses the whole batch. The text of a record is bounded at 2048 characters and stored truncated to the journal's own caps. A run with no actor writes nothing and answers `204`. A record carrying `credential_revision` (a 2xx answered with that credential) also ends the connection's rejection streak: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0, unless the connection no longer holds that credential, the run's actor can no longer reach it (deleted, unshared, moved to another space), or it is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. A token whose run is no longer `running` is refused (`403`).",
       security: [{ bearerExecToken: [] }],
       requestBody: {
         required: true,
@@ -341,7 +341,7 @@ export const internalPaths = {
                     additionalProperties: false,
                     required: [
                       "call_id",
-                      "started_at",
+                      "called_at",
                       "integration_id",
                       "connection_id",
                       "method",
@@ -356,7 +356,7 @@ export const internalPaths = {
                         description:
                           "The call's identity (a UUIDv7 the sidecar mints); with the run, the key a retried batch is deduplicated on.",
                       },
-                      started_at: {
+                      called_at: {
                         type: "string",
                         format: "date-time",
                         description: "When the upstream call started (RFC 3339, with an offset).",

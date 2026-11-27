@@ -83,23 +83,19 @@ const persisted = createLocalStore(LOCAL_STORAGE_KEYS.pendingPairings, {
 /** Read + validate + retention-filter the persisted list. Exported for tests. */
 export const readPersistedPairings = persisted.read;
 
-function persist(pairings: PendingPairing[]): void {
-  persisted.write(pairings);
-}
-
 export const pairingStore = createStore<PairingState>()((set) => ({
   pairings: readPersistedPairings(),
   add: (p) =>
     set((s) => {
       const next = [...s.pairings.filter((x) => x.id !== p.id), p];
-      persist(next);
+      persisted.write(next);
       return { pairings: next };
     }),
   remove: (id) =>
     set((s) => {
       const next = s.pairings.filter((x) => x.id !== id);
       if (next.length === s.pairings.length) return s;
-      persist(next);
+      persisted.write(next);
       return { pairings: next };
     }),
   prune: () =>
@@ -107,11 +103,11 @@ export const pairingStore = createStore<PairingState>()((set) => ({
       const now = Date.now();
       const next = s.pairings.filter((p) => isRetained(p, now));
       if (next.length === s.pairings.length) return s;
-      persist(next);
+      persisted.write(next);
       return { pairings: next };
     }),
   clear: () => {
-    persist([]);
+    persisted.write([]);
     set({ pairings: [] });
   },
   hydrate: () => set({ pairings: readPersistedPairings() }),

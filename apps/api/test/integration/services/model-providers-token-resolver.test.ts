@@ -14,7 +14,7 @@
  * Edge cases under test — every refusal is a 410 `oauth_connection_needs_reconnection` or a 502,
  * with its `cause` extension:
  *   - `invalid_grant` from the provider → row flagged `needs_reconnection` with cause `refresh_token_revoked`.
- *   - Already-flagged blob → `connection_flagged` short-circuit (no provider call).
+ *   - Already-flagged row → `connection_flagged` short-circuit (no provider call).
  *   - Missing `refreshToken` in stored blob → flagged, `refresh_token_missing`.
  *   - Successful refresh rotates `accessToken`+`refreshToken`+`expiresAt` in DB.
  *   - Network error → 502 `upstream_transient`, nothing flagged.

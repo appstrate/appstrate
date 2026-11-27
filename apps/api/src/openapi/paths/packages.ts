@@ -9,6 +9,18 @@ import { orgOfferModeValues } from "@appstrate/db/schema";
 import { ORG_READ_REACH } from "../parameters.ts";
 
 /** Every door that creates an organization package under a caller-chosen id refuses the platform's scopes. */
+/** The body of both successes of `PUT …/org-offer`: the offer and what its activation warns of. */
+const ORG_OFFER_CONTENT = {
+  "application/json": {
+    schema: {
+      allOf: [
+        { $ref: "#/components/schemas/PackageOrgOffer" },
+        { $ref: "#/components/schemas/ActivationWarnings" },
+      ],
+    },
+  },
+};
+
 const SCOPE_RESERVED_RULE =
   "A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.";
 
@@ -2286,30 +2298,12 @@ export const packagesPaths = {
           description:
             "The package was already offered to the organization: the offer is re-asserted in that mode or its mode changed.",
           headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/PackageOrgOffer" },
-                  { $ref: "#/components/schemas/ActivationWarnings" },
-                ],
-              },
-            },
-          },
+          content: ORG_OFFER_CONTENT,
         },
         "201": {
           description: "The offer was created: the package is now offered in that mode.",
           headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/PackageOrgOffer" },
-                  { $ref: "#/components/schemas/ActivationWarnings" },
-                ],
-              },
-            },
-          },
+          content: ORG_OFFER_CONTENT,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },

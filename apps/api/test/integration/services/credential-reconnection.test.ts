@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
+import { expectDbViolation } from "../../helpers/assertions.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
   seedEndUser,
@@ -272,13 +273,24 @@ describe("integration connection death", () => {
 
     it("the database refuses a cause or a date on a row that is not flagged", async () => {
       const connId = await seedConnection();
-      const write = async () => {
-        await db
-          .update(integrationConnections)
-          .set({ needsReconnectionCause: "unrefreshable" })
-          .where(eq(integrationConnections.id, connId));
-      };
-      await expect(write()).rejects.toThrow();
+      const cred = await seedOrgModelProviderOAuth({ orgId: ctx.orgId });
+      const record = /needs_reconnection_record/;
+      for (const set of [
+        { needsReconnectionCause: "unrefreshable" as const },
+        { needsReconnectionAt: new Date() },
+      ]) {
+        await expectDbViolation(
+          db.update(integrationConnections).set(set).where(eq(integrationConnections.id, connId)),
+          record,
+        );
+        await expectDbViolation(
+          db
+            .update(modelProviderCredentials)
+            .set(set)
+            .where(eq(modelProviderCredentials.id, cred.id)),
+          record,
+        );
+      }
     });
   });
 

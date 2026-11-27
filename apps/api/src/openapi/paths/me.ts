@@ -5,6 +5,7 @@ import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { APPEARANCE_PROPERTIES, INACTIVE_REQUIRED_INTEGRATIONS } from "../schemas.ts";
 import { NEEDS_RECONNECTION_RECORD_PROPERTIES } from "../needs-reconnection-record.ts";
+import { DEFAULT_PACKAGE_HINT_LIMIT } from "../../services/space-packages.ts";
 import {
   agentPackageIdParam,
   connectionActionsSchema,
@@ -33,7 +34,7 @@ import {
 
 /**
  * A capped list of `/api/me/context`, one envelope for every such list. Whole or withheld, never a
- * prefix: past the cap (15) `data` is empty, `truncated` is true, and `total` still counts every
+ * prefix: past the cap `data` is empty, `truncated` is true, and `total` still counts every
  * entry. `total` is always present and equals `data.length` when `truncated` is false.
  */
 function cappedList(items: Record<string, unknown>, description: string) {
@@ -49,7 +50,7 @@ function cappedList(items: Record<string, unknown>, description: string) {
       },
       truncated: {
         type: "boolean",
-        description: "True when more than 15 entries exist and `data` was withheld.",
+        description: `True when more than ${DEFAULT_PACKAGE_HINT_LIMIT} entries exist and \`data\` was withheld.`,
       },
       total: {
         type: "integer",
@@ -1075,8 +1076,8 @@ export const mePaths = {
                       },
                     },
                     "Agents ACTIVE in the current space, ordered by id, each with the required " +
-                      "integrations that keep it from launching here. Only present when the " +
-                      "caller holds the `agents:run` permission; empty otherwise. The full list " +
+                      "integrations that keep it from launching here. Empty unless the " +
+                      "caller holds the `agents:run` permission. The full list " +
                       "is the `listAgents` operation (the MCP `search` tool finds them by keyword).",
                   ),
                   skills: cappedList(
@@ -1122,8 +1123,8 @@ export const mePaths = {
                       },
                     },
                     "Skills the caller could attach to an agent in the current space, ordered by " +
-                      "id. A catalogue read, not a runnable hint: only present when the caller " +
-                      "holds the `skills:read` permission; empty otherwise. Skills are not run " +
+                      "id. A catalogue read, not a runnable hint: empty unless the caller " +
+                      "holds the `skills:read` permission. Skills are not run " +
                       "directly: declare them under an agent manifest's `dependencies.skills`. The " +
                       "full list is the `listSkills` operation (the MCP `search` tool finds them " +
                       "by keyword).",

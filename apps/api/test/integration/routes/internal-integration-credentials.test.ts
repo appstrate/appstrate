@@ -617,7 +617,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
   const STARTED_AT = "2026-03-01T10:00:00.000Z";
   const callRecord = (overrides: Record<string, unknown> = {}) => ({
     call_id: Bun.randomUUIDv7(),
-    started_at: STARTED_AT,
+    called_at: STARTED_AT,
     integration_id: INTEGRATION,
     connection_id: null,
     method: "GET",
@@ -1188,15 +1188,15 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     it("DENY: a record without its call_id or start, or with a malformed one, refuses the batch", async () => {
       await seedIntegration(INTEGRATION, true);
       const { call_id: _id, ...noId } = callRecord();
-      const { started_at: _at, ...noStart } = callRecord();
+      const { called_at: _at, ...noStart } = callRecord();
 
       for (const bad of [
         noId,
         noStart,
         callRecord({ call_id: "not-a-uuid" }),
-        callRecord({ started_at: "yesterday" }),
+        callRecord({ called_at: "yesterday" }),
       ]) {
-        expect((await reportCalls([bad])).status).toBe(400);
+        expect((await reportCalls([callRecord(), bad])).status).toBe(400);
       }
       expect(await journaledCalls(ctx, INTEGRATION)).toEqual([]);
     });

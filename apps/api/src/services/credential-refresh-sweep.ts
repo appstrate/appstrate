@@ -80,14 +80,9 @@ async function claimIntegrationConnections(limit: number, now: Date): Promise<st
   return rows.map((r) => r.id);
 }
 
-/**
- * One pass names each refused OAuth client once: its connections all fail the same way, and
- * nothing a reconnect does changes that, so a per-connection line only floods the log.
- */
-type RefusedClients = Set<string>;
-
+/** Names each refused OAuth client once per pass: its connections all fail the same way. */
 function warnRefusedClientOnce(
-  seen: RefusedClients,
+  seen: Set<string>,
   key: string,
   fields: Record<string, unknown>,
 ): void {
@@ -100,7 +95,7 @@ function warnRefusedClientOnce(
   });
 }
 
-async function refreshIntegrationConnection(id: string, refused: RefusedClients): Promise<void> {
+async function refreshIntegrationConnection(id: string, refused: Set<string>): Promise<void> {
   const t = integrationConnections;
   const [row] = await db
     .select({
@@ -192,7 +187,7 @@ async function claimModelCredentials(limit: number, now: Date): Promise<string[]
 }
 
 /** The resolver is non-forced: it honours the lead and throws the 410 on a flagged credential. */
-async function refreshModelCredential(id: string, refused: RefusedClients): Promise<void> {
+async function refreshModelCredential(id: string, refused: Set<string>): Promise<void> {
   try {
     await resolveOAuthTokenForSidecar(id);
     logger.info("credential_refresh_model_ok", { credentialId: id });
@@ -249,7 +244,7 @@ export async function scanCredentialRefreshes(): Promise<{ integrations: number;
   const now = new Date();
   const integrationIds = await claimIntegrationConnections(CLAIM_LIMIT, now);
   const modelIds = await claimModelCredentials(CLAIM_LIMIT, now);
-  const refused: RefusedClients = new Set();
+  const refused: Set<string> = new Set();
   const jobs = [
     ...integrationIds.map(
       (id) => () =>

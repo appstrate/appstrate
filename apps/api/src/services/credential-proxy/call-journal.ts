@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The writer of the call journal (`connection_calls`, described on the table). Best-effort like
- * `recordAudit`: a fault is logged and swallowed, so a call never depends on the journal; the route hands the promise to `trackAudit` (`services/audit.ts`), off its
- * response path, and graceful shutdown drains it.
+ * The writers of the call journal (`connection_calls`, described on the table).
+ * {@link recordConnectionCalls} is best-effort like `recordAudit`: a fault is logged and swallowed,
+ * so a proxied call never depends on the journal; its callers hand the promise to `trackAudit`
+ * (`services/audit.ts`), off their response path, and graceful shutdown drains it.
+ * {@link insertConnectionCalls} throws: the sidecar's journal route answers a fault with a 500, so
+ * the sidecar retries the batch.
  */
 
 import type { Context } from "hono";
@@ -95,47 +98,52 @@ async function connectionOwners(rows: readonly ConnectionCall[]): Promise<Map<st
 }
 
 /**
- * Writes the rows in one statement, in their order (the `id` sequence follows it). Never throws:
- * a database fault is logged and the rows are lost.
+ * Writes the rows in one statement, in their order (the `id` sequence follows it). Throws on a
+ * database fault.
  */
+export async function insertConnectionCalls(rows: readonly ConnectionCall[]): Promise<void> {
+  const owners = await connectionOwners(rows);
+  await db
+    .insert(connectionCalls)
+    .values(
+      rows.map((row) => {
+        const owner = row.connectionId ? owners.get(row.connectionId) : null;
+        return {
+          orgId: row.orgId,
+          spaceId: row.spaceId,
+          connectionId: row.connectionId,
+          integrationId: row.integrationId,
+          ownerType: owner?.type ?? null,
+          ownerId: owner?.id ?? null,
+          actorType: row.actor.type,
+          actorId: row.actor.id,
+          apiKeyId: row.apiKeyId,
+          authMethod: row.authMethod,
+          runId: row.runId,
+          chatSessionId: row.chatSessionId,
+          method: row.method.slice(0, MAX_METHOD_LENGTH),
+          host: row.host?.slice(0, MAX_HOST_LENGTH) ?? null,
+          outcome: row.outcome,
+          // A wall-clock difference: a clock stepped back mid-call reads negative.
+          durationMs: Math.max(row.durationMs, 0),
+          requestId: row.requestId,
+          calledAt: row.calledAt,
+          callId: row.callId ?? Bun.randomUUIDv7(),
+        };
+      }),
+    )
+    // A sidecar batch sent twice (its retry) is stored once: `(run_id, call_id)` is unique. The
+    // index is partial, so the conflict target repeats its predicate or Postgres matches none.
+    .onConflictDoNothing({
+      target: [connectionCalls.runId, connectionCalls.callId],
+      where: sql`${connectionCalls.callId} IS NOT NULL`,
+    });
+}
+
+/** {@link insertConnectionCalls} that never throws: a database fault is logged and the rows are lost. */
 export async function recordConnectionCalls(rows: readonly ConnectionCall[]): Promise<void> {
   try {
-    const owners = await connectionOwners(rows);
-    await db
-      .insert(connectionCalls)
-      .values(
-        rows.map((row) => {
-          const owner = row.connectionId ? owners.get(row.connectionId) : null;
-          return {
-            orgId: row.orgId,
-            spaceId: row.spaceId,
-            connectionId: row.connectionId,
-            integrationId: row.integrationId,
-            ownerType: owner?.type ?? null,
-            ownerId: owner?.id ?? null,
-            actorType: row.actor.type,
-            actorId: row.actor.id,
-            apiKeyId: row.apiKeyId,
-            authMethod: row.authMethod,
-            runId: row.runId,
-            chatSessionId: row.chatSessionId,
-            method: row.method.slice(0, MAX_METHOD_LENGTH),
-            host: row.host?.slice(0, MAX_HOST_LENGTH) ?? null,
-            outcome: row.outcome,
-            // A wall-clock difference: a clock stepped back mid-call reads negative.
-            durationMs: Math.max(row.durationMs, 0),
-            requestId: row.requestId,
-            calledAt: row.calledAt,
-            callId: row.callId ?? Bun.randomUUIDv7(),
-          };
-        }),
-      )
-      // A sidecar batch sent twice (its retry) is stored once: `(run_id, call_id)` is unique. The
-      // index is partial, so the conflict target repeats its predicate or Postgres matches none.
-      .onConflictDoNothing({
-        target: [connectionCalls.runId, connectionCalls.callId],
-        where: sql`${connectionCalls.callId} IS NOT NULL`,
-      });
+    await insertConnectionCalls(rows);
   } catch (err) {
     logger.error("recordConnectionCalls failed (the calls are unaffected)", {
       records: rows.length,

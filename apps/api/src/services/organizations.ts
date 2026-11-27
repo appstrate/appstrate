@@ -47,6 +47,7 @@ import type { SpaceRoleAssignment } from "@appstrate/shared-types";
 import {
   defaultPersonalSpaceRole,
   lockOrgSpaceRole,
+  ADMIN_PRESET,
   PERSONAL_SPACE_DEFAULT_COLUMNS,
   personalSpaceDefaultOn,
   personalSpaceDefaultRef,
@@ -234,20 +235,9 @@ import {
  * Body of `PATCH /api/orgs/{orgId}/settings` — an RFC 7396 merge over the org settings
  * document, so every member is optional.
  *
- * `.strict()`: an unknown key is a 400, never a silently dropped setting. It
- * lives HERE rather than at the route because `openapi/zod-schema-registry.ts`
- * documents this body too, and it built its own `orgSettingsSchema.partial()`
- * — two expressions of one shape that could disagree.
- *
- * This is the ONLY place the shape is enforced, and it has to be: the base
- * schema in `@appstrate/core/permissions` never parses anything. It has
- * exactly two consumers — this `.partial().strict()` derivation, and the
- * `OrgSettings` type alias in `packages/shared-types` (`z.infer`, erased at
- * runtime). The read side is `orgSettingsReadSchema` (the same base with its
- * defaults applied, unknown keys kept), which `getOrgSettings` parses every
- * stored row through. `test/integration/services/organizations.test.ts` pins both halves.
- *
- * `personal_space_role` also takes a custom role id, stored apart ({@link updateOrgSettings}).
+ * `.strict()`: an unknown key is a 400, never a silently dropped setting. The OpenAPI registry
+ * documents this same schema. `personal_space_role` is a role reference, stored apart
+ * ({@link updateOrgSettings}).
  */
 export const orgSettingsPatchSchema = orgSettingsBaseSchema
   .extend({ personal_space_role: spaceRoleReferenceSchema })
@@ -270,7 +260,7 @@ function toOrgSettings(
     personal_space_role:
       row?.personalSpaceRoleId != null
         ? { custom_role_id: row.personalSpaceRoleId }
-        : { preset_role: row?.personalSpacePresetRole ?? "admin" },
+        : { preset_role: row?.personalSpacePresetRole ?? ADMIN_PRESET },
   };
 }
 
@@ -931,15 +921,16 @@ export async function updateMemberRole(
   return result;
 }
 
-/** The org's `personal_space_role` decoded, before the floor and the guest cap; `null`: no org. */
-export async function getOrgPersonalSpaceDefault(orgId: string): Promise<SpaceRoleRef | null> {
+/** The org's `personal_space_role` decoded, before the floor and the guest cap. */
+export async function getOrgPersonalSpaceDefault(orgId: string): Promise<SpaceRoleRef> {
   const [row] = await db
     .select(PERSONAL_SPACE_DEFAULT_COLUMNS)
     .from(organizations)
     .leftJoin(psr, personalSpaceDefaultOn)
     .where(eq(organizations.id, orgId))
     .limit(1);
-  return row ? personalSpaceDefaultRef(row) : null;
+  if (!row) throw notFound("Organization not found");
+  return personalSpaceDefaultRef(row);
 }
 
 /** Delete `userId`'s personal-space override; returns its role, `null` when there was none. */

@@ -555,7 +555,7 @@ export function buildEventEnvelope(params: {
   // Default the inner `object` discriminator to "run" so run-lifecycle
   // callers don't have to set it; callers for non-run events (e.g.
   // `dispatchRunConnectionMissingWebhook`) put their own discriminator
-  // on the `run` payload before calling.
+  // on the event's subject (`params.run`) before calling.
   const execObj: Record<string, unknown> = { object: "run", ...params.run };
 
   // Summary mode: strip result and input

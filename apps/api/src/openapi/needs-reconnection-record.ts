@@ -8,12 +8,12 @@ export const NEEDS_RECONNECTION_RECORD_PROPERTIES = {
     type: ["string", "null"],
     enum: [...CREDENTIAL_DEATH_CAUSES, null],
     description:
-      "Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.",
+      "Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.",
   },
   needs_reconnection_at: {
     type: ["string", "null"],
     format: "date-time",
     description:
-      "When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.",
+      "When the credential died (RFC 3339). `null` while healthy, and when not recorded.",
   },
 } as const;

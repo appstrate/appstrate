@@ -598,7 +598,7 @@ function SummaryActivity({
                       if (calls.some((call) => call.lookup)) {
                         dispatch({ type: "show-lookups", show: true });
                       }
-                      seeAll("tools")();
+                      dispatch({ type: "select-tab", tab: "tools" });
                     }
                   : undefined
               }

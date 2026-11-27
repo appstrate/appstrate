@@ -87,10 +87,10 @@ import {
 import {
   auditSpaceRole,
   exactlyOneRole,
-  spaceRoleAssignmentSchema,
   spaceRoleAssignmentShape,
   toAssignment,
 } from "../lib/space-role-assignment.ts";
+import { spaceRoleReferenceSchema } from "@appstrate/core/permissions";
 import type { PackageType } from "@appstrate/core/validation";
 import type { SpaceSweepResult } from "@appstrate/shared-types";
 import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
@@ -731,7 +731,7 @@ export function createSpacesRouter() {
       const orgId = c.get("orgId");
       const spaceId = c.req.param("id")!;
       const userId = c.req.param("userId")!;
-      const data = await readJsonBody(c, spaceRoleAssignmentSchema);
+      const data = await readJsonBody(c, spaceRoleReferenceSchema);
       const assignment = toAssignment(data);
 
       await saveSpaceMember({

@@ -33,6 +33,9 @@ export const INFRA_ENV_KEYS: Readonly<Record<string, string>> = {
     "compose-level bind-mount path for the appstrate-runner UDS, written by `appstrate install`. The platform reads FIRECRACKER_RUNNER_URL, not this",
 };
 
+/** Namespaces of keys the platform reads that belong to the runtime (`NODE_ENV`) and to git (`GIT_SHA`). */
+export const FOREIGN_ENV_NAMESPACES: ReadonlySet<string> = new Set(["NODE", "GIT"]);
+
 /**
  * The namespaces the platform owns: a present key under one of them that nothing
  * reads is reported. Declared, not derived from the keys read today, so removing

@@ -116,14 +116,12 @@ const connectionCallSchema = {
     called_at: {
       type: ["string", "null"],
       format: "date-time",
-      description:
-        "When the call started. Null on a call recorded before this field existed (migration 0118), never backfilled.",
+      description: "When the call started. Null when not recorded.",
     },
     call_id: {
       type: ["string", "null"],
       format: "uuid",
-      description:
-        "The call's identity (UUIDv7). Null on a call recorded before this field existed (migration 0118).",
+      description: "The call's identity (UUID). Null when not recorded.",
     },
   },
 } as const;

@@ -16,28 +16,11 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { organizations, spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
+import { expectDbViolation } from "../../helpers/assertions.ts";
 import { seedSpaceRole } from "../../helpers/seed.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { ensurePersonalSpace } from "@appstrate/db/provision-org";
-
-/**
- * Drizzle wraps a driver error: `message` is the failed SQL, and the constraint
- * name — the thing under test — is on `cause`. Asserting on `message` would
- * pass for ANY failure of that statement, which is the trap this helper exists
- * to avoid.
- */
-async function expectDbViolation(promise: Promise<unknown>, constraint: RegExp): Promise<void> {
-  let caught: unknown;
-  try {
-    await promise;
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught, "the statement was expected to be refused by the database").toBeDefined();
-  const cause = (caught as { cause?: { message?: string } }).cause;
-  expect(String(cause?.message ?? caught)).toMatch(constraint);
-}
 
 function personalRow(ctx: TestContext, userId: string, overrides: Record<string, unknown> = {}) {
   return {

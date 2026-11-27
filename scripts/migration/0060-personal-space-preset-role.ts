@@ -14,8 +14,7 @@
  * `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`).
  *
  * In one transaction, for each organization whose `org_settings` still holds `personal_space_role`:
- * a preset value is copied into `organizations.personal_space_preset_role` (unless the row already
- * names a custom role, which wins), then the key is removed. `updated_at` is left alone.
+ * a preset value is copied into `organizations.personal_space_preset_role`, then the key is removed. `updated_at` is left alone.
  */
 
 import { parseArgs } from "node:util";
@@ -26,8 +25,8 @@ import { describeDatabaseTarget, exitUnlessDatabaseNamed } from "./lib/database-
 class DryRunRollback extends Error {}
 
 export interface PersonalSpacePresetRole {
-  /** Organizations whose key was moved, with the column's new value (`null`: a custom role is named, which wins). */
-  moved: { orgId: string; presetRole: string | null }[];
+  /** Organizations whose key was moved, with the column's new value. */
+  moved: { orgId: string; presetRole: string }[];
 }
 
 export async function runPersonalSpacePresetRole(options: {
@@ -45,18 +44,15 @@ export async function runPersonalSpacePresetRole(options: {
       await tx.execute("SET LOCAL lock_timeout = '5s'");
       await tx.execute("SET LOCAL statement_timeout = '300s'");
 
-      const rows = toRows<{ id: string; preset_role: string | null }>(
+      const rows = toRows<{ id: string; preset_role: string }>(
         await tx.execute(sql`UPDATE organizations SET
-            personal_space_preset_role = CASE
-              WHEN personal_space_role_id IS NULL THEN org_settings ->> 'personal_space_role'
-              ELSE personal_space_preset_role
-            END,
+            personal_space_preset_role = org_settings ->> 'personal_space_role',
             org_settings = org_settings - 'personal_space_role'
           WHERE org_settings ? 'personal_space_role'
           RETURNING id, personal_space_preset_role AS preset_role`),
       );
       for (const row of rows) {
-        out(`  ${row.id}: personal_space_preset_role = ${row.preset_role ?? "NULL"}`);
+        out(`  ${row.id}: personal_space_preset_role = ${row.preset_role}`);
         result.moved.push({ orgId: row.id, presetRole: row.preset_role });
       }
       out(`organizations moved: ${result.moved.length}`);

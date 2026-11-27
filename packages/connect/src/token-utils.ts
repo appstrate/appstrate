@@ -121,8 +121,8 @@ function redactErrorDescription(description: string): string {
  * refresh token, where retrying is pointless and the stored PKCE state should
  * be dropped. `invalid_client` / `unauthorized_client` map to `"client_rejected"`:
  * the grant is untouched, only fixing the client registration helps.
- * `invalid_request` / `invalid_scope` / `unsupported_grant_type` map to
- * `"misconfigured"`: the request shape, scope or grant type is a manifest or
+ * `invalid_scope` / `unsupported_grant_type` map to
+ * `"misconfigured"`: the scope or grant type is a manifest or
  * client defect that a reconnect cannot fix. Any other code (including
  * `unsupported_response_type`, an authorization-endpoint code outside §5.2) or a
  * body with no string `error` stays `"transient"`: an ambiguous signal never

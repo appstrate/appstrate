@@ -55,8 +55,8 @@ export function projectActiveInSpaces(problem: unknown, eligible: () => readonly
 const NAME_MAX_CHARS = 100;
 
 /**
- * A user-authored name as one line: control characters dropped, whitespace runs (newlines
- * included) one space, trimmed, bounded to `max` characters. A name cannot open a line of its own.
+ * A user-authored name as one line: control and format characters and whitespace runs (newlines
+ * included) become one space, trimmed, bounded to `max` characters. A name cannot open a line of its own.
  */
 export function flattenName(value: string, max = NAME_MAX_CHARS): string {
   const flat = value

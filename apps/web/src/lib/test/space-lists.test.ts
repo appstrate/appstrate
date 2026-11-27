@@ -75,17 +75,17 @@ describe("listAdmits", () => {
       held.includes(permission);
 
   it("admits a list where the permissions of its route hold", () => {
-    expect(listAdmits("runs")(gate("runs:read-all"), SHOWN)).toBe(true);
+    expect(listAdmits("runs")(gate("runs:read-all"))).toBe(true);
     // An agent is seen by a runner too (`packageSightPermissions("agent")`).
-    expect(listAdmits("agents")(gate("agents:run"), SHOWN)).toBe(true);
-    expect(listAdmits("skills")(gate("skills:read"), SHOWN)).toBe(true);
-    expect(listAdmits("integrations")(gate("integrations:read"), SHOWN)).toBe(true);
-    expect(listAdmits("skills")(gate("agents:read", "integrations:read"), SHOWN)).toBe(false);
+    expect(listAdmits("agents")(gate("agents:run"))).toBe(true);
+    expect(listAdmits("skills")(gate("skills:read"))).toBe(true);
+    expect(listAdmits("integrations")(gate("integrations:read"))).toBe(true);
+    expect(listAdmits("skills")(gate("agents:read", "integrations:read"))).toBe(false);
   });
 
   it("judges the data alone: a space hiding the Studio admits the list for the chat, not for the Studio", () => {
     const withoutStudio = (permission: string) => permission === "runs:read-all";
-    expect(listAdmits("runs")(withoutStudio, SHOWN)).toBe(true);
+    expect(listAdmits("runs")(withoutStudio)).toBe(true);
     expect(listAdmitsOn("runs", "chat")(withoutStudio, HIDDEN)).toBe(true);
     expect(listAdmitsOn("runs", "studio")(withoutStudio, HIDDEN)).toBe(false);
     expect(listAdmitsOn("runs", "studio")(withoutStudio, SHOWN)).toBe(true);

@@ -120,8 +120,8 @@ on the barrels' real consumers.
 
 ### Dependabot
 
-`.github/dependabot.yml` gives every `@earendil-works/*` package a group of its
-own (`pi-sdk`), excluded from the `production-dependencies` group: a Pi bump is
+`.github/dependabot.yml` puts all `@earendil-works/*` packages in one group
+(`pi-sdk`), excluded from the `production-dependencies` group: a Pi bump is
 one PR that carries nothing else. Dependabot never merges, so the PR waits for a
 person; updates to this dependency are a deliberate human decision, not an
 automated background bump. Two pins sit outside any manifest Dependabot reads

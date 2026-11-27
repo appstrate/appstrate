@@ -5657,7 +5657,7 @@ export interface paths {
         put?: never;
         /**
          * Journal the upstream calls a run's sidecar dispatched
-         * @description Sidecar-only. Auth via Bearer run token. A batch of the upstream calls the run's sidecar dispatched for its integrations (the `api_call` tool, the MITM listener, a remote MCP server's operations, a local MCP server's `tools/call` when no MITM listener sees its upstream requests), one record per call that may have reached the upstream, taken from its final attempt. Each is written to the connection-call journal (`connection_calls`) with the run's organization, space, actor and API key, `auth_method` `run_token`, `run_id` set and a null `request_id` (the batch's request is not the call's); the sidecar sends none of those. A record carries its `call_id` and `started_at`, stored as the row's `call_id` and `called_at`: `(run_id, call_id)` is unique, so a batch sent twice is stored once and the second answers `204` as well. Every record is checked before any is written, against the run's frozen kickoff snapshot alone — never the live agent or the space's activation, so a call that left stays journaled when its integration is switched off or the agent edited or deleted mid-run: a non-null `connection_id` is one the run bound to that integration (else `400 connection_not_in_run`), and a record with a null `connection_id` names an integration the run resolved (else `400 invalid_request`); one record that fails refuses the whole batch. The text of a record is bounded at 2048 characters and stored truncated to the journal's own caps. A run with no actor writes nothing and answers `204`. A record carrying `credential_revision` (a 2xx answered with that credential) also ends the connection's rejection streak: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0, unless the connection no longer holds that credential, the run's actor can no longer reach it (deleted, unshared, moved to another space), or it is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. A token whose run is no longer `running` is refused (`403`).
+         * @description Sidecar-only. Auth via Bearer run token. A batch of the upstream calls the run's sidecar dispatched for its integrations (the `api_call` tool, the MITM listener, a remote MCP server's operations, a local MCP server's `tools/call` when no MITM listener sees its upstream requests), one record per call that may have reached the upstream, taken from its final attempt. Each is written to the connection-call journal (`connection_calls`) with the run's organization, space, actor and API key, `auth_method` `run_token`, `run_id` set and a null `request_id` (the batch's request is not the call's); the sidecar sends none of those. A record carries its `call_id` and `called_at`, stored as the row's `call_id` and `called_at`: `(run_id, call_id)` is unique, so a batch sent twice is stored once and the second answers `204` as well. Every record is checked before any is written, against the run's frozen kickoff snapshot alone — never the live agent or the space's activation, so a call that left stays journaled when its integration is switched off or the agent edited or deleted mid-run: a non-null `connection_id` is one the run bound to that integration (else `400 connection_not_in_run`), and a record with a null `connection_id` names an integration the run resolved (else `400 invalid_request`); one record that fails refuses the whole batch. The text of a record is bounded at 2048 characters and stored truncated to the journal's own caps. A run with no actor writes nothing and answers `204`. A record carrying `credential_revision` (a 2xx answered with that credential) also ends the connection's rejection streak: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0, unless the connection no longer holds that credential, the run's actor can no longer reach it (deleted, unshared, moved to another space), or it is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. A token whose run is no longer `running` is refused (`403`).
          */
         post: operations["reportIntegrationCalls"];
         delete?: never;
@@ -6835,13 +6835,13 @@ export interface components {
             oauth_email?: string | null;
             needs_reconnection?: boolean;
             /**
-             * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+             * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded. A credential whose stored secret cannot be decrypted reads `credentials_undecryptable`, derived rather than stored, with `needs_reconnection_at` `null`.
              * @enum {string|null}
              */
             needs_reconnection_cause?: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
             /**
              * Format: date-time
-             * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+             * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
              */
             needs_reconnection_at?: string | null;
             /**
@@ -7522,7 +7522,7 @@ export interface components {
             /** @description Integration package id `connect_url` connects (`@scope/name`). */
             packageId?: string;
         };
-        /** @description A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle. */
+        /** @description A space role: one of the platform presets (read-only, `id: null`) or an organization-defined bundle. */
         RoleObject: {
             /** @enum {string} */
             object: "role";
@@ -13991,12 +13991,12 @@ export interface operations {
                             request_id: string | null;
                             /**
                              * Format: date-time
-                             * @description When the call started. Null on a call recorded before this field existed (migration 0118), never backfilled.
+                             * @description When the call started. Null when not recorded.
                              */
                             called_at: string | null;
                             /**
                              * Format: uuid
-                             * @description The call's identity (UUIDv7). Null on a call recorded before this field existed (migration 0118).
+                             * @description The call's identity (UUID). Null when not recorded.
                              */
                             call_id: string | null;
                         }[];
@@ -14176,13 +14176,13 @@ export interface operations {
                             scopes_granted: string[];
                             needs_reconnection: boolean;
                             /**
-                             * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                             * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
                              * @enum {string|null}
                              */
                             needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
                             /**
                              * Format: date-time
-                             * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                             * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
                              */
                             needs_reconnection_at: string | null;
                             /** Format: date-time */
@@ -14498,13 +14498,13 @@ export interface operations {
                                 scopes_granted: string[];
                                 needs_reconnection: boolean;
                                 /**
-                                 * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                                 * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
                                  * @enum {string|null}
                                  */
                                 needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
                                 /**
                                  * Format: date-time
-                                 * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                                 * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
                                  */
                                 needs_reconnection_at: string | null;
                                 /** Format: date-time */
@@ -14720,13 +14720,13 @@ export interface operations {
                         scopes_granted: string[];
                         needs_reconnection: boolean;
                         /**
-                         * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                         * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
                          * @enum {string|null}
                          */
                         needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
                         /**
                          * Format: date-time
-                         * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                         * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
                          */
                         needs_reconnection_at: string | null;
                         /** Format: date-time */
@@ -15150,13 +15150,13 @@ export interface operations {
                             scopes_granted: string[];
                             needs_reconnection: boolean;
                             /**
-                             * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                             * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
                              * @enum {string|null}
                              */
                             needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
                             /**
                              * Format: date-time
-                             * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                             * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
                              */
                             needs_reconnection_at: string | null;
                             /** Format: date-time */
@@ -15259,13 +15259,13 @@ export interface operations {
                         scopes_granted: string[];
                         needs_reconnection: boolean;
                         /**
-                         * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                         * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
                          * @enum {string|null}
                          */
                         needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
                         /**
                          * Format: date-time
-                         * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                         * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
                          */
                         needs_reconnection_at: string | null;
                         /** Format: date-time */
@@ -16186,13 +16186,13 @@ export interface operations {
                                 scopes_granted: string[];
                                 needs_reconnection: boolean;
                                 /**
-                                 * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                                 * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
                                  * @enum {string|null}
                                  */
                                 needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
                                 /**
                                  * Format: date-time
-                                 * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                                 * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
                                  */
                                 needs_reconnection_at: string | null;
                                 /** Format: date-time */
@@ -17399,13 +17399,13 @@ export interface operations {
                                 connected_at: string;
                                 needs_reconnection: boolean;
                                 /**
-                                 * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                                 * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
                                  * @enum {string|null}
                                  */
                                 needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
                                 /**
                                  * Format: date-time
-                                 * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                                 * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
                                  */
                                 needs_reconnection_at: string | null;
                                 expiresAt: string | null;
@@ -17535,13 +17535,13 @@ export interface operations {
                         scopes_granted: string[];
                         needs_reconnection: boolean;
                         /**
-                         * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                         * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
                          * @enum {string|null}
                          */
                         needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
                         /**
                          * Format: date-time
-                         * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                         * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
                          */
                         needs_reconnection_at: string | null;
                         /** Format: date-time */
@@ -17696,12 +17696,12 @@ export interface operations {
                             request_id: string | null;
                             /**
                              * Format: date-time
-                             * @description When the call started. Null on a call recorded before this field existed (migration 0118), never backfilled.
+                             * @description When the call started. Null when not recorded.
                              */
                             called_at: string | null;
                             /**
                              * Format: uuid
-                             * @description The call's identity (UUIDv7). Null on a call recorded before this field existed (migration 0118).
+                             * @description The call's identity (UUID). Null when not recorded.
                              */
                             call_id: string | null;
                         } & {
@@ -18141,7 +18141,7 @@ export interface operations {
                             /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent or `[]` means an agent that declares this integration without its own selection ends up with nothing callable, which publish/import reject and the run aborts on — such an agent must select a tool explicitly. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
                             default_tools?: string[] | "*";
                         }[];
-                        /** @description Agents ACTIVE in the current space, ordered by id, each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. The full list is the `listAgents` operation (the MCP `search` tool finds them by keyword). */
+                        /** @description Agents ACTIVE in the current space, ordered by id, each with the required integrations that keep it from launching here. Empty unless the caller holds the `agents:run` permission. The full list is the `listAgents` operation (the MCP `search` tool finds them by keyword). */
                         agents?: {
                             /** @description The entries, whole; empty when `truncated` is true. */
                             data: {
@@ -18165,7 +18165,7 @@ export interface operations {
                             /** @description How many entries there are, listed or withheld. */
                             total: number;
                         };
-                        /** @description Skills the caller could attach to an agent in the current space, ordered by id. A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly: declare them under an agent manifest's `dependencies.skills`. The full list is the `listSkills` operation (the MCP `search` tool finds them by keyword). */
+                        /** @description Skills the caller could attach to an agent in the current space, ordered by id. A catalogue read, not a runnable hint: empty unless the caller holds the `skills:read` permission. Skills are not run directly: declare them under an agent manifest's `dependencies.skills`. The full list is the `listSkills` operation (the MCP `search` tool finds them by keyword). */
                         skills?: {
                             /** @description The entries, whole; empty when `truncated` is true. */
                             data: {
@@ -22374,9 +22374,10 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
-                    custom_role_id?: string;
-                } & (unknown | unknown);
+                    preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+                } | {
+                    custom_role_id: string;
+                };
             };
         };
         responses: {
@@ -29168,9 +29169,10 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
-                    custom_role_id?: string;
-                } & (unknown | unknown);
+                    preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+                } | {
+                    custom_role_id: string;
+                };
             };
         };
         responses: {
@@ -30628,7 +30630,7 @@ export interface operations {
                          * Format: date-time
                          * @description When the upstream call started (RFC 3339, with an offset).
                          */
-                        started_at: string;
+                        called_at: string;
                         /** @description The integration's package id (`@scope/name`). */
                         integration_id: string;
                         /**
@@ -30728,7 +30730,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_request, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -30745,7 +30747,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_request, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -30814,7 +30816,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_request, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -30831,7 +30833,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_request, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -31512,7 +31514,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_request, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -31528,7 +31530,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_request, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -31569,7 +31571,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_request, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -31585,7 +31587,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_request, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";

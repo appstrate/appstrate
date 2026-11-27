@@ -43,6 +43,7 @@ export function InfoTip({ children, testId }: { children: React.ReactNode; testI
     <PopoverPrimitive.Root
       open={open}
       onOpenChange={(next) => {
+        clearTimeout(closing.current);
         if (!next) pinned.current = false;
         setOpen(next);
       }}
@@ -59,6 +60,7 @@ export function InfoTip({ children, testId }: { children: React.ReactNode; testI
             // Radix would toggle: a click on what a hover opened pins it instead of closing it.
             // Inside a `<label>`, it also keeps the click from reaching the labelled control.
             event.preventDefault();
+            clearTimeout(closing.current);
             pinned.current = !(open && pinned.current);
             setOpen(pinned.current);
           }}

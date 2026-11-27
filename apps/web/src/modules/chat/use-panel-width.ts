@@ -22,8 +22,6 @@ const storedWidths = createLocalStore<number | null>(LOCAL_STORAGE_KEYS.chatPane
   serialize: (width) => (width === null ? null : String(Math.round(width))),
 });
 
-const readStoredWidth = (view: PanelView) => storedWidths.read(view);
-
 /**
  * The context panel's width on desktop, one per view: remembered per browser,
  * clamped between a floor and a share of the chat area (the parent of
@@ -31,9 +29,9 @@ const readStoredWidth = (view: PanelView) => storedWidths.read(view);
  */
 export function usePanelWidth(panelRef: RefObject<HTMLElement | null>, view: PanelView) {
   const [stored, setStored] = useState<Record<PanelView, number>>(() => ({
-    list: readStoredWidth("list") ?? PANEL_DEFAULT_WIDTH.list,
-    detail: readStoredWidth("detail") ?? PANEL_DEFAULT_WIDTH.detail,
-    file: readStoredWidth("file") ?? PANEL_DEFAULT_WIDTH.file,
+    list: storedWidths.read("list") ?? PANEL_DEFAULT_WIDTH.list,
+    detail: storedWidths.read("detail") ?? PANEL_DEFAULT_WIDTH.detail,
+    file: storedWidths.read("file") ?? PANEL_DEFAULT_WIDTH.file,
   }));
   const [areaWidth, setAreaWidth] = useState(0);
 

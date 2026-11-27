@@ -49,7 +49,7 @@ const routeAdmits =
 
 /** A space admits a list where its gate grants the list route's own permissions, Studio or not. */
 export const listAdmits =
-  (list: SpaceList): SpaceAdmits =>
+  (list: SpaceList): ((can: SpaceGate) => boolean) =>
   (can) =>
     ROUTE_ACCESS[LIST_ROUTE[list]].anyOf.some(can);
 
@@ -126,8 +126,7 @@ export function spaceChoice(
 
 /** The « Tous les espaces » is offered from two spaces granting at least one list's own permissions. */
 export function overviewOffered(spaces: readonly ListedSpace[] | undefined): boolean {
-  const admits: SpaceAdmits = (can, space) =>
-    SPACE_LISTS.some((list) => listAdmits(list)(can, space));
+  const admits: SpaceAdmits = (can) => SPACE_LISTS.some((list) => listAdmits(list)(can));
   return spacesWhere(spaces, admits).length >= 2;
 }
 

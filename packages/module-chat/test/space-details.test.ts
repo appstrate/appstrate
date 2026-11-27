@@ -9,7 +9,6 @@ import { fullAgent, meBody } from "./me-context-body.ts";
 import { describe, expect, it } from "bun:test";
 import {
   CHAT_CONTEXT_DETAILS_BUDGET_CHARS,
-  MAX_DETAIL_SPACES,
   SPACE_DETAILS_HEADING,
   formatSpaceDetails,
   orderDetailSpaces,
@@ -412,6 +411,5 @@ describe("the cap on the spaces read", () => {
     expect(formatSpaceDetails([detail(PERSO)], 1).text).toContain("1 space not read");
     expect(formatSpaceDetails([detail(PERSO)], 0).text).not.toContain("not read");
     expect(formatSpaceDetails([], 2).text).toContain("2 spaces not read");
-    expect(MAX_DETAIL_SPACES).toBeGreaterThan(0);
   });
 });

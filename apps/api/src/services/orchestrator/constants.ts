@@ -3,10 +3,7 @@
 // KEEP THIS FILE'S IMPORTS TO `@appstrate/core` ALONE. `services/docker.ts` reads from it, which is
 // an upward import (the orchestrator layer consumes docker.ts, not the reverse). That is safe only
 // while this module imports nothing of this app: adding an import here that leads back to
-// docker.ts creates a cycle. Stop policy genuinely belongs
-// to the orchestrator layer, and the alternatives — a new file for one
-// constant, or parameters whose only argument is ever that same constant —
-// are worse. If this file ever needs an import, move the constants instead.
+// docker.ts creates a cycle.
 
 import { SIDECAR_SIGTERM_GRACE_SECONDS } from "@appstrate/core/sidecar-types";
 
@@ -20,12 +17,6 @@ export const SIDECAR_NANO_CPUS = 500_000_000;
 // SIGTERM→SIGKILL grace on stop, in seconds, derived from the sidecar's journal-drain budget
 // (`@appstrate/core/sidecar-types`) so a SIGTERM drain ends inside it. Single-sourced across ALL THREE
 // backends (docker, process, firecracker) so a cancel behaves the same
-// whichever engine served the run. It lived as a literal `5` in each, with
-// each copy's comment asserting it "matches" the others — exactly the drift
-// this sweep single-sourced MAX_STREAMED_BODY_SIZE to prevent.
-//
-// Backend policy, not a caller option: `stopWorkload`/`stopByRunId` used to
-// accept a `timeoutSeconds` that no production caller ever passed, so the
-// parameter only ever selected this same default. Tests that need the grace
-// out of the way inject it through the backend's deps bag instead.
+// whichever engine served the run. Backend policy, not a caller option: tests that need the grace
+// out of the way inject it through the backend's deps bag.
 export const SIGTERM_GRACE_SECONDS = SIDECAR_SIGTERM_GRACE_SECONDS;

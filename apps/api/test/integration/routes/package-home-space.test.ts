@@ -13,7 +13,7 @@
 import { ifMatch } from "../../helpers/etag.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { and, eq, ne } from "drizzle-orm";
-import { auditEvents, packages, spacePackages, spaces } from "@appstrate/db/schema";
+import { auditEvents, packages, schedules, spacePackages, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem, getDbRow } from "../../helpers/assertions.ts";
@@ -31,6 +31,7 @@ import {
   seedPackageShare,
   seedPackage,
   seedPackageVersion,
+  seedSchedule,
   seedSpace,
   seedSpaceMember,
   seedSpaceRole,
@@ -721,6 +722,13 @@ describe("PUT /api/packages/{scope}/{name}/home", () => {
       draftManifest: { ...MANIFEST, name: OWN },
       draftContent: CONTENT,
     });
+    await seedSpacePackage(personal.id, OWN);
+    const schedule = await seedSchedule({
+      orgId: ctx.orgId,
+      spaceId: personal.id,
+      packageId: OWN,
+      userId: ctx.user.id,
+    });
 
     const res = await app.request(`/api/packages/${OWN}/home`, {
       method: "PUT",
@@ -729,6 +737,16 @@ describe("PUT /api/packages/{scope}/{name}/home", () => {
     });
     expect(res.status, await res.clone().text()).toBe(200);
     expect((await getDbRow(packages, eq(packages.id, OWN))).homeSpaceId).toBe(alphaId);
+    // The default `keep_in_previous_home` keeps nothing in a personal space.
+    const left = await db
+      .select()
+      .from(spacePackages)
+      .where(and(eq(spacePackages.packageId, OWN), eq(spacePackages.spaceId, personal.id)));
+    expect(left).toEqual([]);
+    expect(await getDbRow(schedules, eq(schedules.id, schedule.id))).toMatchObject({
+      enabled: false,
+      disabledReason: "package_removed",
+    });
 
     const [moved] = await db
       .select()
@@ -738,10 +756,14 @@ describe("PUT /api/packages/{scope}/{name}/home", () => {
       );
     expect(moved).toBeDefined();
     expect(moved!.before).toEqual({ homeSpaceId: null, homeOwnerUserId: ctx.user.id });
-    // The destination is a team space by construction now, so `after` carries
+    // The destination is a team space by construction, so `after` carries
     // its id plainly. A personal space never keeps what it no longer homes, whatever
     // `keep_in_previous_home` asked: outside its home it takes the offer only.
-    expect(moved!.after).toEqual({ homeSpaceId: alphaId, keptInPreviousHome: false });
+    expect(moved!.after).toEqual({
+      homeSpaceId: alphaId,
+      keptInPreviousHome: false,
+      disabledScheduleIds: [schedule.id],
+    });
   });
 
   it("accepts a no-op PATCH of a package already homed in the caller's personal space", async () => {

@@ -17,7 +17,7 @@ export const CREDENTIAL_FAILURE_SENTENCES: Record<CredentialFailureCause, string
   connection_changed: "the connection was reconnected or changed while its token was refreshed",
   oauth_client_rejected:
     "the token endpoint rejected the OAuth client or its request (invalid_client, " +
-    "unauthorized_client, invalid_request, invalid_scope or unsupported_grant_type): its " +
+    "unauthorized_client, invalid_scope or unsupported_grant_type): its " +
     "registration or the integration's manifest must be fixed, a reconnect cannot, so the " +
     "failure is never counted",
 };

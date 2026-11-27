@@ -12,8 +12,10 @@
  * whose blob carried the flag before the column existed still reads false: the sweep would claim
  * it and its job would end on a 410. This copies that blob flag into the column.
  *
- * Run in the release window that ships the column. Dry run by default: lists the rows to flag,
- * writes nothing. With `--apply`, `needs_reconnection = true` on exactly those rows, in one
+ * Run after drizzle `0114` has applied and BEFORE the app starts: the platform refuses to boot
+ * until it has run (the `0058` entry of `PENDING_DATA_SCRIPTS`,
+ * `apps/api/src/lib/boot-guards/pending-data-scripts.ts`). Dry run by default: lists the rows to
+ * flag, writes nothing. With `--apply`, `needs_reconnection = true` on exactly those rows, in one
  * transaction; it exits 1 unless none is left after. A blob that cannot be decrypted is listed and
  * left alone. Idempotent. Counts UNMEASURED: rehearse on a restored dump
  * and record them in the README's Log. Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with

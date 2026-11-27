@@ -347,8 +347,6 @@ type BuildPlatformMcpToolsOptions = {
  * The note lands in `content`, which the UI parses too (nothing reads `details`),
  * so the payload stops being the only text part. The block is marked
  * (`isTurnBudgetNoteBlock`); readers that want the payload alone drop it by that marker.
- * `unwrapMcpResult` (`@appstrate/core/mcp-result`) on the UI side tolerates trailing
- * non-payload text.
  */
 export function withTurnBudgetNote(result: PiToolResult, budget: PiTurnBudget): PiToolResult {
   const now = (budget.now ?? Date.now)();

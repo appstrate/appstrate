@@ -432,7 +432,11 @@ export type EnrichedSchedule = ScheduleWireDto & {
 // `Record<OrgRole, ReadonlySet<Permission>>` role-grant matrix in
 // `apps/api/src/lib/permissions.ts` (an exhaustive Record fails when a
 // role is added to one side and not the other).
-import type { OrgRole, SpaceAssignment, SpaceRolePreset } from "@appstrate/core/permissions";
+import type {
+  OrgRole,
+  SpaceAssignment,
+  spaceRoleReferenceSchema,
+} from "@appstrate/core/permissions";
 export type { OrgRole };
 
 /** Re-exported from core so the OpenAPI `SpaceAssignment` component can be
@@ -475,7 +479,7 @@ export interface OrganizationMember {
 }
 
 /** A role given to someone: one preset, or one custom role. */
-export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
+export type SpaceRoleAssignment = z.infer<typeof spaceRoleReferenceSchema>;
 
 /** One space an org member reaches — the per-member projection of `GET /api/spaces/:id/members`. */
 export interface OrganizationMemberSpace {

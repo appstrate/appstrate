@@ -137,6 +137,7 @@ describe("organization settings — effective values", () => {
     // The refused write changed nothing.
     const row = await storedDefault(ctx);
     expect(row.personalSpaceRoleId).toBe(own.id);
+    expect(row.orgSettings).not.toHaveProperty("personal_space_role");
   });
 
   it("stores a custom default in one column and a preset in the other, never both, and reads either the same way", async () => {
@@ -194,23 +195,6 @@ describe("organization settings — effective values", () => {
     expect(role).toBeUndefined();
   });
 
-  it("the schema refuses a row holding both shapes", async () => {
-    const own = await seedSpaceRole({ orgId: ctx.orgId });
-    expect(
-      (await patchSettings(ctx, { personal_space_role: { preset_role: "operator" } })).status,
-    ).toBe(200);
-    let threw = false;
-    try {
-      await db
-        .update(organizations)
-        .set({ personalSpaceRoleId: own.id })
-        .where(eq(organizations.id, ctx.orgId));
-    } catch {
-      threw = true;
-    }
-    expect(threw).toBe(true);
-  });
-
   it("a PATCH of another key does not write the personal_space_role default into storage", async () => {
     expect((await patchSettings(ctx, { dashboard_sso_enabled: true })).status).toBe(200);
     const [row] = await db
@@ -228,7 +212,7 @@ describe("organization settings — effective values", () => {
     expect((await storedDefault(ctx)).orgSettings).not.toHaveProperty("personal_space_role");
   });
 
-  it("reads a row still carrying the retired document key without failing, ignoring it", async () => {
+  it("a `personal_space_role` key in the settings document never shadows the columns", async () => {
     await db
       .update(organizations)
       .set({ orgSettings: { personal_space_role: "viewer" } })

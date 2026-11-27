@@ -777,20 +777,23 @@ export async function connectRemoteHttpIntegration(
     // refresh replay included. A handshake exchange is kept aside until the client connects, and
     // journaled only when it never does (the last one that reached the server).
     const started = performance.now();
+    const startedAtMs = Date.now();
     const operation = isMcpOperationExchange(init?.body);
-    const record = (outcome: string, answered: Awaited<ReturnType<typeof send>> | null) => {
+    type Sent = Awaited<ReturnType<typeof send>>;
+    const record = (outcome: string, answered: Sent | null) => {
       const call: DispatchedCall = {
         method: init?.method ?? "GET",
         host: new URL(String(target)).hostname,
         outcome,
         durationMs: performance.now() - started,
+        startedAtMs,
         credential: answered?.credentialAnswered ? { revision: answered.credentialRevision } : null,
       };
       if (operation) journal(call);
       else if (!connected) unconnectedExchange = call;
     };
     // `earlier`: the 401 a replay follows. A replay that fails before dispatch leaves it as the record.
-    const sendRecorded = async (earlier?: Awaited<ReturnType<typeof send>>) => {
+    const sendRecorded = async (earlier?: Sent) => {
       try {
         return await send();
       } catch (err) {
@@ -1422,12 +1425,14 @@ export function journalToolCalls(
     ...client,
     async callTool(args, options) {
       const started = performance.now();
+      const startedAtMs = Date.now();
       const record = (outcome: string) =>
         journal({
           method: "POST",
           host: null,
           outcome,
           durationMs: performance.now() - started,
+          startedAtMs,
           credential: null,
         });
       try {

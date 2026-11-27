@@ -831,8 +831,8 @@ interface ActiveAgentHint extends PackageHint {
 }
 
 interface ActiveAgentHintsResult {
-  agents: ActiveAgentHint[];
-  /** True when the catalog exceeded `limit`, `agents` then empty (reach it via search). */
+  data: ActiveAgentHint[];
+  /** True when the catalog exceeded `limit`, `data` then empty (reach it via search). */
   truncated: boolean;
   /** Total active agents. */
   total: number;
@@ -862,11 +862,11 @@ export async function listActiveAgentHints(
     await selectorlessLaunchManifests(rows),
     scope,
   );
-  const agents = items.map((item, i) => ({
+  const data = items.map((item, i) => ({
     ...item,
     inactive_required_integrations: inactive[i]!,
   }));
-  return { agents, truncated, total };
+  return { data, truncated, total };
 }
 
 /** One entry in the active-skill hint exposed via get_me. */
@@ -877,8 +877,8 @@ interface ActiveSkill extends PackageHint {
 }
 
 interface ActiveSkillsResult {
-  skills: ActiveSkill[];
-  /** True when the catalog exceeded `limit`, `skills` then empty (reach it via search). */
+  data: ActiveSkill[];
+  /** True when the catalog exceeded `limit`, `data` then empty (reach it via search). */
   truncated: boolean;
   /** Total active skills. */
   total: number;
@@ -903,7 +903,7 @@ export async function listActiveSkills(
     }),
     opts,
   );
-  return { skills: items, truncated, total };
+  return { data: items, truncated, total };
 }
 
 /** The run gate: is this package active in this space (RBAC spec §6.10)? The row wins, system packages included; with no row the deployment default decides. Carries the org boundary itself. */
@@ -1143,7 +1143,7 @@ export async function listConnectableIntegrations(
   scope: SpaceScope,
   connected: ReadonlySet<string>,
   opts: { canConfigure: boolean },
-): Promise<{ integrations: string[]; truncated: boolean; total: number }> {
+): Promise<{ data: string[]; truncated: boolean; total: number }> {
   const active = await listActivePackages(scope.orgId, [scope.spaceId], "integration");
   const open = active.filter(
     (row) => !connected.has(row.id) && !isRuntimeBoundIntegration(row.draftManifest),
@@ -1173,6 +1173,6 @@ export async function listConnectableIntegrations(
     .map((row) => row.id)
     .sort();
   return ids.length > DEFAULT_PACKAGE_HINT_LIMIT
-    ? { integrations: [], truncated: true, total: ids.length }
-    : { integrations: ids, truncated: false, total: ids.length };
+    ? { data: [], truncated: true, total: ids.length }
+    : { data: ids, truncated: false, total: ids.length };
 }

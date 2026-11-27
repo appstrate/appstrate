@@ -368,12 +368,14 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   const targetHost = templateHost(targetUrl);
   // Journaled on the template's host: a `{{field}}` stays as written, never its value.
   const journalStarted = performance.now();
+  const journalStartedAtMs = Date.now();
   const journalCall = (outcome: string, answeredBy: CredentialsResponse | null) =>
     deps.journal({
       method,
       host: targetHost,
       outcome,
       durationMs: performance.now() - journalStarted,
+      startedAtMs: journalStartedAtMs,
       credential: answeredBy ? { revision: answeredBy.credentialRevision } : null,
     });
   // `undispatched` runs when the failed request sent nothing: a replay's refusal then leaves the

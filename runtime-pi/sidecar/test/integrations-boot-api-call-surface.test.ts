@@ -469,7 +469,7 @@ describe("bootIntegrations — synthetic api_call surface", () => {
         );
       }
       expect(
-        records.map(({ duration_ms: _, call_id: __, started_at: ___, ...record }) => record),
+        records.map(({ duration_ms: _, call_id: __, called_at: ___, ...record }) => record),
       ).toEqual([
         {
           integration_id: INTEGRATION_ID,

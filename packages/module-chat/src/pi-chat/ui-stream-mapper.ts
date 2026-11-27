@@ -540,7 +540,7 @@ function stringifyToolResult(result: unknown): string {
     const content = (result as { content?: unknown }).content;
     if (Array.isArray(content)) {
       // The model's turn-budget note is marked: it is not the reader's.
-      const texts = (omitTurnBudgetNote(content) as unknown[]).map((c) =>
+      const texts = omitTurnBudgetNote(content).map((c) =>
         c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : "",
       );
       return texts.join("");

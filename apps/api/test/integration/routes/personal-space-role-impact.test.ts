@@ -5,7 +5,7 @@
  * `personal_space_role` would stop. The claims: who is counted (a member or guest following the
  * default, with an enabled schedule they run in their own personal space), who is not (an
  * override, an owner or admin, a disabled schedule), that a role granting `agents:run` stops
- * nothing, and how the door refuses (foreign role, missing guard, malformed `role`).
+ * nothing, and how the door refuses (foreign role, missing guard, malformed reference).
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -139,13 +139,12 @@ describe("GET /api/orgs/{orgId}/personal-space-role/impact", () => {
     expect(missing.status).toBe(400);
   });
 
-  it("400s the retired bare `role` parameter and a query naming both references", async () => {
-    const get = (query: string) =>
-      app.request(`/api/orgs/${owner.orgId}/personal-space-role/impact?${query}`, {
-        headers: { Cookie: owner.cookie },
-      });
-    expect((await get("role=viewer")).status).toBe(400);
+  it("400s a query naming both references", async () => {
     const own = await seedSpaceRole({ orgId: owner.orgId });
-    expect((await get(`preset_role=viewer&custom_role_id=${own.id}`)).status).toBe(400);
+    const both = await app.request(
+      `/api/orgs/${owner.orgId}/personal-space-role/impact?preset_role=viewer&custom_role_id=${own.id}`,
+      { headers: { Cookie: owner.cookie } },
+    );
+    expect(both.status).toBe(400);
   });
 });

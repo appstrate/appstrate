@@ -10,7 +10,7 @@
  * the room the estimated input leaves (`clampMaxTokensToContext`), so the
  * reserve stays small on large windows — {@link RESERVE_CEILING_TOKENS}.
  *
- * **Known limit near the threshold.** pi-ai's clamp (unchanged through 1.6.0) keeps a margin of
+ * **Known limit near the threshold.** pi-ai 1.6.0's clamp keeps a margin of
  * `max(4096, 15 % of the input)`; once that margin would leave under 32 768
  * tokens of output, it keeps only the 4 096 margin and caps the reply at
  * 32 768. On a window above ~272k, a context near `window - 64k` is in that

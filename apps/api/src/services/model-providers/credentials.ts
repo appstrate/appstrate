@@ -35,7 +35,7 @@ import type {
   OAuthTokenResponse,
 } from "@appstrate/core/sidecar-types";
 import { announceCredentialNeedsReconnection } from "../credential-reconnection.ts";
-import { recordAudit } from "../audit.ts";
+import { recordAudit, trackAudit } from "../audit.ts";
 import type { ModelProviderDefinition, ModelProviderIdentity } from "@appstrate/core/module";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { getEnv } from "@appstrate/env";
@@ -940,12 +940,14 @@ export async function updateOAuthCredentialTokens(
     if (!row) return;
     const existing = decryptBlob(row.credentialsEncrypted, id);
     if (existing?.kind !== "oauth") return;
-    const next: CredentialsBlob = {
-      ...existing,
+    const accountId = fresh.accountId ?? existing.accountId;
+    const next: OAuthBlob = {
+      kind: "oauth",
       accessToken: fresh.accessToken,
       refreshToken: fresh.refreshToken,
       expiresAt: fresh.expiresAt,
-      ...(fresh.accountId ? { accountId: fresh.accountId } : {}),
+      ...(accountId ? { accountId } : {}),
+      ...(existing.email ? { email: existing.email } : {}),
     };
     const set: Record<string, unknown> = {
       credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
@@ -964,6 +966,8 @@ export async function updateOAuthCredentialTokens(
       set.expiresAt = next.expiresAt !== null ? new Date(next.expiresAt) : null;
     }
 
+    // Unlike the integration twin, this write never clears `needs_reconnection`, so it needs no
+    // gate on that column: a concurrent death mark survives it.
     const updated = await db
       .update(modelProviderCredentials)
       .set(set)
@@ -1031,14 +1035,16 @@ function announceModelCredentialDeath(
   providerId: string,
   cause: CredentialDeathCause,
 ): void {
-  void recordAudit({
-    orgId,
-    actorType: "system",
-    action: "model_provider_credential.needs_reconnection",
-    resourceType: "model_provider_credential",
-    resourceId: credentialId,
-    after: { cause },
-  });
+  void trackAudit(
+    recordAudit({
+      orgId,
+      actorType: "system",
+      action: "model_provider_credential.needs_reconnection",
+      resourceType: "model_provider_credential",
+      resourceId: credentialId,
+      after: { cause },
+    }),
+  );
   announceCredentialNeedsReconnection({
     kind: "model_provider_credential",
     orgId,

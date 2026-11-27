@@ -13,7 +13,7 @@ import { recordingCallReporter } from "./helpers/call-journal.ts";
 
 const record = (overrides: Partial<IntegrationCallRecord> = {}): IntegrationCallRecord => ({
   call_id: "01900000-0000-7000-8000-000000000000",
-  started_at: "2026-03-01T10:00:00.000Z",
+  called_at: "2026-03-01T10:00:00.000Z",
   integration_id: "@test/integ",
   connection_id: "11111111-1111-4111-8111-111111111111",
   method: "GET",
@@ -316,16 +316,16 @@ describe("createCallReporter — retry and drain deadline", () => {
       fetchFn: hangingFetch,
       flushIntervalMs: 60_000,
       maxBatch: 1,
-      drainDeadlineMs: 80,
+      drainDeadlineMs: 400,
     });
     reporter.report(record({ outcome: "200" }));
-    const first = reporter.drain();
-    await new Promise((r) => setTimeout(r, 30));
-    reporter.report(record({ outcome: "201" }));
     const started = Date.now();
+    const first = reporter.drain();
+    await new Promise((r) => setTimeout(r, 100));
+    reporter.report(record({ outcome: "201" }));
     await Promise.all([first, reporter.drain()]);
-    // The second joined the first's deadline (80 ms from its start), not a fresh one.
-    expect(Date.now() - started).toBeLessThan(75);
+    // The second joined the first's deadline (400 ms from its start), not a fresh one (500 ms).
+    expect(Date.now() - started).toBeLessThan(450);
   });
 });
 
@@ -360,6 +360,7 @@ describe("connectionCallJournal", () => {
       host: "h",
       outcome: "upstream_timeout",
       durationMs: 3.6,
+      startedAtMs: Date.parse("2026-03-01T10:00:00.000Z"),
       credential: null,
     });
     expect(records).toEqual([
@@ -367,7 +368,7 @@ describe("connectionCallJournal", () => {
         call_id: expect.stringMatching(
           /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/,
         ),
-        started_at: expect.any(String),
+        called_at: expect.any(String),
         integration_id: "@test/integ",
         connection_id: null,
         method: "PATCH",
@@ -378,24 +379,34 @@ describe("connectionCallJournal", () => {
     ]);
   });
 
-  it("stamps a call id of its own and the start of the call: the end less its duration", () => {
+  it("stamps a call id of its own and the start the call carries", () => {
     const { reporter, records } = recordingCallReporter();
     const journal = connectionCallJournal(reporter, {
       integrationId: "@test/integ",
       connectionId: null,
       source: null,
     });
-    const before = Date.now();
-    journal({ method: "GET", host: "h", outcome: "200", durationMs: 1_500, credential: null });
-    journal({ method: "GET", host: "h", outcome: "200", durationMs: 0, credential: null });
-    const after = Date.now();
+    const startedAtMs = Date.parse("2026-03-01T10:00:00.000Z");
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "200",
+      durationMs: 1_500,
+      startedAtMs,
+      credential: null,
+    });
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "200",
+      durationMs: 0,
+      startedAtMs,
+      credential: null,
+    });
 
     const [slow, quick] = records;
     expect(slow!.call_id).not.toBe(quick!.call_id);
-    const started = Date.parse(slow!.started_at);
-    expect(started).toBeGreaterThanOrEqual(before - 1_500);
-    expect(started).toBeLessThanOrEqual(after - 1_500);
-    expect(Date.parse(quick!.started_at)).toBeGreaterThanOrEqual(before);
+    expect(slow!.called_at).toBe("2026-03-01T10:00:00.000Z");
   });
 
   it("asks the source for a streak only on a 2xx answered with the injected credential", () => {
@@ -407,9 +418,30 @@ describe("connectionCallJournal", () => {
       source,
     });
     const credential = { revision: "0123456789abcdef" };
-    journal({ method: "GET", host: "h", outcome: "401", durationMs: 1, credential });
-    journal({ method: "GET", host: "h", outcome: "200", durationMs: 1, credential: null });
-    journal({ method: "GET", host: "h", outcome: "204", durationMs: 1, credential });
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "401",
+      durationMs: 1,
+      startedAtMs: Date.now(),
+      credential,
+    });
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "200",
+      durationMs: 1,
+      startedAtMs: Date.now(),
+      credential: null,
+    });
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "204",
+      durationMs: 1,
+      startedAtMs: Date.now(),
+      credential,
+    });
     expect(asked).toEqual(["0123456789abcdef"]);
     expect(records.map((r) => r.credential_revision)).toEqual([
       undefined,
@@ -431,8 +463,22 @@ describe("connectionCallJournal", () => {
       source,
     });
     const credential = { revision: "0123456789abcdef" };
-    journal({ method: "GET", host: "h", outcome: "200", durationMs: 1, credential: null });
-    journal({ method: "GET", host: "h", outcome: "200", durationMs: 1, credential });
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "200",
+      durationMs: 1,
+      startedAtMs: Date.now(),
+      credential: null,
+    });
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "200",
+      durationMs: 1,
+      startedAtMs: Date.now(),
+      credential,
+    });
     expect(undelivered[0]).toBeUndefined();
     undelivered[1]!();
     expect(rearmed).toEqual(["0123456789abcdef"]);

@@ -61,7 +61,8 @@ type RefusalCode =
   | "not_granted"
   | "credential_proxy_closed"
   | "not_found"
-  | "too_large";
+  | "too_large"
+  | "internal_error";
 
 /**
  * Every refused tool call, from every tool (MCP 2025-11-25, SEP-1303: input
@@ -87,6 +88,8 @@ export interface Refusal {
   ceiling_permissions?: readonly string[];
   /** Next step (`not_granted`: NO_FALLBACK_HINT / report it). */
   hint?: string;
+  /** `internal_error`: the platform request to quote when reporting the failure. */
+  request_id?: string;
 }
 
 /** A route's refusal, as `invoke_operation` relays one: its status and problem body. */

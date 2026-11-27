@@ -38,7 +38,7 @@ describe("journalToolCalls", () => {
 
     expect(await client.callTool({ name: "a", arguments: {} })).toBe(ok);
     expect(await client.callTool({ name: "b", arguments: {} })).toBe(toolError);
-    expect(calls.map(({ durationMs: _, ...call }) => call)).toEqual([
+    expect(calls.map(({ durationMs: _, startedAtMs: __, ...call }) => call)).toEqual([
       { method: "POST", host: null, outcome: "200", credential: null },
       { method: "POST", host: null, outcome: "200", credential: null },
     ]);

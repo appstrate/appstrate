@@ -9,7 +9,8 @@ type Scalar<T, K extends string, S extends string> = { [P in K]: T } & {
 
 /**
  * A store holding one scalar kept in `stored` (a `createLocalStore` of a scalar codec): `field`
- * starts from what is stored, `setter` writes it back (`null` removes the key). For `create` (a hook) or `createStore` (vanilla) alike.
+ * starts from what is stored, `setter` writes it back (`null` removes the key). For `create` (a
+ * hook) or `createStore` (vanilla) alike.
  *
  * The store's state is read once on init: a write from another tab reaches `stored` (it listens to
  * `storage` events) but not this store, so two tabs can hold different selections until reload.

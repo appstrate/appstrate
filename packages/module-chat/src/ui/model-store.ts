@@ -30,7 +30,12 @@ import {
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
-import { LOCAL_STORAGE_KEYS, createLocalStore, scalarCodec } from "@appstrate/ui/local-storage";
+import {
+  LOCAL_STORAGE_KEYS,
+  createLocalStore,
+  jsonCodec,
+  scalarCodec,
+} from "@appstrate/ui/local-storage";
 import { fileDelivery, type FileDelivery } from "../file-input.ts";
 
 const pickStore = createLocalStore<string | null>(
@@ -41,15 +46,10 @@ const pickStore = createLocalStore<string | null>(
 const generationStore = createLocalStore<ModelGenerationSettings>(
   LOCAL_STORAGE_KEYS.chatGeneration,
   {
-    parse: (raw) => {
-      if (raw === null) return {};
-      try {
-        const parsed = modelGenerationSettingsSchema.safeParse(JSON.parse(raw));
-        return parsed.success ? parsed.data : {};
-      } catch {
-        return {};
-      }
-    },
+    ...jsonCodec<ModelGenerationSettings>((value) => {
+      const parsed = modelGenerationSettingsSchema.safeParse(value);
+      return parsed.success ? parsed.data : {};
+    }),
     serialize: (value) => (Object.keys(value).length === 0 ? null : JSON.stringify(value)),
   },
 );

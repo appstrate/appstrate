@@ -52,7 +52,7 @@ import {
   packagePageHref,
   type CreatedPackage,
 } from "./package-created.ts";
-import { callOutcome, showCall } from "./tool-presentation.ts";
+import { showCall } from "./tool-presentation.ts";
 import { cardSpaceOf, type StoredResult } from "./use-call-presentation.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
 import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
@@ -157,7 +157,7 @@ export function ToolCallCard({
   // stream chunk.
   const unwrapped = React.useMemo(() => unwrapToolResult(result), [result]);
   const status = httpStatusOf(unwrapped);
-  const durationMs = callOutcome(stored)?.durationMs;
+  const durationMs = stored?.durationMs;
   const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
   const meta = definedEntries({
     tool_call_id: toolCallId,
@@ -277,7 +277,7 @@ function RunLaunchCard(props: ToolCardProps): React.ReactNode {
     tool_call_id: props.toolCallId,
     is_error: props.isError,
     http_status: httpStatusOf(unwrapped),
-    duration_ms: callOutcome(props.stored)?.durationMs,
+    duration_ms: props.stored?.durationMs,
   });
   const agentLabel = extractAgentLabel(props.args);
   const phase = deriveToolPhase(props);

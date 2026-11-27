@@ -6,8 +6,8 @@
 -- LOCK AND COST. The two `CREATE INDEX` statements below are never CONCURRENTLY (Postgres forbids
 -- it inside a transaction block and drizzle wraps the pending batch in one; see 0041's header):
 -- each takes SHARE on `connection_calls`, which blocks the journal's INSERTs until the batch
--- commits. Both are partial, so each scans the whole table and indexes only the rows that name a
--- run (`chat_session_id` is NULL on every existing row, so the first indexes nothing). `connection_calls`
+-- commits. Both are partial, so each scans the whole table and indexes only the rows matching its
+-- predicate (`chat_session_id` is NULL on every existing row, so the first indexes nothing). `connection_calls`
 -- has no retention (#1945): the build time scales with its row count. The CHECK scans the table
 -- once more inside the same batch.
 ALTER TABLE "connection_calls" ADD COLUMN "chat_session_id" text;--> statement-breakpoint

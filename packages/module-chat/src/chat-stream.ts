@@ -462,13 +462,12 @@ export async function handleChatStream(
     // Detailed without recording: the origin and touched spaces are recorded already, and the
     // personal space holds the caller's own data, which they cannot lose access to. Every other
     // space is detailed only when the user asked for them all, and recorded before inference.
-    const engaged = new Set(
-      [conv.spaceId, personalSpaceId, ...conv.touched].filter((id) => id !== null),
-    );
+    const priority = [conv.spaceId, personalSpaceId, ...conv.touched];
+    const engaged = new Set(priority.filter((id) => id !== null));
     // Priority order, which the read is capped on: origin, personal, touched, then the rest.
     const detailSpaces = orderDetailSpaces(
       body.context_all_spaces === true ? spaces : spaces.filter((space) => engaged.has(space.id)),
-      [conv.spaceId, personalSpaceId, ...conv.touched],
+      priority,
     );
     return {
       skills: conv.selection,

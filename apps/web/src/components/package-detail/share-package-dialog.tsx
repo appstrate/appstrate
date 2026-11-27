@@ -38,8 +38,6 @@ import { toastError } from "../../lib/mutation-error";
 import { TextSkeleton } from "../loading-skeletons";
 import { RemoveFromSpaceConfirm, type RemovalTarget } from "../remove-from-space-confirm";
 
-/** The subject of one share: a team space. */
-
 /** The URL parameter that opens the dialog; its value is the package. */
 export const SHARE_PARAM = "share";
 

@@ -14,6 +14,7 @@ import { join } from "node:path";
 import ts from "typescript";
 import { platformReadEnvKeys } from "../../apps/api/src/lib/platform-env-keys.ts";
 import {
+  FOREIGN_ENV_NAMESPACES,
   PLATFORM_ENV_NAMESPACES,
   envNamespace,
   findUnreadEnvKeys,
@@ -47,7 +48,7 @@ describe("unread-env-keys over this repository", () => {
     const undeclared = [...READ].filter(
       (key) =>
         !PLATFORM_ENV_NAMESPACES.has(envNamespace(key)) &&
-        !["NODE", "GIT"].includes(envNamespace(key)),
+        !FOREIGN_ENV_NAMESPACES.has(envNamespace(key)),
     );
     expect(undeclared, "declare the namespace in PLATFORM_ENV_NAMESPACES").toEqual([]);
   });

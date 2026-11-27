@@ -8,6 +8,7 @@ import {
   CREDENTIAL_PROXY_OPEN_DESCRIPTION,
   EMOJI_ICON_WRITE_RULE,
   SPACE_ROLE_ID_PATTERN,
+  SPACE_ROLE_REFERENCE_ONE_OF,
 } from "../schemas.ts";
 
 export const spacesPaths = {
@@ -860,13 +861,7 @@ export const spacesPaths = {
         content: {
           "application/json": {
             schema: {
-              type: "object",
-              allOf: [{ oneOf: [{ required: ["preset_role"] }, { required: ["custom_role_id"] }] }],
-              properties: {
-                preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
-                custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
-              },
-              additionalProperties: false,
+              oneOf: SPACE_ROLE_REFERENCE_ONE_OF,
             },
           },
         },

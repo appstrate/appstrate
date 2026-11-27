@@ -13,7 +13,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { logger } from "../../lib/logger.ts";
 import { getCatalog } from "./catalog.ts";
-import { jsonResult } from "./tool-results.ts";
+import { refusalResult } from "./tool-results.ts";
 import { toolIcons } from "./tool-icons.ts";
 import type { McpToolName } from "./tools.ts";
 
@@ -91,15 +91,12 @@ function withIcons(descriptor: Tool): Tool {
 
 /** A handler's throw as a tool refusal: a generic sentence and the request id, the detail in the log only. */
 function thrownResult(requestId: string): CallToolResult {
-  return jsonResult(
-    {
-      code: "internal_error",
-      error:
-        "The tool failed unexpectedly. Retrying may work; if it persists, report the request_id.",
-      request_id: requestId,
-    },
-    true,
-  );
+  return refusalResult({
+    code: "internal_error",
+    error:
+      "The tool failed unexpectedly. Retrying may work; if it persists, report the request_id.",
+    request_id: requestId,
+  });
 }
 
 type Presenter = (

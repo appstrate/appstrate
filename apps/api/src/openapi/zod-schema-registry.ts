@@ -100,7 +100,7 @@ import {
 
 // --- Role schemas (routes/roles.ts) ---
 import { createSpaceRoleSchema, updateSpaceRoleSchema } from "../routes/roles.ts";
-import { spaceRoleAssignmentSchema } from "../lib/space-role-assignment.ts";
+import { spaceRoleReferenceSchema } from "@appstrate/core/permissions";
 
 // --- Run launch schemas (routes/runs.ts) ---
 import { runAgentBodySchema } from "../routes/runs.ts";
@@ -309,7 +309,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "PUT",
     path: "/api/orgs/{orgId}/members/{userId}/personal-space-role",
-    jsonSchema: toJsonSchema(spaceRoleAssignmentSchema),
+    jsonSchema: toJsonSchema(spaceRoleReferenceSchema),
     description: "Set a member's role in their personal space",
   },
   {
@@ -442,7 +442,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "PATCH",
     path: "/api/spaces/{id}/members/{userId}",
-    jsonSchema: toJsonSchema(spaceRoleAssignmentSchema),
+    jsonSchema: toJsonSchema(spaceRoleReferenceSchema),
     description: "Change a space member's role",
   },
 

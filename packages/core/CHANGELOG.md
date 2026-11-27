@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`appstrateToolPartMetadataSchema`**, type `AppstrateToolPartMetadata` and
+- **Type `AppstrateToolPartMetadata`** and
   `readAppstrateToolPartMetadata` (`@appstrate/core/chat-turn-metadata`): the shape the chat stamps
   on an AI SDK tool part under `providerMetadata.appstrate` (`lookup`, `spaceId`, `presentation`,
   `durationMs`, `actedSpaceIds`). The reader returns `undefined` for a missing or non-object entry
@@ -56,13 +56,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`CALL_JOURNAL_DRAIN_DEADLINE_MS`, `CALL_JOURNAL_FLUSH_TIMEOUT_MS`,
   `SIDECAR_SIGTERM_GRACE_SECONDS`** (`@appstrate/core/sidecar-types`): the three bounds of a run's
   call-journal drain, derived one from another (drain deadline < flush timeout < SIGTERM grace).
-  A sidecar call record carries the required `call_id` (UUIDv7) and `started_at` (RFC 3339).
 
 ### Removed
 
 - **`personal_space_role` in `orgSettingsSchema` and `orgSettingsReadSchema`** — BREAKING. The
   personal-space default role is no longer stored in the settings document but in two columns of
-  the organization; a document still carrying the key reads without it. The org settings as
+  the organization; the key is part of neither schema, and the read schema passes a stored one
+  through untyped until script 0060 removes it. The org settings as
   served (`OrgSettings` in `@appstrate/shared-types`) follow `orgSettingsWireSchema`, where
   `personal_space_role` is a role reference object, never a bare string.
 - **`SPACE_CHOICE_META_KEY`** — BREAKING (`@appstrate/core/mcp-spaces`). An MCP call that needs a

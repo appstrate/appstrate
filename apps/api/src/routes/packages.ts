@@ -1896,18 +1896,18 @@ export function createPackagesRouter() {
           .set({ homeSpaceId: target })
           .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
         // `locked`, not `pkg`: the space left is the one this transaction holds.
-        const disabledScheduleIds = locked.homeSpaceId
+        const rehome = locked.homeSpaceId
           ? await reconcilePlacementsAfterRehome(tx, {
               packageId,
               newHomeSpaceId: target,
               previousHome: { spaceId: locked.homeSpaceId, keep: body.keep_in_previous_home },
             })
-          : [];
+          : { kept: false, disabledScheduleIds: [] };
         // The new home activates it, keeping a deliberate "off" (the move transfers authority, not what a space runs).
         const activation = await activatePackageWithin(tx, { orgId, spaceId: target }, packageId, {
           keepExistingDecision: true,
         });
-        return { ...activation, disabledScheduleIds };
+        return { ...activation, ...rehome };
       });
       await removeScheduleJobs(activation.disabledScheduleIds);
       // A personal old home is audited as its owner, never by space id (§3.6).
@@ -1925,7 +1925,7 @@ export function createPackagesRouter() {
         // `keptInPreviousHome: false` is a withdrawal of access; it rides on this event (one act, one entry).
         after: {
           homeSpaceId: target,
-          keptInPreviousHome: body.keep_in_previous_home && previousHomeOwnerId === null,
+          keptInPreviousHome: activation.kept,
           ...(activation.disabledScheduleIds.length > 0
             ? { disabledScheduleIds: activation.disabledScheduleIds }
             : {}),

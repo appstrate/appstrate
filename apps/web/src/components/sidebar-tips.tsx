@@ -43,7 +43,7 @@ import { PackageIcon } from "./package-icon";
 /** How long a card stays on top before the next one takes its place. */
 const TIP_ROTATION_MS = 6000;
 
-/** How long a card takes to leave the top: it must equal the `duration-base` class of the card wrapper in {@link TipStack}. */
+/** How long a card takes to leave the top: it must equal `--transition-duration-base` (the `duration-base` class) on the card wrapper in {@link TipStack}. */
 const TIP_LEAVE_MS = 250;
 
 /** The tile colour of each package type on the catalogue card. */
@@ -101,7 +101,7 @@ function useSidebarTipFacts(dismissed: readonly string[]): SidebarTipFacts {
   const orgId = useCurrentOrgId();
   const open = (id: SidebarTipId, allowed: boolean) => allowed && !dismissed.includes(id);
 
-  const canConnect = canReach("/integrations") && can("integrations:connect");
+  const canConnect = !overview && canReach("/integrations") && can("integrations:connect");
   // Both act in the working space: « Tous les espaces » has none.
   const canCreateWithChat = !overview && canReach("/chat") && can("agents:write");
   const canSchedule = !overview && canReach("/schedules") && can("schedules:write");
@@ -202,7 +202,7 @@ function TipStack({
       data-testid="sidebar-tips"
       className={cn(
         "group/tips duration-base ease-surface relative px-3 pt-2 pb-3 transition-[padding] [@media(max-height:759px)]:hidden",
-        count > 1 && "desktop-pointer:hover:pt-7 desktop-pointer:pt-2 pt-7",
+        count > 1 && "desktop-pointer:hover:pt-7 desktop-pointer:pt-2 pt-11",
       )}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
@@ -213,7 +213,7 @@ function TipStack({
         <button
           type="button"
           aria-label={t("tips.next", { title: t(TIP_COPY[next].title) })}
-          className="focus-visible:ring-ring desktop-pointer:h-2 desktop-pointer:group-hover/tips:h-7 absolute inset-x-3 top-0 z-40 h-7 cursor-pointer rounded-t-lg outline-none focus-visible:ring-2"
+          className="focus-visible:ring-ring desktop-pointer:h-2 desktop-pointer:group-hover/tips:h-7 absolute inset-x-3 top-0 z-40 h-11 cursor-pointer rounded-t-lg outline-none focus-visible:ring-2"
           onClick={() => {
             setTurnedByHand(true);
             setLeaving(current);
@@ -239,7 +239,7 @@ function TipStack({
                 !isLeaving && depth === 0 && "z-30",
                 !isLeaving &&
                   depth === 1 &&
-                  "desktop-pointer:group-hover/tips:-translate-y-7 z-20 -translate-y-2 scale-[0.94]",
+                  "desktop-pointer:group-hover/tips:-translate-y-7 desktop-pointer:-translate-y-2 z-20 -translate-y-11 scale-[0.94]",
                 !isLeaving && depth > 1 && "z-10 scale-[0.88] opacity-0",
               )}
             >

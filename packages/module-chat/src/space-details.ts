@@ -95,7 +95,14 @@ const record = (value: unknown): Record<string, unknown> => asRecordOrNull(value
 function parseDetail(space: DetailSpace, result: unknown): SpaceDetail | undefined {
   const answer = record(result);
   const outcome = record(answer.structuredContent);
-  if (answer.isError === true || outcome.status !== 200) return undefined;
+  if (answer.isError === true || outcome.status !== 200) {
+    logger.warn("get_me of a space did not answer a context — left out", {
+      spaceId: space.id,
+      status: outcome.status,
+      isError: answer.isError === true,
+    });
+    return undefined;
+  }
   const parsed = getMeResultSchema.safeParse(outcome);
   if (!parsed.success) {
     logger.warn("get_me of a space answered a context of an unexpected shape — left out", {
@@ -167,9 +174,7 @@ export async function readSpaceDetails(
 ): Promise<SpaceDetail[]> {
   const read = (space: DetailSpace): Promise<SpaceDetail | undefined> =>
     client.callTool({ name: "get_me", arguments: { space_id: space.id } }, { signal }).then(
-      (result) => {
-        return parseDetail(space, result);
-      },
+      (result) => parseDetail(space, result),
       (err: unknown) => {
         logger.warn("get_me of a space failed — left out", {
           spaceId: space.id,
@@ -191,8 +196,7 @@ export async function readSpaceDetails(
   return details.filter((detail): detail is SpaceDetail => detail !== undefined);
 }
 
-const oneLine = flattenName;
-const label = (value: string): string => oneLine(value, 80);
+const label = (value: string): string => flattenName(value, 80);
 const head = (id: string, name: string): string => {
   const shown = label(name);
   return shown && shown !== id ? `\`${id}\` (${shown})` : `\`${id}\``;
@@ -301,7 +305,8 @@ function agentLines(details: readonly SpaceDetail[], level: Level): string[] {
       ].filter(Boolean);
       return `${label(space.name)}${notes.length ? ` (${notes.join("; ")})` : ""}`;
     });
-    const description = level === "full" ? oneLine(agent.description, DESCRIPTION_MAX_CHARS) : "";
+    const description =
+      level === "full" ? flattenName(agent.description, DESCRIPTION_MAX_CHARS) : "";
     return `- ${head(id, agent.name)} — in ${where.join(", ")}${agent.takesInput ? "; takes input" : ""}${
       description ? `. ${description}` : ""
     }`;

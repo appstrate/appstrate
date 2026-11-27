@@ -3,10 +3,11 @@
 /**
  * The run's call journal on the sidecar side: every upstream call the sidecar dispatches for an
  * integration is queued here and POSTed in batches to `/internal/integration-calls` with the run
- * token; the platform derives org, space, actor and owner from the run. Best-effort: a refused or
- * failed POST is retried once (each record carries its `call_id`, so a batch the platform already
- * took is stored once), then logged and its records dropped, never thrown into the call path. A
- * drain ends by a deadline ({@link CALL_JOURNAL_DRAIN_DEADLINE_MS}), whatever the platform does.
+ * token; the platform derives org, space, actor and owner from the run. Best-effort: a POST that
+ * fails in transport or answers 5xx is retried once, at once (no backoff; each record carries its
+ * `call_id`, so a batch the platform already took is stored once), then logged and its records
+ * dropped, never thrown into the call path. A drain ends by a deadline
+ * ({@link CALL_JOURNAL_DRAIN_DEADLINE_MS}), whatever the platform does.
  */
 
 import { CALL_JOURNAL_DRAIN_DEADLINE_MS } from "@appstrate/core/sidecar-types";
@@ -18,7 +19,7 @@ export interface IntegrationCallRecord {
   /** The call's identity (UUIDv7), minted here: with the run, the key that deduplicates a retried POST. */
   call_id: string;
   /** When the upstream call started (RFC 3339). */
-  started_at: string;
+  called_at: string;
   integration_id: string;
   /** NULL for an integration that binds no connection (unauthenticated, AFPS §7.2). */
   connection_id: string | null;
@@ -45,7 +46,7 @@ export interface CallReporter {
 /** The platform's cap of records per batch. */
 const DEFAULT_MAX_BATCH = 100;
 const DEFAULT_FLUSH_INTERVAL_MS = 2_000;
-/** Most batches held, queued or awaiting their turn: at most 5 POSTs per 2 s, under the route's 200/min. */
+/** Most batches held, queued or awaiting their turn: the overflow is dropped at `report`. */
 const QUEUED_BATCHES = 5;
 /** One POST attempt; the deadline of a drain already running when the attempt starts bounds it too. */
 const POST_TIMEOUT_MS = 3_000;
@@ -184,6 +185,7 @@ export function createCallReporter(opts: {
           lost += batch.length;
           undeliver(batch);
         }
+        if (lost === 0) return;
         logger.warn("integration call journal drain hit its deadline, records dropped", {
           records: lost,
           deadline_ms: drainDeadlineMs,
@@ -204,6 +206,8 @@ export interface DispatchedCall {
   host: string | null;
   outcome: string;
   durationMs: number;
+  /** Epoch ms read where the duration starts: the call's start, whenever it is journaled. */
+  startedAtMs: number;
   /** The injected credential the final response answered, `null` when it answered none. */
   credential: { revision: string | undefined } | null;
 }
@@ -235,8 +239,7 @@ export function connectionCallJournal(
     reporter.report(
       {
         call_id: Bun.randomUUIDv7(),
-        // The call ends as it is journaled: its start is the duration back.
-        started_at: new Date(Date.now() - durationMs).toISOString(),
+        called_at: new Date(call.startedAtMs).toISOString(),
         integration_id: binding.integrationId,
         connection_id: binding.connectionId,
         method: call.method,

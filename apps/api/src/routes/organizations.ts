@@ -9,10 +9,10 @@ import {
   auditSpaceAssignments,
   auditSpaceRole,
   spaceAssignmentSchema,
-  spaceRoleAssignmentSchema,
   toAssignment,
 } from "../lib/space-role-assignment.ts";
 import { defaultPersonalSpaceRole, toSpaceRoleReference } from "../lib/space-role.ts";
+import { spaceRoleReferenceSchema } from "@appstrate/core/permissions";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { listCallerOrganizations } from "../lib/principal-permissions.ts";
 import { callerReachableSpaces } from "../lib/reachable-spaces.ts";
@@ -257,11 +257,9 @@ async function personalSpaceView(orgId: string, mayChange: boolean, userIds?: re
   ]);
   return (userId: string, orgRole: OrgRole) => ({
     personal_space_role: overrides.get(userId) ?? null,
-    ...(orgDefault && {
-      personal_space_default_role: toSpaceRoleReference(
-        defaultPersonalSpaceRole(orgRole, orgDefault),
-      ),
-    }),
+    personal_space_default_role: toSpaceRoleReference(
+      defaultPersonalSpaceRole(orgRole, orgDefault),
+    ),
   });
 }
 
@@ -656,7 +654,7 @@ router.put(
   async (c) => {
     const orgId = c.req.param("orgId")!;
     const targetUserId = c.req.param("userId")!;
-    const data = await readJsonBody(c, spaceRoleAssignmentSchema);
+    const data = await readJsonBody(c, spaceRoleReferenceSchema);
     const { previous } = await setPersonalSpaceRoleOverride(
       orgId,
       targetUserId,
@@ -735,7 +733,7 @@ router.get(
   requirePermission("org", "settings"),
   async (c) => {
     const orgId = c.req.param("orgId")!;
-    const query = parseBody(spaceRoleAssignmentSchema, c.req.query());
+    const query = parseBody(spaceRoleReferenceSchema, c.req.query());
     return c.json(await personalSpaceRoleImpact(orgId, toAssignment(query)));
   },
 );

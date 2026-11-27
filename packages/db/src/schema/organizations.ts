@@ -105,7 +105,7 @@ export const organizations = pgTable(
     ),
     check(
       "organizations_personal_space_preset_valid",
-      sql`personal_space_preset_role IS NULL OR personal_space_preset_role IN ('admin', 'builder', 'operator', 'runner', 'viewer')`,
+      sql`personal_space_preset_role IS NULL OR personal_space_preset_role IN (${sql.raw(SPACE_ROLE_PRESETS.map((v) => `'${v}'`).join(", "))})`,
     ),
     // Backstop behind the application's icon validation: the largest image icon
     // (`data:image/webp;base64,` + 12 000 bytes encoded) is 16 023 bytes, its PNG

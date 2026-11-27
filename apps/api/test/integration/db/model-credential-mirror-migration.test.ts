@@ -13,10 +13,15 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import { corruptCredentialBlob, seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
+import { PENDING_DATA_SCRIPTS } from "../../../src/lib/boot-guards/pending-data-scripts.ts";
 import { runModelCredentialNeedsReconnectionMirror } from "../../../../../scripts/migration/0058-model-credential-needs-reconnection-mirror.ts";
 
 const run = (apply: boolean, lines: string[] = []) =>
   runModelCredentialNeedsReconnectionMirror({ apply, out: (line) => lines.push(line) });
+
+/** The boot guard's own count of what the script has left to do. */
+const pending = () =>
+  PENDING_DATA_SCRIPTS.find((entry) => entry.script.includes("/0058-"))!.pending(db);
 
 const columnOf = async (id: string) =>
   (
@@ -77,7 +82,10 @@ describe("0058 — model credential needs_reconnection mirror", () => {
   });
 
   it("--apply flags only the drifted row, leaves an unreadable blob alone, and a second run finds nothing", async () => {
+    // The guard counts the drifted row alone: an unreadable blob never holds the boot.
+    expect(await pending()).toBe(1);
     await run(true);
+    expect(await pending()).toBe(0);
 
     expect(await columnOf(drifted)).toBe(true);
     expect(await columnOf(healthy)).toBe(false);

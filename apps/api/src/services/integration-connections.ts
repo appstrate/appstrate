@@ -181,7 +181,7 @@ import {
   readPublishedIntegrationManifests,
 } from "./integration-service.ts";
 import { assertSpaceInScope } from "./spaces.ts";
-import { recordAudit } from "./audit.ts";
+import { recordAudit, trackAudit } from "./audit.ts";
 
 // ─────────────────────────────────────────────
 // Types
@@ -2514,15 +2514,17 @@ function announceConnectionDeath(
   row: Pick<typeof integrationConnections.$inferSelect, keyof typeof deathColumns>,
   cause: CredentialDeathCause,
 ): void {
-  void recordAudit({
-    orgId: row.orgId,
-    spaceId: row.spaceId,
-    actorType: "system",
-    action: "integration.connection.needs_reconnection",
-    resourceType: "integration_connection",
-    resourceId: connectionId,
-    after: { cause },
-  });
+  void trackAudit(
+    recordAudit({
+      orgId: row.orgId,
+      spaceId: row.spaceId,
+      actorType: "system",
+      action: "integration.connection.needs_reconnection",
+      resourceType: "integration_connection",
+      resourceId: connectionId,
+      after: { cause },
+    }),
+  );
   announceCredentialNeedsReconnection({
     kind: "integration_connection",
     orgId: row.orgId,

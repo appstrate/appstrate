@@ -3,6 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import { envSchema } from "../src/index.ts";
 import {
+  FOREIGN_ENV_NAMESPACES,
   PLATFORM_ENV_NAMESPACES,
   envNamespace,
   findUnreadEnvKeys,
@@ -83,18 +84,18 @@ describe("PLATFORM_ENV_NAMESPACES", () => {
   });
 
   it("declares the namespace of every schema key, so a new family has to be named", () => {
-    // NODE_ENV and GIT_SHA are read, but their namespaces belong to the runtime and to git.
     const missing = Object.keys(envSchema.shape).filter(
       (key) =>
         !PLATFORM_ENV_NAMESPACES.has(envNamespace(key)) &&
-        !["NODE", "GIT"].includes(envNamespace(key)),
+        !FOREIGN_ENV_NAMESPACES.has(envNamespace(key)),
     );
     expect(missing, "declare the namespace in PLATFORM_ENV_NAMESPACES").toEqual([]);
   });
 
   it("holds neither the foreign namespaces nor lowercase names", () => {
-    expect(PLATFORM_ENV_NAMESPACES.has("NODE")).toBe(false);
-    expect(PLATFORM_ENV_NAMESPACES.has("GIT")).toBe(false);
+    for (const namespace of FOREIGN_ENV_NAMESPACES) {
+      expect(PLATFORM_ENV_NAMESPACES.has(namespace)).toBe(false);
+    }
     for (const namespace of PLATFORM_ENV_NAMESPACES) expect(namespace).toMatch(/^[A-Z][A-Z0-9]*$/);
   });
 });

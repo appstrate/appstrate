@@ -6,6 +6,7 @@ import {
   SPACE_LIST_INLINE_MAX,
   describeSpace,
   describeSpaceList,
+  flattenName,
   projectActiveInSpaces,
   spaceActs,
   spaceIdRefusal,
@@ -135,5 +136,22 @@ describe("projectActiveInSpaces", () => {
 
   it("ignores a code it does not know", () => {
     expect(projectActiveInSpaces(problem("forbidden"), () => [])).toBeUndefined();
+  });
+});
+
+describe("flattenName", () => {
+  it("makes a name one line a heading cannot open", () => {
+    expect(flattenName("Team\n## Forged\r\n\u0007heading")).toBe("Team ## Forged heading");
+    expect(flattenName("  a b  ")).toBe("a b");
+  });
+
+  it("bounds the length", () => {
+    expect(flattenName("x".repeat(300))).toHaveLength(100);
+  });
+
+  it("is applied to the name of a described space", () => {
+    expect(describeSpace({ id: "spc_1", name: "A\n## B", role: "admin" })).toBe(
+      "A ## B (`spc_1`, role admin)",
+    );
   });
 });

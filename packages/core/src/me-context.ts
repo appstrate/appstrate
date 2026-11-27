@@ -3,19 +3,19 @@
 /**
  * The wire shape of `GET /api/me/context`, which the MCP `get_me` tool relays as
  * `{ status, body, spaces? }`. One definition for the tool's `outputSchema` and for the chat that
- * reads it. Objects keep unknown keys: a field the server adds must not break a reader.
+ * reads it. Objects keep unknown keys, so a field the server adds does not break a reader; the
+ * closed enums (`org.role`, `source`, `via`, `can`) reject a value they do not list.
  */
 
 import { z } from "zod";
 import { SPACE_ACTS } from "./mcp-spaces.ts";
-
-const obj = <T extends z.ZodRawShape>(shape: T) => z.looseObject(shape);
+import { ORG_ROLES } from "./permissions.ts";
 
 /** A capped list: whole or withheld, `total` counts every entry either way. */
 const cappedList = <T extends z.ZodType>(item: T) =>
-  obj({ data: z.array(item), truncated: z.boolean(), total: z.int() });
+  z.looseObject({ data: z.array(item), truncated: z.boolean(), total: z.int() });
 
-const connection = obj({
+const connection = z.looseObject({
   id: z.string(),
   label: z.string(),
   account_id: z.string(),
@@ -23,7 +23,7 @@ const connection = obj({
   needs_reconnection: z.boolean(),
 });
 
-const integrationEntry = obj({
+const integrationEntry = z.looseObject({
   integration_package_id: z.string(),
   name: z.string(),
   source: z.enum(["own", "shared", "both"]),
@@ -35,7 +35,7 @@ const integrationEntry = obj({
   default_tools: z.union([z.array(z.string()), z.literal("*")]).optional(),
 });
 
-const agentEntry = obj({
+const agentEntry = z.looseObject({
   packageId: z.string(),
   display_name: z.string(),
   description: z.string(),
@@ -46,7 +46,7 @@ const agentEntry = obj({
   source: z.string(),
 });
 
-const skillEntry = obj({
+const skillEntry = z.looseObject({
   packageId: z.string(),
   display_name: z.string(),
   description: z.string(),
@@ -56,7 +56,7 @@ const skillEntry = obj({
   source: z.string(),
 });
 
-const recentRun = obj({
+const recentRun = z.looseObject({
   packageId: z.string(),
   status: z.string(),
   runNumber: z.int().nullable().optional(),
@@ -68,30 +68,36 @@ const recentRun = obj({
 const SPACE_LEVEL = ["connections", "connectable_integrations", "recent_runs", "agents", "skills"];
 
 /** The body of `GET /api/me/context`. */
-export const meContextSchema = obj({
-  user: obj({ id: z.string(), name: z.string().nullable(), email: z.string().nullable() }),
-  org: obj({
-    id: z.string(),
-    role: z.enum(["owner", "admin", "member", "guest", "end_user"]),
-    name: z.string(),
-    slug: z.string(),
-  }),
-  space: obj({ id: z.string(), name: z.string(), personal: z.boolean() }).optional(),
-  connections: z.array(integrationEntry).optional(),
-  connectable_integrations: cappedList(z.string()).optional(),
-  recent_runs: z.array(recentRun).optional(),
-  agents: cappedList(agentEntry).optional(),
-  skills: cappedList(skillEntry).optional(),
-}).superRefine((body, ctx) => {
-  if (body.space === undefined) return;
-  for (const key of SPACE_LEVEL) {
-    if (!(key in body))
-      ctx.addIssue({ code: "custom", path: [key], message: "missing with space" });
-  }
-});
+export const meContextSchema = z
+  .looseObject({
+    user: z.looseObject({
+      id: z.string(),
+      name: z.string().nullable(),
+      email: z.string().nullable(),
+    }),
+    org: z.looseObject({
+      id: z.string(),
+      role: z.enum([...ORG_ROLES, "end_user"] as const),
+      name: z.string(),
+      slug: z.string(),
+    }),
+    space: z.looseObject({ id: z.string(), name: z.string(), personal: z.boolean() }).optional(),
+    connections: z.array(integrationEntry).optional(),
+    connectable_integrations: cappedList(z.string()).optional(),
+    recent_runs: z.array(recentRun).optional(),
+    agents: cappedList(agentEntry).optional(),
+    skills: cappedList(skillEntry).optional(),
+  })
+  .superRefine((body, ctx) => {
+    if (body.space === undefined) return;
+    for (const key of SPACE_LEVEL) {
+      if (!(key in body))
+        ctx.addIssue({ code: "custom", path: [key], message: "missing with space" });
+    }
+  });
 
 /** One space `get_me` names with its acts, in an organization-wide connection. */
-const spaceReach = obj({
+const spaceReach = z.looseObject({
   id: z.string(),
   name: z.string(),
   role: z.string(),
@@ -100,7 +106,7 @@ const spaceReach = obj({
 });
 
 /** `get_me`'s answer when the route answered 200: the body and, org-wide, the spaces reached. */
-export const getMeResultSchema = obj({
+export const getMeResultSchema = z.looseObject({
   status: z.literal(200),
   etag: z.string().optional(),
   body: meContextSchema,
