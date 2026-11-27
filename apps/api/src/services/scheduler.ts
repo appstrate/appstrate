@@ -168,9 +168,9 @@ export async function scheduleActorRunSpaces(
     // frozen actor is the caller in personal spaces too (RBAC spec §3.6).
     const snapshots = await loadSpaceAccessForIds(spaceIds, orgId, actor.id);
     return new Set(
-      snapshots.flatMap(({ orgRole, space, member, personalSpaceRole }) => {
+      snapshots.flatMap(({ orgRole, space, member, personalDefault }) => {
         if (!orgRole) return [];
-        const role = resolveSpaceRole(orgRole, space, member, actor.id, personalSpaceRole);
+        const role = resolveSpaceRole(orgRole, space, member, actor.id, personalDefault);
         return spacePermissions(role).has("agents:run") ? [space.id] : [];
       }),
     );
@@ -541,7 +541,8 @@ export async function triggerScheduledRun(
       await failSchedule(
         executionBlock === "not_placed"
           ? `Agent '${packageId}' is not placed in space '${spaceId}'. ` +
-              `Share it into that space via POST /api/packages/${packageId}/shares, ` +
+              `Share it into a team space (POST /api/packages/${packageId}/shares), ` +
+              `have an organization owner or admin offer it (PUT /api/packages/${packageId}/org-offer), ` +
               `or move this schedule to a space the agent is placed in.`
           : `Agent '${packageId}' is not active in space '${spaceId}'. ` +
               `Activate it via POST /api/spaces/${spaceId}/packages to resume this schedule.`,

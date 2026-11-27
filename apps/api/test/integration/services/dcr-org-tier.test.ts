@@ -10,6 +10,7 @@
  * (RFC 9728 → RFC 8414 → RFC 7591) and counts the registrations it receives.
  */
 
+import { readCredentialRevision } from "../../helpers/refresh-fixtures.ts";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -19,7 +20,6 @@ import { integrationConnections, integrationOauthClients } from "@appstrate/db/s
 import {
   persistCredentialBundle,
   promoteIntegrationOAuthClient,
-  readCredentialRevision,
   resolveConnectClient,
   resolveIntegrationClientById,
 } from "../../../src/services/integration-connections.ts";
@@ -241,7 +241,7 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
     for (const scope of [spaceA, spaceB]) {
       expect(await usableIds(scope.spaceId)).toEqual([fromA, fromB].sort());
       expect(
-        await resolveIntegrationClientById(clients[0]!.id, scope.spaceId, REMOTE, AUTH_KEY, "none"),
+        await resolveIntegrationClientById(clients[0]!.id, scope, REMOTE, AUTH_KEY, "none"),
       ).toEqual({
         clientId: clients[0]!.clientId,
         clientSecret: "",
@@ -276,9 +276,11 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
       })
       .returning({ id: integrationConnections.id });
 
-    expect(
-      await resolveIntegrationClientById(legacy, spaceA.spaceId, REMOTE, AUTH_KEY, "none"),
-    ).toEqual({ clientId: "legacy", clientSecret: "", tokenEndpointAuthMethod: "none" });
+    expect(await resolveIntegrationClientById(legacy, spaceA, REMOTE, AUTH_KEY, "none")).toEqual({
+      clientId: "legacy",
+      clientSecret: "",
+      tokenEndpointAuthMethod: "none",
+    });
     expect(await usableIds(spaceB.spaceId)).toEqual([]);
 
     const clientRef = await connectClientRef(spaceA);
@@ -361,9 +363,11 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
       integrationId: REMOTE,
       manifest,
       authDef,
-      scope: spaceA,
-      actor,
-      trigger: { kind: "rejected", revision: null },
+      trigger: {
+        kind: "rejected",
+        revision: null,
+        reach: { spaceId: spaceA.spaceId, actor },
+      },
     });
   }
 

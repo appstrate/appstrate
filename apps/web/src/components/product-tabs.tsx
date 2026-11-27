@@ -15,7 +15,7 @@ import { Blocks, MessageSquare } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { CountBadge } from "@/components/count-badge";
-import { useCanReach } from "@/hooks/use-can-reach";
+import { useCanReach, useStudioReach } from "@/hooks/use-can-reach";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
 import { useChatCan, useShellChatTransport } from "@/modules/chat/use-chat-runtime";
@@ -42,6 +42,7 @@ export function ProductTabs() {
   // working space grants.
   const canReach = useCanReach();
   const chatReachable = canReach("/chat");
+  const studio = useStudioReach();
   const canWrite = useChatCan()("chat:write");
   const { ready } = usePermissions();
   const previewing = useViewAsHeader() !== null;
@@ -64,15 +65,8 @@ export function ProductTabs() {
   // Studio owns every route the chat does not, so it is active whenever the chat is not.
   const inChat = pathname.startsWith("/chat");
 
+  // The chat leads: it is the reader's home wherever it is theirs (`useHome`).
   const products: Product[] = [
-    {
-      id: "studio",
-      label: t("products.studio"),
-      icon: <Blocks className="size-4" />,
-      to: "/",
-      active: !inChat,
-      enabled: true,
-    },
     {
       id: "chat",
       label: t("products.chat"),
@@ -82,11 +76,20 @@ export function ProductTabs() {
       enabled: chatShown,
       unread: chatUnread,
     },
+    {
+      id: "studio",
+      label: t("products.studio"),
+      icon: <Blocks className="size-4" />,
+      to: "/dashboard",
+      active: !inChat,
+      enabled: studio,
+    },
   ].filter((p) => p.enabled);
 
   // A toggle with one choice is noise; a slot still being decided keeps the row.
   const chatDeciding = chatPending && !chatShown;
-  if (products.length < 2 && !chatDeciding) return null;
+  const studioDeciding = !ready && !studio;
+  if (products.length + Number(chatDeciding) + Number(studioDeciding) < 2) return null;
 
   return (
     <div className="px-2 pt-4 pb-1">
@@ -94,6 +97,7 @@ export function ProductTabs() {
         aria-label={t("products.ariaLabel")}
         className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5"
       >
+        {chatDeciding && <Skeleton className="desktop-pointer:h-7 h-10 flex-1 rounded-md" />}
         {products.map((p) => (
           <Link
             key={p.id}
@@ -118,7 +122,7 @@ export function ProductTabs() {
             )}
           </Link>
         ))}
-        {chatDeciding && <Skeleton className="desktop-pointer:h-7 h-10 flex-1 rounded-md" />}
+        {studioDeciding && <Skeleton className="desktop-pointer:h-7 h-10 flex-1 rounded-md" />}
       </nav>
     </div>
   );

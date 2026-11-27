@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import i18n, { i18nReady } from "../../../i18n.ts";
+import { i18nReady } from "../../../i18n.ts";
 import { render } from "../../../test/render.tsx";
 import type { PackageShare } from "../../../hooks/use-package-shares.ts";
 import { HomeSpaceNote, ShareList } from "../share-package-dialog.tsx";
@@ -42,15 +42,6 @@ describe("ShareList", () => {
     const html = render(<ShareList shares={[]} isLoading={false} onRevoke={() => {}} />);
     expect(html).toContain("n'est partagé avec personne");
     expect(html).not.toContain("Actif");
-  });
-});
-
-describe("withdrawing a share", () => {
-  it("names a person's target as their personal space in the confirmation", () => {
-    const label = i18n.t("settings:catalogue.personalSpaceOf", { name: "Alice" });
-    expect(i18n.t("settings:catalogue.revokeTitle", { space: label })).toBe(
-      "Retirer de l'espace personnel de Alice ?",
-    );
   });
 });
 

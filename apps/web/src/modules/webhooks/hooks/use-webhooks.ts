@@ -28,6 +28,7 @@ const WEBHOOK_EVENT_SET: Record<WebhookEvent, true> = {
   "run.timeout": true,
   "run.cancelled": true,
   "run.connection_missing": true,
+  "credential.needs_reconnection": true,
 };
 export const WEBHOOK_EVENTS = Object.keys(WEBHOOK_EVENT_SET) as WebhookEvent[];
 

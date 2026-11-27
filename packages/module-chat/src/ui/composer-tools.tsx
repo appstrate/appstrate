@@ -5,8 +5,8 @@
  * tools panel (`ComposerToolsPanel`), and a chip for each setting off its default
  * (`useComposerDepartures`): a chip opens the panel at the level that changes it, its X restores
  * the default. Below `md` ONE "+" at the left of the field opens the same panel, as the chats people
- * already use do: nothing else stays beside the field, a dot on the "+" says a setting is off its
- * default and the panel names it (`ComposerPlusButton`). The panel is one `Popover`: a sheet from
+ * already use do: nothing else stays beside the field, and the panel names each setting off its
+ * default (`ComposerPlusButton`). The panel is one `Popover`: a sheet from
  * the bottom below `md`, by the design system's own rule.
  */
 
@@ -14,6 +14,7 @@ import { useId, useRef, type ReactNode, type Ref } from "react";
 import { ComposerPrimitive } from "@assistant-ui/react";
 import {
   CpuIcon,
+  LayersIcon,
   MapPinIcon,
   PackageIcon,
   PaperclipIcon,
@@ -43,6 +44,7 @@ import { useConversationSkillsContext } from "./use-conversation-skills.ts";
 import { useConversationScope, useSpaceName } from "./conversation-scope.ts";
 import { setPackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { setInlineRunModelEnabled } from "./inline-run-model-store.ts";
+import { setContextAllSpacesEnabled } from "./context-all-spaces-store.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
@@ -70,19 +72,19 @@ export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
     >
       {/* From `md` up; a phone has the "+". The popover anchors to the whole row. */}
       <PopoverAnchor asChild>
-        <div className="flex min-w-0 items-center gap-1.5 max-md:hidden">
+        {/* A chip's X hands the focus on within this row (`chip-focus.ts`). */}
+        <div className="flex min-w-0 items-center gap-1.5 max-md:hidden" data-chip-row="">
           <AttachButton />
           <PopoverTrigger asChild>
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
-              className={cn(COMPOSER_TOOL_CLASS, "relative")}
+              className={COMPOSER_TOOL_CLASS}
               aria-label={t("composer.tools")}
               data-testid="composer-settings-trigger"
             >
               <SettingsIcon />
-              {departures.length > 0 && <DepartureDot testId="composer-settings-dot" />}
             </Button>
           </PopoverTrigger>
           {departures.map((departure) => (
@@ -94,7 +96,7 @@ export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
           ))}
         </div>
       </PopoverAnchor>
-      <ComposerPlusButton ref={plus} authorsPackages={authorsPackages} />
+      <ComposerPlusButton ref={plus} />
       <PopoverContent
         side="top"
         align="start"
@@ -172,6 +174,21 @@ function DepartureChip({
         {t("composer.inlineRunModelChip")}
       </RemovableChip>
     );
+  if (departure === "contextAllSpacesOff")
+    return (
+      <RemovableChip
+        icon={<LayersIcon />}
+        open={{
+          onClick: onOpen,
+          label: t("composer.contextAllSpacesOff"),
+          testId: "composer-context-all-spaces-off-chip",
+        }}
+        removeLabel={t("composer.contextAllSpacesOff.undo")}
+        onRemove={() => setContextAllSpacesEnabled(true)}
+      >
+        {t("composer.contextAllSpacesOff")}
+      </RemovableChip>
+    );
   if (departure === "limit")
     return (
       <RemovableChip
@@ -246,35 +263,17 @@ function AttachButton() {
   );
 }
 
-/** The dot on the panel's opener while a setting departs from its default. */
-function DepartureDot({ testId }: { testId: string }) {
-  return (
-    <span
-      aria-hidden
-      data-testid={testId}
-      className="bg-primary ring-card desktop-pointer:top-1 desktop-pointer:right-1 absolute top-1.5 right-1.5 size-2 rounded-full ring-2"
-    />
-  );
-}
-
 /** The phone's opener of the panel, at the left of the field. */
-function ComposerPlusButton({
-  ref,
-  authorsPackages,
-}: {
-  ref: Ref<HTMLButtonElement>;
-  authorsPackages: boolean;
-}) {
+function ComposerPlusButton({ ref }: { ref: Ref<HTMLButtonElement> }) {
   const { t } = useChatHost();
   const panel = useComposerPanel();
-  const departed = useComposerDepartures(authorsPackages).length > 0;
   return (
     <Button
       ref={ref}
       type="button"
       variant="ghost"
       size="icon-sm"
-      className={cn(COMPOSER_TOOL_CLASS, "relative md:hidden")}
+      className={cn(COMPOSER_TOOL_CLASS, "md:hidden")}
       aria-label={t("composer.tools")}
       aria-haspopup="dialog"
       aria-expanded={panel.open}
@@ -282,7 +281,6 @@ function ComposerPlusButton({
       onClick={() => panel.openAt("tools")}
     >
       <PlusIcon />
-      {departed && <DepartureDot testId="composer-plus-dot" />}
     </Button>
   );
 }

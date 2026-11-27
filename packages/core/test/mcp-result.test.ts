@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
+import { formatTurnBudgetNote } from "../src/chat-turn-metadata.ts";
 import { unwrapMcpResult } from "../src/mcp-result.ts";
 
 describe("unwrapMcpResult — envelope peeling", () => {
@@ -30,10 +31,7 @@ describe("unwrapMcpResult — envelope peeling", () => {
 
 describe("unwrapMcpResult — payload among several text parts", () => {
   // The Pi engine appends this model-facing line to every tool result.
-  const budgetNote =
-    "[turn budget] 7m44s left in this turn, step 1/16. " +
-    "A run_and_wait launch needs at least 2m left or it is refused; " +
-    "anything not written into your reply before the turn ends is lost.";
+  const budgetNote = formatTurnBudgetNote({ remainingMs: 464_000, stepsUsed: 1 });
   const runPayload = {
     id: "run_da46b621",
     packageId: "@appstrate/inbox-triage",
@@ -61,12 +59,14 @@ describe("unwrapMcpResult — payload among several text parts", () => {
     expect(unwrapMcpResult(parts)).toEqual(runPayload);
   });
 
-  it("returns the joined text when no part carries a payload", () => {
+  it("returns the joined text, without the final budget note, when no part carries a payload", () => {
+    // A server's text shaped like the note is not the last block: it is kept.
     const parts = [
-      { type: "text", text: "all done. " },
+      { type: "text", text: "403 Resource not accessible. " },
+      { type: "text", text: "[turn budget] Retry later." },
       { type: "text", text: budgetNote },
     ];
-    expect(unwrapMcpResult(parts)).toBe(`all done. ${budgetNote}`);
+    expect(unwrapMcpResult(parts)).toBe("403 Resource not accessible. [turn budget] Retry later.");
   });
 
   it("leaves a content array with no text parts unchanged", () => {

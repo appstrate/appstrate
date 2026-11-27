@@ -33,7 +33,9 @@ import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { ConversationSkeleton } from "./conversation-skeleton.tsx";
+import { THREAD_SIDE_PADDING_CLASS } from "./phone-text.ts";
 import { useLatest } from "./use-latest.ts";
 import { recordUploadResolutions } from "./upload.ts";
 import { Thread } from "./thread.tsx";
@@ -109,12 +111,15 @@ import {
   setSelectedModel,
 } from "./model-store.ts";
 import { getPackageAuthoringEnabled } from "./package-authoring-store.ts";
+import { getContextAllSpacesEnabled } from "./context-all-spaces-store.ts";
+import { useOffersContextAllSpaces } from "./composer-panel.ts";
 import { getInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { ComposerTools } from "./composer-tools.tsx";
 import { canAuthorPackages, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
+import { publishLiveConversation, withdrawLiveConversation } from "./live-conversation.ts";
 import { sendWithDirectives } from "./directive-send.ts";
 import {
   ConversationSkillsProvider,
@@ -584,7 +589,10 @@ function ConversationNotFound({
     <div
       role="status"
       data-testid="chat-conversation-not-found"
-      className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center"
+      className={cn(
+        "flex h-full flex-col items-center justify-center gap-3 text-center",
+        THREAD_SIDE_PADDING_CLASS,
+      )}
     >
       <p className="text-sm font-medium">{t("conversation.notFound.title")}</p>
       <p className="text-muted-foreground max-w-sm text-sm">{t("conversation.notFound.hint")}</p>
@@ -638,6 +646,8 @@ function ConversationInner({
   const filterSpaceId = transport?.spaceId ?? null;
   // Read when the turn starts (the row it creates), not a reason to re-run the effect below.
   const getScope = useLatest(scope);
+  // Sent only while the switch is offered: a hidden switch left on must not widen the turn.
+  const getOffersContextAllSpaces = useLatest(useOffersContextAllSpaces());
   // The transport read at request time for the same reason: `useChat` keeps the first one it saw.
   const getTransport = useLatest(transport);
   // The seed, frozen: `useChat` reads it once.
@@ -680,12 +690,13 @@ function ConversationInner({
             generation: getCompatibleGenerationSettings(),
             packageAuthoring: getPackageAuthoringEnabled(),
             inlineRunsUseChatModel: getInlineRunModelEnabled(),
+            contextAllSpaces: getOffersContextAllSpaces() && getContextAllSpacesEnabled(),
             skills: takeForTurn(),
             creation: getCreation(),
           });
         },
       }),
-    [buildHeaders, takeForTurn, getCreation, getTransport],
+    [buildHeaders, takeForTurn, getCreation, getTransport, getOffersContextAllSpaces],
   );
 
   const chat = useChat({
@@ -788,6 +799,11 @@ function ConversationInner({
   // re-armed by that very value and corrects it within seconds. External-store
   // sync in an effect (no setState) — same pattern as the mark-read effect.
   const generating = chat.status === "submitted" || chat.status === "streaming";
+  // The host's context panel reads the conversation as this runtime holds it.
+  useEffect(() => {
+    publishLiveConversation(id, { messages: chatMessages, running: generating });
+  }, [id, chatMessages, generating]);
+  useEffect(() => () => withdrawLiveConversation(id), [id]);
   const wasGenerating = useRef(false);
   useEffect(() => {
     if (generating) {

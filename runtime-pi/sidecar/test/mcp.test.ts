@@ -23,6 +23,7 @@ import {
   wrapClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
+import { noJournal } from "./helpers/call-journal.ts";
 
 /** A tool answering its own arguments as JSON text. */
 const echoTool: AppstrateToolDefinition = {
@@ -511,6 +512,7 @@ describe("POST /mcp — api_call", () => {
           namespace: "gmail",
           integrationId: "@official/gmail",
           connectionId: "conn-1",
+          journal: noJournal,
           declaredUris: ["https://api.example.com/**"],
           fetchCredentials: async () => integrationCreds(),
           refreshCredentials: async () => integrationCreds("integ-tok-2"),

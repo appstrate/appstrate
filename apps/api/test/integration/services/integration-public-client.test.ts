@@ -145,7 +145,7 @@ describe("public OAuth client is declared, not inferred", () => {
   function credentialsOf(clientRef: string) {
     return resolveIntegrationClientById(
       clientRef,
-      ctx.defaultSpaceId,
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       INTEGRATION,
       AUTH_KEY,
       "client_secret_post",
@@ -245,7 +245,7 @@ describe("public OAuth client is declared, not inferred", () => {
       // The manifest says client_secret_post; the client's own declaration wins.
       const resolved = await resolveIntegrationClientById(
         client.id,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         INTEGRATION,
         AUTH_KEY,
         "client_secret_post",
@@ -264,7 +264,7 @@ describe("public OAuth client is declared, not inferred", () => {
       });
       const resolved = await resolveIntegrationClientById(
         client.id,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         INTEGRATION,
         AUTH_KEY,
         "client_secret_post",

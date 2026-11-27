@@ -2,7 +2,7 @@
 
 /**
  * "What can this assistant do for me": the caller's role and a verdict per chat
- * act, as a section of the conversation's Info tab. Lives in the SHELL
+ * act, as a folding section of the conversation's Summary, which names it. Lives in the SHELL
  * (everything it reads is host state). A role preview (`X-View-As`) needs no
  * logic here: `/api/orgs` and `/api/spaces` already answer AS the persona; the
  * summary only marks it. The verdicts judge the spaces the conversation acts in, not the working
@@ -85,7 +85,6 @@ export function ChatAccessSummary({
 
   return (
     <section className={cn("flex flex-col gap-2", persona && "text-foreground")}>
-      <h3 className="text-sm font-medium">{t("chat:context.info.access")}</h3>
       <p className="text-muted-foreground text-xs">{t("chat:access.subtitle")}</p>
       <div className="flex items-center gap-2 text-sm">
         <RoleIcon aria-hidden="true" className="text-muted-foreground size-4 shrink-0" />

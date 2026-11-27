@@ -102,25 +102,30 @@ they start with `packages/` or `e2e/`.
   control opens it (`SidebarOpener`): a burger, then the organization's avatar with the space's on
   its corner (`OrgSpaceTile`, the switcher's own, stacked, never side by side), no names; its
   accessible name says them, and it carries the unread dot of the Runs entry it hides and, below
-  `md`, that of the notification bell the drawer holds there (its accessible name counts both). Then
-  the trail (the last segment alone on a phone), the page's controls and, from `md` up, the
+  `md`, that of the notification bell the drawer holds there (its accessible name counts both).
+  Then the trail (the last segment alone on a phone), the page's controls and, from `md` up, the
   notification bell. Below `md` the bell leaves the header for the drawer so the page's title keeps
   the room; the header never writes the organization's or the space's name either, the drawer
-  does. Controls are 44 px on touch. In the chat the trail is the conversation's name and the controls are
-  its spaces, the pencil that renames it and the context panel.
+  does. Controls are 44 px on touch. In the chat the trail is the conversation's name and the
+  controls are its spaces, the pencil that renames it and the context panel.
 - **The sidebar is the whole screen on a phone**: its first row is the organization switcher, as
   wide as its names with its chevrons right after them (the sidebar's width from `md` up), then at
   the row's end the notification bell (its list rises from the bottom, as every phone menu does)
-  and the close button, both 44 px. Then the Studio/Chat switch and the product's navigation.
-  Following a link folds the sheet, except the Studio/Chat switch: it swaps the sheet's content and
+  and the close button, both 44 px. Then the Chat/Studio switch and the product's navigation.
+  Following a link folds the sheet, except the Chat/Studio switch: it swaps the sheet's content and
   leaves it open (`lib/drawer-navigation.ts`), while the page behind moves to the product's landing
-  (Studio's home, a new conversation), so closing it without a choice still lands somewhere. In the chat: "Nouvelle
-  conversation" (a left-aligned row with its icon in a round tile, like the conversations below)
-  with the search as a magnifier at the end of that row, which unfolds a filled field (no border)
+  (a new conversation, the Studio's dashboard), so closing it without a choice still lands
+  somewhere. In the chat: "Nouvelle conversation" (a left-aligned row with its icon in a round
+  tile, like the conversations below) with the search as a magnifier at the end of that row, which unfolds a filled field (no border)
   under it, closed by its X or by a tap elsewhere while empty, then the recent conversations (one
   line each: the title, then the tiles of its spaces, two at most then « +N », named for a screen
   reader; the names are in the "…" panel). Then the footer every drawer has: Catalogue, Settings
   and the account.
+- **Getting-started cards** (`components/sidebar-tips.tsx`, rules in `lib/sidebar-tips.ts`): on a
+  desktop at least 760 px tall, a stack of small cards above Catalogue, one first step each (title,
+  two lines of text, a small visual, one outline button to its page). The next card peeks above the
+  top one; they turn every 6 s, hold still under the pointer or the focus, and stop once turned by
+  hand. A card leaves when its step is done (existing API only), on its own page, or dismissed.
 - **A phone's menus rise from the bottom**, and no screen decides it: `DropdownMenu` and `Popover`
   (`packages/ui`) draw their content below `md` as a panel from the bottom (`SheetMenuContent`,
   `packages/ui/src/components/sheet-menu.tsx`, on the bottom `Sheet`), with the same open state and
@@ -897,15 +902,33 @@ on assistant-ui). Its lightweight `@appstrate/module-chat/conversation-skeleton`
 is shared by the route fallback and the history wait. The chat sits inside the
 shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
-import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`),
-reasoning a collapsible group (`reasoning.tsx`), a run started from the chat a
+import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`); a failed one is softened, never hidden: no red border or lead icon, its message stays visible under the header in muted text, and a small red cross (`FailedGlyph`, named « Échec · HTTP 404 » for assistive tech) ends the row, the same cross, decorative, preceding the muted failed count of a folded lookups group, running or settled; only what ends the turn stays red. The HTTP status is no badge: it is in the call's detail. Reasoning is
+a collapsible group (`reasoning.tsx`), the working indicator
+(`ThinkingStatus`, same file) the spark: four coral balls swapping diagonals, pure
+CSS (`.spark` in `styles.css`), still under reduced motion. A running turn holds one spark,
+on one line: the loading line (« Réflexion en cours… », the turn's clock from 1 s), the reasoning
+row it is thinking in, or the header of the folded lookups it ends in, which then reads the step
+in progress, the count, any failure and the clock; a settled reasoning row reads its first line. A run started from the chat is a
 `ChatRunProgressCard`, the model picker `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
 The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that
 canvas and floats beside the thread: its cards and its previewed file are `Card` /
 `FileArtifact` with `FLOATING_FRAME` (`rounded-2xl shadow-xs`), the one place a card
-takes a shadow outside what floats over the page. Its width follows what it shows (a
-list, the details, a file), each remembered per browser.
+takes a shadow outside what floats over the page. It opens on the Summary, which reads
+without scrolling: the title and its gist, then the activity in one view (its runs, its
+files and its integration calls, lookups included, the latest of each on one line, a
+failure on its own line, each group leading to its tab), then models, access and details
+folded to one line each (`Collapsible`, remembered per browser). Beside it,
+Runs, Files and Tools, each named in words on every format: a narrow panel drops the
+tabs' icons, tightens them and scrolls them sideways past its width. Each group of the
+Summary stands on its own read (waiting in its shape, or saying its failure in its place);
+the calls, held by the conversation, show at once. Tools lists the
+calls as the open chat holds them, the turn in flight included, else as stored
+(`@appstrate/module-chat/conversation-tools`, `live-conversation`), named as their cards
+name them (`tool-presentation.ts`), lookups behind a switch the panel keeps; a call's
+detail is the card's (`tool-call-detail`). A file or a call opened from the Summary leads
+back to it. Its width follows what it shows (a list, the details or a call, a file), each
+remembered per browser.
 
 ## 14. Modules and feature gating
 
@@ -951,7 +974,7 @@ header actions wrap (`PageHeader wrapActions`: the group of badges and buttons
 wraps under the title as a whole), the sidebar becomes a sheet, a panel's rail
 becomes a menu sheet (`PhoneNavigation`), and a panel overlay covers the page
 (`OverlayFrame` goes full screen below `sm`). Tabs tighten to `px-2`
-below `sm` (`DetailTabsTrigger`) so four of them fit 390 px.
+below `sm` (`UnderlineTabList`) so four of them fit 390 px.
 
 Chat controls have a 40 px minimum touch target. Drawer rows and menu entries use 44 px.
 Give neighboring controls their own space, including a chip’s open and remove buttons.

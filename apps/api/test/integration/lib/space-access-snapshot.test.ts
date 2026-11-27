@@ -75,7 +75,13 @@ describe("loadSpaceAccess", () => {
 
     expect(access?.member?.ref).toEqual({
       kind: "custom",
-      role: { id: role.id, key: role.key, name: role.name, permissions: ["agents:read"] },
+      role: {
+        id: role.id,
+        key: role.key,
+        name: role.name,
+        permissions: ["agents:read"],
+        showsStudio: true,
+      },
     });
   });
 

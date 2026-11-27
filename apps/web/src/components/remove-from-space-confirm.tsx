@@ -8,9 +8,9 @@ import { ConfirmModal } from "./confirm-modal";
 export interface RemovalTarget {
   packageId: string;
   name: string;
-  /** A `shareTargetHandle`: a space id, or a user id for a person's personal space. */
+  /** A space id. */
   target: string;
-  /** What the dialog calls the target (a space name, or "l'espace personnel de X"). */
+  /** What the dialog calls the target (a space name). */
   targetLabel: string;
 }
 

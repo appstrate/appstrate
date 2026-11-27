@@ -18,6 +18,8 @@ import {
 } from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+import type { DispatchedCall } from "../call-reporter.ts";
+import { noJournal } from "./helpers/call-journal.ts";
 
 /** The credential scope of `integrationId` on the `conn-1` connection these tests bind. */
 const scopeOf = (integrationId: string): string => credentialScope(integrationId, "conn-1");
@@ -43,6 +45,7 @@ function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
       credentialFieldName: "access_token",
     })),
     reportedAuthFailures: new Set<string>(),
+    journal: noJournal,
     // Deterministic public answer so the SSRF DNS-rebind layer never
     // does real DNS in tests. Rebind-specific tests override this.
     resolveHost: async () => ["203.0.113.7"],
@@ -598,14 +601,14 @@ describe("executeApiCall — 401 retry path", () => {
     expect(deps.reportedAuthFailures.has(scopeOf("gmail"))).toBe(true);
   });
 
-  it("reports an upstream success only for a 2xx on the injected credential", async () => {
+  it("journals one record per call: the template's host, the status, the credential", async () => {
     const statuses = [200, 401];
     const fetchFn = mock(async () => new Response("{}", { status: statuses.shift()! }));
-    const reportUpstreamSuccess = mock(() => {});
+    const journaled: DispatchedCall[] = [];
     const deps = makeDeps({
       fetchFn: fetchFn as unknown as typeof fetch,
       refreshCredentials: mock(async () => null),
-      reportUpstreamSuccess,
+      journal: (call) => journaled.push(call),
     });
     const call = () =>
       executeApiCall(
@@ -621,7 +624,72 @@ describe("executeApiCall — 401 retry path", () => {
       );
     await call();
     await call();
-    expect(reportUpstreamSuccess).toHaveBeenCalledTimes(1);
+    expect(journaled.map((c) => [c.method, c.host, c.outcome, c.credential])).toEqual([
+      ["GET", "api.example.com", "200", { revision: undefined }],
+      ["GET", "api.example.com", "401", { revision: undefined }],
+    ]);
+  });
+
+  it("journals the host as written: a templated host keeps its placeholder", async () => {
+    const journaled: DispatchedCall[] = [];
+    const deps = makeDeps({
+      declaredUris: ["https://{{tenant}}.example.com/**"],
+      fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "tok-123", tenant: "acme" },
+        authorizedUris: ["https://acme.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer ",
+        credentialFieldName: "access_token",
+      })),
+      journal: (call) => journaled.push(call),
+    });
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        connectionId: "conn-1",
+        targetUrl: "https://{{tenant}}.example.com/x",
+        method: "POST",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(journaled.map((c) => [c.method, c.host, c.outcome])).toEqual([
+      ["POST", "{{tenant}}.example.com", "200"],
+    ]);
+  });
+
+  it("journals a dispatched failure under its code, and nothing for a refusal before dispatch", async () => {
+    const journaled: DispatchedCall[] = [];
+    const deps = makeDeps({
+      fetchFn: mock(async () => {
+        throw Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" });
+      }) as unknown as typeof fetch,
+      journal: (call) => journaled.push(call),
+    });
+    const call = (targetUrl: string) =>
+      executeApiCall(
+        {
+          integrationId: "gmail",
+          connectionId: "conn-1",
+          targetUrl,
+          method: "GET",
+          callerHeaders: {},
+          body: { kind: "none" },
+        },
+        deps,
+      );
+    const unreachable = await call("https://api.example.com/x");
+    expect(unreachable.ok).toBe(false);
+    if (!unreachable.ok) expect(unreachable.code).toBe("upstream_unreachable");
+    const refused = await call("https://other.example.org/x");
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.code).toBe("unauthorized_target");
+    expect(journaled.map((c) => [c.host, c.outcome, c.credential])).toEqual([
+      ["api.example.com", "upstream_unreachable", null],
+    ]);
   });
 
   it("judges nothing once a redirect hop stripped the credential, even back on its origin", async () => {
@@ -644,7 +712,7 @@ describe("executeApiCall — 401 retry path", () => {
       return new Response("{}", { status: terminalStatus });
     });
     const refreshCredentials = mock(async () => null);
-    const reportUpstreamSuccess = mock(() => {});
+    const journaled: DispatchedCall[] = [];
     const allowlist = ["https://api.example.com/**", "http://api.example.com/**"];
     const deps = makeDeps({
       fetchFn: fetchFn as unknown as typeof fetch,
@@ -658,7 +726,7 @@ describe("executeApiCall — 401 retry path", () => {
         credentialFieldName: "access_token",
       })),
       refreshCredentials,
-      reportUpstreamSuccess,
+      journal: (call) => journaled.push(call),
     });
     const call = async () => {
       const result = await executeApiCall(
@@ -678,7 +746,10 @@ describe("executeApiCall — 401 retry path", () => {
     terminalStatus = 200;
     expect(await call()).toBe(200);
     expect(refreshCredentials).not.toHaveBeenCalled();
-    expect(reportUpstreamSuccess).not.toHaveBeenCalled();
+    expect(journaled.map((c) => [c.outcome, c.credential])).toEqual([
+      ["401", null],
+      ["200", null],
+    ]);
     expect(deps.reportedAuthFailures.size).toBe(0);
   });
 
@@ -699,14 +770,14 @@ describe("executeApiCall — 401 retry path", () => {
     };
     const statuses = [401, 200];
     const refreshCredentials = mock(async () => fresh);
-    const reportUpstreamSuccess = mock(() => {});
+    const journaled: DispatchedCall[] = [];
     const deps = makeDeps({
       fetchFn: mock(
         async () => new Response("{}", { status: statuses.shift()! }),
       ) as unknown as typeof fetch,
       fetchCredentials: mock(async () => carried),
       refreshCredentials,
-      reportUpstreamSuccess,
+      journal: (call) => journaled.push(call),
     });
     await executeApiCall(
       {
@@ -720,7 +791,85 @@ describe("executeApiCall — 401 retry path", () => {
       deps,
     );
     expect(refreshCredentials).toHaveBeenCalledWith("gmail", carried);
-    expect(reportUpstreamSuccess).toHaveBeenCalledWith(fresh);
+    // The 401 replayed after the refresh is one call: its final attempt, on the fresh credential.
+    expect(journaled.map((c) => [c.outcome, c.credential])).toEqual([
+      ["200", { revision: "rev-b" }],
+    ]);
+  });
+
+  describe("an aborted call", () => {
+    const request = (signal: AbortSignal) => ({
+      signal,
+      integrationId: "gmail",
+      connectionId: "conn-1",
+      targetUrl: "https://api.example.com/x",
+      method: "GET",
+      callerHeaders: {},
+      body: { kind: "none" as const },
+    });
+
+    it("is journaled when it was dispatched, then rethrown", async () => {
+      const started = Promise.withResolvers<void>();
+      const controller = new AbortController();
+      const journaled: DispatchedCall[] = [];
+      const deps = makeDeps({
+        fetchFn: mock(async (_input: unknown, init?: RequestInit) => {
+          const signal = init!.signal!;
+          started.resolve();
+          return await new Promise<Response>((_resolve, reject) =>
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+          );
+        }) as unknown as typeof fetch,
+        journal: (call) => journaled.push(call),
+      });
+      const call = executeApiCall(request(controller.signal), deps);
+      await started.promise;
+      controller.abort(new Error("request cancelled"));
+      await expect(call).rejects.toThrow("request cancelled");
+      expect(journaled.map((c) => [c.host, c.outcome])).toEqual([
+        ["api.example.com", "upstream_unreachable"],
+      ]);
+    });
+
+    it("journals the 401 it got when aborted during the refresh", async () => {
+      const controller = new AbortController();
+      const journaled: DispatchedCall[] = [];
+      const deps = makeDeps({
+        fetchFn: mock(async () => new Response("{}", { status: 401 })) as unknown as typeof fetch,
+        refreshCredentials: mock(async (): Promise<CredentialsResponse> => {
+          controller.abort(new Error("request cancelled"));
+          return {
+            credentials: { access_token: "tok-456" },
+            authorizedUris: ["https://api.example.com/**"],
+            allowAllUris: false,
+            credentialHeaderName: "Authorization",
+            credentialHeaderPrefix: "Bearer ",
+            credentialFieldName: "access_token",
+          };
+        }),
+        journal: (call) => journaled.push(call),
+      });
+      await expect(executeApiCall(request(controller.signal), deps)).rejects.toThrow(
+        "request cancelled",
+      );
+      expect(journaled.map((c) => c.outcome)).toEqual(["401"]);
+    });
+
+    it("journals nothing when aborted before dispatch", async () => {
+      const controller = new AbortController();
+      controller.abort(new Error("request cancelled"));
+      const fetchFn = mock(async () => new Response("{}"));
+      const journaled: DispatchedCall[] = [];
+      const deps = makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        journal: (call) => journaled.push(call),
+      });
+      await expect(executeApiCall(request(controller.signal), deps)).rejects.toThrow(
+        "request cancelled",
+      );
+      expect(fetchFn).not.toHaveBeenCalled();
+      expect(journaled).toEqual([]);
+    });
   });
 });
 

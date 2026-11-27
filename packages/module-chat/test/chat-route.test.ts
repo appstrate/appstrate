@@ -110,8 +110,16 @@ describe("the origin space of a new conversation", () => {
     generation: {},
     packageAuthoring: false,
     inlineRunsUseChatModel: false,
+    contextAllSpaces: false,
     skills: undefined,
   };
+
+  it("asks for every space's details only while the switch is on", () => {
+    expect("context_all_spaces" in turnBody({ ...base, creation: undefined })).toBe(false);
+    expect(turnBody({ ...base, contextAllSpaces: true, creation: undefined })).toMatchObject({
+      context_all_spaces: true,
+    });
+  });
 
   it("carries the inline-run model switch as the user set it", () => {
     expect(turnBody({ ...base, creation: undefined })).toMatchObject({

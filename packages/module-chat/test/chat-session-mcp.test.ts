@@ -370,11 +370,17 @@ describe("a chat turn's loopback bearer on the MCP endpoints", () => {
     expect(envelope.result?.isError).toBeFalsy();
     const content = envelope.result?.content as Array<{ text: string }>;
     const me = JSON.parse(content[0]!.text) as {
-      spaces: Array<{ id: string }>;
+      spaces: Array<{ id: string; can: string[] }>;
       body: { space: { id: string } };
     };
     expect(me.spaces.map((space) => space.id).sort()).toEqual(turnSpaces().sort());
     expect(me.body.space.id).toBe(gestion.id);
+    // Each space names what the caller's role there allows: an admin of Gestion creates
+    // packages, an operator of the default space runs agents and creates none.
+    const can = (spaceId: string) => me.spaces.find((space) => space.id === spaceId)!.can;
+    expect(can(gestion.id)).toContain("create_packages");
+    expect(can(owner.defaultSpaceId)).toContain("run_agents");
+    expect(can(owner.defaultSpaceId)).not.toContain("create_packages");
     // Outside the allowlist, though the caller reaches it as a viewer: refused.
     const outside = await rpc(headers, "tools/call", {
       name: "get_me",

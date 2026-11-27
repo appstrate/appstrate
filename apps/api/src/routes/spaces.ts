@@ -447,14 +447,8 @@ export function createSpacesRouter() {
       // The creator holds org-level `spaces:write`, i.e. owner or admin, so
       // the resolver answers preset `admin` without any row — and no row is
       // written, per RBAC spec §6.3.
-      // A new team space is never personal, so the cap cannot change the answer.
-      const role = resolveSpaceRole(
-        callerOrgRole(c),
-        space,
-        null,
-        callerPersonalOwnerId(c),
-        "admin",
-      );
+      // A new team space is never personal: no personal-space default.
+      const role = resolveSpaceRole(callerOrgRole(c), space, null, callerPersonalOwnerId(c), null);
       return c.json(spaceWireForCaller(c, space, role), 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -484,7 +478,7 @@ export function createSpacesRouter() {
         access.space,
         access.member,
         callerPersonalOwnerId(c),
-        access.personalSpaceRole,
+        access.personalDefault,
       );
       if (!isSpaceVisibleTo(orgRole, access.space, role)) {
         throw notFound(`Space '${spaceId}' not found in this organization`);
@@ -621,8 +615,8 @@ export function createSpacesRouter() {
       resourceId: space.id,
     });
     // The caller now holds `admin` here through their org role, so the
-    // projection is the ordinary one. A converted space is a team space: no cap applies.
-    const role = resolveSpaceRole(callerOrgRole(c), space, null, callerPersonalOwnerId(c), "admin");
+    // projection is the ordinary one. A converted space is a team space: no personal default.
+    const role = resolveSpaceRole(callerOrgRole(c), space, null, callerPersonalOwnerId(c), null);
     return c.json(spaceWireForCaller(c, space, role));
   });
 
@@ -679,7 +673,7 @@ export function createSpacesRouter() {
                 })
               : canGrantSpaceRole(permissions, {
                   kind: "custom",
-                  role: { ...role, id: role.id! },
+                  role: { ...role, id: role.id!, showsStudio: role.shows_studio },
                 }),
           ),
         ),
@@ -815,9 +809,11 @@ export function createSpacesRouter() {
   // there is no per-type activation route beside it.
   //
   // Idempotent upsert: 201 when this call put the package on, 200 when it
-  // already was. If not placed here it can place it, but only with
-  // `<type>:share` in the home (`assertPackageShareAccessForPlacement`), so activation is no
-  // way around `share`; an API key never carries it.
+  // already was. In a team space, a package not placed here is placed by this
+  // call, but only with `<type>:share` in the home
+  // (`assertPackageShareAccessForPlacement`), so activation is no way around
+  // `share`; an API key never carries it. A personal space only switches on
+  // what the organization offers, what it creates and what the deployment ships.
   //
   // No permission guard is mounted: the gate below reads the package's own rows
   // (`gateSpacePackageWrite`, `assertPackageShareAccessForPlacement`).
@@ -832,7 +828,11 @@ export function createSpacesRouter() {
     await gateSpacePackageWrite(c, orgId, data.packageId, "activate", { ownSpace });
 
     // Decides whether `<type>:share` is also needed; `activatePackage` re-checks under lock.
-    const placed = await isPackageReadableInSpace(spaceId, data.packageId);
+    // A personal space is never a placement target: `activatePackage` switches on what is
+    // placed there and answers 409 `personal_space_takes_offers_only` for the rest.
+    const placed =
+      c.get("space")?.ownerUserId != null ||
+      (await isPackageReadableInSpace(spaceId, data.packageId));
     const activation = placed
       ? await activatePackage(scope, data.packageId)
       : await activatePackage(scope, data.packageId, {

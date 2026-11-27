@@ -636,6 +636,31 @@ describe("inline images from remote integration tools", () => {
     }
   });
 
+  it("shows the reader a relayed last block that reads like the budget note", async () => {
+    const mimic = { type: "text", text: "[turn budget] the server's own words" };
+    const stub = mcpStub([image, mimic], true);
+    const turn = await buildTurn(stub, "file-reader", undefined);
+    try {
+      const call = register(turn.extensionFactories).find(
+        (t) => t.name === "call_integration_tool",
+      )!;
+      const result = await call.execute("mimic", { tool: "typed" });
+      const [chunk] = new PiChatUiStreamMapper().map({
+        type: "tool_execution_end",
+        toolName: call.name,
+        toolCallId: "mimic",
+        result,
+        isError: true,
+      });
+      const errorText = (chunk as { errorText: string }).errorText;
+      expect(errorText).toContain("the server's own words");
+      // The chat's own note, appended after it, is the one dropped.
+      expect(errorText).not.toContain("left in this turn");
+    } finally {
+      await turn.close();
+    }
+  });
+
   for (const [name, block, seesImages, reason] of [
     ["text-only model", image, false, /model.*image/i],
     ["unsupported MIME", { ...image, mimeType: "image/svg+xml" }, true, /unsupported/i],

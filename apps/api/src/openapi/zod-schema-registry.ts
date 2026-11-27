@@ -38,6 +38,7 @@ import {
 // --- API Key schemas (routes/api-keys.ts) ---
 import { createApiKeySchema } from "../routes/api-keys.ts";
 import { callRemoteToolSchema } from "../routes/credential-proxy.ts";
+import { integrationCallsBodySchema } from "../routes/internal.ts";
 
 // --- Organization schemas (routes/organizations.ts) ---
 import {
@@ -46,6 +47,7 @@ import {
   addMemberSchema,
   updateInvitationSchema,
   updateRoleSchema,
+  personalSpaceRoleOverrideSchema,
 } from "../routes/organizations.ts";
 
 // --- Org settings schema (services/organizations.ts) ---
@@ -83,6 +85,7 @@ import {
   packageJsonCreateWithContentSchema,
   packageJsonUpdateSchema,
   packageHomeSpaceSchema,
+  packageOrgOfferSchema,
   shareTargetSchema,
   createVersionBodySchema,
 } from "../routes/packages.ts";
@@ -305,6 +308,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Update member role",
   },
   {
+    method: "PUT",
+    path: "/api/orgs/{orgId}/members/{userId}/personal-space-role",
+    jsonSchema: toJsonSchema(personalSpaceRoleOverrideSchema),
+    description: "Set a member's role in their personal space",
+  },
+  {
     method: "PATCH",
     path: "/api/orgs/{orgId}/invitations/{invitationId}",
     jsonSchema: toJsonSchema(updateInvitationSchema),
@@ -522,6 +531,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
 
   {
+    method: "PUT",
+    path: "/api/packages/{scope}/{name}/org-offer",
+    jsonSchema: toJsonSchema(packageOrgOfferSchema),
+    description: "Offer a package to the organization",
+  },
+
+  {
     method: "POST",
     path: "/api/packages/{scope}/{name}/shares",
     jsonSchema: toJsonSchema(shareTargetSchema),
@@ -569,6 +585,14 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/credential-proxy/tools/call",
     jsonSchema: toJsonSchema(callRemoteToolSchema),
     description: "Call a typed tool of a remote MCP integration",
+  },
+
+  // ─── Internal (sidecar) ─────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/internal/integration-calls",
+    jsonSchema: toJsonSchema(integrationCallsBodySchema),
+    description: "Journal the upstream calls a run's sidecar dispatched",
   },
 
   // ─── Integrations ───────────────────────────────────────────────────────

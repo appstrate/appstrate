@@ -47,31 +47,6 @@ function renderList(
 }
 
 describe("NotificationContent", () => {
-  it("renders a `package_shared` row as the share it is", () => {
-    const html = renderList([
-      {
-        id: "n1",
-        spaceId: SPACE,
-        type: "package_shared",
-        runId: null,
-        payload: {
-          packageId: PACKAGE_ID,
-          package_type: "agent",
-          shared_by_name: "Alice Martin",
-        },
-        read_at: null,
-        createdAt: "2026-09-10T10:00:00.000Z",
-      },
-    ]);
-
-    expect(html).toContain(`Alice Martin vous a partagé ${PACKAGE_ID}`);
-    // The share's own page, which links on to the package's sheet.
-    expect(html).toContain('href="/notifications/n1"');
-    // Not a run: no run-scoped link, and nothing that reads as a dead agent.
-    expect(html).not.toContain("Agent supprimé");
-    expect(html).not.toContain('href="/runs/');
-  });
-
   it("renders a failed run as its agent and status, linking to the run", () => {
     const html = renderList([
       {
@@ -134,6 +109,29 @@ describe("NotificationContent", () => {
     expect(html).not.toContain(`href="/agents/${PACKAGE_ID}/runs/run_4"`);
   });
 
+  it("renders a `credential_needs_reconnection` row as the connection to reconnect, on its own page", () => {
+    const html = renderList([
+      {
+        id: "n12",
+        spaceId: SPACE,
+        type: "credential_needs_reconnection",
+        runId: null,
+        payload: {
+          packageId: "@acme/gmail",
+          integration_name: "Gmail",
+          label: "pierre@acme.test",
+          cause: "refresh_token_revoked",
+        },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ]);
+
+    expect(html).toContain("Gmail : la connexion pierre@acme.test doit être reconnectée");
+    expect(html).toContain("Le fournisseur a révoqué l'accès");
+    expect(html).toContain('href="/notifications/n12"');
+  });
+
   it("names the sender of an `agent_message` from an unlisted agent by the name stamped on its run", () => {
     const html = renderList([
       {
@@ -191,16 +189,16 @@ describe("NotificationContent", () => {
       {
         id: "n5",
         spaceId: SPACE,
-        type: "package_shared",
+        type: "agent_message",
         runId: null,
-        payload: { packageId: PACKAGE_ID, package_type: "agent", shared_by_name: "Bob" },
+        payload: { packageId: PACKAGE_ID, agent_name: null, title: "Bob", message: "Salut." },
         read_at: null,
         createdAt: "2026-09-10T10:00:00.000Z",
       },
     ];
     const denied = renderList(notifications, () => false);
     expect(denied).toContain("Worker");
-    expect(denied).toContain(`Bob vous a partagé ${PACKAGE_ID}`);
+    expect(denied).toContain("Bob");
     expect(denied).toContain('href="/notifications/n4"');
     expect(denied).toContain('href="/notifications/n5"');
     expect(denied).not.toContain('href="/agents/');
@@ -258,9 +256,9 @@ describe("NotificationContent", () => {
       {
         id: "n12",
         spaceId: SPACE,
-        type: "package_shared",
+        type: "agent_message",
         runId: null,
-        payload: { packageId: PACKAGE_ID, package_type: "agent", shared_by_name: "Bob" },
+        payload: { packageId: PACKAGE_ID, agent_name: null, title: "Bob", message: "Salut." },
         read_at: null,
         createdAt: "2026-09-10T10:00:00.000Z",
       },

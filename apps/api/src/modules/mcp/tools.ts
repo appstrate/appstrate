@@ -137,6 +137,12 @@ import {
   type McpSkillReader,
 } from "./discovery.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
+import { presentTools, withPresentation } from "./presentation.ts";
+import {
+  MAX_PRESENTED_ITEMS,
+  TOOL_LOOKUP_META_KEY,
+  type PresentationSubject,
+} from "@appstrate/core/mcp-presentation";
 import {
   ACTIVE_SPACES_META_KEY,
   OPERATION_SPACES_META_KEY,
@@ -156,6 +162,7 @@ import type { DispatchContext } from "./api-call-batch.ts";
 import {
   grantedIn,
   grantedSpaces,
+  mcpSpaceActs,
   spaceIdsWhere,
   spaceArgumentRefusal,
   recordOperationSpaces,
@@ -454,10 +461,14 @@ interface SearchCall {
  * A kind's section (`denied`: operations withheld; `searched`: the spaces its shown entries name),
  * or the refusal that answers a call naming it.
  */
-type KindSearch = (
-  call: SearchCall,
-) => Promise<
-  | { section: Record<string, unknown>; denied?: number; searched?: string[] }
+type KindSearch = (call: SearchCall) => Promise<
+  | {
+      section: Record<string, unknown>;
+      denied?: number;
+      searched?: string[];
+      /** The entities its shown items name, for the call's presentation. */
+      subjects?: PresentationSubject[];
+    }
   | { refused: Refusal | RouteRefusal }
 >;
 
@@ -584,11 +595,20 @@ function invalidFilter(args: Record<string, unknown>): Refusal | undefined {
   return undefined;
 }
 
-/** Read-only, unless the kind of integration tools is declared: reading its catalog reaches third-party servers. */
-function discoveryAnnotations(title: string, kinds: readonly DiscoveryKind[]): Tool["annotations"] {
+/**
+ * Read-only, unless the kind of integration tools is declared: reading its catalog reaches
+ * third-party servers, so the descriptor is stamped a lookup instead.
+ */
+function discoveryHints(
+  title: string,
+  kinds: readonly DiscoveryKind[],
+): Pick<Tool, "annotations" | "_meta"> {
   return kinds.includes("integration_tool")
-    ? { title, ...INTEGRATION_KIND_ANNOTATIONS }
-    : { title, readOnlyHint: true, idempotentHint: true, openWorldHint: false };
+    ? {
+        annotations: { title, ...INTEGRATION_KIND_ANNOTATIONS },
+        _meta: { [TOOL_LOOKUP_META_KEY]: true },
+      }
+    : { annotations: { title, readOnlyHint: true, idempotentHint: true, openWorldHint: false } };
 }
 
 function buildSearchTool(
@@ -606,13 +626,14 @@ function buildSearchTool(
     description:
       `Search what you can act on, by keyword: ${kinds.map((k) => KINDS[k].section).join(", ")}. ` +
       "Returns one section per kind searched, each with its `total` and its `items`, capped at " +
-      "`limit`; every item carries the `id` describe takes. " +
+      "`limit`, best match first and equal matches by name, an order that ranks no space; every " +
+      "item carries the `id` describe takes. " +
       (uses ? `Each kind is used by its own tool: ${uses}. ` : "") +
       "Without keywords, a section lists its kind (`tag` narrows operations). Operations your " +
       "role may not invoke are listed apart under `denied`, with the permissions they need: " +
       "report that to the user instead of trying them." +
       (kinds.includes("integration_tool") ? INTEGRATION_TOOLS_DESCRIPTION : ""),
-    annotations: discoveryAnnotations("Search", kinds),
+    ...discoveryHints("Search", kinds),
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -689,8 +710,11 @@ function buildSearchTool(
     );
     const sections: Record<string, unknown> = {};
     let shown = 0;
+    let found = 0;
     let denied: number | undefined;
     const searched = new Set<string>();
+    // Each entity once: a skill placed in several spaces is an item per space.
+    const subjects = new Map<string, PresentationSubject>();
     for (const { kind, named, outcome } of outcomes) {
       if ("refused" in outcome) {
         if (named) return refusalResult(outcome.refused);
@@ -698,6 +722,11 @@ function buildSearchTool(
       }
       sections[KINDS[kind].section] = outcome.section;
       shown += Array.isArray(outcome.section.items) ? outcome.section.items.length : 0;
+      if (typeof outcome.section.total === "number") found += outcome.section.total;
+      for (const subject of outcome.subjects ?? []) {
+        const key = `${subject.kind} ${subject.id}`;
+        if (!subjects.has(key)) subjects.set(key, subject);
+      }
       denied = outcome.denied ?? denied;
       for (const id of outcome.searched ?? []) searched.add(id);
     }
@@ -710,10 +739,13 @@ function buildSearchTool(
     });
     // Without `space_id`, the spaces that contributed an entry to the result: what the chat records.
     const readSpaceIds = ctx.orgSpaces && args.space_id === undefined ? [...searched] : [];
-    return jsonResult({
-      ...sections,
-      ...(readSpaceIds.length > 0 ? { searched_spaces: readSpaceIds } : {}),
-    });
+    return withPresentation(
+      jsonResult({
+        ...sections,
+        ...(readSpaceIds.length > 0 ? { searched_spaces: readSpaceIds } : {}),
+      }),
+      { count: found, items: [...subjects.values()].slice(0, MAX_PRESENTED_ITEMS) },
+    );
   };
 
   return { descriptor, handler };
@@ -733,14 +765,10 @@ function readingIn(ctx: McpToolContext, space: McpSpace | undefined): DispatchCo
 async function searchOperations({ ctx, spaces, tokens, tag, limit }: SearchCall) {
   let matches = [...getCatalog().operations.values()];
   if (tag) matches = matches.filter((op) => op.tags.some((t) => t.toLowerCase() === tag));
-  const scored = rankByKeywords(
-    matches.sort((a, b) => a.operationId.localeCompare(b.operationId)),
-    tokens,
-    (op) => ({
-      name: op.operationId,
-      text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
-    }),
-  );
+  const scored = rankByKeywords(matches, tokens, (op) => ({
+    name: op.operationId,
+    text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
+  }));
   const grantedHere = (op: CatalogOperation) => (space: McpSpace) =>
     operationGranted(op, space.permissions, ctx.ceiling);
 
@@ -814,6 +842,11 @@ async function searchAgentKind({ ctx, spaces, tokens, limit, signal }: SearchCal
   return {
     section: { total: matches.length, items, ...unsearched(refused) },
     searched: spacesShown(items),
+    subjects: items.map((hit) => ({
+      kind: "agent" as const,
+      id: hit.id,
+      ...(hit.display_name ? { display_name: hit.display_name } : {}),
+    })),
   };
 }
 
@@ -853,6 +886,11 @@ async function searchSkillKind({ ctx, spaces, tokens, limit }: SearchCall) {
   return {
     section: { total: matches.length, items, ...unsearched(refused) },
     searched: spacesShown(items),
+    subjects: items.map((skill) => ({
+      kind: "skill" as const,
+      id: skill.packageId,
+      ...(skill.name ? { display_name: skill.name } : {}),
+    })),
   };
 }
 
@@ -932,7 +970,7 @@ function buildDescribeTool(
           "with call_integration_tool, how to read its result and what its connections' fields " +
           "mean. Its remote catalog is read from its server when not cached."
         : ""),
-    annotations: discoveryAnnotations("Describe", kinds),
+    ...discoveryHints("Describe", kinds),
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -2430,16 +2468,24 @@ export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourc
   };
 }
 
+/** The acts a `can` may name: those of the union surface an org-wide `get_me` is built with. */
+function actVocabulary(surface: McpSurface): string {
+  const acts = mcpSpaceActs(surface);
+  return acts.length > 0 ? ` (${acts.map((act) => `\`${act}\``).join(", ")})` : "";
+}
+
 function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "get_me",
     description:
       "Return the caller's working context in the space of the call: `user`, `org` (with the " +
-      "organization `role`), `space`, `connections`, `agents`, `skills` and `recent_runs`" +
+      "organization `role`), `space`, `connections`, `connectable_integrations`, `agents`, `skills` " +
+      "and `recent_runs`" +
       (ctx.orgSpaces
         ? ", and `spaces`: your role in each space you reach, which, not the organization role, " +
-          "decides each call. With no space designated, it returns `user`, `org` and `spaces` " +
-          "alone: call it first without `space_id` to see which spaces you reach"
+          `decides each call, and \`can\`, the acts that role allows there${actVocabulary(surface)}: an act not ` +
+          "listed is refused in that space. With no space designated, it returns `user`, `org` " +
+          "and `spaces` alone: call it first without `space_id` to see which spaces you reach"
         : "") +
       ". `connections` holds one entry per " +
       "integration with a connection the caller may bind in THIS space, its own or shared into it " +
@@ -2447,10 +2493,12 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "organization-scoped connection in their personal space when own connections are allowed), each listing those " +
       "`connections` (`id`, `label`, `account_id`, `owned_by_actor`, `needs_reconnection`). On the " +
       "integration entry, not on a connection: `active` (`false`: the integration is switched off " +
-      "in this space, so a run there cannot use it until it is activated — `activatePackage`, or " +
+      "in this space, so a run there cannot use it until it is activated — `activatePackage` (a " +
+      "personal space switches on only what is its own, offered to the organization or on by the " +
+      "platform's default: anything else is refused `personal_space_takes_offers_only`), or " +
       "for an organization owner or admin offered to the organization: from chat, in the " +
       "organization catalog; otherwise `offerPackageToOrg` with an unconfined user credential. An " +
-      "offer activates the integration, never a connection, and a space's own switched-off row " +
+      "offer made on by default activates the integration, an available one only lets a space switch it on, neither ever a connection, and a space's own switched-off row " +
       "still wins); `via` (`home`, `shared`, `system`, `organization`: why it is placed here, " +
       "`null` when the caller holds a connection but it is not placed); `version` and " +
       "`default_tools`, present only when active; `needs_reconnection` (no healthy connection: " +
@@ -2463,8 +2511,14 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
           ? "You cannot call them directly here: an admin closed this space's credential proxy " +
             "outside a run. Agents you run still use them. "
           : "") +
-      "`agents` and `skills` are capped (`agents_truncated`, `skills_truncated`): `search` finds " +
-      "the rest by keyword.",
+      "`connectable_integrations` names the integrations active in " +
+      "THIS space that the caller has not connected and for which a connect flow can start: " +
+      "connecting one makes it usable here. It is whole or withheld: more than 15 and it is " +
+      "empty with `connectable_integrations_truncated` true and the count in " +
+      "`connectable_integrations_total`; `search` finds them by keyword. " +
+      "`agents` and `skills` are listed whole, by id, or not at all: past 15 entries a list is " +
+      "empty, with `agents_truncated` / `skills_truncated` true and `agents_total` / " +
+      "`skills_total` counting it, and `search` finds its entries by keyword.",
     annotations: {
       title: "Get caller context",
       readOnlyHint: true,
@@ -2501,6 +2555,7 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       name: s.name,
       role: s.role,
       personal: s.personal,
+      can: mcpSpaceActs(s.surface),
     }));
     return readResponse(response, spaces ? { spaces } : undefined);
   };
@@ -2645,8 +2700,10 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
   ];
   const { orgSpaces } = ctx;
   const pinned = orgSpaces === undefined;
-  return (orgSpaces ? tools.map((tool) => withSpaceArgument(tool, orgSpaces)) : tools).map((tool) =>
-    refuseUndeclaredArguments(tool, pinned),
+  return presentTools(
+    (orgSpaces ? tools.map((tool) => withSpaceArgument(tool, orgSpaces)) : tools).map((tool) =>
+      refuseUndeclaredArguments(tool, pinned),
+    ),
   );
 }
 

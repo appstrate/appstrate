@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { packageTypeValues, runAlertStatusValues } from "@appstrate/db/schema";
+import { runAlertStatusValues } from "@appstrate/db/schema";
+import { CREDENTIAL_DEATH_CAUSES } from "@appstrate/core/sidecar-types";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { ORG_READ_REACH } from "../parameters.ts";
 
@@ -62,14 +63,6 @@ const notificationObject = {
         status: { type: "string", enum: [...runAlertStatusValues] },
       },
     }),
-    notificationOf("package_shared", {
-      required: ["packageId", "package_type", "shared_by_name"],
-      properties: {
-        packageId: { type: "string" },
-        package_type: { type: "string", enum: [...packageTypeValues] },
-        shared_by_name: { type: "string" },
-      },
-    }),
     notificationOf("agent_message", {
       required: ["packageId", "agent_name", "title", "message"],
       properties: {
@@ -85,6 +78,22 @@ const notificationObject = {
         },
         title: { type: "string", description: "Headline the agent wrote (`notify` tool)." },
         message: { type: "string", description: "Body the agent wrote (`notify` tool)." },
+      },
+    }),
+    notificationOf("credential_needs_reconnection", {
+      required: ["packageId", "integration_name", "label", "cause"],
+      properties: {
+        packageId: { type: "string", description: "The connection's integration (`@scope/name`)." },
+        integration_name: {
+          type: "string",
+          description: "The integration's display name as stamped when the notice was written.",
+        },
+        label: { type: "string", description: "The connection's label." },
+        cause: {
+          type: "string",
+          enum: [...CREDENTIAL_DEATH_CAUSES],
+          description: "Why the credential is dead.",
+        },
       },
     }),
   ],
@@ -144,12 +153,13 @@ const notificationListPageResponses = {
             {
               id: "550e8400-e29b-41d4-a716-446655440000",
               spaceId: "spc_8f14e45fceea167a5a36dedd4bea2543",
-              type: "package_shared",
-              runId: null,
+              type: "agent_message",
+              runId: "run_8f14e45fceea167a5a36dedd4bea2543",
               payload: {
                 packageId: "@acme/email-sorter",
-                package_type: "agent",
-                shared_by_name: "Ada Lovelace",
+                agent_name: "Email sorter",
+                title: "Inbox sorted",
+                message: "42 messages filed.",
               },
               read_at: null,
               createdAt: "2026-01-15T10:31:12Z",

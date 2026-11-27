@@ -83,7 +83,7 @@ export function NotificationDetailPage() {
         actions={
           view.target && (
             <HeaderActionButton onClick={() => navigate(view.target!)}>
-              {t(notification.runId ? "notifications.openRun" : "notifications.openPackage")}
+              {t(view.targetLabel)}
             </HeaderActionButton>
           )
         }

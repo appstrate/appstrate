@@ -16,6 +16,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import { noCallReporter } from "./helpers/call-journal.ts";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { ApiCallToolDeps } from "../mcp.ts";
 import { BlobStore } from "../blob-store.ts";
@@ -132,6 +133,7 @@ async function boot(spec: IntegrationSpawnSpec) {
       {
         platformApiUrl: "http://platform.local",
         runToken: "run-token",
+        callReporter: noCallReporter,
         fetchFn: platformFetch,
       },
       apiCallDeps,

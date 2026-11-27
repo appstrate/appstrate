@@ -2,7 +2,6 @@
 
 import type { TFunction } from "i18next";
 import { formatDateField } from "./format-date";
-import { catalogueHref } from "./catalogue-link";
 import { runDetailPath } from "./package-paths";
 import { linkedSpacePath } from "./across-spaces";
 import type { paths } from "../api/client";
@@ -10,6 +9,9 @@ import type { paths } from "../api/client";
 /** One notification as returned by `GET /api/notifications`. */
 export type NotificationItem =
   paths["/api/notifications"]["get"]["responses"]["200"]["content"]["application/json"]["data"][number];
+
+/** The preferences page listing the caller's own connections, where one is reconnected. */
+const RECONNECT_PATH = "/preferences/connections";
 
 /** What a row says and where it leads (`null` when that page is closed to the caller). */
 interface NotificationRow {
@@ -20,6 +22,8 @@ interface NotificationRow {
   /** The line under the row: its date, and who sent it for an agent's message. */
   meta: string;
   target: string | null;
+  /** The locale key of the button leading to `target`. */
+  targetLabel: string;
 }
 
 /**
@@ -33,19 +37,19 @@ export function notificationRow(
   t: TFunction<["common", "agents"]>,
 ): NotificationRow {
   const date = formatDateField(notification.createdAt);
-  if (notification.type === "package_shared") {
-    // One share, one decision: open THAT package's sheet, not a list to search.
-    const share = notification.payload;
-    const href = share ? catalogueHref(share.package_type, { packageId: share.packageId }) : null;
+  if (notification.type === "credential_needs_reconnection") {
+    // The owner's own connections: where a dead connection is reconnected.
+    const dead = notification.payload;
     return {
-      title: t("notifications.packageShared", {
-        name: share?.shared_by_name ?? "",
-        package: share?.packageId ?? "",
+      title: t("notifications.credentialNeedsReconnection", {
+        label: dead?.label ?? "",
+        integration: dead?.integration_name ?? "",
       }),
       status: null,
-      message: null,
+      message: dead ? t(`notifications.credentialCause.${dead.cause}`) : null,
       meta: date,
-      target: href && canReach(href) ? href : null,
+      target: canReach(RECONNECT_PATH) ? RECONNECT_PATH : null,
+      targetLabel: "notifications.reconnect",
     };
   }
   const packageId = notification.payload?.packageId ?? null;
@@ -64,6 +68,7 @@ export function notificationRow(
       message: sent?.message ?? null,
       meta: t("notifications.agentMessageFrom", { agent, date }),
       target,
+      targetLabel: "notifications.openRun",
     };
   }
   // A run that needs attention: it failed or timed out.
@@ -78,6 +83,7 @@ export function notificationRow(
     message: null,
     meta: date,
     target,
+    targetLabel: "notifications.openRun",
   };
 }
 

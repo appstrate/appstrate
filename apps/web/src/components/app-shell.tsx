@@ -15,6 +15,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { ChatSidebarSkeleton } from "@/components/loading-skeletons";
 import { SidebarCredits } from "@/components/sidebar-credits";
+import { SidebarTips } from "@/components/sidebar-tips";
 import { useUnreadRunCount } from "@/hooks/use-run-reads";
 import { useUnreadCount } from "@/hooks/use-notifications";
 import { useOverlayPath } from "@/lib/modal-route";
@@ -90,7 +91,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   // On a phone the navigation is a sheet over the page: once a link has taken the user somewhere,
   // the sheet would only hide where they went, unless it was a product tab, which only swaps the
   // sheet's content (`lib/drawer-navigation.ts`). Desktop keeps its own, remembered, open state.
-  const { setOpenMobile } = useSidebar();
+  const { setOpenMobile, isMobile } = useSidebar();
   const { key, state } = useLocation();
   useEffect(() => {
     if (!keepsDrawerOpen(state)) setOpenMobile(false);
@@ -164,6 +165,8 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
         )}
       </SidebarContent>
       <SidebarFooter className="gap-0 p-0">
+        {/* Desktop only: a phone's drawer keeps its whole height for the navigation. */}
+        {!isMobile && <SidebarTips />}
         <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
           <OverlayEntry
             to={catalogueHref("agent")}

@@ -22,10 +22,12 @@ Onboarding for a new organization has three steps: create the organization (a de
 
 ## Navigation
 
+The app opens on the chat when your role can write in it, and on the Studio's dashboard otherwise. A role without the Studio opens on the chat whenever it can open it. Signing in, finishing onboarding or accepting an invitation lands on the same page. Switching organization keeps you in the product you were using.
+
 The sidebar has four parts, top to bottom:
 
 - **The organization switcher** at its head. It lists your organizations and, for the one you open, its spaces (the switcher calls them workspaces). Picking one applies the organization and the space together. Each organization and space shows its own icon and color (Preview).
-- **Studio and Chat tabs.** **Studio** is the management console below. **Chat** swaps the sidebar for your conversations and the [assistant](/using-appstrate/chat), with a badge for unread ones. The Chat tab only appears when the chat module is on and your role can write in the chat, or already has conversations to reread.
+- **Chat and Studio tabs.** **Chat** comes first: it swaps the sidebar for your conversations and the [assistant](/using-appstrate/chat), with a badge for unread ones. **Studio** is the management console below; its dashboard is at `/dashboard`. The Chat tab only appears when the chat module is on and your role can write in the chat, or already has conversations to reread.
 - **The Studio navigation.** Two groups, each shown only for the pages your role can reach:
 
 | Group    | Page             | What you do here                                                                                                                                                                                                                                                            |
@@ -39,6 +41,8 @@ The sidebar has four parts, top to bottom:
 |          | **Schedules**    | Cron schedules that launch agents, with their next run and last result                                                                                                                                                                                                      |
 
 - **The footer.** **Catalog** (the packages the organization and Appstrate offer, see below), **Settings**, and your user menu.
+
+On a computer, getting-started cards sit above **Catalog**: connect a service, create with the chat, invite colleagues, schedule your agents, explore the catalog. They take turns every few seconds and hold still while the pointer is on them; the edge of the card behind shows the next one, and clicking it stops the turns. A card goes away once its step is done or when you close it with its **×**. Closed cards stay closed in that browser. The cards are hidden on a phone and on a short screen.
 
 The user menu opens **Preferences**, the theme, the documentation, a help link and the **API Documentation** (Swagger UI of your instance), and lets you sign out. The bell at the top right of the page shows notifications about your runs, and each page shows a breadcrumb and an **Actions** menu in its header. On a phone the navigation is a sheet opened from the menu button, and the bell sits in that sheet's first row, next to its close button; a dot on the menu button says there is something unread.
 

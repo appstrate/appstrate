@@ -18,6 +18,11 @@ const detailKey = (id: string) => [
   "/api/orgs/{orgId}/chat/sessions/{id}",
   { params: { path: { orgId: "org_1", id } } },
 ];
+const integrationsKey = (id: string) => [
+  "get",
+  "/api/orgs/{orgId}/chat/sessions/{id}/integrations",
+  { params: { path: { orgId: "org_1", id } } },
+];
 const filesForSessionKey = (id: string) => [
   "get",
   "/api/orgs/{orgId}/files",
@@ -41,6 +46,12 @@ describe("matchesChatSessionQuery", () => {
   it("scopes the session detail to the frame's session", () => {
     expect(matchesChatSessionQuery(detailKey("chs_a"), "chs_a")).toBe(true);
     expect(matchesChatSessionQuery(detailKey("chs_b"), "chs_a")).toBe(false);
+  });
+
+  it("scopes the integrations a session reached to the frame's session", () => {
+    expect(matchesChatSessionQuery(integrationsKey("chs_a"), "chs_a")).toBe(true);
+    expect(matchesChatSessionQuery(integrationsKey("chs_b"), "chs_a")).toBe(false);
+    expect(matchesChatSessionQuery(integrationsKey("chs_b"), undefined)).toBe(true);
   });
 
   it("scopes the file list to the page filtered on that session (negative control)", () => {

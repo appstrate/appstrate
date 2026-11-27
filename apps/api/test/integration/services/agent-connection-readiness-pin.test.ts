@@ -25,6 +25,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 
 import { eq } from "drizzle-orm";
+import { testCaller } from "../../helpers/connection-shares.ts";
 import { integrationConnections, packages } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
@@ -89,6 +90,11 @@ function agentManifest(opts: { withIntegration: boolean }): Record<string, unkno
 
 describe("resolveAgentConnectionReadiness — integration manifests are read at the PIN", () => {
   let ctx: TestContext;
+  const owner = () =>
+    testCaller(
+      { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
+      { spaceId: ctx.defaultSpaceId, governs: true },
+    );
 
   beforeEach(async () => {
     await truncateAll();
@@ -151,9 +157,8 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const readiness = await resolveAgentConnectionReadiness({
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
-      principal: { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
-      canConnect: true,
-      canConfigureIntegrations: true,
+      caller: owner(),
+      orgRole: null,
       // The selector is the ROUTER's decision now, and the service takes it as
       // given. `draft` is what the route hands over for a caller who may write
       // the agent — which is this fixture's author.
@@ -195,13 +200,8 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const base = {
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
-      principal: {
-        kind: "person",
-        binding: null,
-        actor: { type: "user", id: ctx.user.id },
-      } as const,
-      canConnect: true,
-      canConfigureIntegrations: true,
+      caller: owner(),
+      orgRole: null,
     };
 
     // `draft` still reads the working copy — one declared integration, and the
@@ -256,9 +256,8 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const readiness = await resolveAgentConnectionReadiness({
       scope,
       agentPackageId: AGENT,
-      principal: { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
-      canConnect: true,
-      canConfigureIntegrations: true,
+      caller: owner(),
+      orgRole: null,
       version: "draft",
     });
 

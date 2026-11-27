@@ -13,6 +13,7 @@ import * as React from "react";
 import { ChevronLeftIcon } from "lucide-react";
 
 import { cn } from "../cn.ts";
+import { InfoTip } from "./info-tip.tsx";
 import { SheetContent, SheetTitle } from "./sheet.tsx";
 import { Switch } from "./switch.tsx";
 
@@ -116,7 +117,11 @@ export const SheetMenuRow = React.forwardRef<HTMLButtonElement, React.ComponentP
 );
 SheetMenuRow.displayName = "SheetMenuRow";
 
-/** A setting that is on or off: the label, then the switch, the whole row toggles. */
+/**
+ * A setting that is on or off: the label, then the switch, the whole row toggles. Its hint sits
+ * behind an ⓘ beside the label, so a row stays one line in a menu; the switch is described by a
+ * hidden copy of it, which a screen reader reads with the setting.
+ */
 export function SheetMenuSwitchRow({
   id,
   checked,
@@ -136,23 +141,33 @@ export function SheetMenuSwitchRow({
   hint?: React.ReactNode;
   testId?: string;
 }) {
+  const labelId = `${id}-label`;
+  const hintId = `${id}-hint`;
   return (
     <div className={ROW_BOX_CLASS}>
       {icon}
       <label
         htmlFor={id}
-        className="text-foreground desktop-pointer:text-sm flex min-w-0 flex-1 flex-col text-base"
+        className="text-foreground desktop-pointer:text-sm flex min-w-0 flex-1 items-center gap-1 text-base"
       >
-        {label}
-        {hint && (
-          <span className="text-muted-foreground desktop-pointer:text-xs text-sm">{hint}</span>
-        )}
+        {/* The switch's name: the label's own text, without the ⓘ button's. */}
+        <span id={labelId} className="min-w-0">
+          {label}
+        </span>
+        {hint && <InfoTip testId={testId && `${testId}-info`}>{hint}</InfoTip>}
       </label>
+      {hint && (
+        <span id={hintId} hidden>
+          {hint}
+        </span>
+      )}
       <Switch
         id={id}
         checked={checked}
         onCheckedChange={onCheckedChange}
         disabled={disabled}
+        aria-labelledby={labelId}
+        aria-describedby={hint ? hintId : undefined}
         data-testid={testId}
       />
     </div>

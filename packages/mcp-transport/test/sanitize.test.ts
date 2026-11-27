@@ -56,6 +56,25 @@ describe("sanitiseToolDescriptor", () => {
     expect(out.description).toContain("[truncated]");
   });
 
+  it("sanitises both display names, title and annotations.title, keeping the other hints", () => {
+    const { tool: out } = sanitiseToolDescriptor({
+      name: "echo",
+      title: "Se​arch\u0007",
+      annotations: {
+        title: "Fi‮nd" + "y".repeat(MAX_PARAMETER_DESCRIPTION_BYTES + 10),
+        readOnlyHint: true,
+      },
+      inputSchema: { type: "object" },
+    });
+    expect(out.title).toBe("Search");
+    expect(out.annotations?.title).toStartWith("Find");
+    expect(new TextEncoder().encode(out.annotations!.title).byteLength).toBeLessThanOrEqual(
+      MAX_PARAMETER_DESCRIPTION_BYTES,
+    );
+    expect(out.annotations?.title).toEndWith("[truncated]");
+    expect(out.annotations?.readOnlyHint).toBe(true);
+  });
+
   it("recursively sanitises nested property descriptions (Full-Schema Poisoning)", () => {
     const { tool: out } = sanitiseToolDescriptor({
       name: "bad",

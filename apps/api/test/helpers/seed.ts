@@ -31,6 +31,7 @@ import {
   spaceRoles,
   user as userTable,
 } from "@appstrate/db/schema";
+import type { OrgOfferMode } from "@appstrate/db/schema";
 import { and, eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -165,9 +166,13 @@ export async function seedPackageShare(
     .onConflictDoNothing();
 }
 
-/** Offer a package to its organization (`org_package_offers`), bypassing the door. */
-export async function seedOrgOffer(orgId: string, packageId: string): Promise<void> {
-  await db.insert(orgPackageOffers).values({ orgId, packageId }).onConflictDoNothing();
+/** Offer a package to its organization (`org_package_offers`) in `mode`, bypassing the door. */
+export async function seedOrgOffer(
+  orgId: string,
+  packageId: string,
+  mode: OrgOfferMode,
+): Promise<void> {
+  await db.insert(orgPackageOffers).values({ orgId, packageId, mode }).onConflictDoNothing();
 }
 
 /**
@@ -589,6 +594,8 @@ interface OAuthCredentialSeed {
 export async function seedOrgModelProviderOAuth(
   overrides: OAuthCredentialSeed,
 ): Promise<InferSelectModel<typeof modelProviderCredentials>> {
+  const expiresAt = overrides.expiresAt === undefined ? Date.now() + 3600_000 : overrides.expiresAt;
+  const needsReconnection = overrides.needsReconnection ?? false;
   const [row] = await db
     .insert(modelProviderCredentials)
     .values({
@@ -599,10 +606,13 @@ export async function seedOrgModelProviderOAuth(
         kind: "oauth",
         accessToken: overrides.accessToken ?? "test-access-token",
         refreshToken: overrides.refreshToken ?? "test-refresh-token",
-        expiresAt: overrides.expiresAt === undefined ? Date.now() + 3600_000 : overrides.expiresAt,
-        needsReconnection: overrides.needsReconnection ?? false,
+        expiresAt,
+        needsReconnection,
         ...(overrides.accountId !== undefined ? { accountId: overrides.accountId } : {}),
       }),
+      // The columns mirror the blob, as production writes them (the refresh sweep reads the columns).
+      expiresAt: expiresAt === null ? null : new Date(expiresAt),
+      needsReconnection,
       createdBy: overrides.createdBy ?? null,
       ownerUserId: overrides.ownerUserId ?? null,
     })

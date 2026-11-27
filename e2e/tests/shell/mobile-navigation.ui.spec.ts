@@ -10,7 +10,7 @@ test("the mobile navigation folds once one of its links is followed", async ({
   authedPage: page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await page.goto("/dashboard");
 
   const toggle = page.getByRole("button", {
     name: /Afficher ou masquer le menu latéral|Toggle sidebar/,
@@ -30,7 +30,7 @@ test("the mobile navigation folds once one of its links is followed", async ({
 });
 
 /**
- * The Studio/Chat switch only swaps the sheet's content: the user picks a section or a
+ * The Chat/Studio switch only swaps the sheet's content: the user picks a section or a
  * conversation next, without reopening it. The page behind still moves to the product's landing.
  */
 test("the mobile navigation stays open on a switch between Studio and Chat", async ({
@@ -50,7 +50,7 @@ test("the mobile navigation stays open on a switch between Studio and Chat", asy
   await expect(sheet).toBeVisible();
 
   await products.getByRole("link", { name: "Studio" }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/dashboard$/);
   await expect(sheet).toBeVisible();
 
   // Any other link still folds it.

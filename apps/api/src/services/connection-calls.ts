@@ -35,8 +35,10 @@ export interface ConnectionCallView {
   apiKeyId: string | null;
   auth_method: string;
   runId: string | null;
+  chat_session_id: string | null;
   method: string;
-  host: string;
+  /** NULL: an operation of a local MCP server, whose upstream requests are not seen. */
+  host: string | null;
   outcome: string;
   duration_ms: number;
   request_id: string;
@@ -71,6 +73,7 @@ function toView(row: ConnectionCallRow): ConnectionCallView {
     apiKeyId: row.apiKeyId,
     auth_method: row.authMethod,
     runId: row.runId,
+    chat_session_id: row.chatSessionId,
     method: row.method,
     host: row.host,
     outcome: row.outcome,

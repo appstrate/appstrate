@@ -7,29 +7,21 @@
  *   - it gets the 404 a missing space gets (`enterSpaceById`), on the path guard
  *     (`pinnedSpaceScopeGuard`), on the share-target check and through the MCP dispatch,
  *     though its org permissions would serve the space;
- *   - a pinned credential keeps its 403 (asserted by `spaces.test.ts`);
- *   - a confined credential addressing a PERSON in a share is refused before the directory is
- *     read, so a member and a non-member answer alike, and no personal space is provisioned.
+ *   - a pinned credential keeps its 403 (asserted by `spaces.test.ts`).
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spacePackages, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import {
-  addOrgMember,
-  createTestContext,
-  createTestUser,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { loopbackHeaders } from "../../helpers/loopback.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { orgPermissions, presetPermissions } from "../../../src/lib/permissions.ts";
-import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -160,61 +152,20 @@ describe("a space outside an allowlist", () => {
   });
 });
 
-describe("POST …/shares with a person target and a confined credential", () => {
-  const share = (userId: string) =>
-    app.request(`/api/packages/${AGENT}/shares`, {
+describe("POST …/shares with a confined credential", () => {
+  it("refuses a space outside its allowlist like a missing one", async () => {
+    const outside = await app.request(`/api/packages/${AGENT}/shares`, {
       method: "POST",
       headers: { ...allowlisted([homeId]), "Content-Type": "application/json" },
-      body: JSON.stringify({ target: { kind: "user", userId } }),
+      body: JSON.stringify({ target: { kind: "space", spaceId: otherId } }),
     });
-  const personalSpacesOf = (userId: string) =>
-    db
-      .select({ id: spaces.id })
-      .from(spaces)
-      .where(and(eq(spaces.orgId, ctx.orgId), eq(spaces.ownerUserId, userId)));
-
-  it("answers a member and a stranger identically, before any directory read", async () => {
-    const member = await createTestUser();
-    await addOrgMember(ctx.orgId, member.id, "member");
-    const stranger = await createTestUser();
-
-    const asMember = await share(member.id);
-    const asStranger = await share(stranger.id);
-    const unknown = await share("00000000-0000-4000-8000-000000000000");
-
-    expect(asMember.status, await asMember.clone().text()).toBe(403);
-    const bodies = await Promise.all([asMember, asStranger, unknown].map((res) => problemOf(res)));
-    expect(asStranger.status).toBe(403);
-    expect(unknown.status).toBe(403);
-    expect(bodies[1]).toEqual(bodies[0]);
-    expect(bodies[2]).toEqual(bodies[0]);
-  });
-
-  it("provisions no personal space, and places nothing in one already provisioned", async () => {
-    const member = await createTestUser();
-    await addOrgMember(ctx.orgId, member.id, "member");
-
-    expect((await share(member.id)).status).toBe(403);
-    expect(await personalSpacesOf(member.id)).toEqual([]);
-
-    await ensurePersonalSpaceFor(ctx.orgId, member.id);
-    expect((await share(member.id)).status).toBe(403);
+    const missing = await app.request(`/api/packages/${AGENT}/shares`, {
+      method: "POST",
+      headers: { ...allowlisted([homeId]), "Content-Type": "application/json" },
+      body: JSON.stringify({ target: { kind: "space", spaceId: MISSING_SPACE } }),
+    });
+    expect(outside.status).toBe(404);
+    expect(missing.status).toBe(404);
     expect(await placements(AGENT)).toEqual([homeId]);
-  });
-
-  it("DELETE …/shares/:userId answers a member and a stranger identically", async () => {
-    const member = await createTestUser();
-    await addOrgMember(ctx.orgId, member.id, "member");
-    const stranger = await createTestUser();
-    const del = (userId: string) =>
-      app.request(`/api/packages/${AGENT}/shares/${userId}`, {
-        method: "DELETE",
-        headers: allowlisted([homeId]),
-      });
-    const a = await del(member.id);
-    const b = await del(stranger.id);
-    expect(a.status).toBe(403);
-    expect(b.status).toBe(403);
-    expect(await problemOf(b)).toEqual(await problemOf(a));
   });
 });

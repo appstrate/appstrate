@@ -13,6 +13,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
 import { logger } from "../../../src/lib/logger.ts";
+import { ApiError } from "../../../src/lib/errors.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedRun, seedPublishedVersion } from "../../helpers/seed.ts";
@@ -73,6 +74,8 @@ async function setup(
   packageId: string,
   fields: Record<string, string>,
   delivery = BEARER_DELIVERY,
+  /** Valid by default: the 401 path is what the tests below exercise, not the pre-check. */
+  expiresInMs = 60 * 60_000,
 ): Promise<void> {
   await seedPackage({
     id: packageId,
@@ -116,7 +119,7 @@ async function setup(
     // oauth2 connections always pin their minting client by id; here the org's
     // custom per-space client registered just above.
     clientRef: customClient!.id,
-    expiresAt: new Date(Date.now() - 60_000),
+    expiresAt: new Date(Date.now() + expiresInMs),
   });
 }
 
@@ -159,7 +162,7 @@ async function setupSystemPinned(
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: ["openid", "email"],
     clientRef: systemId,
-    expiresAt: new Date(Date.now() - 60_000),
+    expiresAt: new Date(Date.now() + 60 * 60_000),
   });
   initSystemIntegrations([
     {
@@ -232,7 +235,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     expect(captured[1]!.authorization).toBe("Bearer fresh_token");
     expect(res.authRefreshed).toBeUndefined();
 
-    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    const tokenReqs = mockServer.tokenRequests();
     expect(tokenReqs).toHaveLength(1);
     const refreshBody = new URLSearchParams(tokenReqs[0]!.body);
     expect(refreshBody.get("grant_type")).toBe("refresh_token");
@@ -357,7 +360,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
 
     expect(res.status).toBe(200);
     expect(captured).toEqual(["Bearer stale_token", "Bearer fresh_token"]);
-    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    const tokenReqs = mockServer.tokenRequests();
     expect(new URLSearchParams(tokenReqs[0]!.body).get("refresh_token")).toBe("rt_valid");
   });
 
@@ -516,7 +519,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     expect(res.status).toBe(403);
     expect(upstreamCalls).toBe(1);
 
-    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    const tokenReqs = mockServer.tokenRequests();
     expect(tokenReqs).toHaveLength(0);
   });
 
@@ -562,7 +565,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     expect(res.authRefreshed).toBe(true);
     expect(upstreamCalls).toBe(1);
 
-    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    const tokenReqs = mockServer.tokenRequests();
     expect(tokenReqs).toHaveLength(1);
   });
 
@@ -616,7 +619,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
 
     // The refresh POST authenticated as the SYSTEM client (default auth method
     // client_secret_basic → Authorization: Basic base64(client_id:secret)).
-    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    const tokenReqs = mockServer.tokenRequests();
     expect(tokenReqs).toHaveLength(1);
     const authHeader = tokenReqs[0]!.headers?.authorization ?? "";
     const decoded = authHeader.startsWith("Basic ")
@@ -698,7 +701,7 @@ describe("proxyCall — an X-Run-Id run is re-checked on the 401 refresh", () =>
       headers: {},
       fetch: fakeFetch,
     });
-    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    const tokenReqs = mockServer.tokenRequests();
     return { status: res.status, upstreamCalls, refreshes: tokenReqs.length };
   }
 
@@ -846,5 +849,142 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
     expect(await clearedWithin(sentinel, 1000)).toBe(true);
 
     expect(await failures()).toBe(3);
+  });
+});
+
+describe("proxyCall — the pre-check refreshes an expiring credential before it is sent", () => {
+  const packageId = "@cprefreshorg/gmail-precheck";
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    mockServer.clearRequests();
+    mockServer.setTokenStatus(200);
+    mockServer.setTokenResponse({
+      access_token: "fresh_token",
+      token_type: "Bearer",
+      expires_in: 3600,
+    });
+    ctx = await createTestContext({ orgSlug: "cprefreshorg" });
+  });
+
+  /** The token sent upstream is recorded; the Nth upstream call answers `status(N)`. */
+  function wire(status: (n: number) => number = () => 200) {
+    const sent: Array<string | null> = [];
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      if (String(url).startsWith(mockServer.url)) return fetch(url, init);
+      sent.push(new Headers(init.headers).get("authorization"));
+      return new Response("{}", { status: status(sent.length) });
+    }) as unknown as typeof fetch;
+    return { sent, fakeFetch };
+  }
+
+  /** A credential already past its expiry, so the pre-check refreshes it. */
+  const setupExpired = () =>
+    setup(
+      ctx,
+      packageId,
+      { access_token: "stale_token", refresh_token: "rt_valid" },
+      BEARER_DELIVERY,
+      -60_000,
+    );
+
+  const call = (fakeFetch: typeof fetch) =>
+    proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      reach: "own",
+      integrationId: packageId,
+      method: "GET",
+      target: "https://gmail.googleapis.com/gmail/v1/x",
+      headers: {},
+      fetch: fakeFetch,
+    });
+
+  it("sends the refreshed token on the first call after expiry, with one exchange", async () => {
+    await setupExpired();
+    const { sent, fakeFetch } = wire();
+
+    const res = await call(fakeFetch);
+
+    expect(res.status).toBe(200);
+    expect(sent).toEqual(["Bearer fresh_token"]);
+    expect(mockServer.tokenRequests()).toHaveLength(1);
+  });
+
+  it("names the credential it just wrote, so a 401 on the refreshed token is refreshed again", async () => {
+    await setupExpired();
+    const { sent, fakeFetch } = wire((n) => (n === 1 ? 401 : 200));
+
+    const res = await call(fakeFetch);
+
+    // A rejection naming a revision other than the stored one is not refreshed: the replay and the
+    // second exchange only happen when the pre-check handed back the revision it wrote.
+    expect(res.status).toBe(200);
+    expect(sent).toEqual(["Bearer fresh_token", "Bearer fresh_token"]);
+    expect(mockServer.tokenRequests()).toHaveLength(2);
+  });
+
+  it("sends the stored token untouched while it is valid beyond the lead", async () => {
+    await setup(ctx, packageId, { access_token: "live_token", refresh_token: "rt_valid" });
+    const { sent, fakeFetch } = wire();
+
+    await call(fakeFetch);
+
+    expect(sent).toEqual(["Bearer live_token"]);
+    expect(mockServer.tokenRequests()).toHaveLength(0);
+  });
+
+  it("answers the flagged-connection 409 when the pre-check finds the refresh token revoked", async () => {
+    await setupExpired();
+    mockServer.setTokenStatus(400);
+    mockServer.setTokenResponse({ error: "invalid_grant" });
+    const { sent, fakeFetch } = wire();
+
+    const err = await call(fakeFetch).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(409);
+    expect((err as ApiError).code).toBe("needs_reconnection");
+    expect(sent).toEqual([]);
+    const [row] = await db.select().from(integrationConnections);
+    expect(row!.needsReconnection).toBe(true);
+  });
+
+  it("serves the stored credential when the exchange fails transiently", async () => {
+    await setupExpired();
+    mockServer.setTokenStatus(503);
+    mockServer.setTokenResponse({ error: "temporarily_unavailable" });
+    const { sent, fakeFetch } = wire();
+
+    const res = await call(fakeFetch);
+
+    expect(res.status).toBe(200);
+    expect(sent).toEqual(["Bearer stale_token"]);
+  });
+
+  it("serves the stored credential when the pre-check throws while the token is still valid", async () => {
+    // Inside the lead but not expired: a missing key makes the refresh throw (503), not return a verdict.
+    await setup(
+      ctx,
+      packageId,
+      { access_token: "live_token", refresh_token: "rt_valid" },
+      BEARER_DELIVERY,
+      2 * 60_000,
+    );
+    await db
+      .update(integrationOauthClients)
+      .set({ clientSecretEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .where(eq(integrationOauthClients.integrationId, packageId));
+    const { sent, fakeFetch } = wire();
+
+    const res = await call(fakeFetch);
+
+    expect(res.status).toBe(200);
+    expect(sent).toEqual(["Bearer live_token"]);
   });
 });

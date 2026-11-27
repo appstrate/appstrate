@@ -222,8 +222,11 @@ export function CataloguePreview({
   const description = (pinnedVersion ? detail?.description : undefined) || item.description;
 
   // Active with no row of its own: the organization's offer runs it here.
-  const viaOrganization = new Set(
-    item.placements.filter((entry) => entry.via === "organization").map((entry) => entry.space_id),
+  const fromOrganization = item.placements.filter((entry) => entry.via === "organization");
+  const viaOrganization = new Set(fromOrganization.map((entry) => entry.space_id));
+  // Placed by an `available` offer and not yet switched on here.
+  const availableFromOrganization = new Set(
+    fromOrganization.filter((entry) => entry.state === "none").map((entry) => entry.space_id),
   );
   const stateLabel = (row: SheetSpaceRow) => {
     const base =
@@ -231,14 +234,18 @@ export function CataloguePreview({
         ? viaOrganization.has(row.id)
           ? t("catalogue.sheet.viaOrganization")
           : t("catalogue.filter.active")
-        : row.state === "inactive"
-          ? [
-              t("catalogue.filter.inactive"),
-              row.sharedBy && t("catalogue.sheet.sharedBy", { name: row.sharedBy }),
-            ]
-              .filter(Boolean)
-              .join(" · ")
-          : t("catalogue.sheet.absent");
+        : availableFromOrganization.has(row.id)
+          ? t("catalogue.sheet.availableOrganization")
+          : row.state === "inactive"
+            ? [
+                t("catalogue.filter.inactive"),
+                row.sharedBy && t("catalogue.sheet.sharedBy", { name: row.sharedBy }),
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : row.refusal === "notOffered"
+              ? t("catalogue.sheet.notOffered")
+              : t("catalogue.sheet.absent");
     return row.home ? t("catalogue.sheet.atHome", { state: base }) : base;
   };
   const switchFor = (row: SheetSpaceRow) => (

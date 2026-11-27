@@ -7,12 +7,13 @@
  * they are about.
  *
  * And what of the composer's settings departs from its default, decided once: the desktop draws
- * it as chips, the phone as the dot on its "+".
+ * it as chips, the phone's panel names it.
  */
 
 import { createContext, createElement, useContext, useMemo, useState, type ReactNode } from "react";
 import { canComposeInlineRuns } from "../capabilities.ts";
 import { canResetSkills } from "./chat-skills.ts";
+import { useContextAllSpacesEnabled } from "./context-all-spaces-store.ts";
 import { useConversationScope } from "./conversation-scope.ts";
 import { useInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { usePackageAuthoringEnabled } from "./package-authoring-store.ts";
@@ -66,9 +67,11 @@ export function ComposerPanelProvider({ children }: { children: ReactNode }) {
 export const useComposerPanel = () => useContext(ComposerPanelContext);
 
 /** A composer setting off its default, and the panel level that changes it. */
-export type ComposerDeparture = "creationOff" | "inlineRunModel" | "limit" | "skills";
+export type ComposerDeparture =
+  "contextAllSpacesOff" | "creationOff" | "inlineRunModel" | "limit" | "skills";
 
 export const DEPARTURE_LEVEL: Record<ComposerDeparture, ComposerPanelLevel> = {
+  contextAllSpacesOff: "tools",
   creationOff: "tools",
   inlineRunModel: "models",
   limit: "tools",
@@ -77,11 +80,11 @@ export const DEPARTURE_LEVEL: Record<ComposerDeparture, ComposerPanelLevel> = {
 
 /**
  * The composer's settings that depart from their default, in the order the desktop's chips show
- * them. The phone's "+" wears a dot while the list is not empty.
+ * them.
  *
  * The space limit is counted whenever it is on, though a conversation started in a selected space
  * starts limited to it: it narrows where the agent acts, which nothing in a reply shows, so every
- * format says it — the desktop by its chip naming the space, the phone by the dot.
+ * format says it — the desktop by its chip naming the space, the phone by its panel.
  */
 export function useComposerDepartures(authorsPackages: boolean): readonly ComposerDeparture[] {
   const conversation = useConversationSkillsContext();
@@ -89,10 +92,13 @@ export function useComposerDepartures(authorsPackages: boolean): readonly Compos
   const creationMode = usePackageAuthoringEnabled();
   const inlineRunModel = useInlineRunModelEnabled();
   const offersInlineRunModel = useOffersInlineRunModel();
+  const contextAllSpaces = useContextAllSpacesEnabled();
+  const offersContextAllSpaces = useOffersContextAllSpaces();
   const departures: ComposerDeparture[] = [];
   if (authorsPackages && !creationMode) departures.push("creationOff");
   if (offersInlineRunModel && inlineRunModel) departures.push("inlineRunModel");
   if (scope.restricted) departures.push("limit");
+  if (offersContextAllSpaces && !contextAllSpaces) departures.push("contextAllSpacesOff");
   if (conversation !== null && canResetSkills(conversation.skills)) departures.push("skills");
   return departures;
 }
@@ -117,6 +123,16 @@ export function useComposerPanelHeading(): { title: string; back?: MenuBack } {
     };
   }
   return { title: t("composer.tools") };
+}
+
+/**
+ * The every-space context switch is offered: the conversation can act in more than one space. A
+ * limited one acts in its origin alone, which its context always details.
+ */
+export function useOffersContextAllSpaces(): boolean {
+  const { actingSpaceIds } = useChatHost();
+  const scope = useConversationScope();
+  return !scope.restricted && (actingSpaceIds?.length ?? 0) > 1;
 }
 
 /** The inline-run model switch is offered: composing an inline run needs creation mode too. */

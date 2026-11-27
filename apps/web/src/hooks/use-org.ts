@@ -11,11 +11,13 @@ import { exitViewAs, serializeViewAs, type ViewAsPersona } from "../stores/view-
 import { useAutoSelect } from "./use-auto-select";
 import {
   invalidateOrgDetail,
+  invalidatePackageCaches,
   invalidatePaths,
   orgKeys,
   removeOrgScopedQueries,
 } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
+import { memberPersonalSpaceRoleRequest } from "../lib/personal-space-role";
 import { viewAsRefusalCode } from "../lib/view-as-refusal";
 
 // Reactive hook for query key usage — re-renders when org changes
@@ -69,6 +71,12 @@ export function invalidateMemberWrite(queryClient: QueryClient): void {
   void invalidateIntegrationQueries(queryClient);
 }
 
+/** A personal-space role changes the permissions each space serves and the verdicts package rows carry. */
+export function invalidatePersonalSpaceRoleWrite(queryClient: QueryClient): void {
+  void invalidatePaths(queryClient, ["/api/spaces", "/api/spaces/{id}"]);
+  invalidatePackageCaches(queryClient);
+}
+
 export function useRemoveMember() {
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
@@ -84,6 +92,27 @@ export function useMemberDepartureImpact(orgId: string | undefined, userId: stri
     { params: { path: { orgId: orgId ?? "", userId: userId ?? "" } } },
     { enabled: !!orgId && !!userId, staleTime: 0, gcTime: 0, select: (envelope) => envelope.data },
   );
+}
+
+/** A member's own role in their personal space: PUT sets it, DELETE returns them to the org default. */
+export function useSetMemberPersonalSpaceRole() {
+  const qc = useQueryClient();
+  const onSuccess = () => {
+    void invalidateOrgDetail(qc);
+    invalidatePersonalSpaceRoleWrite(qc);
+  };
+  const path = "/api/orgs/{orgId}/members/{userId}/personal-space-role" as const;
+  const put = $api.useMutation("put", path, { onSuccess });
+  const clear = $api.useMutation("delete", path, { onSuccess });
+  return {
+    isPending: put.isPending || clear.isPending,
+    apply: (orgId: string, userId: string, selectValue: string) => {
+      const params = { path: { orgId, userId } };
+      const request = memberPersonalSpaceRoleRequest(selectValue);
+      if (request.method === "DELETE") clear.mutate({ params });
+      else put.mutate({ params, body: request.body });
+    },
+  };
 }
 
 export function useChangeMemberRole() {

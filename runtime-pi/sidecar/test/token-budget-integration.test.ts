@@ -37,6 +37,7 @@ import {
   wrapClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
+import { noJournal } from "./helpers/call-journal.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
@@ -122,6 +123,7 @@ async function buildTestApp(opts: {
         declaredUris: ["https://api.example.com/**"],
         fetchCredentials: defaultFetchCredentials,
         refreshCredentials: defaultFetchCredentials,
+        journal: noJournal,
       },
     ],
     { proxyDeps, blobStore, tokenBudget: opts.tokenBudget },
@@ -388,6 +390,7 @@ describe("token-aware spill — env-var configuration via buildSidecarRuntimeDep
             declaredUris: ["https://api.example.com/**"],
             fetchCredentials: defaultFetchCredentials,
             refreshCredentials: defaultFetchCredentials,
+            journal: noJournal,
           },
         ],
         runtimeDeps,

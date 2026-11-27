@@ -6,7 +6,7 @@ import { installFakeStorage } from "../../../test/fake-storage.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
-const { DefaultConnectionSettings } = await import("../default-connection-section.tsx");
+const { DefaultConnectionLine } = await import("../default-connection-section.tsx");
 const { render } = await import("../../../test/render.tsx");
 const i18nModule = await import("../../../i18n.ts");
 
@@ -22,16 +22,20 @@ const auths = [
     ],
   },
 ] as IntegrationDetailWire["auths"];
-function section(proxy: IntegrationDetailWire["proxy_connection"], active = true) {
+function section(
+  proxy: IntegrationDetailWire["proxy_connection"],
+  active = true,
+  editHref?: string,
+) {
   return render(
-    <DefaultConnectionSettings
-      packageId="@acme/gmail"
+    <DefaultConnectionLine
       detail={{ active, auths, proxy_connection: proxy }}
+      editHref={editHref}
     />,
   );
 }
 
-describe("DefaultConnectionSettings", () => {
+describe("DefaultConnectionLine", () => {
   it("names the imposed account, not the reader's own", () => {
     const html = section({ status: "ready", imposed: true, connection_id: "team" });
     expect(html).toContain(
@@ -58,9 +62,16 @@ describe("DefaultConnectionSettings", () => {
     ).toContain(t("integration.defaultConnection.direct.inactive"));
   });
 
-  it("holds the space default and the agent exceptions under the verdict", () => {
-    const html = section({ status: "none", imposed: false });
-    expect(html).toContain(t("integration.defaultConnection.direct.none"));
-    expect(html).toMatch(new RegExp(`<h3[^>]*>${t("integration.admin.exceptions.title")}</h3>`));
+  it("offers the way to Paramètres only when it is given one", () => {
+    const href = "/integrations/@acme/gmail?integrationSettings=access#settings";
+    const ready = { status: "ready", imposed: false, connection_id: "personal" } as const;
+    expect(section(ready)).toContain(
+      t("integration.defaultConnection.direct.account", { account: "Mon compte" }),
+    );
+    expect(section(ready)).not.toContain('data-testid="default-connection-edit"');
+    const html = section(ready, true, href);
+    expect(html).toContain('data-testid="default-connection-edit"');
+    expect(html).toContain(`href="${href}"`);
+    expect(html).toContain(t("integration.defaultConnection.edit"));
   });
 });

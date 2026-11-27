@@ -663,15 +663,20 @@ describe("Run read state (per-recipient)", () => {
       expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(1);
     });
 
-    it("counts run read state only — a share notification's `packageId` is not a run", async () => {
+    it("counts run read state only — a connection notice's `packageId` is not a run", async () => {
       await seedFinishedRun({ agentName: "shared", actor: { userId: ctx.user.id } });
       await db.insert(notifications).values({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         recipientType: "user",
         recipientId: ctx.user.id,
-        type: "package_shared",
-        payload: { packageId: "@notiforg/shared", package_type: "agent", shared_by_name: "A" },
+        type: "credential_needs_reconnection",
+        payload: {
+          packageId: "@notiforg/shared",
+          integration_name: "A",
+          label: "work",
+          cause: "refresh_token_revoked",
+        },
       });
 
       const counts = await countsByAgent(authHeaders(ctx));

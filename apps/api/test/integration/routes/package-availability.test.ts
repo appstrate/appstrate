@@ -34,7 +34,7 @@ interface Availability {
   via: string;
   state: string;
   shared_by: { user_id: string; name: string } | null;
-  offered_to_org: boolean;
+  org_offer: "available" | "on_by_default" | null;
   org_offerable: boolean;
   active_by_default: boolean;
 }
@@ -68,7 +68,7 @@ async function read(as: TestContext, type: Kind, id: string) {
       Kind,
       {
         id: string;
-        offered_to_org: boolean;
+        org_offer: "available" | "on_by_default" | null;
         org_offerable: boolean;
         active_by_default: boolean;
         placements: {
@@ -86,7 +86,7 @@ async function read(as: TestContext, type: Kind, id: string) {
     via: placement.via,
     state: placement.state,
     shared_by: placement.shared_by,
-    offered_to_org: entry.offered_to_org,
+    org_offer: entry.org_offer,
     org_offerable: entry.org_offerable,
     active_by_default: entry.active_by_default,
   });
@@ -131,7 +131,7 @@ for (const type of ["agent", "skill"] as const) {
       expect(a).toMatchObject({
         via: "home",
         shared_by: null,
-        offered_to_org: false,
+        org_offer: null,
         active_by_default: false,
       });
     });
@@ -147,9 +147,9 @@ for (const type of ["agent", "skill"] as const) {
     });
 
     it("reads `organization` and `active` for an offer with no row of the space's own", async () => {
-      await seedOrgOffer(ctx.orgId, offered);
+      await seedOrgOffer(ctx.orgId, offered, "on_by_default");
       const a = await read(ctx, type, offered);
-      expect(a).toMatchObject({ via: "organization", state: "active", offered_to_org: true });
+      expect(a).toMatchObject({ via: "organization", state: "active", org_offer: "on_by_default" });
     });
 
     it("reads `inactive` once the space has switched the package off", async () => {
@@ -159,15 +159,19 @@ for (const type of ["agent", "skill"] as const) {
     });
 
     it("gives an owner the offer verdict", async () => {
-      await seedOrgOffer(ctx.orgId, offered);
+      await seedOrgOffer(ctx.orgId, offered, "on_by_default");
       expect((await read(ctx, type, offered)).org_offerable).toBe(true);
     });
 
     it("refuses the offer switch to a member holding only the read grants", async () => {
       const reader = await memberHolding(ctx, [`${SEGMENT[type]}:read`, "spaces:read"]);
-      await seedOrgOffer(ctx.orgId, offered);
+      await seedOrgOffer(ctx.orgId, offered, "on_by_default");
       const a = await read(reader, type, offered);
-      expect(a).toMatchObject({ via: "organization", offered_to_org: true, org_offerable: false });
+      expect(a).toMatchObject({
+        via: "organization",
+        org_offer: "on_by_default",
+        org_offerable: false,
+      });
     });
 
     it("404s on a package homed in another space and placed nowhere else", async () => {

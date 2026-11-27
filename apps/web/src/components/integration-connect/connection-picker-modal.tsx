@@ -20,6 +20,9 @@ import type { ConnectionPicker, PickerProblem } from "./use-connection-picker";
 
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
+/** The server's verdict: the caller may renew this connection in place, healthy or not. */
+const canRenew = (conn: IntegrationCandidate) => conn.allowed_actions.includes("reconnect");
+
 /**
  * « Modifier » of a connections cell: the candidates as boxes (the imposed ones ticked and
  * locked), the problems of what is ticked with their way out, and one write on « Enregistrer »,
@@ -145,7 +148,7 @@ export function ConnectionPickerFields({
   upgradeTargetId: string | null;
   onUpgradeTarget: (id: string | null) => void;
 }) {
-  const { t } = useTranslation(["agents", "settings"]);
+  const { t } = useTranslation(["agents", "settings", "common"]);
   const {
     listedCandidates,
     imposedIds,
@@ -159,6 +162,10 @@ export function ConnectionPickerFields({
   const atCap = imposedIds.length + ticked.length >= MAX_CONNECTIONS_PER_INTEGRATION;
   // What « Enregistrer » would bind, and the stored members it drops (said until it does).
   const problems = picker.problemsOf([...ticked, ...picker.unavailableIds]);
+  // A dead row named in a problem line offers « Reconnecter » there, next to its replacement.
+  const renewedInProblems = new Set(
+    problems.flatMap((problem) => (problem.kind === "dead" ? [problem.conn.id] : [])),
+  );
   const typeLabel = (authKey: string): string | null => {
     const type = auths[authKey]?.type;
     return type ? t(`settings:integration.auth.type.${type}`) : null;
@@ -184,24 +191,40 @@ export function ConnectionPickerFields({
           {listedCandidates.map((c) => {
             const imposed = imposedIds.includes(c.id);
             const checked = imposed || ticked.includes(c.id);
+            const renew = canRenew(c) && !renewedInProblems.has(c.id);
             return (
-              <CheckboxField
-                key={c.id}
-                id={`member-pick-option-${c.id}`}
-                data-testid={`member-pick-option-${c.id}`}
-                label={c.label}
-                description={
-                  <CandidateLines
-                    conn={c}
-                    picker={picker}
-                    typeLabel={typeLabel}
-                    imposed={imposed}
-                  />
-                }
-                checked={checked}
-                disabled={busy || imposed || (!checked && atCap)}
-                onCheckedChange={() => onToggle(c.id)}
-              />
+              <div key={c.id} className="flex items-start justify-between gap-2">
+                <CheckboxField
+                  id={`member-pick-option-${c.id}`}
+                  data-testid={`member-pick-option-${c.id}`}
+                  label={c.label}
+                  description={
+                    <CandidateLines
+                      conn={c}
+                      picker={picker}
+                      typeLabel={typeLabel}
+                      imposed={imposed}
+                    />
+                  }
+                  checked={checked}
+                  disabled={busy || imposed || (!checked && atCap)}
+                  onCheckedChange={() => onToggle(c.id)}
+                />
+                {renew && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0"
+                    disabled={oauthPending}
+                    onClick={() => void picker.renewConnection(c)}
+                    data-testid={`member-pick-renew-${c.id}`}
+                  >
+                    <RefreshCw />
+                    {t("btn.reconnect", { ns: "common" })}
+                  </Button>
+                )}
+              </div>
             );
           })}
           {atCap && (
@@ -331,18 +354,20 @@ export function ProblemActions({
   upgradeTargetId: string | null;
   onUpgradeTarget: (id: string | null) => void;
 }) {
-  const { t } = useTranslation(["agents", "settings"]);
+  const { t } = useTranslation(["agents", "settings", "common"]);
   if (problem.kind !== "dead" && problem.kind !== "underScoped") return null;
   const { conn } = problem;
   const { oauthPending, busy } = picker;
   const canUseMethod = picker.authKeys.includes(conn.auth_key);
   const identified = displayAccountId(conn.account_id) !== null;
-  const canFix = picker.canConnect && conn.is_own && canUseMethod && identified;
+  const canFix = canRenew(conn);
   const imposed = picker.lockedConnectionIds.includes(conn.id);
   const canCreate = picker.canAddConnection && canUseMethod && !imposed;
+  // Renewing keeps every pin, share and schedule on the connection: it leads when the owner can.
   const create = canCreate && (
     <Button
       type="button"
+      variant={problem.kind === "dead" && canFix ? "outline" : "default"}
       size="sm"
       disabled={busy || oauthPending}
       onClick={() => onConnect(conn.auth_key, conn.id)}
@@ -371,20 +396,19 @@ export function ProblemActions({
             )}
           </p>
         )}
-        {create}
         {canFix && (
           <Button
             type="button"
-            variant="outline"
             size="sm"
             disabled={oauthPending}
             onClick={() => void picker.renewConnection(conn)}
             data-testid={`member-pick-renew-${conn.id}`}
           >
             <RefreshCw />
-            {t("detail.integrationMemberPicker.renew")}
+            {t("btn.reconnect", { ns: "common" })}
           </Button>
         )}
+        {create}
       </div>
     );
   }

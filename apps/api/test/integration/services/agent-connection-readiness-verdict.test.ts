@@ -19,7 +19,7 @@ import { activatePackage, deactivatePackage } from "../../../src/services/space-
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage } from "../../helpers/seed.ts";
-import { seedShares } from "../../helpers/connection-shares.ts";
+import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 import {
   httpHeaderDelivery,
   localIntegrationManifest,
@@ -80,14 +80,16 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
   }
 
   let seq = 0;
-  async function seedConnection(over: { authKey?: string; dead?: boolean } = {}) {
+  async function seedConnection(
+    over: { authKey?: string; dead?: boolean; accountId?: string } = {},
+  ) {
     seq += 1;
     const [row] = await db
       .insert(integrationConnections)
       .values({
         integrationId: INTEG,
         authKey: over.authKey ?? "primary",
-        accountId: `acct-${seq}`,
+        accountId: over.accountId ?? `acct-${seq}`,
         orgId: ctx.orgId,
         spaceId: null,
         originSpaceId: ctx.defaultSpaceId,
@@ -122,13 +124,15 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
     });
   }
 
-  async function entryOf(integrationId = INTEG) {
+  async function entryOf(integrationId = INTEG, caller: { canConnect?: boolean } = {}) {
     const readiness = await resolveAgentConnectionReadiness({
       scope,
       agentPackageId: AGENT,
-      principal: { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
-      canConnect: true,
-      canConfigureIntegrations: true,
+      caller: testCaller(
+        { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
+        { spaceId: scope.spaceId, governs: true, ...caller },
+      ),
+      orgRole: null,
       version: "draft",
     });
     return readiness.integrations.find((i) => i.integration_package_id === integrationId)!;
@@ -388,6 +392,29 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
         candidates: [],
       });
     });
+  });
+
+  it("candidates carry `reconnect` for the owner of an identified row, healthy or not", async () => {
+    await seedAgentDeclaring({ auth_key: "primary" });
+    const [healthy, dead, anonymous] = [
+      await seedConnection(),
+      await seedConnection({ dead: true }),
+      await seedConnection({ accountId: "default" }),
+    ];
+    const actionsBy = async (canConnect: boolean) =>
+      new Map(
+        (await entryOf(INTEG, { canConnect })).resolution.candidates.map((c) => [
+          c.id,
+          c.allowed_actions,
+        ]),
+      );
+    const actions = await actionsBy(true);
+    expect(actions.get(healthy)).toContain("reconnect");
+    expect(actions.get(dead)).toContain("reconnect");
+    // Nothing proves a renewal is the same account: the replacement flow stays the way out.
+    expect(actions.get(anonymous)).not.toContain("reconnect");
+    // Without `integrations:connect` the owner holds no action at all.
+    expect([...(await actionsBy(false)).values()].flat()).toEqual([]);
   });
 
   it("no verdict — a declared integration whose manifest cannot load → both null", async () => {

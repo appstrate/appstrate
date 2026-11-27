@@ -12,6 +12,8 @@ import { RunRow } from "../run-row.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 import { makeRun, STARTED_AT } from "../../test/run-fixture.ts";
+import { installFakeStorage } from "../../test/fake-storage.ts";
+import { memberSpaceClient, renderInSpace, testSpace } from "../../test/space-context.ts";
 import { formatDateField } from "../../lib/format-date.ts";
 
 await i18nReady;
@@ -89,9 +91,22 @@ describe("RunIdentity, whatever the context", () => {
 });
 
 describe("RunRow", () => {
+  installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
+  const rowIn = (grants: string[]) =>
+    renderInSpace(
+      <RunRow run={makeRun({ spaceId: "spc_a" })} agentName={AGENT.name} agent={AGENT.identity} />,
+      { overview: false, queryClient: memberSpaceClient([testSpace("spc_a", grants)]) },
+    );
+
   it("draws the same block, and leads to the run", () => {
-    const html = render(<RunRow run={makeRun()} agentName={AGENT.name} agent={AGENT.identity} />);
+    const html = rowIn(["runs:read"]);
     expect(html).toContain(`#42 · ${START}`);
     expect(html).toContain('href="/agents/@acme/reporter/runs/run_1"');
+  });
+
+  it("leads nowhere where the run's page does not open", () => {
+    const html = rowIn([]);
+    expect(html).toContain(`#42 · ${START}`);
+    expect(html).not.toContain("href=");
   });
 });

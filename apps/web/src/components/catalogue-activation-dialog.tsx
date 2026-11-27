@@ -11,6 +11,7 @@ import { PendingButton } from "@/components/app-ui/pending-button";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "./modal";
+import { ClosureList } from "./closure-list";
 import type { MissingDependency } from "../lib/activation-closure";
 
 export function ActivationClosureDialog({
@@ -56,18 +57,13 @@ export function ActivationClosureDialog({
     >
       <div className="flex flex-col gap-3 text-sm">
         <p>{t("catalogue.closureBody", { space: spaceName })}</p>
-        <ul className="border-border divide-border divide-y rounded-lg border">
-          {missing.map((entry) => (
-            <li key={entry.id} className="flex items-center justify-between gap-3 px-3 py-2">
-              <span className="truncate">{entry.name}</span>
-              {!entry.activatable && (
-                <span className="text-muted-foreground shrink-0 text-xs">
-                  {t("catalogue.closureNoRight")}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
+        <ClosureList
+          entries={missing.map((entry) => ({
+            id: entry.id,
+            name: entry.name,
+            note: entry.activatable ? undefined : t("catalogue.closureNoRight"),
+          }))}
+        />
         <p className="text-muted-foreground text-xs">{t("catalogue.closureCredentials")}</p>
       </div>
     </Modal>

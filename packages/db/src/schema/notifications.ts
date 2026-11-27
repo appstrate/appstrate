@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { RunStatus } from "@appstrate/core/run-status";
-import type { PackageType } from "./enums.ts";
+import type { CredentialDeathCause } from "@appstrate/core/sidecar-types";
 import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
 import { runs } from "./runs.ts";
@@ -21,7 +21,7 @@ import { runs } from "./runs.ts";
  * In-app notifications — one row per recipient (fan-out on write).
  *
  * The bell's feed: what needs the recipient's attention (a failed run, a
- * package shared with them), decided when the row is written. A run's read
+ * message from an agent, a dead connection), decided when the row is written. A run's read
  * state is `run_reads`, whether or not the run was notified.
  *
  * The recipient is modelled as a single polymorphic pair
@@ -50,7 +50,11 @@ import { runs } from "./runs.ts";
  * carries the few fields the bell needs to render without a join.
  */
 /** The notification kinds — `notifications.type`, held by the CHECK below. */
-export const notificationTypeValues = ["run_failed", "package_shared", "agent_message"] as const;
+export const notificationTypeValues = [
+  "run_failed",
+  "agent_message",
+  "credential_needs_reconnection",
+] as const;
 export type NotificationType = (typeof notificationTypeValues)[number];
 
 /**
@@ -68,13 +72,23 @@ export type RunAlertStatus = (typeof runAlertStatusValues)[number];
  */
 export interface NotificationPayloads {
   run_failed: { packageId: string | null; agent_name: string | null; status: RunAlertStatus };
-  package_shared: { packageId: string; package_type: PackageType; shared_by_name: string };
   /** Sent by the agent of `runId` from inside the run (the `notify` tool). */
   agent_message: {
     packageId: string | null;
     agent_name: string | null;
     title: string;
     message: string;
+  };
+  /**
+   * A credential of the recipient died. Integration connections only for now: a model-provider
+   * credential has no recipient decided yet (#1310), so it reaches the event and webhook alone.
+   */
+  credential_needs_reconnection: {
+    packageId: string;
+    /** The integration's display name stamped at write time. */
+    integration_name: string;
+    label: string;
+    cause: CredentialDeathCause;
   };
 }
 

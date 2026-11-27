@@ -265,7 +265,7 @@ function useDeletePackage(type: PackageType) {
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       if (type === "integration") void invalidateIntegrationQueries(qc);
       toast.success(t("packages.deleted"));
-      navigate("/");
+      navigate("/dashboard");
     },
   });
 }

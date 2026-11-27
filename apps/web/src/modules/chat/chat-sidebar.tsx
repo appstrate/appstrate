@@ -16,7 +16,6 @@ import {
 import { ChatSidebarSkeleton } from "../../components/loading-skeletons";
 import { ChatTitleCrumb } from "./chat-title-crumb";
 import { renderSpaces } from "./render-spaces";
-import { formatAge } from "../../lib/format-date";
 import { useChatCan, useChatFilter, useChatTransport, useChatTranslate } from "./use-chat-runtime";
 
 export function ChatSidebar() {
@@ -52,7 +51,6 @@ export function ChatSidebar() {
           t={t}
           can={can}
           renderSpaces={renderSpaces}
-          formatAge={formatAge}
         />
       </SelectConversationProvider>
     </ChatTransportProvider>

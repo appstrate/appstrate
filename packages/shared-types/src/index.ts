@@ -428,7 +428,7 @@ export type EnrichedSchedule = ScheduleWireDto & {
 // `Record<OrgRole, ReadonlySet<Permission>>` role-grant matrix in
 // `apps/api/src/lib/permissions.ts` (an exhaustive Record fails when a
 // role is added to one side and not the other).
-import type { OrgRole, SpaceAssignment } from "@appstrate/core/permissions";
+import type { OrgRole, SpaceAssignment, SpaceRolePreset } from "@appstrate/core/permissions";
 export type { OrgRole };
 
 /** Re-exported from core so the OpenAPI `SpaceAssignment` component can be
@@ -438,8 +438,9 @@ export type { OrgRole };
  */
 export type { SpaceAssignment };
 
-import type { orgSettingsReadSchema } from "@appstrate/core/permissions";
-export type OrgSettings = z.output<typeof orgSettingsReadSchema>;
+import type { orgSettingsWireSchema } from "@appstrate/core/permissions";
+/** The org settings as the API serves them (`GET /api/orgs/{orgId}/settings`). */
+export type OrgSettings = z.output<typeof orgSettingsWireSchema>;
 
 /**
  * Mirrored by an OpenAPI response schema, and reached only by name.
@@ -463,7 +464,14 @@ export interface OrganizationMember {
   email?: string;
   /** The spaces this member reaches, among those whose member list the caller may read. */
   spaces: OrganizationMemberSpace[];
+  /** Their own role in their personal space, overriding the org default; `null` = follows it. */
+  personal_space_role: SpaceRoleAssignment | null;
+  /** Their role there by the org default alone; both `null` without `members:change-role`. */
+  personal_space_default_role: SpaceMember["role"];
 }
+
+/** A role given to someone: one preset, or one custom role. */
+export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
 
 /** One space an org member reaches — the per-member projection of `GET /api/spaces/:id/members`. */
 export interface OrganizationMemberSpace {
@@ -636,7 +644,7 @@ export interface PackageAvailability {
   via: "home" | "shared" | "system" | "organization";
   state: "active" | "inactive" | "none";
   shared_by: { user_id: string; name: string } | null;
-  offered_to_org: boolean;
+  org_offer: "available" | "on_by_default" | null;
   org_offerable: boolean;
   /** A system package the deployment activates in every space: it takes no offer. */
   active_by_default: boolean;

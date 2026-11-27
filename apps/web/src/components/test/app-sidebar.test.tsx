@@ -86,6 +86,23 @@ describe("the sidebar in « Tous les espaces »", () => {
   });
 });
 
+describe("the sidebar of a role without the Studio", () => {
+  it("offers the Catalogue in the chat: an overlay stands over both products", () => {
+    const html = renderInSpace(
+      <SidebarProvider>
+        <AppSidebar product="chat" />
+      </SidebarProvider>,
+      {
+        overview: false,
+        queryClient: memberSpaceClient([
+          testSpace("spc_a", ["chat:read", "spaces:read"], "Atelier", { studio: false }),
+        ]),
+      },
+    );
+    expect(catalogueShown(html)).toBe(true);
+  });
+});
+
 describe("the drawer's head", () => {
   const render = (product: "studio" | "chat") =>
     renderInSpace(

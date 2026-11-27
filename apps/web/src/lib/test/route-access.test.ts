@@ -17,6 +17,7 @@ import {
   OVERLAY_PREFIXES,
   ROUTE_ACCESS,
   routeVerdict,
+  STUDIO_PERMISSION,
   type RoutePath,
 } from "../route-access.ts";
 import { routeOf } from "../route-match.ts";
@@ -66,10 +67,10 @@ describe("route declarations", () => {
     // the patterns above is a diff here. The settings rail, not the shell,
     // links every settings page.
     expect([...new Set(targets)].sort()).toEqual([
-      "/",
       "/agents",
       "/catalogue",
       "/chat",
+      "/dashboard",
       "/files",
       "/integrations",
       "/onboarding/create",
@@ -116,9 +117,31 @@ describe("route declarations", () => {
 describe("routeVerdict", () => {
   const none = () => false;
 
+  const studio =
+    (...held: string[]) =>
+    (p: string) =>
+      p === STUDIO_PERMISSION || held.includes(p);
+
   it("opens a gated route on any one of its permissions", () => {
-    expect(routeVerdict("/runs", (p) => p === "runs:read-all", {}, false)).toBe("granted");
-    expect(routeVerdict("/runs", none, {}, false)).toBe("denied");
+    expect(routeVerdict("/runs", studio("runs:read-all"), {}, false)).toBe("granted");
+    expect(routeVerdict("/runs", studio(), {}, false)).toBe("denied");
+  });
+
+  it("opens none of the Studio's screens without the Studio, whatever else is granted", () => {
+    const withoutStudio = (p: string) => p !== STUDIO_PERMISSION;
+    expect(routeVerdict("/runs", withoutStudio, {}, false)).toBe("denied");
+    expect(routeVerdict("/agents/:scope/:name", withoutStudio, {}, false)).toBe("denied");
+  });
+
+  it("keeps the chat, the overlays and the reader pages without the Studio", () => {
+    const withoutStudio = (p: string) => p !== STUDIO_PERMISSION;
+    expect(routeVerdict("/chat", withoutStudio, { chat: true }, false)).toBe("granted");
+    expect(routeVerdict("/workspace-settings/general", withoutStudio, {}, false)).toBe("granted");
+    expect(routeVerdict("/org-settings/members", withoutStudio, {}, false)).toBe("granted");
+    expect(routeVerdict("/catalogue/:type", withoutStudio, {}, false)).toBe("granted");
+    expect(routeVerdict("/files/:fileId", none, {}, false)).toBe("granted");
+    expect(routeVerdict("/notifications/:id", none, {}, false)).toBe("granted");
+    expect(routeVerdict("/", none, {}, false)).toBe("granted");
   });
 
   it("treats a route whose module is off as absent, whatever the grants", () => {
@@ -227,7 +250,7 @@ describe("routeOf", () => {
   });
 
   it("feeds routeVerdict, so a concrete link is judged by its route's gate", () => {
-    const runsOnly = (p: string) => p === "runs:read";
+    const runsOnly = (p: string) => p === STUDIO_PERMISSION || p === "runs:read";
     const verdict = (url: string) => routeVerdict(routeOf(url)!, runsOnly, {}, false);
     expect(verdict("/agents/@acme/triage/runs/run_1")).toBe("granted");
     expect(verdict("/agents/@acme/triage")).toBe("denied");

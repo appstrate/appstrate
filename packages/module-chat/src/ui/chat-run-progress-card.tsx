@@ -36,6 +36,7 @@ import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
 import { useChatHost, type ChatHost } from "./runtime-context.ts";
 import { CallSpace } from "./call-space.tsx";
+import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import {
   autoPresentFile,
   buildRunPageHref,
@@ -97,6 +98,7 @@ function StatusIcon({
 }
 
 export function ChatRunProgressCard({
+  toolCallId,
   runId,
   initialStatus,
   agentLabel,
@@ -108,6 +110,8 @@ export function ChatRunProgressCard({
   modalTitle,
   details,
 }: {
+  /** The call the card stands for: the context panel reveals it by this id. */
+  toolCallId: string;
   runId: string | undefined;
   initialStatus?: string;
   agentLabel?: string;
@@ -131,6 +135,7 @@ export function ChatRunProgressCard({
   modalTitle: React.ReactNode;
   details: React.ReactNode;
 }) {
+  const anchor = useRevealAnchor(toolCallId);
   const {
     logs,
     status,
@@ -225,7 +230,10 @@ export function ChatRunProgressCard({
   // the z-10 content escapes into the thread's stacking context and paints
   // over the sticky composer when the card scrolls behind it.
   return (
-    <div className="bg-card text-card-foreground relative isolate my-3 w-full rounded-lg border">
+    <div
+      {...anchor}
+      className={`bg-card text-card-foreground relative isolate my-3 w-full rounded-lg border ${REVEAL_RING_CLASS}`}
+    >
       {/* Full-card click target (opens the detail modal). Behind the content so
           the run-page link can re-enable pointer events for itself — avoids
           nesting interactive elements. */}

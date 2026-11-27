@@ -51,6 +51,14 @@ export const packageSourceValues = ["local", "system"] as const;
 export const packageSourceEnum = pgEnum("package_source", packageSourceValues);
 
 /**
+ * How a package offered to its organization (`org_package_offers.mode`) reaches the spaces that hold
+ * no row of their own: `available` is placed and switchable, `on_by_default` is placed and active.
+ * A text column guarded by a CHECK, not a `pgEnum`.
+ */
+export const orgOfferModeValues = ["available", "on_by_default"] as const;
+export type OrgOfferMode = (typeof orgOfferModeValues)[number];
+
+/**
  * Source discriminator for `llm_usage` rows. Each source has its own
  * dedup key: `proxy` rows dedup on `request_id`, `runner` rows dedup on
  * `(run_id, sequence)`.

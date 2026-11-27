@@ -4,9 +4,9 @@
  * Withdrawing a placement (#2045 R6, R7) — `DELETE /api/packages/{scope}/{name}/shares/{target}`
  * and the `keep_in_previous_home: false` move.
  *
- *   1. EITHER SIDE may withdraw: the home's `<type>:share`, or the target's
- *      deactivation grant (waived in the caller's own personal space). Somebody
- *      else's personal space named by id stays a 404.
+ *   1. EITHER SIDE may withdraw: the home's `<type>:share`, or the target
+ *      space's deactivation grant. The target is a space id; a personal space
+ *      holds no share, so any personal space id is a 404.
  *   2. The package's schedules in that space go OFF in the same transaction,
  *      and nowhere else.
  */
@@ -214,47 +214,23 @@ describe("conversation receipts for package placement", () => {
     expect(withdrawn.response.status).toBe(204);
     expect(withdrawn.ids).toEqual([teamId]);
   });
-
-  it("keeps another member's private space out of a user-addressed share and withdrawal", async () => {
-    const sent = await dispatch(shares, "POST", author.headers(homeId), {
-      target: { kind: "user", userId: recipient.userId },
-    });
-    expect(sent.response.status).toBe(201);
-    expect(sent.ids).toEqual([homeId]);
-    const withdrawn = await dispatch(
-      `${shares}/${recipient.userId}`,
-      "DELETE",
-      author.headers(homeId),
-    );
-    expect(withdrawn.response.status).toBe(204);
-    expect(withdrawn.ids).toEqual([homeId]);
-  });
 });
 
 describe("the recipient side may withdraw", () => {
   beforeEach(async () => {
-    expect(
-      (await share(author.headers(homeId), { kind: "user", userId: recipient.userId })).status,
-    ).toBe(201);
     expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(201);
   });
 
-  it("from their own personal space, by its id, with no grant at all", async () => {
-    const res = await withdraw(recipient.headers(), recipient.personalSpaceId);
-    expect(res.status, await res.clone().text()).toBe(204);
-    expect(await placedIn(recipient.personalSpaceId)).toBe(false);
-    // Audited as its owner, like a `user` target: the space id stays out of the trail.
-    expect((await unsharedAudit()).after).toEqual({
-      recipientUserId: recipient.userId,
-      targetKind: "user",
-      authority: "recipient",
-    });
-  });
-
-  it("from their own personal space, by their user id", async () => {
-    const res = await withdraw(recipient.headers(), recipient.userId);
-    expect(res.status, await res.clone().text()).toBe(204);
-    expect(await placedIn(recipient.personalSpaceId)).toBe(false);
+  it("answers 404 for a personal space named by id: it holds no share, whoever asks", async () => {
+    const stranger = await principal();
+    for (const [label, caller] of [
+      ["their own", recipient.headers()],
+      ["somebody else's, with `share` in the home", author.headers(homeId)],
+      ["somebody else's, unreachable package", stranger.headers()],
+    ] as const) {
+      const res = await withdraw(caller, recipient.personalSpaceId);
+      expect({ label, status: res.status }).toEqual({ label, status: 404 });
+    }
   });
 
   it("from a team space where they hold the deactivation grant, without `share` in the home", async () => {
@@ -284,19 +260,12 @@ describe("the recipient side may withdraw", () => {
   }
 
   it("refuses a team builder withdrawing from a space where they hold nothing (403)", async () => {
-    await expectProblem(await withdraw(teamBuilder.headers(teamId), recipient.userId), 403);
-    expect(await placedIn(recipient.personalSpaceId)).toBe(true);
-  });
-
-  it("answers 404 for somebody else's personal space named by id, even with `share` in the home", async () => {
-    await expectProblem(await withdraw(author.headers(homeId), recipient.personalSpaceId), 404);
-    expect(await placedIn(recipient.personalSpaceId)).toBe(true);
-  });
-
-  it("answers 404 for somebody else's personal space to a caller who cannot reach the package", async () => {
-    const stranger = await principal();
-    await expectProblem(await withdraw(stranger.headers(), recipient.personalSpaceId), 404);
-    expect(await placedIn(recipient.personalSpaceId)).toBe(true);
+    const elsewhere = (
+      await seedSpace({ orgId: ctx.orgId, name: "Elsewhere", visibility: "closed" })
+    ).id;
+    expect((await share(owner(), { kind: "space", spaceId: elsewhere })).status).toBe(201);
+    await expectProblem(await withdraw(teamBuilder.headers(teamId), elsewhere), 403);
+    expect(await placedIn(elsewhere)).toBe(true);
   });
 
   it("answers 404 for the home itself — the home placement is not withdrawn here", async () => {
@@ -320,7 +289,6 @@ describe("the recipient side learns nothing about an unreachable package", () =>
     app.request(`/api/packages/${packageId}/shares/${target}`, { method: "DELETE", headers });
 
   for (const [label, caller, target] of [
-    ["their own user id", () => recipient, () => recipient.userId],
     ["their own personal space", () => recipient, () => recipient.personalSpaceId],
     ["a space where they may deactivate", () => teamBuilder, () => teamId],
   ] as const) {

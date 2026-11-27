@@ -4,7 +4,7 @@
  * `connection_calls` holds the principal kinds `Actor` admits: `actor_type` is
  * `user` or `end_user`, `owner_type` the same or NULL (the connection was gone
  * at call time); a row without a connection (an unauthenticated integration) has
- * no owner either.
+ * no owner either. A row names a run or a chat conversation, never both.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -29,6 +29,8 @@ describe("connection_calls — principal kinds", () => {
     actorType?: string;
     ownerType?: string | null;
     connectionId?: string | null;
+    runId?: string | null;
+    chatSessionId?: string | null;
   }) =>
     db.insert(connectionCalls).values({
       orgId: ctx.orgId,
@@ -40,6 +42,8 @@ describe("connection_calls — principal kinds", () => {
       actorType: fields.actorType ?? "user",
       actorId: ctx.user.id,
       authMethod: "session",
+      runId: fields.runId ?? null,
+      chatSessionId: fields.chatSessionId ?? null,
       method: "GET",
       host: "api.example.com",
       outcome: "200",
@@ -77,6 +81,17 @@ describe("connection_calls — principal kinds", () => {
   it("refuses an owner_type outside user / end_user", async () => {
     expect(await refusal(call({ ownerType: "org" }))).toContain(
       "connection_calls_owner_type_valid",
+    );
+  });
+
+  it("accepts a row naming a run or a chat conversation", async () => {
+    await call({ runId: "run_1" });
+    await call({ chatSessionId: "chat_1" });
+  });
+
+  it("refuses a row naming both a run and a chat conversation", async () => {
+    expect(await refusal(call({ runId: "run_1", chatSessionId: "chat_1" }))).toContain(
+      "connection_calls_one_context",
     );
   });
 });

@@ -81,10 +81,11 @@ column connection_calls.actor_id text not null
 column connection_calls.actor_type text not null
 column connection_calls.api_key_id text
 column connection_calls.auth_method text not null
+column connection_calls.chat_session_id text
 column connection_calls.connection_id uuid
 column connection_calls.created_at timestamp with time zone not null default now()
 column connection_calls.duration_ms integer not null
-column connection_calls.host text not null
+column connection_calls.host text
 column connection_calls.id bigint not null default nextval('connection_calls_id_seq'::regclass)
 column connection_calls.integration_id text not null
 column connection_calls.method text not null
@@ -154,6 +155,7 @@ column integration_connections.needs_reconnection boolean not null default false
 column integration_connections.oauth_resource text
 column integration_connections.org_id uuid not null
 column integration_connections.origin_space_id text
+column integration_connections.refresh_checked_at timestamp with time zone
 column integration_connections.refresh_failure_count integer not null default 0
 column integration_connections.scopes_granted text[] not null default '{}'::text[]
 column integration_connections.share_all_spaces boolean not null default false
@@ -228,9 +230,11 @@ column model_provider_credentials.credentials_encrypted text not null
 column model_provider_credentials.expires_at timestamp with time zone
 column model_provider_credentials.id uuid not null default gen_random_uuid()
 column model_provider_credentials.label text not null
+column model_provider_credentials.needs_reconnection boolean not null default false
 column model_provider_credentials.org_id uuid not null
 column model_provider_credentials.owner_user_id text
 column model_provider_credentials.provider_id text not null
+column model_provider_credentials.refresh_checked_at timestamp with time zone
 column model_provider_credentials.refresh_failure_count integer not null default 0
 column model_provider_credentials.updated_at timestamp with time zone not null default now()
 column model_provider_pairings.consumed_at timestamp with time zone
@@ -411,6 +415,7 @@ column org_models.reasoning boolean
 column org_models.source text not null default 'custom'::text
 column org_models.updated_at timestamp with time zone not null default now()
 column org_package_offers.created_at timestamp with time zone not null default now()
+column org_package_offers.mode text not null
 column org_package_offers.offered_by text
 column org_package_offers.org_id uuid not null
 column org_package_offers.package_id text not null
@@ -435,6 +440,7 @@ column organizations.icon text
 column organizations.id uuid not null default gen_random_uuid()
 column organizations.name text not null
 column organizations.org_settings jsonb not null default '{}'::jsonb
+column organizations.personal_space_role_id text
 column organizations.slug text not null
 column organizations.updated_at timestamp with time zone not null default now()
 column package_dist_tags.package_id text not null
@@ -620,6 +626,7 @@ column space_roles.key text not null
 column space_roles.name text not null
 column space_roles.org_id uuid not null
 column space_roles.permissions text[] not null default '{}'::text[]
+column space_roles.shows_studio boolean not null default true
 column space_roles.updated_at timestamp with time zone not null default now()
 column space_smtp_configs.created_at timestamp with time zone not null default now()
 column space_smtp_configs.from_address text not null
@@ -738,6 +745,7 @@ constraint cli_refresh_tokens cli_refresh_tokens_token_hash_unique UNIQUE (token
 constraint cli_refresh_tokens cli_refresh_tokens_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint connection_calls connection_calls_actor_type_valid CHECK ((actor_type = ANY (ARRAY['user'::text, 'end_user'::text])))
 constraint connection_calls connection_calls_no_connection_no_owner CHECK (((connection_id IS NOT NULL) OR ((owner_type IS NULL) AND (owner_id IS NULL))))
+constraint connection_calls connection_calls_one_context CHECK (((run_id IS NULL) OR (chat_session_id IS NULL)))
 constraint connection_calls connection_calls_owner_type_valid CHECK (((owner_type IS NULL) OR (owner_type = ANY (ARRAY['user'::text, 'end_user'::text]))))
 constraint connection_calls connection_calls_pkey PRIMARY KEY (id)
 constraint device_codes device_codes_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
@@ -833,7 +841,7 @@ constraint notifications notifications_pkey PRIMARY KEY (id)
 constraint notifications notifications_recipient_type_valid CHECK ((recipient_type = ANY (ARRAY['user'::text, 'end_user'::text])))
 constraint notifications notifications_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 constraint notifications notifications_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
-constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'package_shared'::text, 'agent_message'::text])))
+constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'agent_message'::text, 'credential_needs_reconnection'::text]))) NOT VALID
 constraint oauth_access_tokens oauth_access_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_access_tokens oauth_access_tokens_pkey PRIMARY KEY (id)
 constraint oauth_access_tokens oauth_access_tokens_refresh_id_oauth_refresh_tokens_id_fk FOREIGN KEY (refresh_id) REFERENCES oauth_refresh_tokens(id) ON DELETE CASCADE
@@ -883,6 +891,7 @@ constraint org_models org_models_credential_provider_fk FOREIGN KEY (credential_
 constraint org_models org_models_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_models org_models_pkey PRIMARY KEY (id)
 constraint org_models org_models_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
+constraint org_package_offers org_package_offers_mode_known CHECK ((mode = ANY (ARRAY['available'::text, 'on_by_default'::text])))
 constraint org_package_offers org_package_offers_offered_by_user_id_fk FOREIGN KEY (offered_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint org_package_offers org_package_offers_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_package_offers org_package_offers_org_id_package_id_pk PRIMARY KEY (org_id, package_id)
@@ -893,6 +902,9 @@ constraint org_proxies org_proxies_pkey PRIMARY KEY (id)
 constraint org_proxies org_proxies_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
 constraint organizations organizations_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint organizations organizations_icon_length CHECK ((octet_length(icon) <= 16384))
+constraint organizations organizations_personal_space_role_fk FOREIGN KEY (personal_space_role_id, id) REFERENCES space_roles(id, org_id) ON DELETE RESTRICT
+constraint organizations organizations_personal_space_role_one_shape CHECK (((personal_space_role_id IS NULL) OR (NOT (org_settings ? 'personal_space_role'::text))))
+constraint organizations organizations_personal_space_role_preset CHECK (((NOT (org_settings ? 'personal_space_role'::text)) OR COALESCE(((org_settings ->> 'personal_space_role'::text) = ANY (ARRAY['admin'::text, 'builder'::text, 'operator'::text, 'runner'::text, 'viewer'::text])), false)))
 constraint organizations organizations_pkey PRIMARY KEY (id)
 constraint organizations organizations_slug_unique UNIQUE (slug)
 constraint package_dist_tags package_dist_tags_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
@@ -1040,7 +1052,9 @@ index CREATE INDEX idx_chat_sessions_org_user ON public.chat_sessions USING btre
 index CREATE INDEX idx_chat_sessions_space_user ON public.chat_sessions USING btree (space_id, user_id)
 index CREATE INDEX idx_cli_refresh_tokens_family ON public.cli_refresh_tokens USING btree (family_id)
 index CREATE INDEX idx_cli_refresh_tokens_user ON public.cli_refresh_tokens USING btree (user_id)
+index CREATE INDEX idx_connection_calls_chat_session_id ON public.connection_calls USING btree (chat_session_id, id) WHERE (chat_session_id IS NOT NULL)
 index CREATE INDEX idx_connection_calls_connection_id ON public.connection_calls USING btree (connection_id, id)
+index CREATE INDEX idx_connection_calls_run_id ON public.connection_calls USING btree (run_id, id) WHERE (run_id IS NOT NULL)
 index CREATE INDEX idx_connection_calls_space_id ON public.connection_calls USING btree (space_id, id)
 index CREATE INDEX idx_end_users_org_id ON public.end_users USING btree (org_id)
 index CREATE INDEX idx_end_users_space_id ON public.end_users USING btree (space_id)
@@ -1056,6 +1070,7 @@ index CREATE INDEX idx_integration_conn_end_user ON public.integration_connectio
 index CREATE INDEX idx_integration_conn_lookup ON public.integration_connections USING btree (integration_package_id, space_id, auth_key)
 index CREATE INDEX idx_integration_conn_org ON public.integration_connections USING btree (org_id, integration_package_id, auth_key)
 index CREATE INDEX idx_integration_conn_origin ON public.integration_connections USING btree (origin_space_id) WHERE (origin_space_id IS NOT NULL)
+index CREATE INDEX idx_integration_conn_refresh_due ON public.integration_connections USING btree (expires_at) WHERE ((client_ref IS NOT NULL) AND (NOT needs_reconnection) AND (expires_at IS NOT NULL))
 index CREATE INDEX idx_integration_conn_space ON public.integration_connections USING btree (space_id) WHERE (space_id IS NOT NULL)
 index CREATE INDEX idx_integration_conn_user ON public.integration_connections USING btree (user_id) WHERE (user_id IS NOT NULL)
 index CREATE INDEX idx_integration_oauth_clients_lookup ON public.integration_oauth_clients USING btree (space_id, integration_package_id, auth_key)
@@ -1109,6 +1124,7 @@ index CREATE INDEX idx_org_package_offers_package_id ON public.org_package_offer
 index CREATE INDEX idx_org_proxies_created_by ON public.org_proxies USING btree (created_by)
 index CREATE INDEX idx_org_proxies_org_id ON public.org_proxies USING btree (org_id)
 index CREATE INDEX idx_organizations_created_by ON public.organizations USING btree (created_by)
+index CREATE INDEX idx_organizations_personal_space_role_id ON public.organizations USING btree (personal_space_role_id)
 index CREATE INDEX idx_package_schedules_org_id ON public.package_schedules USING btree (org_id)
 index CREATE INDEX idx_package_schedules_space_id ON public.package_schedules USING btree (space_id)
 index CREATE INDEX idx_package_shares_shared_by ON public.package_shares USING btree (shared_by)
@@ -1262,6 +1278,7 @@ index CREATE UNIQUE INDEX uq_org_invitations_pending ON public.org_invitations U
 index CREATE UNIQUE INDEX uq_org_models_unaliased_binding ON public.org_models USING btree (org_id, credential_id, model_id) WHERE (aliased = false)
 index CREATE UNIQUE INDEX uq_org_models_unbound ON public.org_models USING btree (org_id, provider_id, model_id) WHERE (credential_id IS NULL)
 index CREATE UNIQUE INDEX uq_runs_id_org_id ON public.runs USING btree (id, org_id)
+index CREATE UNIQUE INDEX uq_space_roles_id_org_id ON public.space_roles USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_spaces_id_org_id ON public.spaces USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_spaces_org_owner ON public.spaces USING btree (org_id, owner_user_id) WHERE (owner_user_id IS NOT NULL)
 index CREATE UNIQUE INDEX uq_storage_deletion_jobs_pending ON public.storage_deletion_jobs USING btree (bucket, storage_key) WHERE (completed_at IS NULL)

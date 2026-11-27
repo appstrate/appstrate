@@ -30,7 +30,7 @@
  *   9. DELETE /pairing/<bogus>  → 204 idempotent (wrong-id is silent)
  *
  * The refresh-mid-run path lives in
- * `apps/api/test/integration/services/model-providers-refresh-worker.test.ts`
+ * `apps/api/test/integration/services/credential-refresh-sweep.test.ts`
  * — it needs to fake the upstream `/token` endpoint, which only the
  * in-process mock OAuth server can do. The badge surface is covered by
  * `oauth-ui.ui.spec.ts`. This file is the only place that proves the

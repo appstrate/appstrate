@@ -14,11 +14,12 @@ import {
   primaryKey,
   check,
   foreignKey,
+  type PgTableExtraConfigValue,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
-import { spaces } from "./spaces.ts";
+import { spaceRoles, spaces } from "./spaces.ts";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 
@@ -37,6 +38,9 @@ export const organizations = pgTable(
     // colour needs no migration. Null derives the colour from the id.
     color: text("color"),
     orgSettings: jsonb("org_settings").notNull().default({}),
+    // The org's personal-space default when it is a custom role (RBAC spec §3.6); a preset one is
+    // `org_settings.personal_space_role`, never both, neither = `admin`.
+    personalSpaceRoleId: text("personal_space_role_id"),
     // The org's default model — a flat model id that may name a system model
     // (SYSTEM_PROVIDER_KEYS) OR an `org_models.id` (UUID). A pointer rather than
     // an `is_default` boolean on `org_models` so the default can point at a
@@ -80,11 +84,27 @@ export const organizations = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [
+  // Annotated: the composite FK below references `space_roles`, which references this table.
+  (table): PgTableExtraConfigValue[] => [
     // Referencing-side index for the `user` SET NULL action (0048).
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_organizations_created_by").on(table.createdBy),
+    // RESTRICT like `space_members.custom_role_id`; composite so the role is one of this org's.
+    foreignKey({
+      name: "organizations_personal_space_role_fk",
+      columns: [table.personalSpaceRoleId, table.id],
+      foreignColumns: [spaceRoles.id, spaceRoles.orgId],
+    }).onDelete("restrict"),
+    index("idx_organizations_personal_space_role_id").on(table.personalSpaceRoleId),
+    check(
+      "organizations_personal_space_role_one_shape",
+      sql`personal_space_role_id IS NULL OR NOT (org_settings ? 'personal_space_role')`,
+    ),
+    check(
+      "organizations_personal_space_role_preset",
+      sql`NOT (org_settings ? 'personal_space_role') OR COALESCE(org_settings ->> 'personal_space_role' IN ('admin', 'builder', 'operator', 'runner', 'viewer'), false)`,
+    ),
     // Backstop behind the application's icon validation: the largest image icon
     // (`data:image/webp;base64,` + 12 000 bytes encoded) is 16 023 bytes, its PNG
     // twin one byte shorter.
@@ -279,16 +299,14 @@ export const modelProviderCredentials = pgTable(
     baseUrlOverride: text("base_url_override"),
     /**
      * Denormalized OAuth token expiry — duplicates `blob.expiresAt` from the
-     * encrypted blob to enable an efficient SQL filter in the refresh worker
-     * scan (avoids decrypting every row to test a single timestamp).
+     * encrypted blob to enable an efficient SQL filter in the background
+     * refresh sweep (avoids decrypting every row to test a single timestamp).
      *
      * The blob remains the source of truth; this column is a cache, written
-     * by `updateOAuthCredentialTokens` / `createOAuthCredential`. NULL for
-     * api-key credentials, OAuth blobs without an upstream-supplied expiry,
-     * and (transiently) for rows that pre-date the column — those self-cure
-     * on the next refresh. The worker's predicate (`expires_at IS NULL OR
-     * expires_at < cutoff`) covers the backfill window without a one-shot
-     * decrypt-and-rewrite migration.
+     * by `updateBlob` (whenever the next blob's expiry differs) and by
+     * `createOAuthCredential` / `reconnectOAuthCredential`. NULL for api-key
+     * credentials and OAuth blobs without an upstream-supplied expiry. The
+     * background refresh sweep reads it: a row with a NULL expiry is never due.
      */
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     // Consecutive token-refresh failures classified as *transient* (network /
@@ -305,6 +323,19 @@ export const modelProviderCredentials = pgTable(
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
     // An api-key credential reuses the counter for consecutive upstream 401s,
     // reset by any successful call (`clearModelCredentialRejections`).
+    /**
+     * When the background refresh sweep last visited the row, or a credential was last written
+     * (`createOAuthCredential`, `reconnectOAuthCredential`, `updateOAuthCredentialTokens`). NULL =
+     * never visited, so due. The sweep's due predicate reads it: one visit per row per day.
+     */
+    refreshCheckedAt: timestamp("refresh_checked_at", { withTimezone: true }),
+    /**
+     * Denormalized `blob.needsReconnection`, mirrored by `updateBlob` whenever the next blob's flag
+     * differs and written false by create / reconnect. The blob stays the source of truth. The
+     * background refresh sweep skips a flagged row without decrypting it. A row flagged in its blob
+     * before this column existed is brought in line by `scripts/migration/0058`.
+     */
+    needsReconnection: boolean("needs_reconnection").notNull().default(false),
     // NOTE — there is deliberately no `last_refresh_failure_at` here. There was
     // one, written beside `refresh_failure_count` on every transient refresh
     // failure and read by nothing: no route, no DTO, no OpenAPI field, no

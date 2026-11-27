@@ -17,3 +17,24 @@ export function mcpFetch(
     { preconnect: fetch.preconnect },
   );
 }
+
+/** The methods whose exchange is an MCP operation itself, not its session's handshake or upkeep. */
+const OPERATION_METHODS: ReadonlySet<unknown> = new Set(["tools/call", "tools/list"]);
+
+/**
+ * Whether a request body is a JSON-RPC request of an operation (`tools/call`, a `tools/list`
+ * page): the exchanges a call journal records as one row each.
+ */
+export function isMcpOperationExchange(body: RequestInit["body"]): boolean {
+  if (typeof body !== "string") return false;
+  try {
+    const message: unknown = JSON.parse(body);
+    return (
+      typeof message === "object" &&
+      message !== null &&
+      OPERATION_METHODS.has((message as { method?: unknown }).method)
+    );
+  } catch {
+    return false;
+  }
+}

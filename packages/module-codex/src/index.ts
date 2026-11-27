@@ -153,7 +153,7 @@ const codexHooks: ModelProviderHooks = {
       };
     }
     // Prefer the credential row's `expiresAt` (the platform's source of
-    // truth, kept fresh by the refresh worker); fall back to the token's
+    // truth, kept fresh by the credential refresh); fall back to the token's
     // own `exp` claim (seconds → ms) when the row carries none. The shared
     // gate rejects an absent expiry (unverifiable offline) and a past one.
     const expiresAtMs = ctx.expiresAt ?? (claims.exp !== undefined ? claims.exp * 1000 : undefined);

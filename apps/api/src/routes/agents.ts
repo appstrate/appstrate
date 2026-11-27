@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { connectionPrincipal } from "../lib/connection-principal.ts";
+import { spaceListCaller } from "./integrations.ts";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
@@ -437,16 +437,15 @@ export function createAgentsRouter() {
       // the same question of the same package, and each one resolving the
       // caller's spaces for itself is two full space walks per badge.
       await assertDraftSelectorAllowed(c, agent.id, c.req.query("version"));
+      // The connection lists' own caller, so the picker cannot promise what they refuse.
+      const [caller, orgRole] = spaceListCaller(c);
       return c.json(
         await resolveAgentConnectionReadiness({
           scope,
           dependencyOverrides,
           agentPackageId: agent.id,
-          principal: connectionPrincipal(c),
-          // Drive `can_add_connection` with the connect routes' own guard and
-          // exemption, so the badge cannot promise what the mutation refuses.
-          canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
-          canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
+          caller,
+          orgRole,
           // The ROUTER decides which definition readiness judges, and it is
           // EXACTLY the one the detail page rendered: an explicit selector (a
           // `draft` one only for a caller who may write the agent), else
