@@ -72,7 +72,8 @@ export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
     >
       {/* From `md` up; a phone has the "+". The popover anchors to the whole row. */}
       <PopoverAnchor asChild>
-        <div className="flex min-w-0 items-center gap-1.5 max-md:hidden">
+        {/* A chip's X hands the focus on within this row (`chip-focus.ts`). */}
+        <div className="flex min-w-0 items-center gap-1.5 max-md:hidden" data-chip-row="">
           <AttachButton />
           <PopoverTrigger asChild>
             <Button

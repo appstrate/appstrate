@@ -2,7 +2,8 @@
 
 /**
  * A composer setting that departs from the default, shown as a chip whose X restores the default.
- * With `open`, the chip's body is itself a button (it reopens the setting's picker).
+ * With `open`, the chip's body is itself a button (it reopens the setting's picker). Inside a
+ * chip row (`data-chip-row`), the X hands the focus on to its neighbour as the chip leaves.
  */
 
 import type { ComponentProps, ReactNode } from "react";
@@ -10,6 +11,7 @@ import { XIcon } from "lucide-react";
 import { badgeVariants } from "@appstrate/ui/components/badge";
 import { NOTE_TEXT_CLASS } from "./phone-text.ts";
 import { cn } from "@appstrate/ui/cn";
+import { handOverFocusOnRemoval } from "./chip-focus.ts";
 import { CHIP_REMOVE_CLASS } from "./touch-targets.ts";
 
 const ICON = "[&>svg]:size-3.5 [&>svg]:shrink-0";
@@ -44,6 +46,7 @@ export function RemovableChip({
     // `rest` carries what a Radix trigger (`asChild`) passes: ref, handlers, data-state.
     <span
       {...rest}
+      data-removable-chip=""
       className={cn(
         badgeVariants({ variant: "secondary" }),
         "text-muted-foreground desktop-pointer:h-7 h-10 max-w-56 min-w-0 shrink gap-1.5 py-0 pl-2.5 font-normal",
@@ -72,7 +75,10 @@ export function RemovableChip({
           type="button"
           aria-label={removeLabel}
           disabled={removeDisabled}
-          onClick={onRemove}
+          onClick={(event) => {
+            handOverFocusOnRemoval(event.currentTarget);
+            onRemove();
+          }}
           className={cn(
             "hover:bg-foreground/10 desktop-pointer:size-5 rounded-full disabled:pointer-events-none disabled:opacity-50",
             CHIP_REMOVE_CLASS,
