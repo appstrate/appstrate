@@ -108,7 +108,7 @@ export function ConnectionsTable({
       return {
         authKey: connection.auth_key,
         methodReady,
-        canRenew: methodReady && (connection.allowed_actions ?? []).includes("reconnect"),
+        canRenew: (connection.allowed_actions ?? []).includes("reconnect"),
         canCreate: methodReady && grants(connection.rowSpaceId, "integrations:connect") && !blocked,
       };
     },

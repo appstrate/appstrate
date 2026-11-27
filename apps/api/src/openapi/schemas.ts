@@ -43,6 +43,7 @@ import {
   OVERRIDE_REFUSAL_CODES,
 } from "@appstrate/core/integration";
 import {
+  connectionActionsSchema,
   connectionIdSetJsonSchema,
   connectionScopeSchema,
   originSpaceIdSchema,
@@ -2734,6 +2735,7 @@ export const schemas = {
             "missing_scopes",
             "scope_fit",
             "is_own",
+            "allowed_actions",
           ],
           properties: {
             id: { type: "string", format: "uuid" },
@@ -2763,6 +2765,7 @@ export const schemas = {
                 "The granted scopes against the agent's selection. `exact` — covers it and grants nothing beyond it and the auth's `default_scopes`. `unjudged` — covers it on an auth that is not `oauth2` or declares no `scope_catalog`, so breadth is unknown. `broader` — covers it and grants more. `missing` — does not cover it (`missing_scopes`).",
             },
             is_own: { type: "boolean" },
+            allowed_actions: connectionActionsSchema,
           },
         },
       },

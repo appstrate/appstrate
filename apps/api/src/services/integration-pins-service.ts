@@ -44,7 +44,7 @@ import { getPackageDisplayName } from "../lib/package-helpers.ts";
 import { conflict, notFound } from "../lib/errors.ts";
 import type { Tx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
+import type { OrgRole } from "@appstrate/core/permissions";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
@@ -55,9 +55,10 @@ import {
   connectionReach,
   connectionViewOf,
   loadConnectionShares,
+  listedConnectionActions,
   listReachableConnections,
 } from "./integration-connections.ts";
-import { sharedInSpace, usableInSpace } from "./connection-reach.ts";
+import { sharedInSpace, usableInSpace, type ConnectionCaller } from "./connection-reach.ts";
 import {
   additionsOpen,
   resolveConnectionsForRun,
@@ -732,8 +733,10 @@ export async function listMemberPinsForAgent(
 export async function listAccessibleConnections(
   scope: SpaceScope,
   integrationId: string,
-  principal: ConnectionPrincipal,
+  caller: ConnectionCaller,
+  orgRole: OrgRole | null,
 ): Promise<AccessibleIntegrationConnection[]> {
+  const { principal } = caller;
   const rows = await listReachableConnections(
     { spaceId: scope.spaceId, actor: principal.actor },
     "usable",
@@ -744,6 +747,7 @@ export async function listAccessibleConnections(
     db,
     rows.map((row) => row.id),
   );
+  const actionsOf = await listedConnectionActions(scope, integrationId, caller, orgRole);
   return rows.map((row): AccessibleIntegrationConnection => {
     return {
       id: row.id,
@@ -759,6 +763,7 @@ export async function listAccessibleConnections(
         connectionViewOf(principal, row, scope.spaceId, shares.get(row.id) ?? []),
       ),
       needs_reconnection: row.needsReconnection,
+      allowed_actions: actionsOf(row, shares.get(row.id) ?? []),
     };
   });
 }
@@ -788,9 +793,8 @@ async function resolveAgentIntegrationPick(args: {
   scope: SpaceScope;
   agentPackageId: string;
   integrationId: string;
-  principal: ConnectionPrincipal;
-  canConnect: boolean;
-  canConfigureIntegrations: boolean;
+  caller: ConnectionCaller;
+  orgRole: OrgRole | null;
   /** The manifest of the version under inspection — never re-read from the package. */
   agentManifest: Record<string, unknown>;
   /** Agent-level `includeInert: true` cascade, resolved once for every integration. */
@@ -802,17 +806,8 @@ async function resolveAgentIntegrationPick(args: {
   /** Shared integration-manifest memo, so N integrations cost N fetches, not N². */
   manifestCache: IntegrationManifestCache;
 }): Promise<IntegrationAgentResolution> {
-  const {
-    scope,
-    agentPackageId,
-    integrationId,
-    principal,
-    canConnect,
-    canConfigureIntegrations,
-    agentManifest,
-    resolution,
-  } = args;
-  const actor = principal.actor;
+  const { scope, agentPackageId, integrationId, caller, orgRole, agentManifest, resolution } = args;
+  const actor = caller.principal.actor;
 
   const agentEntry = parseManifestIntegrations(agentManifest).find((e) => e.id === integrationId);
 
@@ -848,7 +843,7 @@ async function resolveAgentIntegrationPick(args: {
   const memberPins = args.memberPins;
 
   const [candidatesRaw, adminPins, blocked, orgDefault] = await Promise.all([
-    listAccessibleConnections(scope, integrationId, principal),
+    listAccessibleConnections(scope, integrationId, caller, orgRole),
     listIntegrationPins(scope, integrationId),
     isUserConnectionCreationBlocked(scope.spaceId, integrationId),
     getOrgDefault(scope, integrationId),
@@ -909,7 +904,7 @@ async function resolveAgentIntegrationPick(args: {
       adminPin?.allow_additional_connections ?? false,
       orgDefault?.enforce ?? false,
     ),
-    can_add_connection: canConnect && (canConfigureIntegrations || !blocked),
+    can_add_connection: caller.canConnect && (caller.governs || !blocked),
     candidates,
   };
 }
@@ -957,10 +952,9 @@ export async function resolveAgentConnectionReadiness(args: {
   dependencyOverrides?: Record<string, string> | null;
   scope: SpaceScope;
   agentPackageId: string;
-  principal: ConnectionPrincipal;
-  /** `integrations:connect` and `integrations:configure`: together they drive `can_add_connection`. */
-  canConnect: boolean;
-  canConfigureIntegrations: boolean;
+  /** Its `canConnect` and `governs` drive `can_add_connection`; its actions, the candidates'. */
+  caller: ConnectionCaller;
+  orgRole: OrgRole | null;
   /**
    * Version selector (`draft` | `published` | concrete semver | dist-tag) —
    * REQUIRED, and the router's decision, not this service's. Who may name
@@ -972,8 +966,8 @@ export async function resolveAgentConnectionReadiness(args: {
    */
   version: string;
 }): Promise<AgentConnectionReadiness> {
-  const { scope, agentPackageId, principal, canConnect, canConfigureIntegrations, version } = args;
-  const actor = principal.actor;
+  const { scope, agentPackageId, caller, orgRole, version } = args;
+  const actor = caller.principal.actor;
   const loaded = await getPackage(agentPackageId, scope.orgId);
   if (!loaded) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
   // The SPACE's own switch, asked here and reported rather than thrown. The run
@@ -1060,9 +1054,8 @@ export async function resolveAgentConnectionReadiness(args: {
         scope,
         agentPackageId: agent.id,
         integrationId: e.id,
-        principal,
-        canConnect,
-        canConfigureIntegrations,
+        caller,
+        orgRole,
         agentManifest,
         resolution: pickResolution,
         runWarnings: runResolution.warnings,
