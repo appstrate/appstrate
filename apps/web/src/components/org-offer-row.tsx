@@ -72,8 +72,7 @@ function OrgOfferChoiceRow({
  * Offers a package to the whole organization, in one of two modes, or withdraws the offer. A
  * package the deployment already activates everywhere takes no offer: a plain row says so. Shown
  * to a reader who may change the offer (`org_offerable`) and, read-only, to anyone else when it
- * stands. Withdrawing, or going from « activé par défaut » to « disponible », asks first: spaces
- * without a row of their own lose the package (and its schedules) until they switch it on again.
+ * stands. Withdrawing or downgrading asks first (see `offerChangeStep`).
  */
 export function OrgOfferRow({
   item,

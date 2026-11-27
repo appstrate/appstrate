@@ -9,11 +9,6 @@ import { useInvalidatePackageActivation } from "./use-library";
 
 export type PackageShare = components["schemas"]["PackageShare"];
 
-/** The `target` a revoke addresses: the space id. */
-export function shareTargetHandle(share: PackageShare): string {
-  return share.target.spaceId;
-}
-
 /** A package's audience; only a holder of the type's `share` in its home space may read it, so `enabled` avoids a 403 for anyone else. */
 export function usePackageShares(packageId: string, enabled: boolean) {
   const scope = useOrgOnlyScope();
@@ -47,7 +42,7 @@ function useRevokePackageShare() {
   return $api.useMutation("delete", "/api/packages/{scope}/{name}/shares/{target}");
 }
 
-/** Removes a package from one target (the sharer withdrawing an audience, or the recipient leaving a placement): the server drops the row, its settings, and disables its schedules there. `target` is a `shareTargetHandle`. */
+/** Removes a package from one target (the sharer withdrawing an audience, or the recipient leaving a placement): the server drops the row, its settings, and disables its schedules there. `target` is the space id. */
 export function useRemovePackageFromSpace() {
   const revoke = useRevokePackageShare();
   const invalidate = useInvalidateShares();

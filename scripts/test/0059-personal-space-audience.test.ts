@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Script `0059` against the test database: a personal space keeps only what its owner's
- * organization offers. An enabled integration with no offer is kept by an `available` offer; every
- * other organization-package row outside its home with no offer is deleted (its enabled schedules
- * disabled `package_removed`) and audited; the home package, an offered package, a system package
- * and team-space rows are untouched; `package_shared` notifications are deleted and the kind CHECK
- * is validated; a dry run writes nothing; a second `--apply` writes nothing; the boot guard's count
- * reaches 0.
- */
+/** Script `0059` against the test database: a personal space keeps only what its organization offers. */
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { and, eq, sql } from "drizzle-orm";
@@ -41,7 +33,7 @@ const OFFERED = "@mig0059/offered";
 const INT_ON = "@mig0059/int-on";
 const INT_OFF = "@mig0059/int-off";
 const SYSTEM = "@mig0059/system";
-const ENTRY = PENDING_DATA_SCRIPTS.find((e) => e.after === "0118")!;
+const ENTRY = PENDING_DATA_SCRIPTS.find((e) => e.after === "0117")!;
 
 let ctx: TestContext;
 let home: string;
@@ -62,7 +54,7 @@ const rowsOf = async (spaceId: string) =>
     .map((r) => r.packageId)
     .sort();
 
-/** The kind CHECK is NOT VALID after drizzle 0118 and still refuses the retired kind: re-state it to seed one. */
+/** The kind CHECK is NOT VALID after drizzle 0117 and still refuses the retired kind: re-state it to seed one. */
 async function insertRetiredNotification() {
   await db.execute(sql`ALTER TABLE notifications DROP CONSTRAINT notifications_type_valid`);
   await db.insert(notifications).values({
@@ -162,7 +154,6 @@ describe("0059 — personal spaces take the org offer only", () => {
       [INT_OFF, false, 0],
       [TEAM_AGENT, true, 1],
     ]);
-    expect(applied.schedulesDisabled).toBe(1);
     expect(applied.notificationsDeleted).toBe(1);
     expect(lines).toContain(
       "offers created: 1, rows deleted: 2, schedules disabled: 1, notifications deleted: 1",
@@ -223,7 +214,6 @@ describe("0059 — personal spaces take the org offer only", () => {
     expect(again).toEqual({
       offers: [],
       deleted: [],
-      schedulesDisabled: 0,
       notificationsDeleted: 0,
     });
     expect((await db.select().from(auditEvents)).length).toBe(auditCount);

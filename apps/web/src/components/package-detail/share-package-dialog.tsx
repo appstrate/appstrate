@@ -21,6 +21,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../../api/errors";
+import type { components } from "../../api/schema";
 import { Modal } from "../modal";
 import { splitPackageRef } from "../../lib/package-paths";
 import { useSpaces } from "../../hooks/use-spaces";
@@ -30,7 +31,6 @@ import { isSpaceEnterable } from "../../lib/space-lists";
 import { useCreateVersion, usePackageDetail } from "../../hooks/use-packages";
 import { useIntegrationsById } from "../../hooks/use-integrations";
 import {
-  shareTargetHandle,
   type PackageShare,
   usePackageShares,
   useSharePackage,
@@ -40,7 +40,7 @@ import { TextSkeleton } from "../loading-skeletons";
 import { RemoveFromSpaceConfirm, type RemovalTarget } from "../remove-from-space-confirm";
 
 /** The subject of one share: a team space. */
-type ShareTarget = { kind: "space"; spaceId: string };
+type ShareTarget = components["schemas"]["ShareTarget"];
 
 /** The URL parameter that opens the dialog; its value is the package. */
 export const SHARE_PARAM = "share";
@@ -92,7 +92,10 @@ export function SharePackageDialog({
   const [removing, setRemoving] = useState<RemovalTarget | null>(null);
 
   /** Subjects already holding a placement, so the picker does not propose a no-op. */
-  const placed = useMemo(() => new Set((shares ?? []).map(shareTargetHandle)), [shares]);
+  const placed = useMemo(
+    () => new Set((shares ?? []).map((entry) => entry.target.spaceId)),
+    [shares],
+  );
 
   // Team spaces only, neither the package's home (already has it) nor one that already holds a placement.
   const destinations = (spaces ?? []).filter(
@@ -103,7 +106,6 @@ export function SharePackageDialog({
       !placed.has(candidate.id),
   );
 
-  const selected: ShareTarget | null = target ? { kind: "space", spaceId: target } : null;
   // The members page edits the CURRENT space, so reaching the home's means standing in it.
   const manageMembers =
     homeSpaceId && home && isSpaceEnterable(home) ? () => switchSpace(homeSpaceId) : undefined;
@@ -126,10 +128,6 @@ export function SharePackageDialog({
           // A missing step, performed by the next panel; every other refusal is a toast.
           if (error instanceof ApiError && error.code === "package_has_no_version") {
             setNeedsVersion(subject);
-            return;
-          }
-          if (error instanceof ApiError && error.code === "share_target_is_home") {
-            toast.error(t("packages.shareTargetIsHome"));
             return;
           }
           toastError(error);
@@ -186,14 +184,14 @@ export function SharePackageDialog({
           <PendingButton
             type="button"
             pending={share.isPending}
-            disabled={!selected}
-            onClick={() => selected && submit(selected)}
+            disabled={!target}
+            onClick={() => submit({ kind: "space", spaceId: target })}
           >
             {t("packages.shareSubmit")}
           </PendingButton>
         </div>
         <p className="text-muted-foreground text-sm">
-          {selected ? t("packages.shareSpaceHint") : t("packages.shareUseHint")}
+          {target ? t("packages.shareSpaceHint") : t("packages.shareUseHint")}
         </p>
         {/* Said BEFORE the share: integrations are judged where the run starts, so a recipient without them gets an unexplained `integration_not_active`. */}
         {declaredIntegrations.length > 0 && (
@@ -240,7 +238,7 @@ export function SharePackageDialog({
             setRemoving({
               packageId,
               name: splitPackageRef(packageId).name,
-              target: shareTargetHandle(entry),
+              target: entry.target.spaceId,
               targetLabel: entry.target.name,
             })
           }
@@ -281,7 +279,7 @@ export function ShareList({
         <ul className="divide-y">
           {(shares ?? []).map((entry) => (
             <li
-              key={shareTargetHandle(entry)}
+              key={entry.target.spaceId}
               className="flex items-center justify-between gap-2 py-1.5"
             >
               <span className="flex min-w-0 items-center gap-2 text-sm">

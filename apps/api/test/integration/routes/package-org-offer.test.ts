@@ -101,7 +101,6 @@ const offerRaw = (headers: Headers, packageId: string, body: unknown) =>
   });
 const offer = (headers: Headers, packageId: string, mode = "on_by_default") =>
   offerRaw(headers, packageId, { mode });
-const truncateOffers = () => db.delete(orgPackageOffers);
 const withdraw = (headers: Headers, packageId: string) =>
   app.request(`/api/packages/${packageId}/org-offer`, { method: "DELETE", headers });
 
@@ -297,19 +296,17 @@ describe("the offer mode", () => {
     expect(await offerRows(AGENT)).toHaveLength(0);
   });
 
-  it("records each mode and answers it", async () => {
-    for (const mode of ["available", "on_by_default"] as const) {
-      await truncateOffers();
-      const res = await offer(admin.headers(teamId), AGENT, mode);
-      expect(res.status, await res.clone().text()).toBe(200);
-      expect(await res.json()).toEqual({
-        object: "package_org_offer",
-        packageId: AGENT,
-        org_offer: mode,
-        warnings: [],
-      });
-      expect((await offerRows(AGENT))[0]?.mode).toBe(mode);
-    }
+  it("records an `available` offer and answers it", async () => {
+    // The `on_by_default` answer shape is pinned by the first test.
+    const res = await offer(admin.headers(teamId), AGENT, "available");
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await res.json()).toEqual({
+      object: "package_org_offer",
+      packageId: AGENT,
+      org_offer: "available",
+      warnings: [],
+    });
+    expect((await offerRows(AGENT))[0]?.mode).toBe("available");
   });
 
   it("audits a mode change with its previous mode and leaves a repeat in the same mode silent", async () => {

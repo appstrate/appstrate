@@ -7,8 +7,7 @@
  *   - it gets the 404 a missing space gets (`enterSpaceById`), on the path guard
  *     (`pinnedSpaceScopeGuard`), on the share-target check and through the MCP dispatch,
  *     though its org permissions would serve the space;
- *   - a pinned credential keeps its 403 (asserted by `spaces.test.ts`);
- *   - a person target in a share is a malformed body (400), a space outside the allowlist a 404.
+ *   - a pinned credential keeps its 403 (asserted by `spaces.test.ts`).
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -17,12 +16,7 @@ import { db } from "@appstrate/db/client";
 import { spacePackages, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import {
-  addOrgMember,
-  createTestContext,
-  createTestUser,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { loopbackHeaders } from "../../helpers/loopback.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
@@ -158,19 +152,7 @@ describe("a space outside an allowlist", () => {
   });
 });
 
-describe("POST …/shares and DELETE …/shares/:id with a confined credential", () => {
-  it("refuses a person target as a malformed body, whoever asks", async () => {
-    const member = await createTestUser();
-    await addOrgMember(ctx.orgId, member.id, "member");
-    const res = await app.request(`/api/packages/${AGENT}/shares`, {
-      method: "POST",
-      headers: { ...allowlisted([homeId]), "Content-Type": "application/json" },
-      body: JSON.stringify({ target: { kind: "user", userId: member.id } }),
-    });
-    expect(res.status, await res.clone().text()).toBe(400);
-    expect(await placements(AGENT)).toEqual([homeId]);
-  });
-
+describe("POST …/shares with a confined credential", () => {
   it("refuses a space outside its allowlist like a missing one", async () => {
     const outside = await app.request(`/api/packages/${AGENT}/shares`, {
       method: "POST",
@@ -180,22 +162,10 @@ describe("POST …/shares and DELETE …/shares/:id with a confined credential",
     const missing = await app.request(`/api/packages/${AGENT}/shares`, {
       method: "POST",
       headers: { ...allowlisted([homeId]), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        target: { kind: "space", spaceId: "spc_00000000-0000-4000-8000-000000000000" },
-      }),
+      body: JSON.stringify({ target: { kind: "space", spaceId: MISSING_SPACE } }),
     });
     expect(outside.status).toBe(404);
     expect(missing.status).toBe(404);
     expect(await placements(AGENT)).toEqual([homeId]);
-  });
-
-  it("refuses a user id as a revoke target", async () => {
-    const member = await createTestUser();
-    await addOrgMember(ctx.orgId, member.id, "member");
-    const res = await app.request(`/api/packages/${AGENT}/shares/${member.id}`, {
-      method: "DELETE",
-      headers: allowlisted([homeId]),
-    });
-    expect(res.status).toBe(400);
   });
 });

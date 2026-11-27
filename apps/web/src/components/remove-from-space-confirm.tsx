@@ -8,7 +8,7 @@ import { ConfirmModal } from "./confirm-modal";
 export interface RemovalTarget {
   packageId: string;
   name: string;
-  /** A `shareTargetHandle`: a space id. */
+  /** A space id. */
   target: string;
   /** What the dialog calls the target (a space name). */
   targetLabel: string;

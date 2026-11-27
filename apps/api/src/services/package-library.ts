@@ -284,18 +284,16 @@ async function readPackageLibrary(
 
     const orgOffer = orgOffers.get(row.id) ?? null;
     const activeByDefault = isActiveEverywhereByDefault({ id: row.id, type, source: row.source });
+    const offered = { ...row, type, orgOffer };
     const placements: Placement[] = [];
     for (const space of readable) {
       const placementRow = rowsBySpace?.get(space);
-      const via = placementVia({ ...row, orgOffer }, space, placementRow);
+      const via = placementVia(offered, space, placementRow);
       if (via === null) continue;
       placements.push({
         space_id: space,
         via,
-        state: placementState(
-          { id: row.id, type, source: row.source, orgOffer },
-          placementRow?.enabled,
-        ),
+        state: placementState(offered, placementRow?.enabled),
         shared_by: via === "shared" ? (placementRow?.sharedBy ?? null) : null,
       });
     }
@@ -307,24 +305,17 @@ async function readPackageLibrary(
     if (placements.length === 0 && !(proposable && home.home_shareable)) continue;
 
     const placedIn = new Set(placements.map((placement) => placement.space_id));
-    const verdictPackage = {
-      id: row.id,
-      type,
-      source: row.source,
-      homeSpaceId: row.homeSpaceId,
-      orgOffer,
-    };
     const activation = visibleSpaces.map((space): ActivationCell => ({
       spaceId: space.id,
       activate: activationVerdict(
-        verdictPackage,
+        offered,
         space,
         placedIn.has(space.id),
         home.home_shareable,
         true,
       ),
       deactivate: activationVerdict(
-        verdictPackage,
+        offered,
         space,
         placedIn.has(space.id),
         home.home_shareable,

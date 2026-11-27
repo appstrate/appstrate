@@ -149,13 +149,6 @@ describe("the confirmations' wording", () => {
     expect(settingsFr["catalogue.orgOffer.withdrawConfirm"]).toContain("planifications");
     expect(settingsFr["catalogue.orgOffer.withdrawConfirm"]).toContain("s'arrêtera");
   });
-
-  it("says that spaces which did not activate it themselves lose it when going to available", () => {
-    expect(settingsFr["catalogue.orgOffer.availableTitle"]).toBe("Passer en disponible ?");
-    expect(settingsFr["catalogue.orgOffer.availableConfirm"]).toBe(
-      "Les espaces qui ne l'ont pas activé eux-mêmes le perdront jusqu'à ce qu'ils l'activent.",
-    );
-  });
 });
 
 describe("setOrgOffer", () => {

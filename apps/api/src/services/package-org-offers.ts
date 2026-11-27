@@ -43,8 +43,8 @@ async function loadOfferablePackage(
 
 /**
  * Offer `packageId` to the organization in `mode`. Idempotent: a repeat in the
- * same mode leaves the offer as it is (`created: false, changed: false`); a
- * different mode rewrites it (`changed: true`, with the `previousMode`). A package homed in a space needs a
+ * same mode leaves the offer as it is; a different mode rewrites it (`previousMode` is
+ * the mode it had). A package homed in a space needs a
  * published version (`409 package_has_no_version`): outside its home it runs
  * its latest published version. A system package has no home and no such rule.
  */
@@ -54,11 +54,11 @@ export async function offerPackageToOrg(params: {
   offeredBy: string;
   mode: OrgOfferMode;
   authorizeHome: PlacementAuthority["authorizeHome"];
-}): Promise<{ created: boolean; changed: boolean; previousMode: OrgOfferMode | null }> {
+}): Promise<{ created: boolean; previousMode: OrgOfferMode | null }> {
   const { orgId, packageId, offeredBy, mode, authorizeHome } = params;
   return db.transaction(async (tx) => {
     const pkg = await loadOfferablePackage(tx, orgId, packageId, authorizeHome);
-    if (pkg.orgOffer === mode) return { created: false, changed: false, previousMode: mode };
+    if (pkg.orgOffer === mode) return { created: false, previousMode: mode };
     if (isActiveEverywhereByDefault(pkg)) {
       throw invalidRequest(
         `'${packageId}' is already active in every space by the deployment's default: an offer would change nothing.`,
@@ -69,7 +69,7 @@ export async function offerPackageToOrg(params: {
         .update(orgPackageOffers)
         .set({ mode })
         .where(and(eq(orgPackageOffers.orgId, orgId), eq(orgPackageOffers.packageId, packageId)));
-      return { created: false, changed: true, previousMode: pkg.orgOffer };
+      return { created: false, previousMode: pkg.orgOffer };
     }
     if (pkg.homeSpaceId !== null) await assertHasPublishedVersion(pkg.id, tx);
     const inserted = await tx
@@ -77,7 +77,7 @@ export async function offerPackageToOrg(params: {
       .values({ orgId, packageId, offeredBy, mode })
       .onConflictDoNothing()
       .returning({ packageId: orgPackageOffers.packageId });
-    return { created: inserted.length > 0, changed: false, previousMode: null };
+    return { created: inserted.length > 0, previousMode: null };
   });
 }
 
@@ -96,8 +96,7 @@ export async function offerClosureWarnings(
   if (type !== "agent") return [];
   const manifest = await selectorlessAgentManifest(packageId);
   if (!manifest) return [];
-  const [used] = await usedIntegrations([manifest], orgId);
-  const declared = used!;
+  const declared = (await usedIntegrations([manifest], orgId))[0]!;
   const offers = await listOrgOffers(
     orgId,
     declared.map((req) => req.integrationId),

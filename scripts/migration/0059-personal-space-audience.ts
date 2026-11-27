@@ -7,40 +7,18 @@
  *   set -a && . ./.env && set +a && \
  *     bun scripts/migration/0059-personal-space-audience.ts [--apply]
  *
- * Run after drizzle `0118` has applied and BEFORE the app starts (`pg_dump` first): the platform
- * refuses to boot while a personal space still holds a package the organization never offered, or a
- * `package_shared` notification remains (the `0059` entry of `PENDING_DATA_SCRIPTS`,
+ * Run after drizzle `0117` has applied and BEFORE the app starts (`pg_dump` first): the platform
+ * refuses to boot until it has run (the `0059` entry of `PENDING_DATA_SCRIPTS`,
  * `apps/api/src/lib/boot-guards/pending-data-scripts.ts`). Dry run by default (rolled back);
  * `--apply` commits; a second `--apply` writes nothing. Targets `DATABASE_URL` or
  * `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`).
  *
- * A personal space (`spaces.owner_user_id IS NOT NULL`) runs what it creates, what the organization
- * offers (`org_package_offers`, either mode) and what the deployment runs by default. The rows
- * below are an ORGANIZATION package's `space_packages` rows in a personal space outside the
- * package's home, with no offer to that organization. System packages (`org_id IS NULL`) are left
- * alone. One transaction, in this order:
- *
- *  (a) An ENABLED row of an integration: the owner switched on an integration the organization
- *      never offered. The user's access is kept by offering it: one `org_package_offers` row per
- *      (organization, package), `mode = 'available'`, `offered_by` NULL (no admin decided it),
- *      `ON CONFLICT DO NOTHING`, audited `package.offered_to_org` by the `system` actor. The row
- *      stays as it is.
- *  (b) Every other row, whatever its type or `enabled`: deleted as `withdrawPlacement` deletes
- *      (`services/package-placement.ts`). Each enabled schedule of the package in that space is
- *      disabled first (`disabled_reason = 'package_removed'`, `next_run_at` cleared, `updated_at`
- *      advanced as `nextScheduleVersion` does), then the row is deleted and audited
- *      `package.unshared` by the `system` actor. The script runs with the platform stopped: no
- *      queue job is removed here, and `initScheduleWorker` (`services/scheduler.ts`) syncs only
- *      `enabled` schedules into the queue at boot, so a disabled schedule is not re-armed; a job
- *      left in Redis removes itself at its next fire (`disableScheduleAtFire`).
- *  (c) Notifications of the retired kind `package_shared` are deleted, then
- *      `ALTER TABLE notifications VALIDATE CONSTRAINT notifications_type_valid` takes the half of
- *      drizzle `0118`'s `NOT VALID` CHECK that covers existing rows. Validating an already valid
- *      constraint is a no-op, so a second run holds.
- *
- * Not seen from the database: an integration named by `SYSTEM_INTEGRATIONS` is active by the
- * deployment's default, which the door lets a personal space keep but this script cannot read. Its
- * row, with no offer, is treated as any other: kept by an offer when enabled, deleted when not.
+ * In one transaction: (a) an enabled integration a personal space holds outside the organization's
+ * offer is kept by an `available` offer; (b) every other such row is deleted as
+ * `withdrawPlacement` deletes, its schedules disabled first; (c) `package_shared` notifications are
+ * deleted and `notifications_type_valid` validated. System packages are left alone. Rules,
+ * audit shapes and the queue note: README section "Detail — Personal spaces take the org offer
+ * only".
  */
 
 import { parseArgs } from "node:util";
@@ -50,24 +28,11 @@ import { exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 class DryRunRollback extends Error {}
 
-export interface OfferedIntegration {
-  orgId: string;
-  packageId: string;
-}
-
-export interface DeletedPlacement {
-  packageId: string;
-  spaceId: string;
-  enabled: boolean;
-  schedulesDisabled: number;
-}
-
 export interface PersonalSpaceAudience {
   /** Offers created for integrations a personal space had switched on. */
-  offers: OfferedIntegration[];
+  offers: { orgId: string; packageId: string }[];
   /** Rows deleted, with the schedules each took down. */
-  deleted: DeletedPlacement[];
-  schedulesDisabled: number;
+  deleted: { packageId: string; spaceId: string; enabled: boolean; schedulesDisabled: number }[];
   notificationsDeleted: number;
 }
 
@@ -98,7 +63,6 @@ export async function runPersonalSpaceAudience(options: {
   const result: PersonalSpaceAudience = {
     offers: [],
     deleted: [],
-    schedulesDisabled: 0,
     notificationsDeleted: 0,
   };
   try {
@@ -164,10 +128,9 @@ export async function runPersonalSpaceAudience(options: {
           enabled: row.enabled,
           schedulesDisabled: disabled.length,
         });
-        result.schedulesDisabled += disabled.length;
       }
 
-      // (c) The retired notification kind, then the half of the CHECK 0118 left unvalidated.
+      // (c) The retired notification kind, then the half of the CHECK 0117 left unvalidated.
       const notifications = toRows<{ id: string }>(
         await tx.execute(sql`DELETE FROM notifications WHERE type = 'package_shared' RETURNING id`),
       );
@@ -175,7 +138,7 @@ export async function runPersonalSpaceAudience(options: {
       await tx.execute("ALTER TABLE notifications VALIDATE CONSTRAINT notifications_type_valid");
 
       out(
-        `offers created: ${result.offers.length}, rows deleted: ${result.deleted.length}, schedules disabled: ${result.schedulesDisabled}, notifications deleted: ${result.notificationsDeleted}`,
+        `offers created: ${result.offers.length}, rows deleted: ${result.deleted.length}, schedules disabled: ${result.deleted.reduce((n, d) => n + d.schedulesDisabled, 0)}, notifications deleted: ${result.notificationsDeleted}`,
       );
       if (!apply) throw new DryRunRollback();
     });

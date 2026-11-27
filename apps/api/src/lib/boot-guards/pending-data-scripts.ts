@@ -96,7 +96,7 @@ export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
   },
   {
     script: "scripts/migration/0059-personal-space-audience.ts",
-    after: "0118",
+    after: "0117",
     // EXACTLY what `0059` fixes: an organization package's row in a personal space outside its
     // home with no offer to that organization (before its step (a) offers the enabled
     // integrations), plus the notifications of the retired kind.
@@ -119,7 +119,7 @@ export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
     consequence:
       "Personal spaces still run packages the organization never offered (shares and integrations " +
       "switched on under the previous rule) and notifications of a retired kind remain (migration " +
-      "0118 applied, `0059` not). The API refuses to switch such packages on again, so they must " +
+      "0117 applied, `0059` not). The API refuses to switch such packages on again, so they must " +
       "be brought under the rule first.",
     removeWhen:
       "the release after the one that ships `0059`: delete this entry, its test case and the README note.",

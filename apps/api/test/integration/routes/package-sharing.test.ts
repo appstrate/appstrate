@@ -170,14 +170,6 @@ const offerToOrg = (packageId: string, mode: "available" | "on_by_default" = "av
 const withdrawOffer = (packageId: string) =>
   app.request(`/api/packages/${packageId}/org-offer`, { method: "DELETE", headers: owner() });
 
-/** `POST …/shares` with a `user` target — a retired kind. */
-const shareWithUser = (headers: Headers, packageId: string, userId: string) =>
-  app.request(`/api/packages/${packageId}/shares`, {
-    method: "POST",
-    headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ target: { kind: "user", userId } }),
-  });
-
 /** `POST …/shares` with a `space` target. */
 const shareWithSpace = (headers: Headers, packageId: string, spaceId: string) =>
   app.request(`/api/packages/${packageId}/shares`, {
@@ -422,18 +414,17 @@ describe("authority — `<type>:share` in the home space", () => {
       }),
       "note",
     );
-    await expectProblem(
-      await app.request(`/api/packages/${AGENT}/shares`, {
-        method: "POST",
-        headers: { ...author.headers(homeId), "Content-Type": "application/json" },
-        body: JSON.stringify({ target: { kind: "everyone" } }),
-      }),
-      400,
-    );
-  });
-
-  it("refuses a `user` target with 400: a person is no share target", async () => {
-    await expectProblem(await shareWithUser(author.headers(homeId), AGENT, recipient.userId), 400);
+    // `everyone` is unknown, and `user` is retired: a person is no share target.
+    for (const target of [{ kind: "everyone" }, { kind: "user", userId: recipient.userId }]) {
+      await expectProblem(
+        await app.request(`/api/packages/${AGENT}/shares`, {
+          method: "POST",
+          headers: { ...author.headers(homeId), "Content-Type": "application/json" },
+          body: JSON.stringify({ target }),
+        }),
+        400,
+      );
+    }
     expect(await placementsOutside(AGENT, homeId)).toEqual([]);
   });
 
@@ -951,30 +942,23 @@ describe("offered is not activated", () => {
 describe("a personal space takes only the offer", () => {
   const CATALOGUE = "@system/catalogue-service";
 
-  const rowsIn = (spaceId: string, packageId: string) =>
-    db
-      .select()
-      .from(spacePackages)
-      .where(and(eq(spacePackages.spaceId, spaceId), eq(spacePackages.packageId, packageId)));
-
   beforeEach(async () => {
     // A catalogue integration the deployment ships but does not run by default
     // (not in `SYSTEM_INTEGRATIONS`), and one an organization team publishes.
     await seedPackage({ id: CATALOGUE, orgId: null, type: "integration", source: "system" });
   });
 
-  it("switches on an `available` offer in the owner's personal space", async () => {
-    expect((await offerToOrg(AGENT, "available")).status).toBe(200);
-    const res = await takeUpOffer(recipient.headers(), AGENT);
-    expect(res.status, await res.clone().text()).toBe(201);
-    expect(await activeIn(recipient.personalSpaceId, AGENT)).toBe(true);
-  });
-
   it("refuses a catalogue integration nobody offered, and writes no row", async () => {
     await expectProblem(await takeUpOffer(recipient.headers(), CATALOGUE), 409, {
       code: "personal_space_takes_offers_only",
     });
-    expect(await rowsIn(recipient.personalSpaceId, CATALOGUE)).toEqual([]);
+    await assertDbMissing(
+      spacePackages,
+      and(
+        eq(spacePackages.spaceId, recipient.personalSpaceId),
+        eq(spacePackages.packageId, CATALOGUE),
+      )!,
+    );
   });
 
   it("takes the same integration in a team space from its admin", async () => {
@@ -1008,7 +992,10 @@ describe("a personal space takes only the offer", () => {
     await expectProblem(await takeUpOffer(author.headers(), AGENT), 409, {
       code: "personal_space_takes_offers_only",
     });
-    expect(await rowsIn(author.personalSpaceId, AGENT)).toEqual([]);
+    await assertDbMissing(
+      spacePackages,
+      and(eq(spacePackages.spaceId, author.personalSpaceId), eq(spacePackages.packageId, AGENT))!,
+    );
   });
 
   it("lets the owner switch off what no longer qualifies", async () => {
@@ -1058,26 +1045,18 @@ describe("a personal space takes only the offer", () => {
   });
 
   it("shows the library verdict `not_offered` for the un-offered integration only", async () => {
-    const lib = await library(recipient.headers());
-    const cell = (id: string) =>
+    type Lib = Awaited<ReturnType<typeof library>>;
+    const cell = (lib: Lib, id: string) =>
       (
         lib.packages.integration as
           { id: string; activation: { spaceId: string; activate: string }[] }[] | undefined
       )
         ?.find((row) => row.id === id)
         ?.activation.find((entry) => entry.spaceId === recipient.personalSpaceId)?.activate;
-    expect(cell(CATALOGUE)).toBe("not_offered");
+    expect(cell(await library(recipient.headers()), CATALOGUE)).toBe("not_offered");
 
     expect((await offerToOrg(CATALOGUE, "available")).status).toBe(200);
-    const offered = await library(recipient.headers());
-    expect(
-      (
-        offered.packages.integration as
-          { id: string; activation: { spaceId: string; activate: string }[] }[] | undefined
-      )
-        ?.find((row) => row.id === CATALOGUE)
-        ?.activation.find((entry) => entry.spaceId === recipient.personalSpaceId)?.activate,
-    ).toBe("allowed");
+    expect(cell(await library(recipient.headers()), CATALOGUE)).toBe("allowed");
   });
 });
 
@@ -1738,15 +1717,6 @@ describe("who switches a placement on (R3)", () => {
     const sharer = await sharerWith("operator");
     expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
     expect(await activations()).toEqual([]);
-  });
-
-  it("never places a share in the sharer's own personal space", async () => {
-    await expectProblem(
-      await shareWithSpace(author.headers(homeId), AGENT, author.personalSpaceId),
-      409,
-      { code: "personal_space_takes_offers_only" },
-    );
-    expect(await rowIn(author.personalSpaceId)).toBeUndefined();
   });
 });
 

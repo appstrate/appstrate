@@ -233,6 +233,25 @@ describe("POST /api/packages/import-bundle — import", () => {
     ctx = await createTestContext({ orgSlug: "importorg" });
   });
 
+  /** Import `bytes` into `spaceId`; answers the spaces the request dispatched to. */
+  async function importIn(bytes: Uint8Array, spaceId: string, rootActive = true) {
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "bundle.afps-bundle");
+    const request = new Request("http://localhost/api/packages/import-bundle", {
+      method: "POST",
+      headers: authHeaders(ctx, { "X-Space-Id": spaceId }),
+      body: form,
+    });
+    const ids: string[] = [];
+    onDispatchSpaces(request, async (used) => {
+      ids.push(...used);
+    });
+    const response = await app.fetch(request);
+    expect(response.status, await response.clone().text()).toBe(201);
+    expect(await response.json()).toMatchObject({ root_active: rootActive });
+    return ids;
+  }
+
   it("records the home only when the import places its root into another space", async () => {
     const { bytes } = await seedAndExportBundle({
       ctx,
@@ -241,26 +260,9 @@ describe("POST /api/packages/import-bundle — import", () => {
       skillB: "@importorg/skill-b",
     });
     const destination = await seedSpace({ orgId: ctx.orgId, name: "Destination" });
-    async function importIn(spaceId: string) {
-      const form = new FormData();
-      form.append("file", new Blob([bytes]), "bundle.afps-bundle");
-      const request = new Request("http://localhost/api/packages/import-bundle", {
-        method: "POST",
-        headers: authHeaders(ctx, { "X-Space-Id": spaceId }),
-        body: form,
-      });
-      const ids: string[] = [];
-      onDispatchSpaces(request, async (used) => {
-        ids.push(...used);
-      });
-      const response = await app.fetch(request);
-      expect(response.status, await response.clone().text()).toBe(201);
-      expect(await response.json()).toMatchObject({ root_active: true });
-      return ids;
-    }
-    expect(await importIn(ctx.defaultSpaceId)).toEqual([]);
-    expect(await importIn(destination.id)).toEqual([ctx.defaultSpaceId, destination.id]);
-    expect(await importIn(destination.id)).toEqual([]);
+    expect(await importIn(bytes, ctx.defaultSpaceId)).toEqual([]);
+    expect(await importIn(bytes, destination.id)).toEqual([ctx.defaultSpaceId, destination.id]);
+    expect(await importIn(bytes, destination.id)).toEqual([]);
   });
 
   it("never places a root homed elsewhere into a personal space", async () => {
@@ -271,26 +273,14 @@ describe("POST /api/packages/import-bundle — import", () => {
       skillB: "@importorg/skill-b",
     });
     const personal = await ensurePersonalSpaceFor(ctx.orgId, ctx.user.id);
-    const form = new FormData();
-    form.append("file", new Blob([bytes]), "bundle.afps-bundle");
-    const response = await app.request("/api/packages/import-bundle", {
-      method: "POST",
-      headers: authHeaders(ctx, { "X-Space-Id": personal.id }),
-      body: form,
-    });
-    expect(response.status, await response.clone().text()).toBe(201);
-    expect(await response.json()).toMatchObject({ root_active: false });
-    expect(
-      await db
-        .select()
-        .from(spacePackages)
-        .where(
-          and(
-            eq(spacePackages.packageId, "@importorg/agent-root"),
-            eq(spacePackages.spaceId, personal.id),
-          ),
-        ),
-    ).toHaveLength(0);
+    await importIn(bytes, personal.id, false);
+    await assertDbMissing(
+      spacePackages,
+      and(
+        eq(spacePackages.packageId, "@importorg/agent-root"),
+        eq(spacePackages.spaceId, personal.id),
+      )!,
+    );
   });
 
   it("imports a multi-package .afps-bundle and installs the root", async () => {

@@ -11,9 +11,7 @@
  *              = the deployment's default OR an `on_by_default` offer to the
  *                space's organization (`org_package_offers`), when there is none
  *
- * An offer in either mode PLACES the package in every space of the
- * organization; only `on_by_default` also activates it. An `available` offer
- * leaves the package placed and off until the space switches it on.
+ * An offer in either mode places the package in every space; only `on_by_default` activates it.
  *
  * The ROW ALWAYS WINS. That is why a system package can be switched off per
  * space like any other: an explicit `false` is an operator decision the

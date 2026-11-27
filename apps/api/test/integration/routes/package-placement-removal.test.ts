@@ -221,15 +221,16 @@ describe("the recipient side may withdraw", () => {
     expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(201);
   });
 
-  it("answers 404 for a personal space named by id: it holds no share", async () => {
-    await expectProblem(await withdraw(recipient.headers(), recipient.personalSpaceId), 404);
-  });
-
-  it("answers 400 for a user id: the target is a space id", async () => {
-    await expectProblem(await withdraw(recipient.headers(), recipient.userId), 400, {
-      code: "invalid_request",
-      param: "target",
-    });
+  it("answers 404 for a personal space named by id: it holds no share, whoever asks", async () => {
+    const stranger = await principal();
+    for (const [label, caller] of [
+      ["their own", recipient.headers()],
+      ["somebody else's, with `share` in the home", author.headers(homeId)],
+      ["somebody else's, unreachable package", stranger.headers()],
+    ] as const) {
+      const res = await withdraw(caller, recipient.personalSpaceId);
+      expect({ label, status: res.status }).toEqual({ label, status: 404 });
+    }
   });
 
   it("from a team space where they hold the deactivation grant, without `share` in the home", async () => {
@@ -265,15 +266,6 @@ describe("the recipient side may withdraw", () => {
     expect((await share(owner(), { kind: "space", spaceId: elsewhere })).status).toBe(201);
     await expectProblem(await withdraw(teamBuilder.headers(teamId), elsewhere), 403);
     expect(await placedIn(elsewhere)).toBe(true);
-  });
-
-  it("answers 404 for somebody else's personal space named by id, even with `share` in the home", async () => {
-    await expectProblem(await withdraw(author.headers(homeId), recipient.personalSpaceId), 404);
-  });
-
-  it("answers 404 for somebody else's personal space to a caller who cannot reach the package", async () => {
-    const stranger = await principal();
-    await expectProblem(await withdraw(stranger.headers(), recipient.personalSpaceId), 404);
   });
 
   it("answers 404 for the home itself — the home placement is not withdrawn here", async () => {

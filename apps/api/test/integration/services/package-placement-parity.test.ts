@@ -63,9 +63,9 @@ const ROWS = [
   { label: "no row", row: false },
 ] as const;
 const OFFERS = [
-  { label: "offered on by default", offered: true, mode: "on_by_default" },
-  { label: "offered as available", offered: true, mode: "available" },
-  { label: "not offered", offered: false, mode: null },
+  { label: "offered on by default", mode: "on_by_default" },
+  { label: "offered as available", mode: "available" },
+  { label: "not offered", mode: null },
 ] as const;
 
 /**
@@ -106,7 +106,7 @@ describe("the four statements of PLACED answer the same, cell for cell", () => {
   for (const source of SOURCES) {
     for (const { label: homeLabel, here } of HOMES) {
       for (const { label: rowLabel, row } of ROWS) {
-        for (const { label: offerLabel, offered, mode } of OFFERS) {
+        for (const { label: offerLabel, mode } of OFFERS) {
           it(`${source} / ${homeLabel} / ${rowLabel} / ${offerLabel}`, async () => {
             const id = `@placement/${source}`;
             const system = source === "system";
@@ -126,7 +126,7 @@ describe("the four statements of PLACED answer the same, cell for cell", () => {
             // compared against the RULE and not merely against each other —
             // four statements agreeing on the same wrong answer is the failure
             // a parity test between them cannot see.
-            const expected = system || (here && !system) || row || offered;
+            const expected = system || (here && !system) || row || mode !== null;
 
             const fromSql = await sqlSaysPlaced(ctx.defaultSpaceId, id);
             const fromQuery = await isPackageReadableInSpace(ctx.defaultSpaceId, id);
@@ -137,7 +137,7 @@ describe("the four statements of PLACED answer the same, cell for cell", () => {
               placementGrantsRead(
                 { homeSpaceId },
                 // `loadPlacementSpaces`: a row's space, or every space of an offering org.
-                row || offered ? [ctx.defaultSpaceId] : [],
+                row || mode !== null ? [ctx.defaultSpaceId] : [],
                 new Set([ctx.defaultSpaceId]),
               );
             const fromDoor = await doorSaysPlaced(ctx.defaultSpaceId, id);

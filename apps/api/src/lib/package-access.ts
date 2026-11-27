@@ -471,8 +471,7 @@ async function holdsPackageWriteAuthority(c: Context<AppEnv>, packageId: string)
 /**
  * {@link assertPackageShareAccessForPlacement} as a question, for bundle import: place the
  * root here when the caller may ({@link callerPlacementAuthority}), else `null`
- * and `root_active: false`. A personal space is never a placement target (it
- * takes what is offered to it), so it gets `null` without a lookup.
+ * and `root_active: false`. A personal space is never a placement target: `null`.
  */
 export async function heldPlacementAuthority(
   c: Context<AppEnv>,

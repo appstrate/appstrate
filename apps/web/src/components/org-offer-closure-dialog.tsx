@@ -12,11 +12,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "./modal";
 import { ClosureList } from "./closure-list";
 import { useCatalogueLibrary, useOfferOrgClosure, type OrgOfferMode } from "../hooks/use-library";
-import {
-  offerClosureEntries,
-  offerClosureRequests,
-  type OfferWarning,
-} from "../lib/org-offer-closure";
+import { offerClosureEntries, type OfferWarning } from "../lib/org-offer-closure";
 
 export function OrgOfferClosureDialog({
   warnings,
@@ -46,7 +42,10 @@ export function OrgOfferClosureDialog({
           <PendingButton
             pending={offerAll.isPending}
             onClick={() =>
-              offerAll.mutate(offerClosureRequests(entries, mode), { onSuccess: onClose })
+              offerAll.mutate(
+                entries.map((entry) => ({ packageId: entry.id, mode })),
+                { onSuccess: onClose },
+              )
             }
           >
             {t("catalogue.orgOffer.closureOfferAlso")}

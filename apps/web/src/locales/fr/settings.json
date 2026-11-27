@@ -1309,7 +1309,6 @@
   "packages.shareUseHint": "Le package est placé dans l'espace choisi : actif d'emblée si vous pouvez l'y activer, sinon c'est à ses membres de l'activer. Il s'y exécute avec les identifiants de cet espace, à la dernière version publiée.",
   "packages.shareSpaceHint": "Le package est placé dans cet espace : actif d'emblée si vous pouvez l'y activer, sinon ses membres peuvent l'y activer. Son édition reste réservée à son espace d'origine.",
   "packages.shareSubmit": "Partager",
-  "packages.shareTargetIsHome": "Ce package vit déjà dans cet espace : il n'y a rien à y partager.",
   "packages.shareCurrent": "Partages en cours",
   "packages.shareEmpty": "Ce package n'est partagé avec personne.",
   "packages.shareStateActive": "Actif",

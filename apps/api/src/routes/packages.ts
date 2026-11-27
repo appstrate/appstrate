@@ -2080,8 +2080,8 @@ export function createPackagesRouter() {
     const spaceId = destination.id;
 
     // `sharePackage` re-decides authority under the locked home and refuses a personal
-    // target. The row lands ON when the caller holds the activation grant in the target,
-    // OFF otherwise; a personal target is refused by `sharePackage` before anything lands.
+    // target before anything lands. The row lands ON when the caller holds the activation
+    // grant in the target, OFF otherwise.
     const enabled =
       destination.ownerUserId === null &&
       destination.permissions.has(spacePackagePermission(pkg.type, "activate"));
@@ -2176,7 +2176,7 @@ export function createPackagesRouter() {
     const orgId = c.get("orgId");
     const { pkg, authorizeHome } = await assertPackageOfferAccess(c, packageId);
     const { mode } = await readJsonBody(c, packageOrgOfferSchema);
-    const { created, changed, previousMode } = await offerPackageToOrg({
+    const { created, previousMode } = await offerPackageToOrg({
       orgId,
       packageId,
       offeredBy: c.get("user").id,
@@ -2190,7 +2190,7 @@ export function createPackagesRouter() {
         resourceId: packageId,
         after: { orgId, mode },
       });
-    } else if (changed) {
+    } else if (previousMode !== null && previousMode !== mode) {
       await recordAuditFromContext(c, {
         action: "package.offer_mode_changed",
         resourceType: "package",
