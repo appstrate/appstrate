@@ -330,6 +330,7 @@
   "context.summary.tokensReadGenerated": "{{read}} read · {{generated}} generated",
   "context.summary.tokensScope": "Excludes runs launched from the conversation, counted in the Runs tab.",
   "context.tabs.tools": "Tools",
+  "context.tabs.info": "Info",
   "context.tools.empty": "The assistant has not called any tool in this conversation yet.",
   "context.tools.noAction": "No action yet: the assistant has only looked things up.",
   "context.tools.showLookups_one": "Show the lookup ({{count}})",
@@ -349,6 +350,7 @@
   "context.summary.messages_other": "{{count}} messages",
   "context.summary.details": "Details",
   "context.summary.noActivity": "No activity yet.",
+  "context.summary.noActivityHint": "This conversation's runs, files and integration calls will show here.",
   "context.summary.integrations": "Integrations",
   "context.summary.seeAll": "See all",
   "context.summary.seeAllCount": "See all ({{count}})"

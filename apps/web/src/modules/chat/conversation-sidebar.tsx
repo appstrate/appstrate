@@ -25,6 +25,7 @@ import { localViewableFile } from "../../lib/files";
 import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField } from "../../lib/format-date";
 import { readShown, useConversationFiles, useConversationRuns } from "./use-conversation-lists";
+import { ConversationInfo } from "./conversation-info";
 import { ConversationSummary } from "./conversation-summary";
 import { ConversationToolsList, ShownToolCall } from "./conversation-tools-tab";
 import {
@@ -386,6 +387,9 @@ function ConversationContext({
                 active={active}
                 dispatch={dispatch}
               />
+            ) : null}
+            {id === "info" ? (
+              <ConversationInfo conversationId={conversationId} active={active} />
             ) : null}
           </TabsContent>
         ))}

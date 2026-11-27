@@ -929,12 +929,14 @@ canvas and floats beside the thread: its cards and its previewed file are `Card`
 takes a shadow outside what floats over the page. It opens on the Summary, which reads
 without scrolling: the title and its gist, then the activity in one view (its runs, its
 files and its integration calls, lookups included, the latest of each on one line, a
-failure on its own line, each group leading to its tab), then models, access and details
-folded to one line each (`Collapsible`, remembered per browser). Beside it,
-Runs, Files and Tools, each named in words on every format: a narrow panel drops the
+failure on its own line, each group leading to its tab); with nothing yet, an `EmptyState`
+saying what will show there, and an unsaved conversation's `EmptyState` as on the other tabs.
+Beside it, Runs, Files, Tools and Info, each named in words on every format: a narrow panel drops the
 tabs' icons, tightens them and scrolls them sideways past its width. Each group of the
 Summary stands on its own read (waiting in its shape, or saying its failure in its place);
-the calls, held by the conversation, show at once. Tools lists the
+the calls, held by the conversation, show at once. Info (`conversation-info.tsx`) shows the
+models and tokens, the reader's access and the details as titled sections, always open; for an
+unsaved conversation, the access alone. Tools lists the
 calls as the open chat holds them, the turn in flight included, else as stored
 (`@appstrate/module-chat/conversation-tools`, `live-conversation`), named as their cards
 name them (`tool-presentation.ts`), lookups behind a switch the panel keeps; a call's
