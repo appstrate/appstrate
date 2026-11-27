@@ -24,7 +24,7 @@ import { isSpaceEnterable } from "../lib/space-lists";
 import { SpaceNameOf } from "./space-name";
 
 /**
- * The bell's list, exported for the rendering tests: a Radix popover mounts
+ * The bell's list, exported for the rendering tests: a closed popover mounts
  * nothing under `renderToStaticMarkup`, so the trigger's chrome is not what a
  * test can look at.
  */
@@ -236,7 +236,7 @@ export function NotificationBell({ className }: { className?: string }) {
   // A popover from `md` up, a panel from the bottom below: the primitive decides.
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
+      <PopoverTrigger render={triggerButton} />
       <PopoverContent align="end" className="w-96 p-0">
         <NotificationContent {...contentProps} />
       </PopoverContent>

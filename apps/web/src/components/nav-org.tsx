@@ -98,11 +98,13 @@ export function NavOrg() {
   const renderItems = (items: NavItem[]) =>
     items.map(({ path, label, icon: Icon }) => (
       <SidebarMenuItem key={path}>
-        <SidebarMenuButton asChild isActive={navEntryActive(path, location)} tooltip={label}>
-          <Link to={path}>
-            <Icon />
-            <span>{label}</span>
-          </Link>
+        <SidebarMenuButton
+          isActive={navEntryActive(path, location)}
+          tooltip={label}
+          render={<Link to={path} />}
+        >
+          <Icon />
+          <span>{label}</span>
         </SidebarMenuButton>
       </SidebarMenuItem>
     ));
@@ -145,16 +147,14 @@ export function NavOrg() {
             {canReachRuns && (
               <SidebarMenuItem className="relative">
                 <SidebarMenuButton
-                  asChild
                   isActive={navEntryActive("/runs", location)}
                   tooltip={t("nav.runs")}
+                  render={<Link to="/runs" />}
                 >
-                  <Link to="/runs">
-                    <span className="flex size-4 shrink-0 items-center justify-center">
-                      {hasRunning ? <Spinner /> : <Activity size={16} />}
-                    </span>
-                    <span>{t("nav.runs")}</span>
-                  </Link>
+                  <span className="flex size-4 shrink-0 items-center justify-center">
+                    {hasRunning ? <Spinner /> : <Activity size={16} />}
+                  </span>
+                  <span>{t("nav.runs")}</span>
                 </SidebarMenuButton>
                 {unread > 0 && (
                   <SidebarMenuBadge>

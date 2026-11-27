@@ -255,7 +255,7 @@ export function useProviderColumns({
                   {choices.map((m) => (
                     <DropdownMenuItem
                       key={m.id}
-                      onSelect={() => onSetDefault?.(m)}
+                      onClick={() => onSetDefault?.(m)}
                       // The server refuses a dead credential and a switched-off alias; it
                       // resolves a switched-off built-in model.
                       disabled={m.needs_reconnection || (m.source !== "built-in" && !m.enabled)}
@@ -282,7 +282,7 @@ export function useProviderColumns({
                   {testable.map((m) => (
                     <DropdownMenuItem
                       key={m.id}
-                      onSelect={() => void modelTest.handleTest(m.id)}
+                      onClick={() => void modelTest.handleTest(m.id)}
                       disabled={modelTest.testingIds.has(m.id)}
                     >
                       {m.label}
@@ -303,7 +303,7 @@ export function useProviderColumns({
                     {deletable.map((m) => (
                       <DropdownMenuItem
                         key={m.id}
-                        onSelect={() => onDeleteModel?.(m)}
+                        onClick={() => onDeleteModel?.(m)}
                         data-testid={`delete-model-${m.id}`}
                       >
                         {m.label}

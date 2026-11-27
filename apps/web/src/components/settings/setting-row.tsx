@@ -145,14 +145,12 @@ function RowExplanation({
         {description}
         {description && " "}
         <CollapsibleTrigger className="text-foreground focus-visible:ring-ring inline-flex h-auto items-center gap-0.5 rounded-sm bg-transparent p-0 text-xs font-medium underline-offset-2 outline-none hover:underline focus-visible:ring-2">
-          <span className="group-data-[state=open]/details:hidden">
-            {t("settingRow.showDetails")}
-          </span>
-          <span className="hidden group-data-[state=open]/details:inline">
+          <span className="group-data-open/details:hidden">{t("settingRow.showDetails")}</span>
+          <span className="hidden group-data-open/details:inline">
             {t("settingRow.hideDetails")}
           </span>
           <ChevronDown
-            className="size-3 transition-transform group-data-[state=open]/details:rotate-180"
+            className="size-3 transition-transform group-data-open/details:rotate-180"
             aria-hidden
           />
         </CollapsibleTrigger>

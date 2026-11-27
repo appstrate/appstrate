@@ -135,10 +135,8 @@ function VersionPill({
   if (!hasUnarchivedChanges && detail.version) return published;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={0} className="shrink-0">
-          <Badge variant="secondary">{t("version.draft")}</Badge>
-        </span>
+      <TooltipTrigger render={<span tabIndex={0} className="shrink-0" />}>
+        <Badge variant="secondary">{t("version.draft")}</Badge>
       </TooltipTrigger>
       <TooltipContent className="max-w-80">
         {latestPublishedVersion

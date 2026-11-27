@@ -456,10 +456,8 @@ export function IntegrationDetailPage() {
         hint={t("integration.notInSpace.hint")}
       >
         {canBrowseIntegrations && (
-          <Button variant="outline" asChild>
-            <Link to="/integrations">
-              {overview ? t("integration.notInSpace.backAcross") : t("integration.notInSpace.back")}
-            </Link>
+          <Button variant="outline" render={<Link to="/integrations" />}>
+            {overview ? t("integration.notInSpace.backAcross") : t("integration.notInSpace.back")}
           </Button>
         )}
       </UnreadableDetail>
@@ -547,10 +545,8 @@ export function IntegrationDetailPage() {
           className="mb-4"
           data-testid="integration-wizard-finish"
           action={
-            <Button variant="outline" size="sm" asChild>
-              <Link to={wizardResumePath(packageId)}>
-                {t("integrationWizard.finish.action", { ns: "agents" })}
-              </Link>
+            <Button variant="outline" size="sm" render={<Link to={wizardResumePath(packageId)} />}>
+              {t("integrationWizard.finish.action", { ns: "agents" })}
             </Button>
           }
         >

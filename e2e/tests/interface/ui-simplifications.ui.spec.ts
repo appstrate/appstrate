@@ -220,7 +220,7 @@ test("the overlay band follows its viewport scroll across navigation, reopening 
     await page.setViewportSize({ width, height: 480 });
     await page.goto("/org-settings/general");
     const dialog = page.getByRole("dialog");
-    const viewport = dialog.locator("[data-radix-scroll-area-viewport]");
+    const viewport = dialog.locator("[data-slot=scroll-area-viewport]");
     const band = viewport.locator(".sticky");
     await expect(page.getByRole("textbox", { name: "Nom", exact: true })).toBeVisible();
     await expect(viewport).toBeVisible();

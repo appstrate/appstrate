@@ -117,8 +117,8 @@ export function SpaceAssignmentsField({
             );
           })}
           {!loading && !error && available.length > 0 && (
-            <Select
-              value=""
+            <Select<string>
+              value={null}
               disabled={unavailable}
               onValueChange={(spaceId) =>
                 onChange([...value, { spaceId, role: DEFAULT_SPACE_ROLE_VALUE }])

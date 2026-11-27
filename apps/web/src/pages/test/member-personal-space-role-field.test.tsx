@@ -65,14 +65,14 @@ const selectOf = (html: string) =>
   /<button[^>]*id="member-personal-space-role"[^>]*>[\s\S]*?<\/button>/.exec(html)?.[0];
 
 describe("the personal space role field of the user sheet", () => {
-  // A closed Radix select draws no value under `renderToStaticMarkup`: the control is checked
-  // present, and what each state reads as is pinned through the mapping the field uses.
-  it("draws the control for a member", () => {
+  // A closed select draws its chosen label but no item under `renderToStaticMarkup`: what the
+  // other states read as is pinned through the mapping the field uses.
+  it("draws the control for a member, naming the role it holds", () => {
     const html = renderField(member("member", { custom_role_id: CUSTOM_ROLE_ID }), [
       "members:change-role",
     ]);
     expect(html).toContain(settingsFr["userDetail.personalSpaceRole"]);
-    expect(selectOf(html)).toBeDefined();
+    expect(selectOf(html)).toContain("Triage");
   });
 
   it("names the default the server reports, as the role selects name it", () => {

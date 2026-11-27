@@ -6,7 +6,7 @@ import { memberRoleValue, type RoleObject } from "../hooks/use-roles";
 /** What a role's row asks the preview dialog to start from. */
 export type ViewAsPreset = { kind: "org"; role: ViewAsOrgRole } | { kind: "space"; key: string };
 
-/** The dialog's "no space" value: not the empty string, which Radix refuses as an item value. */
+/** The dialog's "no space" value: not the empty string, which a `Select` reads as no choice. */
 export const VIEW_AS_NO_SPACE = "none";
 
 interface ViewAsSpace {

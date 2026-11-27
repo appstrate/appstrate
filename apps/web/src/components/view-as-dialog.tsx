@@ -9,7 +9,6 @@ import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissio
 import { Field, FieldGroup } from "@appstrate/ui/components/field";
 import { FormItem } from "@/components/app-ui/form-item";
 import { Label } from "@appstrate/ui/components/label";
-import { SelectItem } from "@appstrate/ui/components/select";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { FormModal } from "./form-modal";
 import { OrgRoleOptions } from "./org-role-options";
@@ -171,7 +170,7 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
                 setPickedRole(null);
               }}
               className={CHOSEN_VALUE}
-              leading={<SelectItem value={VIEW_AS_NO_SPACE}>{t("viewAs.noSpace")}</SelectItem>}
+              leading={[{ value: VIEW_AS_NO_SPACE, label: t("viewAs.noSpace") }]}
               options={(spaces ?? []).map((s) => ({ value: s.id, label: spaceLabel(s, t) }))}
             />
           </FormItem>

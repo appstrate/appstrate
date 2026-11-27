@@ -117,10 +117,13 @@ export function OnboardingLayout({
           />
           <div className="flex min-w-0 items-center justify-end gap-1">
             {orgs.length > 0 && (
-              <Button variant="ghost" size="sm" className="min-w-0" asChild>
-                <Link to="/" className="min-w-0 justify-start">
-                  <span className="truncate">{t("onboarding.backToApp")}</span>
-                </Link>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="min-w-0"
+                render={<Link to="/" className="min-w-0 justify-start" />}
+              >
+                <span className="truncate">{t("onboarding.backToApp")}</span>
               </Button>
             )}
             <div className="shrink-0">

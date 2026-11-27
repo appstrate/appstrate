@@ -24,7 +24,7 @@ describe("FrequencyComposer", () => {
   it("names the weekday group by its label", () => {
     const html = compose("0 9 * * 1,3");
     expect(html).toMatch(/id="frequency-days"/);
-    expect(html).toMatch(/role="toolbar"[^>]*aria-labelledby="frequency-days"/);
+    expect(html).toMatch(/role="group"[^>]*aria-labelledby="frequency-days"/);
   });
 
   it("shows the composed number in a controlled field", () => {

@@ -34,20 +34,24 @@ export function ConversationSpacesControl({
   return (
     <Popover>
       <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              // The stacked tiles ring themselves in the button's background, at rest or hovered.
-              className="desktop-pointer:h-8 h-11 shrink-0 px-2 [--tile-ring:var(--canvas)] hover:[--tile-ring:var(--accent)]"
-              aria-label={label}
-              data-testid="conversation-spaces"
-            >
-              <SpaceTileStack spaces={spaces} max={VISIBLE_SPACE_TILES} />
-            </Button>
-          </PopoverTrigger>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  // The stacked tiles ring themselves in the button's background, at rest or hovered.
+                  className="desktop-pointer:h-8 h-11 shrink-0 px-2 [--tile-ring:var(--canvas)] hover:[--tile-ring:var(--accent)]"
+                  aria-label={label}
+                  data-testid="conversation-spaces"
+                />
+              }
+            />
+          }
+        >
+          <SpaceTileStack spaces={spaces} max={VISIBLE_SPACE_TILES} />
         </TooltipTrigger>
         <TooltipContent side="bottom">{names}</TooltipContent>
       </Tooltip>

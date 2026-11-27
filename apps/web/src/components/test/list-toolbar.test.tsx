@@ -3,7 +3,7 @@
 /**
  * The list toolbar, through what it renders without being opened.
  *
- * The filter menus are Radix popovers and stay unmounted until a pointer opens
+ * The filter menus are popovers and stay unmounted until a pointer opens
  * them; there is no DOM here to open one with, so the ticking rule is tested
  * through `toggleValue` directly. What IS testable without a pointer is the
  * bar's own shape: which controls it puts on the line, and whether the filter

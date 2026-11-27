@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { inlineEditingAttributes } from "../lib/keep-open-while-renaming";
+import { inlineEditingAttributes } from "../lib/inline-editing";
 import { Input } from "@appstrate/ui/components/input";
 import { Button } from "@appstrate/ui/components/button";
 import { commitRename } from "../lib/inline-rename";
@@ -79,7 +79,6 @@ export function InlineEditableLabel({
     <div className="relative z-10 flex min-w-0 items-center gap-1" aria-busy={saving}>
       <Input
         ref={inputRef}
-        // Read by the dialogs: Escape here cancels the rename, not the overlay.
         {...inlineEditingAttributes}
         // The field has no visible label: it is named by the name it renames.
         aria-label={t("renameField", { name: value })}
@@ -89,7 +88,11 @@ export function InlineEditableLabel({
         onChange={(e) => setTyped(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") void commit();
-          if (e.key === "Escape" && !savingRef.current) setEditing(false);
+          if (e.key === "Escape") {
+            // Escape cancels the rename only, not the dialog around it.
+            e.stopPropagation();
+            if (!savingRef.current) setEditing(false);
+          }
         }}
         // `min-w-0`, not `min-w-40`: in a 132px column a 10rem minimum is an
         // input wider than the cell that holds it.

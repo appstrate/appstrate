@@ -240,12 +240,10 @@ export function ToolStep(props: ToolCardProps) {
       {/* What lands with the result (duration, cross) follows the trigger on a line of fixed
           height: its arrival moves nothing. */}
       <ActivityLine lead={subject ? <SubjectGlyph subject={subject} /> : <Icon aria-hidden />}>
-        <CollapsibleTrigger asChild>
-          <ActivityTrigger>
-            <ActivityLabel active={phase === "running"}>{label}</ActivityLabel>
-            {idText ? <ActivityId>{idText}</ActivityId> : null}
-            <ActivityChevron />
-          </ActivityTrigger>
+        <CollapsibleTrigger render={<ActivityTrigger />}>
+          <ActivityLabel active={phase === "running"}>{label}</ActivityLabel>
+          {idText ? <ActivityId>{idText}</ActivityId> : null}
+          <ActivityChevron />
         </CollapsibleTrigger>
         {presentation?.count !== undefined ? (
           <span className="flex shrink-0 items-center gap-1.5 text-xs">

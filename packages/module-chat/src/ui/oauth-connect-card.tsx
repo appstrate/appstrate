@@ -366,10 +366,11 @@ export function OAuthConnectCard({
         ) : (
           <>
             {popupBlocked ? (
-              <Button asChild className="shrink-0">
-                <a href={authUrl} target="_blank" rel="noopener noreferrer">
-                  {t("connect.openInTab")}
-                </a>
+              <Button
+                className="shrink-0"
+                render={<a href={authUrl} target="_blank" rel="noopener noreferrer" />}
+              >
+                {t("connect.openInTab")}
               </Button>
             ) : (
               <Button

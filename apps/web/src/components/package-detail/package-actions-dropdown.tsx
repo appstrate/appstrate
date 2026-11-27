@@ -57,7 +57,7 @@ export function PackageActionsDropdown(props: PackageActionsDropdownProps) {
                 <DropdownMenuItem
                   key={entry.id}
                   disabled={entry.disabled || !!entry.reason}
-                  onSelect={entry.onSelect}
+                  onClick={entry.onSelect}
                   variant={entry.destructive ? "destructive" : "default"}
                 >
                   <entry.icon />

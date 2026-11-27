@@ -7,7 +7,7 @@
  * Gating is the interesting half. The module's admin routes require
  * `billing:manage`, so that — not the org role — is what mounts the sections.
  *
- * The picker is a Radix `Popover`, which renders nothing under
+ * The picker is a `Popover`, which renders nothing under
  * `renderToStaticMarkup` — what it may offer is pinned in
  * `lib/test/billing-managers`.
  *

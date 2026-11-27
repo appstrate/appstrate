@@ -196,33 +196,31 @@ export function ActivityGroup({
     >
       {/* The spark is a sibling of the trigger: a live region inside a button is not exposed. */}
       <ActivityLine lead={lead}>
-        <CollapsibleTrigger asChild>
-          <ActivityTrigger>
-            {running ? (
-              <>
-                <ActivityLabel active>{stepLabel}</ActivityLabel>
-                {stepIdText ? <ActivityId>{stepIdText}</ActivityId> : null}
-              </>
-            ) : only ? (
-              <>
-                <ActivityLabel>{only.label}</ActivityLabel>
-                {only.idText ? <ActivityId>{only.idText}</ActivityId> : null}
-              </>
-            ) : calls === 0 ? (
-              <ActivityLabel>{title || t("reasoning.done")}</ActivityLabel>
-            ) : (
-              <span className="shrink-0">{counts.join(" · ")}</span>
-            )}
-            {failed > 0 ? (
-              <>
-                <FailedGlyph />
-                <span className="shrink-0">{t("tool.reads.failed", { count: failed })}</span>
-              </>
-            ) : null}
-            {running && clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
-            {!running && calls > 1 ? <SubjectStack subjects={subjects} /> : null}
-            <ActivityChevron />
-          </ActivityTrigger>
+        <CollapsibleTrigger render={<ActivityTrigger />}>
+          {running ? (
+            <>
+              <ActivityLabel active>{stepLabel}</ActivityLabel>
+              {stepIdText ? <ActivityId>{stepIdText}</ActivityId> : null}
+            </>
+          ) : only ? (
+            <>
+              <ActivityLabel>{only.label}</ActivityLabel>
+              {only.idText ? <ActivityId>{only.idText}</ActivityId> : null}
+            </>
+          ) : calls === 0 ? (
+            <ActivityLabel>{title || t("reasoning.done")}</ActivityLabel>
+          ) : (
+            <span className="shrink-0">{counts.join(" · ")}</span>
+          )}
+          {failed > 0 ? (
+            <>
+              <FailedGlyph />
+              <span className="shrink-0">{t("tool.reads.failed", { count: failed })}</span>
+            </>
+          ) : null}
+          {running && clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
+          {!running && calls > 1 ? <SubjectStack subjects={subjects} /> : null}
+          <ActivityChevron />
         </CollapsibleTrigger>
       </ActivityLine>
       <CollapsibleContent className={ACTIVITY_CONTENT_CLASS}>

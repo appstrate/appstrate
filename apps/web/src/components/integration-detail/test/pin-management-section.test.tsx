@@ -8,7 +8,7 @@
  * l’utilisateur » disabled with its reason), then the one sentence saying whom saving affects.
  * A pin is deleted only from its confirmation.
  *
- * The form's fields are rendered without the dialog chrome (a Radix dialog renders nothing without
+ * The form's fields are rendered without the dialog chrome (a dialog renders nothing without
  * a DOM), its draft and verdict from `lib/admin-pin-payload.ts`, whose payloads are pinned there.
  */
 
@@ -416,7 +416,7 @@ describe("the pin form, editing", () => {
     // Unticked, it stays listed and cannot be ticked again.
     expect(fixed.html).toMatch(
       new RegExp(
-        `aria-checked="false"[^>]*disabled=""[^>]*data-testid="pin-form-connection-${GONE}"`,
+        `disabled=""[^>]*aria-checked="false"[^>]*data-testid="pin-form-connection-${GONE}"`,
       ),
     );
     expect(fixed.verdict).toMatchObject({

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import * as React from "react";
-import { Slot } from "@radix-ui/react-slot";
+import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "../cn.ts";
@@ -36,18 +35,19 @@ const buttonVariants = cva(
 );
 
 export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {
-  asChild?: boolean;
-}
+  extends useRender.ComponentProps<"button">, VariantProps<typeof buttonVariants> {}
 
-const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
-    const Comp = asChild ? Slot : "button";
-    return (
-      <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />
-    );
-  },
-);
-Button.displayName = "Button";
+/**
+ * A `<button>`, or the element `render` gives it (a link) with the button's look and nothing else:
+ * no role or keyboard handling is added, so a link stays a link.
+ */
+function Button({ className, variant, size, render, ref, ...props }: ButtonProps) {
+  return useRender({
+    defaultTagName: "button",
+    render,
+    ref,
+    props: { ...props, className: cn(buttonVariants({ variant, size, className })) },
+  });
+}
 
 export { Button, buttonVariants };

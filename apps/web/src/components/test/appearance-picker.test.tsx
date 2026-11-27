@@ -132,7 +132,10 @@ describe("AppearancePicker", () => {
 
   it("offers the nine colours and the automatic one", () => {
     const html = picker(["lucide"]);
-    const values = [...html.matchAll(/role="radio"[^>]*value="([^"]+)"/g)].map((m) => m[1]);
+    // Each radio is followed by the hidden input that carries its value.
+    const values = [
+      ...html.matchAll(/role="radio"[\s\S]*?<input type="radio"[^>]*value="([^"]+)"/g),
+    ].map((m) => m[1]);
     expect(values).toEqual([
       "auto",
       "neutral",
@@ -150,9 +153,11 @@ describe("AppearancePicker", () => {
   });
 
   it("checks the automatic colour for a null colour, the stored one otherwise", () => {
-    expect(picker(["lucide"])).toMatch(/aria-checked="true"[^>]*value="auto"/);
-    expect(picker(["lucide"], { icon: null, color: "amber" })).toMatch(
-      /aria-checked="true"[^>]*value="amber"/,
-    );
+    const checked = (value: string) =>
+      new RegExp(
+        `aria-checked="true"[^>]*>(?:(?!role="radio")[\\s\\S])*?<input[^>]*value="${value}"`,
+      );
+    expect(picker(["lucide"])).toMatch(checked("auto"));
+    expect(picker(["lucide"], { icon: null, color: "amber" })).toMatch(checked("amber"));
   });
 });

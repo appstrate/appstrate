@@ -58,7 +58,7 @@ const pickerOf = (html: string) =>
   /<button[^>]*id="personal-space-role"[^>]*>[\s\S]*?<\/button>/.exec(html)?.[0];
 
 describe("the personal space role picker", () => {
-  // A closed Radix select draws no item under `renderToStaticMarkup`, so the picker's catalogue
+  // A closed select draws no item under `renderToStaticMarkup`, so the picker's catalogue
   // is read from the hook it uses.
   function optionLabels(): string[] {
     const qc = new QueryClient();

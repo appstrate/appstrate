@@ -912,8 +912,8 @@ export function MessageError() {
         errorState.action || errorState.retryable ? (
           <div className="flex gap-2">
             {errorState.action ? (
-              <Button asChild variant="outline" size="sm">
-                <a href={errorState.action.href}>{errorState.action.label}</a>
+              <Button variant="outline" size="sm" render={<a href={errorState.action.href} />}>
+                {errorState.action.label}
               </Button>
             ) : null}
             {errorState.retryable ? (

@@ -57,12 +57,12 @@ export const ActivityTrigger = React.forwardRef<
   );
 });
 
-/** Turns with its trigger's `data-state`. */
+/** Turns once its trigger's panel is open (`data-panel-open`). */
 export function ActivityChevron() {
   return (
     <ChevronRightIcon
       aria-hidden
-      className="duration-fast ease-surface size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90"
+      className="duration-fast ease-surface size-3.5 shrink-0 transition-transform group-data-panel-open:rotate-90"
     />
   );
 }
@@ -95,6 +95,6 @@ export function ActivityRail({ children }: { children: React.ReactNode }) {
 /** What opens under a step, aligned on its label. */
 export const ACTIVITY_DETAIL_CLASS = "pb-2 pl-6";
 
-/** A line's disclosure, opening and closing. */
+/** A line's disclosure: its height eases open and shut (Base UI's measured height). */
 export const ACTIVITY_CONTENT_CLASS =
-  "duration-base ease-surface motion-safe:data-[state=open]:animate-collapsible-down motion-safe:data-[state=closed]:animate-collapsible-up overflow-hidden";
+  "duration-base ease-surface h-(--collapsible-panel-height) overflow-hidden data-ending-style:h-0 data-starting-style:h-0 motion-safe:transition-[height]";
