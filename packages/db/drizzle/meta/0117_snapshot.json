@@ -5456,7 +5456,7 @@
         },
         "notifications_type_valid": {
           "name": "notifications_type_valid",
-          "value": "type IN ('run_failed', 'package_shared', 'agent_message', 'credential_needs_reconnection')"
+          "value": "type IN ('run_failed', 'agent_message', 'credential_needs_reconnection')"
         }
       },
       "isRLSEnabled": false
