@@ -173,19 +173,19 @@ function DepartureChip({
         {t("composer.inlineRunModelChip")}
       </RemovableChip>
     );
-  if (departure === "contextAllSpaces")
+  if (departure === "contextAllSpacesOff")
     return (
       <RemovableChip
         icon={<LayersIcon />}
         open={{
           onClick: onOpen,
-          label: t("composer.contextAllSpacesChip"),
-          testId: "composer-context-all-spaces-chip",
+          label: t("composer.contextAllSpacesOff"),
+          testId: "composer-context-all-spaces-off-chip",
         }}
-        removeLabel={t("composer.contextAllSpacesChip.undo")}
-        onRemove={() => setContextAllSpacesEnabled(false)}
+        removeLabel={t("composer.contextAllSpacesOff.undo")}
+        onRemove={() => setContextAllSpacesEnabled(true)}
       >
-        {t("composer.contextAllSpacesChip")}
+        {t("composer.contextAllSpacesOff")}
       </RemovableChip>
     );
   if (departure === "limit")
