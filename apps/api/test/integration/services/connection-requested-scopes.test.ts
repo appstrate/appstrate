@@ -28,15 +28,15 @@ describe("connection requested scopes", () => {
   let connectionId: string;
   let reach: { spaceId: string; actor: Actor };
 
-  const requested = async () =>
+  const requested = async (id = connectionId) =>
     (
       await db
         .select({ requested: integrationConnections.requestedScopes })
         .from(integrationConnections)
-        .where(eq(integrationConnections.id, connectionId))
+        .where(eq(integrationConnections.id, id))
     )[0]!.requested;
 
-  const grant = (scopesGranted: string[]) =>
+  const save = (scopesGranted: string[], id?: string) =>
     saveIntegrationConnection(scope, {
       packageId: INTEGRATION,
       authKey: "oauth",
@@ -46,7 +46,7 @@ describe("connection requested scopes", () => {
       scopesGranted,
       clientRef: "test-client",
       actor,
-      connectionId,
+      connectionId: id,
     });
 
   beforeEach(async () => {
@@ -56,17 +56,7 @@ describe("connection requested scopes", () => {
     actor = { type: "user", id: ctx.user.id };
     reach = { spaceId: ctx.defaultSpaceId, actor };
     await seedPackage({ id: INTEGRATION, orgId: ctx.orgId, type: "integration", source: "local" });
-    const created = await saveIntegrationConnection(scope, {
-      packageId: INTEGRATION,
-      authKey: "oauth",
-      accountId: "alice@example.com",
-      credentials: { access_token: "tok" },
-      identityClaims: { email: "alice@example.com" },
-      scopesGranted: ["read"],
-      clientRef: "test-client",
-      actor,
-    });
-    connectionId = created.id;
+    connectionId = (await save(["read"])).id;
   });
 
   it("keeps the valid scopes the connection does not hold, once each", async () => {
@@ -109,18 +99,14 @@ describe("connection requested scopes", () => {
       actor,
     });
     expect(await recordRequestedScopes(keyed.id, INTEGRATION, reach, ["write"])).toBeNull();
-    const [row] = await db
-      .select({ requested: integrationConnections.requestedScopes })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, keyed.id));
-    expect(row!.requested).toEqual([]);
+    expect(await requested(keyed.id)).toEqual([]);
   });
 
   it("is cleared by the reconnect that grants the scopes, and only by it", async () => {
     await recordRequestedScopes(connectionId, INTEGRATION, reach, ["write", "admin"]);
-    await grant(["read", "write"]);
+    await save(["read", "write"], connectionId);
     expect(await requested()).toEqual(["admin"]);
-    await grant(["read", "write", "admin"]);
+    await save(["read", "write", "admin"], connectionId);
     expect(await requested()).toEqual([]);
   });
 
@@ -160,15 +146,11 @@ describe("connection requested scopes", () => {
       await db.update(notifications).set({ readAt: new Date() });
       await recordRequestedScopes(connectionId, INTEGRATION, reach, ["delete"]);
       await until(async () => (await notices()).length === 2);
-    });
-
-    it("says nothing when the demand gains no scope", async () => {
-      await recordRequestedScopes(connectionId, INTEGRATION, reach, ["write"]);
-      await until(async () => (await notices()).length === 1);
+      // Read again, then asked only for scopes it already demands or holds: nothing new to say.
       await db.update(notifications).set({ readAt: new Date() });
       await recordRequestedScopes(connectionId, INTEGRATION, reach, ["write", "read", "bad scope"]);
       await settle();
-      expect(await notices()).toHaveLength(1);
+      expect(await notices()).toHaveLength(2);
     });
   });
 });

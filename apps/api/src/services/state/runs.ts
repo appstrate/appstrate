@@ -1004,7 +1004,6 @@ export async function recordRunScopeRequest(
   runId: string,
   request: { integrationId: string; connectionId: string; scopes: readonly string[] },
 ): Promise<void> {
-  if (request.scopes.length === 0) return;
   const entry = JSON.stringify({
     integration_id: request.integrationId,
     connection_id: request.connectionId,

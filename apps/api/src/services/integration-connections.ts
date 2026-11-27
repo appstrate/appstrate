@@ -2707,7 +2707,7 @@ export function clearReachableUpstreamRejections(
 }
 
 /** The most scopes kept as a connection's demand: a server controls what it asks for. */
-const MAX_REQUESTED_SCOPES = 20;
+export const MAX_REQUESTED_SCOPES = 20;
 
 /**
  * Record the scopes a server asked for (`insufficient_scope`) that a connection does not hold, for

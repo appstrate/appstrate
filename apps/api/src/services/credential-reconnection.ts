@@ -14,19 +14,13 @@ import { logger } from "../lib/logger.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { getPackageDisplayName } from "../lib/package-helpers.ts";
 import { findPersonalSpace } from "./spaces.ts";
-import {
-  createCredentialNeedsReconnectionNotification,
-  createScopesRequestedNotification,
-} from "./state/notifications.ts";
+import { createConnectionNotice } from "./state/notifications.ts";
 
 /** A connection and its owner, as an announcement names them. */
-interface ConnectionOwner {
-  orgId: string;
-  /** `null` for an org-level connection serving every space of the organization. */
-  spaceId: string | null;
-  connectionId: string;
-  owner: { type: "user" | "end_user"; id: string };
-}
+type ConnectionOwner = Pick<
+  Extract<CredentialNeedsReconnectionParams, { kind: "integration_connection" }>,
+  "orgId" | "spaceId" | "connectionId" | "owner"
+>;
 
 /** What every notice to the owner shows, and the space it is written in. */
 interface OwnerNotice {
@@ -94,7 +88,7 @@ export function announceCredentialNeedsReconnection(
 ): void {
   if (params.kind === "integration_connection") {
     notifyOwner(params, "credential needs reconnection", ({ spaceId, ...notice }) =>
-      createCredentialNeedsReconnectionNotification({
+      createConnectionNotice("credential_needs_reconnection", {
         orgId: params.orgId,
         spaceId,
         recipient: params.owner,
@@ -111,7 +105,7 @@ export function announceCredentialNeedsReconnection(
  */
 export function announceRequestedScopes(target: ConnectionOwner): void {
   notifyOwner(target, "requested scopes", ({ spaceId, ...notice }) =>
-    createScopesRequestedNotification({
+    createConnectionNotice("connection_scopes_requested", {
       orgId: target.orgId,
       spaceId,
       recipient: target.owner,

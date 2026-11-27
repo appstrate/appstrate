@@ -81,6 +81,7 @@ import {
 } from "../services/integration-service.ts";
 import {
   clearReachableUpstreamRejections,
+  MAX_REQUESTED_SCOPES,
   recordRequestedScopes,
   isIntegrationActive,
 } from "../services/integration-connections.ts";
@@ -281,9 +282,6 @@ const DISPATCHED_FAILURE_CODES = [
   "upstream_timeout",
 ] as const satisfies readonly ApiCallFailureCode[];
 
-/** Most scopes one record names (the sidecar keeps at most as many from a challenge). */
-const MAX_REQUIRED_SCOPES_PER_CALL = 20;
-
 /** Most records one `POST /internal/integration-calls` takes. */
 const MAX_INTEGRATION_CALLS_PER_BATCH = 100;
 
@@ -313,8 +311,7 @@ const integrationCallRecordSchema = z
     outcome: z.union([z.string().regex(/^[0-9]{3}$/), z.enum(DISPATCHED_FAILURE_CODES)]),
     duration_ms: z.int().min(0).max(2_147_483_647),
     credential_revision: credentialRevisionSchema.optional(),
-    // What a `403 insufficient_scope` challenge named: the connection's step-up demand.
-    required_scopes: z.array(scopeTokenSchema).min(1).max(MAX_REQUIRED_SCOPES_PER_CALL).optional(),
+    required_scopes: z.array(scopeTokenSchema).min(1).max(MAX_REQUESTED_SCOPES).optional(),
   })
   .strict()
   .refine(
@@ -709,8 +706,6 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
         call.credential_revision,
       );
     }
-    // A record carrying `required_scopes` is the connection's step-up demand: recorded on it
-    // (reach checked for the run's actor) and stamped on the run.
     for (const [i, call] of calls.entries()) {
       const connectionId = connectionIds[i];
       if (call.required_scopes === undefined || !connectionId) continue;

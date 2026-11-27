@@ -194,35 +194,22 @@ export async function insertToolReviewNotifications(params: {
 }
 
 /**
- * Tell a connection's owner that it died. No dedup index: one announcement per flip, and there is
- * no `runId`. Model-provider credentials write no row here: who receives it is undecided (#1310).
+ * Tell a connection's owner about it: `credential_needs_reconnection` (it died; one announcement per
+ * flip, no `runId`; model-provider credentials write no row here, who receives it is undecided
+ * #1310) or `connection_scopes_requested` (a server asked for scopes it does not hold; its partial
+ * unique index holds it to one unread notice per (recipient, connection), the rest is absorbed).
  */
-export async function createCredentialNeedsReconnectionNotification(params: {
-  orgId: string;
-  spaceId: string;
-  recipient: Actor;
-  payload: NotificationPayloads["credential_needs_reconnection"];
-}): Promise<void> {
-  await db.insert(notifications).values({
-    orgId: params.orgId,
-    spaceId: params.spaceId,
-    recipientType: params.recipient.type,
-    recipientId: params.recipient.id,
-    type: "credential_needs_reconnection",
-    payload: toPgSafe(params.payload),
-  });
-}
-
-/**
- * Tell a connection's owner that a server asked it for scopes it does not hold. The partial unique
- * index keeps one unread notice per (recipient, connection): the rest is absorbed.
- */
-export async function createScopesRequestedNotification(params: {
-  orgId: string;
-  spaceId: string;
-  recipient: Actor;
-  payload: NotificationPayloads["connection_scopes_requested"];
-}): Promise<void> {
+export async function createConnectionNotice<
+  K extends "credential_needs_reconnection" | "connection_scopes_requested",
+>(
+  type: K,
+  params: {
+    orgId: string;
+    spaceId: string;
+    recipient: Actor;
+    payload: NotificationPayloads[K];
+  },
+): Promise<void> {
   await db
     .insert(notifications)
     .values({
@@ -230,7 +217,7 @@ export async function createScopesRequestedNotification(params: {
       spaceId: params.spaceId,
       recipientType: params.recipient.type,
       recipientId: params.recipient.id,
-      type: "connection_scopes_requested",
+      type,
       payload: toPgSafe(params.payload),
     })
     .onConflictDoNothing();

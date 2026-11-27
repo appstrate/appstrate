@@ -731,6 +731,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       userId: ctx.user.id,
       shared: false,
     },
+    clientRef?: string,
   ): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
     const [row] = await db
@@ -746,6 +747,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         credentialsEncrypted: ciphertext,
         scopesGranted: [],
         userId: owner.userId,
+        clientRef,
       })
       .returning({ id: integrationConnections.id });
     await seedShares(row!.id, owner.shared ? [ctx.defaultSpaceId] : []);
@@ -1214,15 +1216,10 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         runToken,
       );
     afterEach(drainJournal);
-    /** A step-up demand lands only on an OAuth2 connection: one with a minting client. */
-    const seedOauthConnection = async (...args: Parameters<typeof seedConnection>) => {
-      const id = await seedConnection(...args);
-      await db
-        .update(integrationConnections)
-        .set({ clientRef: "test-client" })
-        .where(eq(integrationConnections.id, id));
-      return id;
-    };
+    // A step-up demand lands only on an OAuth2 connection: one with a minting client (`clientRef`).
+    const runMetadata = async () =>
+      (await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId)))[0]!
+        .metadata;
     const stored = async (connectionId: string) =>
       (
         await db
@@ -1233,16 +1230,12 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 
     it("records the demand on the connection and stamps the run's metadata", async () => {
       await seedIntegration(INTEGRATION, true);
-      const connectionId = await seedOauthConnection(INTEGRATION);
+      const connectionId = await seedConnection(INTEGRATION, undefined, "test-client");
       await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
 
       expect((await report(connectionId, ["mail.send"])).status).toBe(204);
       expect(await stored(connectionId)).toEqual(["mail.send"]);
-      const [run] = await db
-        .select({ metadata: runs.metadata })
-        .from(runs)
-        .where(eq(runs.id, runId));
-      expect(run!.metadata).toMatchObject({
+      expect(await runMetadata()).toMatchObject({
         scope_requests: [
           { integration_id: INTEGRATION, connection_id: connectionId, scopes: ["mail.send"] },
         ],
@@ -1250,36 +1243,19 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 
       // A later report replaces the connection's entry: one per connection.
       await report(connectionId, ["mail.read"]);
-      const [again] = await db
-        .select({ metadata: runs.metadata })
-        .from(runs)
-        .where(eq(runs.id, runId));
-      expect(again!.metadata).toMatchObject({
+      expect(await runMetadata()).toMatchObject({
         scope_requests: [{ connection_id: connectionId, scopes: ["mail.send", "mail.read"] }],
       });
-    });
-
-    it("DENY: a connection the run did not bind is a 400, and records nothing", async () => {
-      await seedIntegration(INTEGRATION, true);
-      const bound = await seedOauthConnection(INTEGRATION);
-      const colleague = await memberContext(ctx, "member");
-      const foreign = await seedOauthConnection(INTEGRATION, {
-        userId: colleague.user.id,
-        shared: false,
-      });
-      await bindConnectionsToRun(runId, { [INTEGRATION]: [bound] });
-
-      expect((await report(foreign, ["mail.send"])).status).toBe(400);
-      expect(await stored(foreign)).toEqual([]);
     });
 
     it("records nothing once the run's actor can no longer reach the connection", async () => {
       await seedIntegration(INTEGRATION, true);
       const colleague = await memberContext(ctx, "member");
-      const connectionId = await seedOauthConnection(INTEGRATION, {
-        userId: colleague.user.id,
-        shared: true,
-      });
+      const connectionId = await seedConnection(
+        INTEGRATION,
+        { userId: colleague.user.id, shared: true },
+        "test-client",
+      );
       await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
       await db
         .delete(integrationConnectionShares)
@@ -1287,60 +1263,27 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 
       expect((await report(connectionId, ["mail.send"])).status).toBe(204);
       expect(await stored(connectionId)).toEqual([]);
+      expect((await runMetadata()) ?? {}).not.toHaveProperty("scope_requests");
     });
 
-    it("records nothing on a connection with no minting client (not OAuth2)", async () => {
+    it("DENY: a misplaced or malformed required_scopes is a 400, recording nothing", async () => {
       await seedIntegration(INTEGRATION, true);
-      const connectionId = await seedConnection(INTEGRATION);
+      const connectionId = await seedConnection(INTEGRATION, undefined, "test-client");
       await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+      const demand = (required_scopes: string[]) =>
+        callRecord({ connection_id: connectionId, outcome: "403", required_scopes });
 
-      expect((await report(connectionId, ["mail.send"])).status).toBe(204);
+      const bodies = [
+        // Wrong placement: a non-403 outcome, or no connection.
+        callRecord({ connection_id: connectionId, outcome: "200", required_scopes: ["mail.send"] }),
+        callRecord({ outcome: "403", required_scopes: ["mail.send"] }),
+        // Bad list: empty, an invalid token, 21 items.
+        demand([]),
+        demand(["not a scope"]),
+        demand(Array.from({ length: 21 }, (_, i) => `s${i}`)),
+      ];
+      for (const body of bodies) expect((await reportCalls([body])).status).toBe(400);
       expect(await stored(connectionId)).toEqual([]);
-      const [run] = await db
-        .select({ metadata: runs.metadata })
-        .from(runs)
-        .where(eq(runs.id, runId));
-      expect(run!.metadata ?? {}).not.toHaveProperty("scope_requests");
-    });
-
-    it("DENY: required_scopes on a non-403 record or one without a connection is a 400", async () => {
-      await seedIntegration(INTEGRATION, true);
-      const connectionId = await seedOauthConnection(INTEGRATION);
-      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
-
-      expect(
-        (
-          await reportCalls([
-            callRecord({
-              connection_id: connectionId,
-              outcome: "200",
-              required_scopes: ["mail.send"],
-            }),
-          ])
-        ).status,
-      ).toBe(400);
-      expect(
-        (await reportCalls([callRecord({ outcome: "403", required_scopes: ["mail.send"] })]))
-          .status,
-      ).toBe(400);
-      expect(await stored(connectionId)).toEqual([]);
-    });
-
-    it("DENY: an invalid, empty or oversized scope list is a 400", async () => {
-      await seedIntegration(INTEGRATION, true);
-      const connectionId = await seedOauthConnection(INTEGRATION);
-      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
-
-      expect((await report(connectionId, [])).status).toBe(400);
-      expect((await report(connectionId, ["not a scope"])).status).toBe(400);
-      expect(
-        (
-          await report(
-            connectionId,
-            Array.from({ length: 21 }, (_, i) => `s${i}`),
-          )
-        ).status,
-      ).toBe(400);
     });
   });
 

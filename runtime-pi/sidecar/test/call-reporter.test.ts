@@ -261,13 +261,17 @@ describe("connectionCallJournal", () => {
 
   it("carries the scopes a 403 insufficient_scope challenge names, and only that", () => {
     const { reporter, records } = recordingCallReporter();
-    const journal = connectionCallJournal(reporter, {
-      integrationId: "@test/integ",
-      connectionId: "conn-a",
-      source: null,
-    });
-    const call = (outcome: string, challenge: string | null, answered = true) =>
-      journal({
+    const call = (
+      outcome: string,
+      challenge: string | null,
+      answered = true,
+      connectionId: string | null = "conn-a",
+    ) =>
+      connectionCallJournal(reporter, {
+        integrationId: "@test/integ",
+        connectionId,
+        source: null,
+      })({
         method: "GET",
         host: "h",
         outcome,
@@ -281,28 +285,15 @@ describe("connectionCallJournal", () => {
     call("403", 'Bearer error="invalid_token", scope="mail.send"');
     call("401", insufficient);
     call("403", insufficient, false);
+    call("403", insufficient, true, null);
     expect(records.map((r) => r.required_scopes)).toEqual([
       ["mail.send", "a"],
       undefined,
       undefined,
       undefined,
       undefined,
+      undefined,
     ]);
-
-    const unbound = recordingCallReporter();
-    connectionCallJournal(unbound.reporter, {
-      integrationId: "@test/integ",
-      connectionId: null,
-      source: null,
-    })({
-      method: "GET",
-      host: "h",
-      outcome: "403",
-      durationMs: 1,
-      credential: { revision: undefined },
-      challenge: insufficient,
-    });
-    expect(unbound.records[0]!.required_scopes).toBeUndefined();
   });
 
   it("asks the source for a streak only on a 2xx answered with the injected credential", () => {

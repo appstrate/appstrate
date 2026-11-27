@@ -69,14 +69,6 @@ describe("parseScopeRequests", () => {
     ).toEqual([{ integrationId: "@a/b", connectionId: "c1", scopes: ["mail.send"] }]);
     expect(parseScopeRequests({ scope_requests: "x" })).toEqual([]);
   });
-
-  it("flags the run as degraded", () => {
-    expect(
-      isRunDegraded({
-        scope_requests: [{ integration_id: "i", connection_id: "c", scopes: ["s"] }],
-      }),
-    ).toBe(true);
-  });
 });
 
 describe("isRunDegraded", () => {
@@ -84,6 +76,11 @@ describe("isRunDegraded", () => {
     expect(isRunDegraded({ degraded_integrations: ["@a/b"] })).toBe(true);
     expect(
       isRunDegraded({ unavailable_tools: [{ integration_id: "i", name: "n", reason: "r" }] }),
+    ).toBe(true);
+    expect(
+      isRunDegraded({
+        scope_requests: [{ integration_id: "i", connection_id: "c", scopes: ["s"] }],
+      }),
     ).toBe(true);
     expect(isRunDegraded({ degraded_integrations: [] })).toBe(false);
   });
