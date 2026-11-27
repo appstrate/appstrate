@@ -11,6 +11,7 @@
  * of the auth pipeline used to answer the 401 with `Set-Cookie: …; Max-Age=0`
  * and `Clear-Site-Data: "cookies"`: the dashboard tab that sent nothing wrong
  * was signed out. The cookie the browser holds was never the failed credential.
+ * Better Auth's own routes (`/api/auth/*`) emitted the same delete themselves.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -76,5 +77,26 @@ describe("auth pipeline — invalid bearer beside a valid session cookie", () =>
     });
     expect(res.status).toBe(401);
     expect(deletesSessionCookie(res)).toBe(true);
+  });
+
+  it("leaves the cookie alone on Better Auth's own routes (get-session with Bearer undefined)", async () => {
+    const res = await app.request("/api/auth/get-session", {
+      headers: authHeaders(ctx, { Authorization: "Bearer undefined" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toBeNull();
+    expect(res.headers.getSetCookie()).toEqual([]);
+
+    const after = await app.request("/api/auth/get-session", { headers: authHeaders(ctx) });
+    expect(((await after.json()) as { user?: { id: string } } | null)?.user?.id).toBe(ctx.user.id);
+  });
+
+  it("serves Better Auth's own routes to a valid session token presented as a bearer", async () => {
+    const token = decodeURIComponent(ctx.cookie.slice(ctx.cookie.indexOf("=") + 1));
+    const res = await app.request("/api/auth/get-session", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { user?: { id: string } } | null)?.user?.id).toBe(ctx.user.id);
   });
 });

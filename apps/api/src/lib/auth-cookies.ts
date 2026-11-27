@@ -26,6 +26,7 @@ import { getCookies } from "better-auth/cookies";
 import { eq } from "drizzle-orm";
 import { getAuth } from "@appstrate/db/auth";
 import { parseBearer } from "@appstrate/core/bearer";
+import { propagateRequestClientIp } from "./client-ip.ts";
 import { db } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
@@ -44,7 +45,7 @@ import type { AppEnv } from "../types/index.ts";
  * dotted bearer silently authenticated through the cookie instead.
  */
 export async function readSessionWithCookies(c: Context) {
-  const viaBearer = parseBearer(c.req.header("Authorization")) !== null;
+  const viaBearer = presentsBearer(c.req.raw.headers);
   const headers = new Headers(c.req.raw.headers);
   if (viaBearer) headers.delete("Cookie");
   const { headers: out, response } = await getAuth().api.getSession({
@@ -52,6 +53,50 @@ export async function readSessionWithCookies(c: Context) {
     returnHeaders: true,
   });
   return { session: response, setCookies: viaBearer ? [] : out.getSetCookie(), viaBearer };
+}
+
+function presentsBearer(headers: Headers): boolean {
+  return parseBearer(headers.get("Authorization") ?? undefined) !== null;
+}
+
+/**
+ * The same rule at the Better Auth handler (`/api/auth/*`), whose endpoints
+ * read the session themselves: a request presenting a bearer reaches Better
+ * Auth without its Cookie header, and the Set-Cookie writes of Better Auth's
+ * own cookies are dropped from the answer. A bearer client reads a minted
+ * session from `set-auth-token`, which the `bearer()` plugin still sets.
+ */
+export async function handleAuthRequest(req: Request): Promise<Response> {
+  if (!presentsBearer(req.headers)) return getAuth().handler(req);
+  const headers = new Headers(req.headers);
+  headers.delete("Cookie");
+  const stripped = new Request(req, { headers });
+  propagateRequestClientIp(req, stripped);
+  const res = await getAuth().handler(stripped);
+  const managed = new Set(managedAuthCookies().map((cookie) => cookie.name));
+  const setCookies = res.headers.getSetCookie();
+  if (!setCookies.some((cookie) => managed.has(cookieNameOf(cookie)))) return res;
+  const out = new Headers(res.headers);
+  out.delete("Set-Cookie");
+  for (const cookie of setCookies) {
+    if (!managed.has(cookieNameOf(cookie))) out.append("Set-Cookie", cookie);
+  }
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
+}
+
+function cookieNameOf(setCookie: string): string {
+  return setCookie.slice(0, setCookie.indexOf("=")).trim();
+}
+
+/** The Better Auth cookies the platform manages, as Better Auth computes them. */
+function managedAuthCookies() {
+  const cookies = getCookies(getAuth().options);
+  return [
+    cookies.sessionToken,
+    cookies.sessionData,
+    cookies.dontRememberToken,
+    cookies.accountData,
+  ];
 }
 
 /** Appended, never set: other cookies on the response survive. */
@@ -118,13 +163,7 @@ export async function sessionRealmOf(session: {
  *      Browser support: Chrome/Edge 61+, Firefox 63+, Safari 16.4+.
  */
 export function clearStaleAuthCookies(c: Context<AppEnv>): void {
-  const cookies = getCookies(getAuth().options);
-  for (const cookie of [
-    cookies.sessionToken,
-    cookies.sessionData,
-    cookies.dontRememberToken,
-    cookies.accountData,
-  ]) {
+  for (const cookie of managedAuthCookies()) {
     // `attributes` already carries Path, Domain (when crossSubDomainCookies
     // is on), SameSite, Secure, HttpOnly and Partitioned exactly as BA
     // emitted them at Set-Cookie time. `deleteCookie` overlays `maxAge: 0`,
