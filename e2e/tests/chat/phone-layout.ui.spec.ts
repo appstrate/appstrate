@@ -39,7 +39,8 @@ test("chat fields stay legible in both orientations and the search sheet fits th
   const code = page.locator("pre > code");
   await expect(composer).toHaveCSS("font-size", "16px");
   await expect(search).toHaveCSS("font-size", "16px");
-  await expect(code).toHaveCSS("font-size", "12px");
+  // Text size follows the pointer, not the width: on touch a code block is 14 px in both orientations.
+  await expect(code).toHaveCSS("font-size", "14px");
   const send = page.getByRole("button", { name: "Envoyer", exact: true });
   const fieldBox = await composer.boundingBox();
   const sendBox = await send.boundingBox();
