@@ -21,7 +21,7 @@ for (const available of [true, false]) {
       ),
     );
     const counted = page.waitForResponse((response) => filteredCount(new URL(response.url())));
-    await page.goto("/");
+    await page.goto("/dashboard");
     await counted;
     await expect(page.getByText("Test Agent count-check", { exact: true })).toBeVisible();
     if (available) await expect(page.getByText(/26 runs en cours/)).toBeVisible();

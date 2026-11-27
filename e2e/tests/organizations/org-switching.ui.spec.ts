@@ -101,7 +101,7 @@ test.describe("Org switching in UI", () => {
     await expect(page.getByText(agentA)).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect(page).toHaveURL("/");
+    await expect(page).toHaveURL("/dashboard");
   });
 
   test("Webhook page reflects current org context", async ({ authedPage: page, clientA }) => {

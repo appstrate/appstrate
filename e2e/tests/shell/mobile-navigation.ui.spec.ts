@@ -10,7 +10,7 @@ test("the mobile navigation folds once one of its links is followed", async ({
   authedPage: page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await page.goto("/dashboard");
 
   const toggle = page.getByRole("button", {
     name: /Afficher ou masquer le menu latéral|Toggle sidebar/,
