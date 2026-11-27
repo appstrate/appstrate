@@ -67,10 +67,10 @@ describe("route declarations", () => {
     // the patterns above is a diff here. The settings rail, not the shell,
     // links every settings page.
     expect([...new Set(targets)].sort()).toEqual([
-      "/",
       "/agents",
       "/catalogue",
       "/chat",
+      "/dashboard",
       "/files",
       "/integrations",
       "/onboarding/create",

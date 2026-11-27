@@ -80,6 +80,7 @@ test.describe("Onboarding — account menu", () => {
     await expect(backToApp).toBeVisible({ timeout: 15_000 });
     await backToApp.click();
 
-    await expect(authedPage).toHaveURL(/\/$/);
+    // Back home: the chat leads for a role that may write there.
+    await expect(authedPage).toHaveURL(/\/chat$/);
   });
 });

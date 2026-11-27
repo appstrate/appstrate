@@ -41,8 +41,8 @@ export class Sidebar {
       .filter({ has: this.page.getByText(spaceName, { exact: true }) })
       .click();
     await expect(this.dropdownMenu).toHaveCount(0);
-    // Organization changes always return to the dashboard.
-    await expect(this.page).toHaveURL("/");
+    // An organization change from the Studio lands on its dashboard.
+    await expect(this.page).toHaveURL("/dashboard");
   }
 
   /**

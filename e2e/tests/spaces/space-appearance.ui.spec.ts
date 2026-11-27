@@ -35,7 +35,7 @@ test("a team space's icon and colour, set in its settings, show in the switcher"
   await settings.getByTitle("Émeraude", { exact: true }).click();
   await expect.poll(stored).toEqual({ icon: "lucide:rocket", color: "emerald" });
 
-  await page.goto("/");
+  await page.goto("/dashboard");
   const sidebar = new Sidebar(page);
   await sidebar.openSwitcher();
   const tile = page.getByTestId(`space-item-${spaceId}`).locator('[class*="@container"]');

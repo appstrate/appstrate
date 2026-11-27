@@ -62,15 +62,8 @@ export function ProductTabs() {
   // Studio owns every route the chat does not, so it is active whenever the chat is not.
   const inChat = pathname.startsWith("/chat");
 
+  // The chat leads: it is the reader's home wherever it is theirs (`useHome`).
   const products: Product[] = [
-    {
-      id: "studio",
-      label: t("products.studio"),
-      icon: <Blocks className="size-4" />,
-      to: "/",
-      active: !inChat,
-      enabled: studio,
-    },
     {
       id: "chat",
       label: t("products.chat"),
@@ -79,6 +72,14 @@ export function ProductTabs() {
       active: inChat,
       enabled: chatShown,
       unread: chatUnread,
+    },
+    {
+      id: "studio",
+      label: t("products.studio"),
+      icon: <Blocks className="size-4" />,
+      to: "/dashboard",
+      active: !inChat,
+      enabled: studio,
     },
   ].filter((p) => p.enabled);
 
@@ -93,7 +94,7 @@ export function ProductTabs() {
         aria-label={t("products.ariaLabel")}
         className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5"
       >
-        {studioDeciding && <Skeleton className="desktop-pointer:h-7 h-10 flex-1 rounded-md" />}
+        {chatDeciding && <Skeleton className="desktop-pointer:h-7 h-10 flex-1 rounded-md" />}
         {products.map((p) => (
           <Link
             key={p.id}
@@ -117,7 +118,7 @@ export function ProductTabs() {
             )}
           </Link>
         ))}
-        {chatDeciding && <Skeleton className="desktop-pointer:h-7 h-10 flex-1 rounded-md" />}
+        {studioDeciding && <Skeleton className="desktop-pointer:h-7 h-10 flex-1 rounded-md" />}
       </nav>
     </div>
   );

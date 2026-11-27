@@ -126,20 +126,25 @@ describe("closing an overlay", () => {
 
 describe("organization switch", () => {
   it("lands the page on its product's root, whatever resource it named", () => {
-    expect(orgSwitchLanding("/agents/@acme/triage/runs/run_1")).toBe("/");
-    expect(orgSwitchLanding("/")).toBe("/");
+    expect(orgSwitchLanding("/agents/@acme/triage/runs/run_1")).toBe("/dashboard");
+    expect(orgSwitchLanding("/dashboard")).toBe("/dashboard");
     expect(orgSwitchLanding("/chat/c_1")).toBe("/chat");
     expect(orgSwitchLanding("/chat")).toBe("/chat");
-    expect(orgSwitchLanding("/chatroom")).toBe("/");
+    expect(orgSwitchLanding("/chatroom")).toBe("/dashboard");
   });
 
   // The switcher's gear of another organization: the previous organization's agent page
   // would 404 under its settings.
   it("opens the new organization's settings over the landing, not over the page it left", () => {
     const held = backgroundOf(overlayStateAfterOrgSwitch("/agents/@acme/triage/runs/run_1"));
-    expect(held).toMatchObject({ location: { pathname: "/", search: "", hash: "" }, index: null });
+    expect(held).toMatchObject({
+      location: { pathname: "/dashboard", search: "", hash: "" },
+      index: null,
+    });
     const settings = at("/org-settings", { state: overlayStateAfterOrgSwitch("/agents/@acme/t") });
-    expect(pageLocation(settings, backgroundOf(settings.state)!.location).pathname).toBe("/");
+    expect(pageLocation(settings, backgroundOf(settings.state)!.location).pathname).toBe(
+      "/dashboard",
+    );
   });
 
   it("keeps the chat under settings opened from it", () => {
@@ -149,7 +154,11 @@ describe("organization switch", () => {
   it("closes them onto the landing, which has no entry of its own", () => {
     const held = backgroundOf(overlayStateAfterOrgSwitch("/agents"))!;
     expect(overlayCloseStep(held.index, 5)).toBeNull();
-    expect(modalReturnTarget(held.location).to).toEqual({ pathname: "/", search: "", hash: "" });
+    expect(modalReturnTarget(held.location).to).toEqual({
+      pathname: "/dashboard",
+      search: "",
+      hash: "",
+    });
   });
 });
 

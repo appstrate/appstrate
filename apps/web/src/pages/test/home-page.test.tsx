@@ -13,7 +13,7 @@ installFakeStorage({
 
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { memberSpaceClient, renderInSpace, testSpace } = await import("../../test/space-context.ts");
-const { HomePage } = await import("../home-page.tsx");
+const { DashboardRoute, HomePage } = await import("../home-page.tsx");
 const { NotFoundPage } = await import("../../components/route-gate.tsx");
 
 await i18nReady;
@@ -39,10 +39,22 @@ describe("HomePage", () => {
   });
 });
 
+describe("DashboardRoute", () => {
+  it("refuses the dashboard to a role without the Studio", () => {
+    expect(inSpace(<DashboardRoute />, ["chat:read", "chat:write"], false)).toContain(DENIED);
+  });
+});
+
 describe("NotFoundPage", () => {
-  it("leads back to the dashboard where the Studio opens", () => {
+  it("leads back to the chat where the reader may write there, Studio or not", () => {
+    const html = inSpace(<NotFoundPage />, ["chat:read", "chat:write", "mcp:read"], true);
+    expect(html).toContain('href="/chat"');
+    expect(html).toContain(">Chat<");
+  });
+
+  it("leads back to the dashboard where the Studio opens and the chat is read-only", () => {
     const html = inSpace(<NotFoundPage />, ["chat:read"], true);
-    expect(html).toContain('href="/"');
+    expect(html).toContain('href="/dashboard"');
     expect(html).toContain("Dashboard");
   });
 

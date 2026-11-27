@@ -35,7 +35,7 @@ for (const width of [1440, 390]) {
      * current space's follows it.
      */
     const shellTile = async () => {
-      await page.goto("/");
+      await page.goto("/dashboard");
       if (width === 390) {
         await page.getByRole("button", { name: "Afficher ou masquer le menu latéral" }).click();
         await expect(page.getByRole("dialog", { name: "Menu latéral", exact: true })).toBeVisible();
