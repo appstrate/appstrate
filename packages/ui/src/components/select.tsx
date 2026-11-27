@@ -51,7 +51,11 @@ function SelectTrigger({
       {...props}
     >
       {children}
-      <SelectPrimitive.Icon render={<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />} />
+      {/* The chevron is the icon's child: rendered in its place, it would receive the part's
+          default "▼" text as a child of the svg, read as part of the trigger's text. */}
+      <SelectPrimitive.Icon className="flex shrink-0 opacity-50">
+        <ChevronDown className="h-4 w-4" />
+      </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );
 }

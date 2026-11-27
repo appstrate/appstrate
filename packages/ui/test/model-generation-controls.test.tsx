@@ -32,6 +32,10 @@ describe("shared generation controls", () => {
     expect(render()).toContain("models.generation.inherit");
   });
 
+  it("leaves a select trigger's text to its value, without the icon part's default glyph", () => {
+    expect(render(0.37)).not.toContain("\u25bc");
+  });
+
   it("names both controls and connects each description to its control", () => {
     const html = render();
     const ids = [...html.matchAll(/<label[^>]*for="([^"]+)"/g)].map((match) => match[1]);
