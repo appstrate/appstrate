@@ -38,7 +38,7 @@ const tool = (output: unknown, extra: Record<string, unknown> = {}) => ({
 });
 
 type Part = {
-  output: { content?: unknown[]; actedSpaceIds?: unknown } | unknown[];
+  output: { content?: unknown[]; isError?: boolean; actedSpaceIds?: unknown } | unknown[];
   resultProviderMetadata?: unknown;
 };
 
