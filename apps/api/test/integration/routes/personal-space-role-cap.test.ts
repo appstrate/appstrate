@@ -336,7 +336,7 @@ describe("personal_space_role: operator", () => {
 
     it("reports role operator and the capped permissions on GET /api/spaces", async () => {
       const own = await personalOf(member);
-      expect(own.role).toMatchObject({ kind: "preset", key: "operator" });
+      expect(own.role).toMatchObject({ preset_role: "operator" });
       for (const permission of DELETES) expect(own.permissions).toContain(permission);
       for (const permission of ["agents:write", "agents:configure", "skills:write"]) {
         expect(own.permissions).not.toContain(permission);
@@ -346,7 +346,7 @@ describe("personal_space_role: operator", () => {
 
     it("leaves an org admin's own personal space at admin", async () => {
       const own = await personalOf(admin);
-      expect(own.role).toMatchObject({ key: "admin" });
+      expect(own.role).toMatchObject({ preset_role: "admin" });
       expect(own.permissions).toContain("agents:write");
       const res = await validateInline(admin, own.id);
       expect(res.status, await res.clone().text()).not.toBe(403);
@@ -354,7 +354,7 @@ describe("personal_space_role: operator", () => {
 
     it("gives a guest the operator default too, deletes included", async () => {
       const own = await personalOf(guest);
-      expect(own.role).toMatchObject({ key: "operator" });
+      expect(own.role).toMatchObject({ preset_role: "operator" });
       for (const permission of DELETES) expect(own.permissions).toContain(permission);
       await expectProblem(await validateInline(guest, own.id), 403, {
         code: "inline_run_not_allowed_in_space",
@@ -368,7 +368,7 @@ describe("personal_space_role: operator", () => {
       await setCap(owner, "admin");
       const res = await validateInline(member, personalId);
       expect(res.status, await res.clone().text()).not.toBe(403);
-      expect((await personalOf(member)).role).toMatchObject({ key: "admin" });
+      expect((await personalOf(member)).role).toMatchObject({ preset_role: "admin" });
     });
   });
 
@@ -379,7 +379,7 @@ describe("personal_space_role: operator", () => {
 
     it("holds admin in the personal space, as before", async () => {
       const own = await personalOf(member);
-      expect(own.role).toMatchObject({ key: "admin" });
+      expect(own.role).toMatchObject({ preset_role: "admin" });
       const res = await validateInline(member, personalId);
       expect(res.status, await res.clone().text()).not.toBe(403);
       const statuses = await authoringStatuses(member, personalId, agentId);
@@ -400,13 +400,13 @@ describe("personal_space_role: operator", () => {
     it("gives a member builder or viewer plus the delete floor", async () => {
       await setCap(owner, "builder");
       const asBuilder = await personalOf(member);
-      expect(asBuilder.role).toMatchObject({ kind: "preset", key: "builder" });
+      expect(asBuilder.role).toMatchObject({ preset_role: "builder" });
       expect(asBuilder.permissions).toContain("agents:write");
       for (const permission of DELETES) expect(asBuilder.permissions).toContain(permission);
 
       await setCap(owner, "viewer");
       const asViewer = await personalOf(member);
-      expect(asViewer.role).toMatchObject({ kind: "preset", key: "viewer" });
+      expect(asViewer.role).toMatchObject({ preset_role: "viewer" });
       for (const permission of DELETES) expect(asViewer.permissions).toContain(permission);
       for (const permission of ["agents:write", "agents:run"]) {
         expect(asViewer.permissions).not.toContain(permission);
@@ -418,7 +418,7 @@ describe("personal_space_role: operator", () => {
     it("caps a guest to operator plus the floor under an authoring default, and gives them a narrower one", async () => {
       await setCap(owner, "builder");
       const asBuilder = await personalOf(guest);
-      expect(asBuilder.role).toMatchObject({ kind: "preset", key: "operator" });
+      expect(asBuilder.role).toMatchObject({ preset_role: "operator" });
       expect(asBuilder.permissions).not.toContain("agents:write");
       for (const permission of DELETES) expect(asBuilder.permissions).toContain(permission);
 
@@ -432,24 +432,28 @@ describe("personal_space_role: operator", () => {
       await setCap(owner, author.id);
       const asAuthor = await personalOf(guest);
       // Restricted to what `operator` grants: the chosen role, named as such, without its write half.
-      expect(asAuthor.role).toMatchObject({ kind: "custom", key: "author" });
+      expect(asAuthor.role).toMatchObject({ custom_role_id: author.id, name: "Author" });
       expect(asAuthor.permissions).toContain("agents:read");
       expect(asAuthor.permissions).not.toContain("agents:write");
       for (const permission of DELETES) expect(asAuthor.permissions).toContain(permission);
-      expect((await personalOf(member)).role).toMatchObject({ kind: "custom", key: "author" });
+      expect((await personalOf(member)).role).toMatchObject({
+        custom_role_id: author.id,
+        name: "Author",
+      });
 
       // A guest never outranks a member: under `viewer` both hold viewer plus the floor.
       await setCap(owner, "viewer");
       const asViewer = await personalOf(guest);
-      expect(asViewer.role).toMatchObject({ kind: "preset", key: "viewer" });
+      expect(asViewer.role).toMatchObject({ preset_role: "viewer" });
       expect(asViewer.permissions).not.toContain("agents:run");
       for (const permission of DELETES) expect(asViewer.permissions).toContain(permission);
     });
 
     describe("a custom role as the default", () => {
+      let role: Awaited<ReturnType<typeof seedSpaceRole>>;
       beforeEach(async () => {
         // `shows_studio: false`: the Studio is what this role withholds.
-        const role = await seedSpaceRole({
+        role = await seedSpaceRole({
           orgId: owner.orgId,
           key: "runner-lite",
           name: "Runner lite",
@@ -461,7 +465,7 @@ describe("personal_space_role: operator", () => {
 
       it("gives a member its permissions plus the floor on GET /api/spaces", async () => {
         const own = await personalOf(member);
-        expect(own.role).toMatchObject({ kind: "custom", key: "runner-lite" });
+        expect(own.role).toMatchObject({ custom_role_id: role.id, name: "Runner lite" });
         expect(own.shows_studio).toBe(false);
         expect(own.permissions).not.toContain("agents:write");
         for (const permission of ["agents:read", "agents:run", "runs:read", ...DELETES]) {
@@ -475,17 +479,17 @@ describe("personal_space_role: operator", () => {
         });
         expect(detail.status, await detail.clone().text()).toBe(200);
         expect(await detail.json()).toMatchObject({
-          role: { kind: "custom", key: "runner-lite", name: "Runner lite" },
+          role: { custom_role_id: role.id, name: "Runner lite" },
         });
       });
 
       it("leaves an org admin at admin", async () => {
-        expect((await personalOf(admin)).role).toMatchObject({ key: "admin" });
+        expect((await personalOf(admin)).role).toMatchObject({ preset_role: "admin" });
       });
 
       it("gives a guest the same role, never above a member", async () => {
         const guestOwn = await personalOf(guest);
-        expect(guestOwn.role).toMatchObject({ kind: "custom", key: "runner-lite" });
+        expect(guestOwn.role).toMatchObject({ custom_role_id: role.id, name: "Runner lite" });
         expect(guestOwn.permissions).not.toContain("agents:write");
         for (const permission of DELETES) expect(guestOwn.permissions).toContain(permission);
       });

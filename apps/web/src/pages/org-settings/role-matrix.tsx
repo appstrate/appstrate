@@ -8,7 +8,7 @@
 import { useTranslation } from "react-i18next";
 import { PermissionMark } from "../../components/permission-mark";
 import { PermissionMatrix } from "../../components/permission-matrix";
-import { spaceRoleLabel, useRoleVocabulary, type RoleObject } from "../../hooks/use-roles";
+import { catalogRoleLabel, useRoleVocabulary, type RoleObject } from "../../hooks/use-roles";
 import {
   groupPermissionsByResource,
   permissionLabel,
@@ -39,7 +39,7 @@ export function RoleMatrix({ roles }: { roles: RoleObject[] }) {
         firstHeader={t("roles.matrixPermission")}
         columns={roles.map((role) => ({
           key: columnKey(role),
-          label: spaceRoleLabel(role, t) ?? role.name,
+          label: catalogRoleLabel(role, t),
           dividerBefore: role === firstCustom,
         }))}
         groups={[

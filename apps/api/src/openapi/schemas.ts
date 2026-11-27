@@ -80,6 +80,13 @@ export const SPACE_ROLE_REFERENCE_ONE_OF = [
   },
 ];
 
+/** A role as responses serve it: the reference plus the role's display `name` (a preset's is its key). */
+const SPACE_ROLE_NAMED_REFERENCE_ONE_OF = SPACE_ROLE_REFERENCE_ONE_OF.map((ref) => ({
+  ...ref,
+  required: [...ref.required, "name"],
+  properties: { ...ref.properties, name: { type: "string" } },
+}));
+
 const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
   TOKEN_USAGE_COUNTERS.map((counter) => [counter, { type: "integer", minimum: 0 }]),
 );
@@ -1035,11 +1042,7 @@ export const schemas = {
       personal_space_default_role: {
         description:
           "The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. A role reference (`preset_role` or `custom_role_id`) plus its display `name`. Omitted when the caller lacks `members:change-role`, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it.",
-        oneOf: SPACE_ROLE_REFERENCE_ONE_OF.map((ref) => ({
-          ...ref,
-          required: [...ref.required, "name"],
-          properties: { ...ref.properties, name: { type: "string" } },
-        })),
+        oneOf: SPACE_ROLE_NAMED_REFERENCE_ONE_OF,
       },
     },
   },
@@ -1056,13 +1059,7 @@ export const schemas = {
           "How the member reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
       },
       role: {
-        type: ["object", "null"],
-        required: ["kind", "key", "name"],
-        properties: {
-          kind: { type: "string", enum: ["preset", "custom"] },
-          key: { type: "string" },
-          name: { type: "string" },
-        },
+        oneOf: [{ type: "null" }, ...SPACE_ROLE_NAMED_REFERENCE_ONE_OF],
       },
     },
   },
@@ -3043,13 +3040,7 @@ export const schemas = {
         description: "Whether the caller may enter this space",
       },
       role: {
-        type: ["object", "null"],
-        required: ["kind", "key", "name"],
-        properties: {
-          kind: { type: "string", enum: ["preset", "custom"] },
-          key: { type: "string" },
-          name: { type: "string" },
-        },
+        oneOf: [{ type: "null" }, ...SPACE_ROLE_NAMED_REFERENCE_ONE_OF],
         description: "The caller's role in this space, or null when they have none",
       },
       permissions: {
@@ -3087,13 +3078,7 @@ export const schemas = {
           "How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
       },
       role: {
-        type: ["object", "null"],
-        required: ["kind", "key", "name"],
-        properties: {
-          kind: { type: "string", enum: ["preset", "custom"] },
-          key: { type: "string" },
-          name: { type: "string" },
-        },
+        oneOf: [{ type: "null" }, ...SPACE_ROLE_NAMED_REFERENCE_ONE_OF],
       },
       createdAt: {
         type: ["string", "null"],

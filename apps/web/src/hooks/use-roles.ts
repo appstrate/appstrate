@@ -84,12 +84,24 @@ export function spaceRoleValue(role: {
 
 /** A preset's slug is translated; a custom bundle renders its author's name. `t` is a parameter (hence the namespace-qualified key) so paths holding another namespace's `t` reuse it. */
 export function spaceRoleLabel(
-  role: { kind: "preset" | "custom"; key: string; name: string } | null | undefined,
+  role: (SpaceRoleReference & { name: string }) | null | undefined,
   t: (key: string) => string,
 ): string | null {
   if (!role) return null;
+  return "preset_role" in role ? t(`settings:roles.preset.${role.preset_role}`) : role.name;
+}
+
+/** Same rule for an entry of the role catalog (`GET /api/roles`). */
+export function catalogRoleLabel(role: RoleObject, t: (key: string) => string): string {
   return role.kind === "preset" ? t(`settings:roles.preset.${role.key}`) : role.name;
 }
+
+/** The select value of a catalog entry. */
+export const catalogRoleValue = (role: Pick<RoleObject, "kind" | "key" | "id">): string =>
+  spaceRoleValue({
+    preset_role: role.kind === "preset" ? role.key : null,
+    custom_role_id: role.id,
+  });
 
 /** Same rule for the one-line description shown on the roles page. */
 export function spaceRoleDescription(role: RoleObject, t: (key: string) => string): string | null {
@@ -107,17 +119,6 @@ export function spaceRoleAssignment(value: string): SpaceRoleReference {
   const [kind, ...rest] = value.split(":");
   const key = rest.join(":");
   return kind === "preset" ? { preset_role: key as SpaceRolePreset } : { custom_role_id: key };
-}
-
-/** A custom role is reported by `key` but addressed by `id` in a write, hence the lookup. */
-export function memberRoleValue(
-  role: { kind: "preset" | "custom"; key: string } | null,
-  roles: RoleObject[] | undefined,
-): string | undefined {
-  if (!role) return undefined;
-  if (role.kind === "preset") return spaceRoleValue({ preset_role: role.key });
-  const match = roles?.find((r) => r.kind === "custom" && r.key === role.key);
-  return match?.id ? spaceRoleValue({ custom_role_id: match.id }) : undefined;
 }
 
 /**
@@ -155,11 +156,8 @@ export function useSpaceRoleOptions(spaceId?: string, enabled = true) {
   const options = useMemo<SpaceRoleOption[]>(() => {
     if (roles) {
       return roles.map((r) => ({
-        value: spaceRoleValue({
-          preset_role: r.kind === "preset" ? r.key : null,
-          custom_role_id: r.id,
-        }),
-        label: spaceRoleLabel(r, t) ?? r.key,
+        value: catalogRoleValue(r),
+        label: catalogRoleLabel(r, t),
       }));
     }
     if (spaceId) return [];

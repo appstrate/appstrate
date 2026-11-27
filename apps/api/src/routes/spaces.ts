@@ -57,7 +57,7 @@ import {
 import {
   resolveSpaceRole,
   spaceShowsStudio,
-  toSpaceRoleWire,
+  toSpaceRoleReference,
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
 import { enterSpaceById } from "../middleware/space-context.ts";
@@ -141,7 +141,7 @@ function spaceWireForCaller(
     personal: space.ownerUserId !== null,
     ...(administers ? { orphaned_at: toISO(space.orphanedAt) } : {}),
     access: role ? ("member" as const) : ("none" as const),
-    role: toSpaceRoleWire(role),
+    role: role && toSpaceRoleReference(role),
     permissions: [...effectiveInSpace(c, role)].sort(),
     shows_studio: spaceShowsStudio(role),
   };

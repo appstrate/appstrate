@@ -22,7 +22,7 @@ import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
 import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import {
   spaceRoleDescription,
-  spaceRoleLabel,
+  catalogRoleLabel,
   useCreateRole,
   useDeleteRole,
   useRoleVocabulary,
@@ -200,7 +200,7 @@ export function OrgSettingsRolesPage() {
                   rows={presets}
                   rowKey={(role) => role.key}
                   rowAction={openRole}
-                  rowLabel={(role) => spaceRoleLabel(role, t) ?? role.name}
+                  rowLabel={(role) => catalogRoleLabel(role, t)}
                   {...tableState}
                 />
               </SettingsGroup>
@@ -269,7 +269,7 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
   return (
     <Modal
       onClose={onClose}
-      title={spaceRoleLabel(role, t) ?? role.name}
+      title={catalogRoleLabel(role, t)}
       className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-lg"
     >
       <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">

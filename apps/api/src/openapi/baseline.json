@@ -15967,8 +15967,7 @@
                           "name": "Default",
                           "source": "org_role",
                           "role": {
-                            "kind": "preset",
-                            "key": "admin",
+                            "preset_role": "admin",
                             "name": "admin"
                           }
                         }
@@ -15991,8 +15990,7 @@
                           "name": "Default",
                           "source": "open_space",
                           "role": {
-                            "kind": "preset",
-                            "key": "operator",
+                            "preset_role": "operator",
                             "name": "operator"
                           }
                         }
@@ -16356,8 +16354,7 @@
                       "name": "Default",
                       "source": "org_role",
                       "role": {
-                        "kind": "preset",
-                        "key": "admin",
+                        "preset_role": "admin",
                         "name": "admin"
                       }
                     }
@@ -26604,8 +26601,7 @@
                   "personal": false,
                   "access": "member",
                   "role": {
-                    "kind": "preset",
-                    "key": "admin",
+                    "preset_role": "admin",
                     "name": "admin"
                   },
                   "permissions": ["agents:read", "agents:run"],
@@ -26697,8 +26693,7 @@
                       "personal": false,
                       "access": "member",
                       "role": {
-                        "kind": "preset",
-                        "key": "operator",
+                        "preset_role": "operator",
                         "name": "operator"
                       },
                       "permissions": ["agents:read", "agents:run"],
@@ -37673,20 +37668,39 @@
             "description": "How the member reaches the space: an explicit row, their org role (owner/admin), or the open space's default."
           },
           "role": {
-            "type": ["object", "null"],
-            "required": ["kind", "key", "name"],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": ["preset", "custom"]
+            "oneOf": [
+              {
+                "type": "null"
               },
-              "key": {
-                "type": "string"
+              {
+                "type": "object",
+                "required": ["preset_role", "name"],
+                "properties": {
+                  "preset_role": {
+                    "type": "string",
+                    "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
               },
-              "name": {
-                "type": "string"
+              {
+                "type": "object",
+                "required": ["custom_role_id", "name"],
+                "properties": {
+                  "custom_role_id": {
+                    "type": "string",
+                    "pattern": "^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
               }
-            }
+            ]
           }
         }
       },
@@ -40587,20 +40601,39 @@
             "description": "Whether the caller may enter this space"
           },
           "role": {
-            "type": ["object", "null"],
-            "required": ["kind", "key", "name"],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": ["preset", "custom"]
+            "oneOf": [
+              {
+                "type": "null"
               },
-              "key": {
-                "type": "string"
+              {
+                "type": "object",
+                "required": ["preset_role", "name"],
+                "properties": {
+                  "preset_role": {
+                    "type": "string",
+                    "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
               },
-              "name": {
-                "type": "string"
+              {
+                "type": "object",
+                "required": ["custom_role_id", "name"],
+                "properties": {
+                  "custom_role_id": {
+                    "type": "string",
+                    "pattern": "^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
               }
-            },
+            ],
             "description": "The caller's role in this space, or null when they have none"
           },
           "permissions": {
@@ -40664,20 +40697,39 @@
             "description": "How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default."
           },
           "role": {
-            "type": ["object", "null"],
-            "required": ["kind", "key", "name"],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": ["preset", "custom"]
+            "oneOf": [
+              {
+                "type": "null"
               },
-              "key": {
-                "type": "string"
+              {
+                "type": "object",
+                "required": ["preset_role", "name"],
+                "properties": {
+                  "preset_role": {
+                    "type": "string",
+                    "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
               },
-              "name": {
-                "type": "string"
+              {
+                "type": "object",
+                "required": ["custom_role_id", "name"],
+                "properties": {
+                  "custom_role_id": {
+                    "type": "string",
+                    "pattern": "^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
               }
-            }
+            ]
           },
           "createdAt": {
             "type": ["string", "null"],

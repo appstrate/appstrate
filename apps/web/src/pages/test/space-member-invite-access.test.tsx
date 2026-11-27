@@ -131,8 +131,8 @@ function pageFor(
     source: options.memberSource ?? "explicit",
     role:
       options.memberSource === "org_role"
-        ? { kind: "preset", key: "admin", name: "admin" }
-        : { kind: "preset", key: "viewer", name: "viewer" },
+        ? { preset_role: "admin", name: "admin" }
+        : { preset_role: "viewer", name: "viewer" },
     createdAt: null,
   };
   if (cached)

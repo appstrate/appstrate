@@ -6,6 +6,7 @@ import type { operations } from "../api/schema";
 import {
   spaceRoleAssignment,
   spaceRoleLabel,
+  catalogRoleValue,
   spaceRoleValue,
   type RoleObject,
   type SpaceRoleReference,
@@ -23,14 +24,7 @@ export const FOLLOW_ORG_DEFAULT = "org-default";
 export function followLabel(member: OrgMember, t: (key: string) => string): string {
   const role = member.personal_space_default_role;
   if (!role) return t("settings:userDetail.personalSpaceRoleNoDefault");
-  return (
-    spaceRoleLabel(
-      "preset_role" in role
-        ? { kind: "preset", key: role.preset_role, name: role.name }
-        : { kind: "custom", key: role.custom_role_id, name: role.name },
-      t,
-    ) ?? role.name
-  );
+  return spaceRoleLabel(role, t) ?? role.name;
 }
 
 /** The org setting's PATCH body for a picked select value. */
@@ -69,9 +63,7 @@ export function guestRoleValues(
   return new Set(
     (roles ?? [])
       .filter((r) => r.permissions.every((permission) => operator.has(permission)))
-      .map((r) =>
-        spaceRoleValue({ preset_role: r.kind === "preset" ? r.key : null, custom_role_id: r.id }),
-      ),
+      .map(catalogRoleValue),
   );
 }
 

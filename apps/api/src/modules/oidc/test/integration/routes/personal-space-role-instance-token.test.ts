@@ -121,14 +121,14 @@ describe("personal-space override through an MCP instance token", () => {
       (await res.json()) as {
         data: {
           personal: boolean;
-          role: { kind: string; key: string };
+          role: { custom_role_id?: string; name: string };
           permissions: string[];
           shows_studio: boolean;
         }[];
       }
     ).data.filter((s) => s.personal);
     expect(own).toHaveLength(1);
-    expect(own[0]!.role).toMatchObject({ kind: "custom", key: "reader" });
+    expect(own[0]!.role).toMatchObject({ custom_role_id: role.id });
     for (const permission of ["agents:read", ...DELETES]) {
       expect(own[0]!.permissions).toContain(permission);
     }
@@ -162,9 +162,9 @@ describe("personal-space override through an MCP instance token", () => {
       },
     });
     const own = (
-      (await memberSees.json()) as { data: { personal: boolean; role: { key: string } }[] }
+      (await memberSees.json()) as { data: { personal: boolean; role: { preset_role?: string } }[] }
     ).data.filter((s) => s.personal);
-    expect(own[0]!.role).toMatchObject({ key: "viewer" });
+    expect(own[0]!.role).toMatchObject({ preset_role: "viewer" });
 
     const del = await app.request(url, { method: "DELETE", headers: { Authorization: bearer } });
     expect(del.status, await del.clone().text()).toBe(204);

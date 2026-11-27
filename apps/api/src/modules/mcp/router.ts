@@ -116,7 +116,7 @@ import {
   type McpSpace,
   type OrgWideSpaces,
 } from "./spaces.ts";
-import { toSpaceRoleWire } from "../../lib/space-role.ts";
+import { toSpaceRoleReference } from "../../lib/space-role.ts";
 import { requestFileAccess } from "../../lib/file-access.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
@@ -620,7 +620,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const permissions = c.get("permissions")!;
     const current = {
       ...chosen,
-      role: toSpaceRoleWire(c.get("spaceRole")!)!.name,
+      role: toSpaceRoleReference(c.get("spaceRole")!).name,
       permissions,
       surface: deriveMcpSurface(permissions, ceiling, actor, proxied, c.get("space")!),
     };

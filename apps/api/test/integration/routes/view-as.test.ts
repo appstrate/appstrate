@@ -77,7 +77,7 @@ function wait(ms = 150): Promise<void> {
 interface ListedSpace {
   id: string;
   personal: boolean;
-  role: { kind: string; key: string } | null;
+  role: { preset_role?: string; custom_role_id?: string; name: string } | null;
   permissions: string[];
   shows_studio: boolean;
 }
@@ -217,13 +217,13 @@ describe("view as role", () => {
 
     const [previewed] = await listedSpaces(view);
     expect(previewed?.id).toBe(owner.defaultSpaceId);
-    expect(previewed?.role).toMatchObject({ kind: "preset", key: "viewer" });
+    expect(previewed?.role).toMatchObject({ preset_role: "viewer" });
     expect(previewed?.permissions).not.toContain("agents:write");
     expect(previewed?.permissions).toContain("agents:read");
 
     // Same request, no header: the owner is preset `admin` everywhere.
     const [real] = await listedSpaces();
-    expect(real?.role).toMatchObject({ kind: "preset", key: "admin" });
+    expect(real?.role).toMatchObject({ preset_role: "admin" });
     expect(real?.permissions).toContain("agents:write");
 
     expect((await createAgent("@view-as/blocked", view)).status).toBe(403);
@@ -299,7 +299,7 @@ describe("view as role", () => {
     const view = persona("member", `custom:${role.id}`);
 
     const [previewed] = await listedSpaces(view);
-    expect(previewed?.role).toMatchObject({ kind: "custom", key: "auditor" });
+    expect(previewed?.role).toMatchObject({ custom_role_id: role.id, name: role.name });
     expect(previewed?.permissions).toContain("space-settings:write");
     expect(previewed?.permissions).not.toContain("agents:write");
 
@@ -364,7 +364,7 @@ describe("view as role", () => {
           orgRole: "member",
           space: {
             spaceId: owner.defaultSpaceId,
-            role: { kind: "preset", key: "builder", name: "builder" },
+            role: { presetRole: "builder" },
           },
         },
       });
@@ -531,7 +531,7 @@ describe("view as role", () => {
       orgRole: "member",
       space: {
         spaceId: owner.defaultSpaceId,
-        role: { kind: "preset", key: "admin", name: "admin" },
+        role: { presetRole: "admin" },
       },
     });
     // The control: the same write with no header carries no persona at all.

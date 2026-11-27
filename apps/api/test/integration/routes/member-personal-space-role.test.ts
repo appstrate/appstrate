@@ -99,7 +99,7 @@ describe("member personal-space role override", () => {
     });
 
     const own = await personalOf(member);
-    expect(own.role).toMatchObject({ kind: "preset", key: "viewer" });
+    expect(own.role).toMatchObject({ preset_role: "viewer" });
     for (const permission of DELETES) expect(own.permissions).toContain(permission);
     expect(own.permissions).not.toContain("agents:write");
 
@@ -122,14 +122,14 @@ describe("member personal-space role override", () => {
       headers: { Cookie: owner.cookie, ...json },
       body: JSON.stringify({ personal_space_role: { preset_role: "operator" } }),
     });
-    expect((await personalOf(member)).role).toMatchObject({ key: "operator" });
+    expect((await personalOf(member)).role).toMatchObject({ preset_role: "operator" });
 
     expect((await putOverride(owner, member.user.id, { preset_role: "builder" })).status).toBe(200);
-    expect((await personalOf(member)).role).toMatchObject({ key: "builder" });
+    expect((await personalOf(member)).role).toMatchObject({ preset_role: "builder" });
 
     expect((await putOverride(admin, member.user.id, { preset_role: "admin" })).status).toBe(200);
     const own = await personalOf(member);
-    expect(own.role).toMatchObject({ key: "admin" });
+    expect(own.role).toMatchObject({ preset_role: "admin" });
     expect(own.permissions).toContain("agents:write");
     expect(await overrideRows(owner.orgId, member.user.id)).toEqual([
       { presetRole: "admin", customRoleId: null },
@@ -149,7 +149,7 @@ describe("member personal-space role override", () => {
       custom_role_id: role.id,
     });
     const own = await personalOf(member);
-    expect(own.role).toMatchObject({ kind: "custom", key: "reader", name: "Reader" });
+    expect(own.role).toMatchObject({ custom_role_id: role.id, name: "Reader" });
     // Created without a choice, the role shows the Studio.
     expect(own.shows_studio).toBe(true);
     for (const permission of ["agents:read", ...DELETES]) {
@@ -174,7 +174,7 @@ describe("member personal-space role override", () => {
   it("PUT gives a guest any role, held capped to operator, with the floor", async () => {
     expect((await putOverride(owner, guest.user.id, { preset_role: "viewer" })).status).toBe(200);
     const asViewer = await personalOf(guest);
-    expect(asViewer.role).toMatchObject({ key: "viewer" });
+    expect(asViewer.role).toMatchObject({ preset_role: "viewer" });
     expect(asViewer.permissions).not.toContain("agents:run");
 
     expect((await putOverride(owner, guest.user.id, { preset_role: "builder" })).status).toBe(200);
@@ -182,7 +182,7 @@ describe("member personal-space role override", () => {
       { presetRole: "builder", customRoleId: null },
     ]);
     const capped = await personalOf(guest);
-    expect(capped.role).toMatchObject({ kind: "preset", key: "operator" });
+    expect(capped.role).toMatchObject({ preset_role: "operator" });
     expect(capped.permissions).not.toContain("agents:write");
     for (const permission of DELETES) expect(capped.permissions).toContain(permission);
   });
@@ -206,7 +206,7 @@ describe("member personal-space role override", () => {
         ),
       );
     expect(after).toHaveLength(1);
-    expect((await personalOf(member)).role).toMatchObject({ key: "runner" });
+    expect((await personalOf(member)).role).toMatchObject({ preset_role: "runner" });
   });
 
   it("PUT refuses an owner or admin target with 409, a stranger with 404, a bad body with 400", async () => {
@@ -274,7 +274,7 @@ describe("member personal-space role override", () => {
     expect(res.status, await res.clone().text()).toBe(200);
     const own = ((await res.json()) as { data: ListedSpace[] }).data.filter((s) => s.personal);
     expect(own).toHaveLength(1);
-    expect(own[0]!.role).toMatchObject({ kind: "custom", key: "reader" });
+    expect(own[0]!.role).toMatchObject({ custom_role_id: role.id });
     for (const permission of ["agents:read", ...DELETES]) {
       expect(own[0]!.permissions).toContain(permission);
     }
@@ -295,10 +295,10 @@ describe("member personal-space role override", () => {
 
   it("DELETE returns the member to the org default, idempotently", async () => {
     expect((await putOverride(owner, member.user.id, { preset_role: "viewer" })).status).toBe(200);
-    expect((await personalOf(member)).role).toMatchObject({ key: "viewer" });
+    expect((await personalOf(member)).role).toMatchObject({ preset_role: "viewer" });
 
     expect((await clearOverride(owner, member.user.id)).status).toBe(204);
-    expect((await personalOf(member)).role).toMatchObject({ key: "admin" });
+    expect((await personalOf(member)).role).toMatchObject({ preset_role: "admin" });
     expect((await memberInList(owner, member.user.id)).personal_space_role).toBeNull();
     expect(await overrideRows(owner.orgId, member.user.id)).toEqual([]);
 
@@ -334,7 +334,7 @@ describe("member personal-space role override", () => {
     expect(revoked.map((row) => row.spaceId)).not.toContain(personal.id);
 
     expect((await changeOrgRole("member")).status).toBe(200);
-    expect((await personalOf(member)).role).toMatchObject({ key: "admin" });
+    expect((await personalOf(member)).role).toMatchObject({ preset_role: "admin" });
   });
 
   it("a demotion to guest keeps the override, capped to operator, and clears nothing", async () => {
@@ -345,7 +345,7 @@ describe("member personal-space role override", () => {
       preset_role: "builder",
     });
     const asGuest = await personalOf(member);
-    expect(asGuest.role).toMatchObject({ kind: "preset", key: "operator" });
+    expect(asGuest.role).toMatchObject({ preset_role: "operator" });
     expect(asGuest.permissions).not.toContain("agents:write");
     for (const permission of DELETES) expect(asGuest.permissions).toContain(permission);
     const [audit] = await db
@@ -355,7 +355,7 @@ describe("member personal-space role override", () => {
     expect(audit?.after).toEqual({ role: "guest", personalSpaceRoleCleared: null });
 
     expect((await changeOrgRole("member")).status).toBe(200);
-    expect((await personalOf(member)).role).toMatchObject({ kind: "preset", key: "builder" });
+    expect((await personalOf(member)).role).toMatchObject({ preset_role: "builder" });
   });
 
   it("exposes the role the org default alone gives each member as personal_space_default_role", async () => {

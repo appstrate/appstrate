@@ -26,7 +26,7 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCanReach } from "../../hooks/use-can-reach";
 import {
   DEFAULT_SPACE_ROLE_VALUE,
-  memberRoleValue,
+  catalogRoleValue,
   spaceRoleAssignment,
   spaceRoleDescription,
   useSpaceRoleOptions,
@@ -89,7 +89,6 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   );
   const {
     options: roleOptions,
-    roles,
     rolesKnown,
     isLoading: rolesLoading,
     error: rolesError,
@@ -146,7 +145,6 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
       member.source !== "org_role" &&
       rolesReady &&
       (member.source === "explicit" ? canChangeRole : canInvite),
-    roles,
     roleOptions,
     isChangingRole: assignRole.isPending,
     onChangeRole: (member, value) => assignRole.assign({ spaceId, member }, value),
@@ -360,7 +358,7 @@ function AddSpaceMemberModal({
       ? DEFAULT_SPACE_ROLE_VALUE
       : (roleOptions[0]?.value ?? ""));
   const roleFieldLocked = rolesLoading || !!rolesError || roleOptions.length === 0 || isPending;
-  const selectedRole = roles?.find((item) => memberRoleValue(item, roles) === effectiveRole);
+  const selectedRole = roles?.find((item) => catalogRoleValue(item) === effectiveRole);
   const roleDescription = selectedRole ? spaceRoleDescription(selectedRole, t) : null;
   const hasIdentity = selectingUser ? !!userId : !!email.trim();
   const canSubmit =

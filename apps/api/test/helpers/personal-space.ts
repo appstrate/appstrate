@@ -13,7 +13,7 @@ import { orgOnlyHeaders, type TestContext } from "./auth.ts";
 export interface ListedSpace {
   id: string;
   personal: boolean;
-  role: { kind: string; key: string; name: string } | null;
+  role: { preset_role?: string; custom_role_id?: string; name: string } | null;
   permissions: string[];
   shows_studio: boolean;
 }

@@ -7034,12 +7034,14 @@ export interface components {
              * @enum {string}
              */
             source: "explicit" | "org_role" | "open_space";
-            role: {
+            role: null | {
                 /** @enum {string} */
-                kind: "preset" | "custom";
-                key: string;
+                preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
                 name: string;
-            } | null;
+            } | {
+                custom_role_id: string;
+                name: string;
+            };
         };
         OrgModel: {
             id: string;
@@ -7920,12 +7922,14 @@ export interface components {
              * @enum {string}
              */
             source: "explicit" | "org_role" | "open_space";
-            role: {
+            role: null | {
                 /** @enum {string} */
-                kind: "preset" | "custom";
-                key: string;
+                preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
                 name: string;
-            } | null;
+            } | {
+                custom_role_id: string;
+                name: string;
+            };
             /**
              * Format: date-time
              * @description When the explicit row was written; null for an implicit member
@@ -7986,12 +7990,14 @@ export interface components {
              */
             access: "member" | "none";
             /** @description The caller's role in this space, or null when they have none */
-            role: {
+            role: null | {
                 /** @enum {string} */
-                kind: "preset" | "custom";
-                key: string;
+                preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
                 name: string;
-            } | null;
+            } | {
+                custom_role_id: string;
+                name: string;
+            };
             /** @description The caller's effective permission set in this space, ceiling applied */
             permissions: string[];
             /** @description Whether the caller's role in this space shows the Studio's screens in the interface (`false` when they have no role). A display attribute of the role, not a permission and not a boundary: the REST API and an MCP client answer the role's permissions either way. */
@@ -21015,8 +21021,7 @@ export interface operations {
                      *               "name": "Default",
                      *               "source": "org_role",
                      *               "role": {
-                     *                 "kind": "preset",
-                     *                 "key": "admin",
+                     *                 "preset_role": "admin",
                      *                 "name": "admin"
                      *               }
                      *             }
@@ -21039,8 +21044,7 @@ export interface operations {
                      *               "name": "Default",
                      *               "source": "open_space",
                      *               "role": {
-                     *                 "kind": "preset",
-                     *                 "key": "operator",
+                     *                 "preset_role": "operator",
                      *                 "name": "operator"
                      *               }
                      *             }
@@ -22229,8 +22233,7 @@ export interface operations {
                      *           "name": "Default",
                      *           "source": "org_role",
                      *           "role": {
-                     *             "kind": "preset",
-                     *             "key": "admin",
+                     *             "preset_role": "admin",
                      *             "name": "admin"
                      *           }
                      *         }
@@ -28519,8 +28522,7 @@ export interface operations {
                      *           "personal": false,
                      *           "access": "member",
                      *           "role": {
-                     *             "kind": "preset",
-                     *             "key": "operator",
+                     *             "preset_role": "operator",
                      *             "name": "operator"
                      *           },
                      *           "permissions": [
@@ -28632,8 +28634,7 @@ export interface operations {
                      *       "personal": false,
                      *       "access": "member",
                      *       "role": {
-                     *         "kind": "preset",
-                     *         "key": "admin",
+                     *         "preset_role": "admin",
                      *         "name": "admin"
                      *       },
                      *       "permissions": [

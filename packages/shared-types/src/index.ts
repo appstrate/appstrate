@@ -475,11 +475,14 @@ export interface OrganizationMember {
   /** Their own override of the org default in their personal space; `null` = no override. Omitted without `members:change-role`. */
   personal_space_role?: SpaceRoleAssignment | null;
   /** Their role there by the org default alone. Omitted without `members:change-role`. */
-  personal_space_default_role?: SpaceRoleAssignment & { name: string };
+  personal_space_default_role?: SpaceRoleNamedReference;
 }
 
 /** A role given to someone: one preset, or one custom role. */
 export type SpaceRoleAssignment = z.infer<typeof spaceRoleReferenceSchema>;
+
+/** A role as responses serve it: the reference plus its display `name`. */
+export type SpaceRoleNamedReference = SpaceRoleAssignment & { name: string };
 
 /** One space an org member reaches — the per-member projection of `GET /api/spaces/:id/members`. */
 export interface OrganizationMemberSpace {
@@ -1373,7 +1376,7 @@ export interface SpaceInfo {
   /** Whether the caller may enter — a `closed` space is listed as `"none"`. */
   access: "member" | "none";
   /** The caller's role here, or `null` when they have none. */
-  role: { kind: "preset" | "custom"; key: string; name: string } | null;
+  role: SpaceRoleNamedReference | null;
   /** The caller's effective permission set in this space, ceiling applied. */
   permissions: string[];
   created_by: string | null;
@@ -1400,7 +1403,7 @@ export interface SpaceMember {
   org_role: OrgRole;
   /** Explicit row, org role (owner/admin), or the open space's default. */
   source: "explicit" | "org_role" | "open_space";
-  role: { kind: "preset" | "custom"; key: string; name: string } | null;
+  role: SpaceRoleNamedReference | null;
   /** When the explicit row was written; null for an implicit member. */
   createdAt: string | null;
 }

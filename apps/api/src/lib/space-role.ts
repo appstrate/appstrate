@@ -325,15 +325,7 @@ export function memberFromJoin(row: MembershipColumns): SpaceMemberRow | null {
   return row.presetRole !== null || row.customRoleId !== null ? { ref: toRef(row) } : null;
 }
 
-export function toSpaceRoleWire(
-  ref: SpaceRoleRef | null,
-): { kind: "preset" | "custom"; key: string; name: string } | null {
-  if (!ref) return null;
-  if (ref.kind === "preset") return { kind: "preset", key: ref.preset, name: ref.preset };
-  return { kind: "custom", key: ref.role.key, name: ref.role.name };
-}
-
-/** A role as a reference (`{ preset_role }` | `{ custom_role_id }`) plus its display `name`. */
+/** A role as every response serves it: the reference (`{ preset_role }` | `{ custom_role_id }`) plus its display `name`. */
 export function toSpaceRoleReference(
   ref: SpaceRoleRef,
 ): ({ preset_role: SpaceRolePreset } | { custom_role_id: string }) & { name: string } {
