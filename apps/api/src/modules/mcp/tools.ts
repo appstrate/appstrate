@@ -962,24 +962,12 @@ function describeIds(raw: unknown): { list?: string[] } | { refusal: Refusal } {
   return { list };
 }
 
-/** The JSON object a describe result carries, whether it succeeded or was refused. */
-function describedPayload(result: CallToolResult): Record<string, unknown> {
-  const structured = asRecord(result.structuredContent);
-  if (structured) return structured;
-  const first = result.content[0];
-  const text = first?.type === "text" ? first.text : "";
-  try {
-    return asRecord(JSON.parse(text)) ?? { error: text };
-  } catch {
-    return { error: text };
-  }
-}
-
 /**
  * The answer of a `describe` given `ids`: one item per id, in order, each with its `id` and what
- * a lone describe of it returns, a refused one marked `isError: true`. The integration tools'
- * `usage` is long and the same for every tool of one kind: shared by every described tool, it is
- * given once, at the top. The call is an error only when no item could be described.
+ * a lone describe of it returns (every describe answer is a `jsonResult`, so its
+ * `structuredContent`), a refused one marked `isError: true`. A `usage` shared by every described
+ * item (the integration tools': long, the same for every tool of one kind) is given once, at the
+ * top. The call is an error only when no item could be described.
  */
 function batchDescribeResult(
   kind: DiscoveryKind,
@@ -988,13 +976,12 @@ function batchDescribeResult(
 ): CallToolResult {
   const items: Record<string, unknown>[] = results.map((result, index) => ({
     id: ids[index],
-    ...describedPayload(result),
+    ...asRecord(result.structuredContent),
     ...(result.isError ? { isError: true } : {}),
   }));
   const described = items.filter((item) => item.isError !== true);
   const [first] = described;
   const usage =
-    kind === "integration_tool" &&
     described.length > 1 &&
     typeof first?.usage === "string" &&
     described.every((item) => item.usage === first.usage)

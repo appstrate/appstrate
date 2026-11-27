@@ -23,8 +23,9 @@ export type ChatTurnFinishReason =
 
 /**
  * Model calls one chat turn may make, the last one tool-less. A step is a model call, so a read
- * (search, describe) costs one as an action does: 16 left a chain of six integration tools at the
- * cap. It bounds loops and cost; the wall-clock bound is {@link CHAT_TURN_DEADLINE_MS}.
+ * (search, describe) costs one as an action does: room for a chain of integration tools with
+ * their reads and a few retries. It bounds loops and cost; the wall-clock bound is
+ * {@link CHAT_TURN_DEADLINE_MS}.
  */
 export const CHAT_MAX_STEPS = 30;
 export const CHAT_TOOL_STEP_BUDGET = CHAT_MAX_STEPS - 1;
