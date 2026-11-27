@@ -23,6 +23,7 @@ export function PanelResizeHandle({
   onLive,
   onCommit,
   onDraggingChange,
+  className,
 }: {
   edge?: "left" | "right";
   controls: string;
@@ -34,8 +35,11 @@ export function PanelResizeHandle({
   onLive: (width: number) => void;
   onCommit: (width: number | null) => void;
   onDraggingChange: (dragging: boolean) => void;
+  className?: string;
 }) {
   const drag = useRef<{ x: number; width: number } | null>(null);
+  // Set once the pointer moved during the drag: the store already follows `onLive` by then.
+  const moved = useRef(false);
   const latest = useRef(width);
   // The handle unmounts mid-drag when the panel collapses or the window turns mobile: the cleanup
   // ends the drag with the callbacks of the last render.
@@ -49,8 +53,9 @@ export function PanelResizeHandle({
     if (!started) return;
     drag.current = null;
     callbacks.current.onDraggingChange(false);
-    // A click without a move keeps the stored width as it is (null = the default).
-    if (latest.current !== started.width) callbacks.current.onCommit(latest.current);
+    // A click without a move keeps the stored width as it is (null = the default); any move
+    // commits, even back to the starting width, so the store and the storage agree.
+    if (moved.current) callbacks.current.onCommit(latest.current);
   };
   // Unmount only: `endDrag` reads nothing but refs.
   useEffect(() => endDrag, []);
@@ -60,13 +65,15 @@ export function PanelResizeHandle({
     event.currentTarget.setPointerCapture(event.pointerId);
     drag.current = { x: event.clientX, width: clamp(width) };
     latest.current = drag.current.width;
+    moved.current = false;
     onDraggingChange(true);
   };
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!drag.current) return;
     // The panel grows as the pointer moves past its edge.
-    const moved = event.clientX - drag.current.x;
-    latest.current = clamp(drag.current.width + (edge === "left" ? -moved : moved));
+    const delta = event.clientX - drag.current.x;
+    moved.current = true;
+    latest.current = clamp(drag.current.width + (edge === "left" ? -delta : delta));
     onLive(latest.current);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -89,6 +96,7 @@ export function PanelResizeHandle({
       className={cn(
         "hover:bg-primary/20 focus-visible:bg-primary/30 absolute inset-y-0 z-10 w-1.5 cursor-col-resize touch-none transition-colors outline-none",
         edge === "left" ? "left-0" : "right-0",
+        className,
       )}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

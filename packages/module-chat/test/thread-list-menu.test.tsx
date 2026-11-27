@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The open conversation's « … » in the host's header: the same menu a row has (its spaces, then
- * Renommer and Supprimer), a header icon button's size (32 px under a mouse, 44 px on touch),
- * named for assistive tech. A reader gets it too (the spaces alone); a conversation not stored yet
- * gets none.
+ * The open conversation's « … » trigger in the host's header: its name, its size (32 px under a
+ * mouse, 44 px on touch), and which popup it opens by role (a writer's menu, a reader's popover).
+ * The popup's items are portalled and not rendered here. A conversation not in the cache gets no
+ * trigger.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -78,13 +78,13 @@ describe("the open conversation's « … » in the header", () => {
     expect(button).toContain("desktop-pointer:size-8");
   });
 
-  it("is there for a reader too: it names the conversation's spaces", () => {
+  it("is there for a reader too, opening a popover, not an (empty) menu", () => {
     const button = trigger(header("chs_1", reader), "threads\\.actions\\.conversation");
-    expect(button).toContain('aria-haspopup="menu"');
+    expect(button).toContain('aria-haspopup="dialog"');
     expect(button).toContain('data-testid="chat-conversation-menu"');
   });
 
-  it("is not there on a new conversation, nor for one the caller cannot read", () => {
+  it("renders no trigger on a new conversation, nor for an id absent from the cache", () => {
     expect(header(null)).not.toContain("<button");
     expect(header("chs_unknown")).not.toContain("<button");
   });

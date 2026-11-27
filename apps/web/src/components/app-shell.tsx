@@ -128,7 +128,6 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
     <Sidebar id={APP_SIDEBAR_ID} className={KEYBOARD_VIEWPORT_CLASS}>
       {/* The frame never scrolls: it is the resize handle's containing block, so the handle spans
           its whole height whatever the column below it scrolls to. */}
-      {product === "chat" && <ChatSidebarResizeHandle />}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {/* The brand cell sits at the header's height so the two rules meet across the shell. The
           collapse shows while the pointer is on the sidebar or on focus (`group` is its root).
@@ -202,6 +201,8 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
           </div>
         </SidebarFooter>
       </div>
+      {/* After the scroll wrapper so the separator is not the first tab stop (it is absolute). */}
+      {product === "chat" && <ChatSidebarResizeHandle />}
     </Sidebar>
   );
 }
@@ -209,7 +210,9 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
 /**
  * The chat sidebar's edge, dragged to widen or narrow it on desktop: conversation titles are worth
  * the room. Remembered per browser; double-click resets it. A phone's drawer is the whole screen
- * and a collapsed sidebar is off screen: neither has an edge to drag.
+ * and a collapsed sidebar is off screen: neither has an edge to drag, nor does a touch screen (the
+ * handle shows under a fine pointer only). It straddles the border by 2 px to stay clear of the
+ * scroll wrapper's scrollbar.
  */
 function ChatSidebarResizeHandle() {
   const { t } = useTranslation();
@@ -233,6 +236,7 @@ function ChatSidebarResizeHandle() {
       onLive={setLive}
       onCommit={commit}
       onDraggingChange={setDragging}
+      className="desktop-pointer:block -right-0.5 hidden"
     />
   );
 }

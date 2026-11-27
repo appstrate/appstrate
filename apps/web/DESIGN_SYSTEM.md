@@ -108,8 +108,9 @@ they start with `packages/` or `e2e/`.
   the room; the header never writes the organization's or the space's name either, the drawer
   does. Controls are 44 px on touch. In the chat the trail is the conversation's name on every
   format: the chat page publishes it, not the list, whose phone drawer is unmounted while closed.
-  The controls are the conversation's « … », the same menu as its row (its spaces for everyone,
-  Renommer and Supprimer for a writer), then the context panel toggle.
+  The controls are the conversation's « … » then the context panel toggle. For a writer the « … »
+  is the same menu as its row (its spaces, Renommer, Supprimer); a reader's « … » opens a small
+  panel listing the conversation's spaces.
 - **The sidebar is the whole screen on a phone**: its first row is the organization switcher, as
   wide as its names with its chevrons right after them (the sidebar's width from `md` up), then at
   the row's end the notification bell (its list rises from the bottom, as every phone menu does)
@@ -904,11 +905,13 @@ The chat is `@appstrate/module-chat` (UI in `packages/module-chat/src/ui/`, buil
 on assistant-ui). Its lightweight `@appstrate/module-chat/conversation-skeleton`
 is shared by the route fallback and the history wait. The chat sits inside the
 shared shell (its list: `modules/chat/chat-sidebar.tsx`). On desktop the chat sidebar
-resizes from 224 to 480 px, starts at 16rem (256 px) and keeps its width per browser
-(`appstrate-chat-sidebar-width`); a phone and a collapsed sidebar have no handle. Studio's
+resizes from 224 to 480 px, capped at 30% of the window and never below 16rem, starts at 16rem
+(256 px) and keeps its width per browser (`appstrate-chat-sidebar-width`); the handle shows only
+under a fine pointer (a phone, a touch screen and a collapsed sidebar have no handle). Studio's
 sidebar keeps a fixed width. The list's date groups fold from their heading, a button with
-`aria-expanded` whose chevron turns when folded and which fills on hover under a fine pointer;
-folded groups are remembered per browser (`appstrate-chat-collapsed-groups`). Search results are
+`aria-expanded` whose chevron turns when folded and which fills on hover under a fine pointer; its
+text is 14 px on touch and 11 px under a fine pointer, and the group holding the open
+conversation stays open; folded groups are remembered per browser (`appstrate-chat-collapsed-groups`). Search results are
 never grouped, so never folded. The chat
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
 import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`); a failed one is softened, never hidden: no red border or lead icon, its message stays visible under the header in muted text, and a small red cross (`FailedGlyph`, named « Échec · HTTP 404 » for assistive tech) ends the row, the same cross, decorative, preceding the muted failed count of a folded lookups group, running or settled; only what ends the turn stays red. The HTTP status is no badge: it is in the call's detail. Reasoning is

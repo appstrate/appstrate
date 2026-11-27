@@ -47,7 +47,7 @@ function stubStorage(initial: Record<string, string> = {}, throwing = false) {
   return data;
 }
 
-function render(): string {
+function render(activeId: string | null = null): string {
   const qc = new QueryClient();
   const row = (id: string, title: string) => ({
     id,
@@ -67,7 +67,7 @@ function render(): string {
         <SidebarProvider>
           <ChatTransportProvider value={transport}>
             <ChatConversationList
-              activeId={null}
+              activeId={activeId}
               t={(key) => key}
               can={() => true}
               renderSpaces={(ids) => ids.join(", ")}
@@ -97,9 +97,18 @@ describe("a date group's heading", () => {
   it("renders folded, without its rows, when its key was stored as folded", () => {
     stubStorage({ [COLLAPSED_GROUPS_KEY]: JSON.stringify(["today"]) });
     const html = render();
-    expect(heading(html)).toContain('aria-expanded="false"');
-    expect(html).not.toContain("Budget");
+    const button = heading(html);
+    expect(button).toContain('aria-expanded="false"');
     expect(html).toContain("threads.group.today");
+    // Radix unmounts a folded list and drops aria-controls with it: nothing dangles.
+    expect(button).not.toContain("aria-controls");
+    expect(html).not.toContain("Budget");
+  });
+
+  it("keeps a folded group open while it holds the active conversation", () => {
+    stubStorage({ [COLLAPSED_GROUPS_KEY]: JSON.stringify(["today"]) });
+    expect(heading(render("chs_2"))).toContain('aria-expanded="true"');
+    expect(heading(render("chs_other"))).toContain('aria-expanded="false"');
   });
 
   it("ignores garbage and unknown keys in the storage", () => {

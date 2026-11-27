@@ -21,7 +21,7 @@
  * fill as Studio's, or the two products would not read as one app.
  */
 
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ElementType, type ReactElement } from "react";
 import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -46,6 +46,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Label } from "@appstrate/ui/components/label";
 import {
   Dialog,
@@ -335,13 +336,16 @@ export function ChatConversationList({
                 <Collapsible
                   key={group.key}
                   asChild
-                  open={!collapsedGroups.has(group.key)}
+                  // Never folded over the open conversation: it must stay visible.
+                  open={
+                    !collapsedGroups.has(group.key) || group.sessions.some((s) => s.id === activeId)
+                  }
                   onOpenChange={(open) => setFolded(group.key, !open)}
                 >
                   <li className="flex flex-col gap-1">
                     <SidebarGroupLabel
                       asChild
-                      className="group/label desktop-pointer:hover:bg-sidebar-accent desktop-pointer:hover:text-sidebar-accent-foreground desktop-pointer:h-6 mt-1 h-10 gap-1 px-2 text-sm md:text-[11px] [&>svg]:size-3"
+                      className="group/label desktop-pointer:hover:bg-sidebar-accent desktop-pointer:hover:text-sidebar-accent-foreground desktop-pointer:h-6 desktop-pointer:text-[11px] mt-1 h-10 justify-start gap-1 px-2 text-left text-sm [&>svg]:size-3"
                     >
                       <CollapsibleTrigger>
                         {t(GROUP_LABEL_KEY[group.key])}
@@ -508,9 +512,37 @@ function ConversationRow({
   );
 }
 
+/** The spaces a conversation reaches, by name, in a menu's label or a popover's body. */
+function ConversationSpaces({
+  as: Comp,
+  session,
+  t,
+  renderSpaces,
+}: {
+  as: ElementType;
+  session: SessionSummary;
+  t: ChatTranslate;
+  renderSpaces: RenderSpaces;
+}) {
+  // A row shows their tiles alone, and a touch has no hover to read their `title`.
+  return (
+    <Comp
+      data-testid="chat-menu-spaces"
+      className={cn(
+        "text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)]",
+        NOTE_TEXT_CLASS,
+        Comp === "div" && "px-2 py-1.5",
+      )}
+    >
+      {session.space_ids.length > 0 ? renderSpaces(session.space_ids) : t("common:overview.title")}
+    </Comp>
+  );
+}
+
 /**
  * A conversation's « … »: the spaces it reaches, then for a writer « Renommer » and « Supprimer »,
- * for a row and for the open conversation in the host's header alike. `children` is the trigger. Below
+ * for a row and for the open conversation in the host's header alike. A reader's opens a popover
+ * with the spaces alone. `children` is the trigger. Below
  * `md` the menu is a panel from the bottom, titled by the conversation. Deleting the `active`
  * conversation leaves it for a new one.
  */
@@ -569,44 +601,44 @@ function ConversationActionsMenu({
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild ref={menuTrigger}>
-          {children}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-40" sheetTitle={title}>
-          {/* The spaces it reaches, by name: a row shows their tiles alone, and a touch has
-              no hover to read their `title`. */}
-          <DropdownMenuLabel
-            data-testid="chat-menu-spaces"
-            className={cn(
-              "text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)]",
-              NOTE_TEXT_CLASS,
-            )}
-          >
-            {session.space_ids.length > 0
-              ? renderSpaces(session.space_ids)
-              : t("common:overview.title")}
-          </DropdownMenuLabel>
-          {canWrite && (
-            <>
-              <DropdownMenuItem onSelect={() => setRenaming(true)}>
-                <PencilIcon />
-                {t("threads.rename")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={() => {
-                  setDeleteFailed(false);
-                  setConfirmingDelete(true);
-                }}
-              >
-                <Trash2Icon />
-                {t("common:btn.delete")}
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {canWrite ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild ref={menuTrigger}>
+            {children}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-40" sheetTitle={title}>
+            <ConversationSpaces
+              as={DropdownMenuLabel}
+              session={session}
+              t={t}
+              renderSpaces={renderSpaces}
+            />
+            <DropdownMenuItem onSelect={() => setRenaming(true)}>
+              <PencilIcon />
+              {t("threads.rename")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() => {
+                setDeleteFailed(false);
+                setConfirmingDelete(true);
+              }}
+            >
+              <Trash2Icon />
+              {t("common:btn.delete")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        // A reader has no action: a menu would be empty for assistive tech, so the spaces open
+        // in a popover (a panel from the bottom on a phone, as the menu's).
+        <Popover>
+          <PopoverTrigger asChild>{children}</PopoverTrigger>
+          <PopoverContent align="end" className="w-auto min-w-40 p-2">
+            <ConversationSpaces as="div" session={session} t={t} renderSpaces={renderSpaces} />
+          </PopoverContent>
+        </Popover>
+      )}
       {canWrite && (
         <AlertDialog
           open={confirmingDelete}

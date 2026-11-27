@@ -698,11 +698,11 @@ function titleCandidate(message: UIMessage): string | null {
 const TITLE_HEAD = 57;
 
 /**
- * A message's text as a title, opening on a capital (not a brand-style lowercase such as "iPhone"); null when empty. Past 60
- * chars it is cut to its head plus an ellipsis — on the last word boundary,
- * unless that sits before char 30 (a short word, then a long unbroken token),
- * where the word is cut. `toUpperCase`, not the locale's: the server's locale
- * must not decide a title.
+ * A message's text as a title, opening on a capital (not a brand-style lowercase such as
+ * "iPhone"); null when empty. Past 60 chars it is cut to its head plus an ellipsis — on the last
+ * word boundary, unless that sits before char 30 (a short word, then a long unbroken token),
+ * where the word is cut. `toUpperCase`, not the locale's: the server's locale must not decide a
+ * title.
  */
 export function titleFromText(raw: string): string | null {
   if (!raw) return null;

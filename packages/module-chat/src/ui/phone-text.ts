@@ -60,7 +60,10 @@ export const SEARCH_INPUT_CLASS =
 export const USER_MESSAGE_CLASS =
   "bg-card text-foreground max-w-[80%] rounded-2xl border px-4 py-2 text-base desktop-pointer:text-sm whitespace-pre-wrap shadow-sm";
 
-/** The assistant's turn, sized like the user's bubble: by pointer (the markdown sizes its own prose: `MARKDOWN_PROSE_CLASS`). */
+/**
+ * The assistant's turn, sized like the user's bubble: by pointer (the markdown sizes its own
+ * prose: `MARKDOWN_PROSE_CLASS`).
+ */
 export const ASSISTANT_MESSAGE_CLASS =
   "text-foreground text-base desktop-pointer:text-sm leading-relaxed";
 
