@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// A landscape phone can cross md. Keep both editable fields at 1rem at every width.
+// A landscape phone can cross md. Editable fields stay at 1rem on touch (iOS zooms into smaller
+// ones); the pointer decides, never the width. The composer and the user's bubble share one size.
 
 /** The composer's Lexical editor, styled through the library's `aui-lexical-*` classes. */
 export const COMPOSER_INPUT_CLASS =
-  "relative max-h-40 w-full overflow-y-auto px-0 text-base [&_.aui-lexical-input]:min-h-11 desktop-pointer:[&_.aui-lexical-input]:min-h-9 [&_.aui-lexical-input]:py-2.5 md:[&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:break-words [&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:outline-none";
+  "relative max-h-40 w-full overflow-y-auto px-0 text-base desktop-pointer:text-sm [&_.aui-lexical-input]:min-h-11 desktop-pointer:[&_.aui-lexical-input]:min-h-9 [&_.aui-lexical-input]:py-2.5 md:[&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:break-words [&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:outline-none";
 
 /** The field's placeholder, laid over the editor's first line (`ComposerPlaceholder`). */
 export const COMPOSER_PLACEHOLDER_CLASS =
-  "text-muted-foreground pointer-events-none absolute inset-x-0 top-2.5 truncate text-base md:top-1";
+  "text-muted-foreground pointer-events-none absolute inset-x-0 top-2.5 truncate text-base desktop-pointer:text-sm md:top-1";
 
 /** Running text a phone reads (a hint, a state, a message): 16 px, the dense size from `md`. */
 export const READING_TEXT_CLASS = "text-base md:text-sm";
@@ -55,9 +56,9 @@ export const SEARCH_TOGGLE_CLASS =
 export const SEARCH_INPUT_CLASS =
   "pr-9 pl-7 text-base max-md:h-11 max-md:rounded-xl max-md:border-0 max-md:bg-muted max-md:focus-visible:ring-0 max-md:focus-visible:ring-offset-0 max-md:pl-10 max-md:shadow-none md:h-8 md:pr-7 md:py-0 md:text-base [&::-webkit-search-cancel-button]:hidden";
 
-/** The user's bubble. */
+/** The user's bubble: the composer's size, so a message keeps its size when sent. */
 export const USER_MESSAGE_CLASS =
-  "bg-card text-foreground max-w-[80%] rounded-2xl border px-4 py-2 text-base whitespace-pre-wrap shadow-sm md:text-sm";
+  "bg-card text-foreground max-w-[80%] rounded-2xl border px-4 py-2 text-base desktop-pointer:text-sm whitespace-pre-wrap shadow-sm";
 
 /** The assistant's turn (the markdown renderer sizes its own prose: `MARKDOWN_PROSE_CLASS`). */
 export const ASSISTANT_MESSAGE_CLASS = "text-foreground text-base leading-relaxed md:text-sm";

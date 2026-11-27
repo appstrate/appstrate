@@ -19,17 +19,28 @@ import {
   USER_MESSAGE_CLASS,
 } from "../src/ui/phone-text.ts";
 
-it("keeps the composer and search at 1rem in both orientations", () => {
+it("keeps the composer and search at 1rem on touch in both orientations", () => {
   for (const classes of [COMPOSER_INPUT_CLASS, SEARCH_INPUT_CLASS]) {
     expect(classes.split(" ")).toContain("text-base");
-    expect(classes).not.toMatch(/(?:^|[ :])text-(?:xs|sm)\b/);
+    expect(classes.split(/\s+/).filter((t) => /^(?:[a-z-]+:)?text-(?:xs|sm)$/.test(t))).toEqual(
+      classes.includes("desktop-pointer:text-sm") ? ["desktop-pointer:text-sm"] : [],
+    );
   }
   // The shared Input defaults to md:text-sm.
   expect(SEARCH_INPUT_CLASS.split(" ")).toContain("md:text-base");
 });
 
+it("sizes the composer and the user's bubble alike, by pointer and never by width", () => {
+  for (const classes of [COMPOSER_INPUT_CLASS, COMPOSER_PLACEHOLDER_CLASS, USER_MESSAGE_CLASS]) {
+    const tokens = classes.split(/\s+/);
+    expect(tokens).toContain("text-base");
+    expect(tokens).toContain("desktop-pointer:text-sm");
+    expect(tokens).not.toContain("md:text-sm");
+  }
+});
+
 it("uses denser message bodies from md", () => {
-  for (const classes of [USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, READING_TEXT_CLASS]) {
+  for (const classes of [ASSISTANT_MESSAGE_CLASS, READING_TEXT_CLASS]) {
     expect(classes.split(" ")).toContain("text-base");
     expect(classes.split(" ")).toContain("md:text-sm");
   }

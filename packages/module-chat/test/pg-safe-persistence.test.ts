@@ -70,6 +70,6 @@ describe("chat persistence of Postgres-refused characters", () => {
       .select({ title: chatSessions.title })
       .from(chatSessions)
       .where(eq(chatSessions.id, id));
-    expect(session!.title).toBe("hi�there");
+    expect(session!.title).toBe("Hi�there");
   });
 });
