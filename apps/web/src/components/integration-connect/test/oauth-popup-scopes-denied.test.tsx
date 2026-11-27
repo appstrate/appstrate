@@ -37,6 +37,8 @@ const i18nModule = await import("../../../i18n.ts");
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
 
+const { ApiError } = await import("../../../api/errors.ts");
+
 const PACKAGE = "@acme/mail";
 
 function openPopup() {
@@ -137,6 +139,23 @@ describe("connect popup — no completion", () => {
 
     expect(await done).toBe(false);
     expect(failed.mock.calls as unknown[][]).toEqual([[t("timeout")]]);
+    expect(closed).toBeGreaterThan(0);
+  });
+});
+
+describe("connect popup — a scope the catalog does not offer", () => {
+  it("says the refusal itself, not a generic failure, and closes the popup", async () => {
+    let closed = 0;
+    popup!.close = () => {
+      closed += 1;
+    };
+    minted.mockRejectedValue(
+      new ApiError("scope_not_in_catalog", "`mail.nope` is not in the catalog", 400),
+    );
+
+    expect(await openPopup()).toBe(false);
+    expect(failed).toHaveBeenCalledTimes(1);
+    expect(String(failed.mock.calls[0]![0])).toContain("catalogue");
     expect(closed).toBeGreaterThan(0);
   });
 });

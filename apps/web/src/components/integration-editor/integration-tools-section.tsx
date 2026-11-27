@@ -4,12 +4,13 @@
  * Package AFPS › Outils: an integration's tools and the policy each one
  * carries, as one table.
  *
- * Both come from the package alone: the local server's declared `tools[]`
- * (or the manifest's `tools_policy` keys) for the catalog, the manifest's
- * `tools_policy` for the scopes a tool requires. Nothing about them is set
- * per organization or per space, and which tools an agent may call is chosen
- * in the agent. So they are one section of the package: the catalog as a
- * table, the policy edited from each row, in a modal.
+ * The scopes a tool requires come from the package alone (the manifest's
+ * `tools_policy`), so they are edited here, per row, in a modal. The catalog
+ * is the package's too (the local server's declared `tools[]`, or the
+ * `tools_policy` keys), plus, for a remote server, the tools it lists and each
+ * space's verdict on them (`status`): what a space approves or blocks is set
+ * from the row menus (`IntegrationToolPolicySection`), and which tools an agent
+ * calls is chosen in the agent.
  *
  * The catalog is the server's reading of the SAVED package (empty while the
  * package is being created); the scopes follow the draft, so an applied change
@@ -18,7 +19,16 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
+import { asRecord } from "@appstrate/core/safe-json";
+import { useToolSnapshotRefresh } from "../../hooks/use-integrations";
+import { formatDateField } from "../../lib/format-date";
+import {
+  declareTools,
+  isToolWithoutPermission,
+  type ToolCatalogEntry,
+} from "../../lib/integration-tool-policy";
+import type { ToolSnapshot } from "../../lib/integration-tool-snapshot";
+import { ServerReadControl } from "./server-read-control";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Switch } from "@appstrate/ui/components/switch";
@@ -30,8 +40,11 @@ import { SettingRow, SettingsGroup } from "../settings/setting-row";
 import { PageActionsMenu } from "../page-actions-menu";
 import { PackageToolCatalog, type PackageTool } from "../package-detail/package-tool-catalog";
 import { TableRowActions } from "../table-row-actions";
+import {
+  IntegrationToolPolicySection,
+  type ToolPolicyAccess,
+} from "./integration-tool-policy-section";
 import { RequiredScopesField } from "./required-scopes-field";
-import { SyncFromServer, type ServerSyncResult } from "./sync-from-server";
 import {
   getAllowUndeclaredTools,
   getAuths,
@@ -43,24 +56,24 @@ import {
 } from "./utils";
 
 export function IntegrationToolsSection({
+  packageId,
   tools,
   allowUndeclaredTools,
+  snapshot,
+  spacePolicy,
   edit,
-  sync,
 }: {
+  packageId: string;
   /** The saved package's effective tool catalog (`tool_catalog`). */
-  tools: IntegrationToolCatalogEntry[];
+  tools: ToolCatalogEntry[];
+  /** The server's last listing; absent for a source that has none. */
+  snapshot?: ToolSnapshot;
+  /** What the reader may do about the tools in the working space, and what frames it. */
+  spacePolicy?: ToolPolicyAccess;
   /** Read-only: whether the saved package lets agents call undeclared tools. */
   allowUndeclaredTools?: boolean;
   /** The draft manifest, when the reader may change the package. */
   edit?: { manifest: Record<string, unknown>; onChange: (next: Record<string, unknown>) => void };
-  /** Offered only when the integration can be asked for its tools (remote, connected). */
-  sync?: {
-    run: (connectionId?: string) => void;
-    isPending: boolean;
-    error: unknown;
-    result: ServerSyncResult | null;
-  };
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   // The tool being edited, or "new" for a tool added by name.
@@ -76,18 +89,38 @@ export function IntegrationToolsSection({
       permissions: policies
         ? policies.find((policy) => policy.name === tool.name)?.requiredScopes
         : tool.policy?.required_scopes,
+      status: tool.status,
+      origin: tool.origin,
+      modified: tool.modified,
     })),
     ...(policies ?? [])
       .filter((policy) => !tools.some((tool) => tool.name === policy.name))
       .map((policy) => ({ name: policy.name, permissions: policy.requiredScopes })),
-  ];
+  ].map((tool) => ({
+    ...tool,
+    // The agent picker's flag: a tool of an OAuth integration without a declared scope.
+    scopesUnknown: !!snapshot?.oauth && isToolWithoutPermission(tool),
+  }));
 
   const allowUndeclared = edit ? getAllowUndeclaredTools(edit.manifest) : allowUndeclaredTools;
   const commit = (next: ToolPolicyState[]) => edit?.onChange(setToolsPolicy(edit.manifest, next));
+  // Declaring a listed tool edits the draft; saving and publishing stay the author's.
+  const access: ToolPolicyAccess | undefined =
+    spacePolicy && edit
+      ? {
+          ...spacePolicy,
+          declaration: {
+            declared: new Set(Object.keys(asRecord(edit.manifest.tools_policy))),
+            declare: (names) => edit.onChange(declareTools(edit.manifest, names)),
+          },
+        }
+      : spacePolicy;
 
   return (
     <div className="flex flex-col gap-4">
-      {edit && sync && <SyncFromServer {...sync} />}
+      {snapshot && (
+        <ToolSnapshotSummary packageId={packageId} snapshot={snapshot} tools={entries} />
+      )}
       {edit ? (
         <AllowUndeclaredToggle manifest={edit.manifest} onChange={edit.onChange} />
       ) : (
@@ -102,50 +135,62 @@ export function IntegrationToolsSection({
           </Alert>
         )
       )}
-      <div>
-        <PackageToolCatalog
-          tools={entries}
-          actions={
-            edit && (
+      <IntegrationToolPolicySection access={access} tools={tools}>
+        {(controls) => (
+          <PackageToolCatalog
+            tools={[...entries, ...controls.extraRows]}
+            listedAt={snapshot?.summary?.listed_at}
+            actions={
               <PageActionsMenu
                 actions={[
-                  {
-                    id: "add-tool",
-                    label: t("integrationEditor.toolsPolicy.addTool"),
-                    icon: Plus,
-                    onSelect: () => setPolicyTarget("new"),
-                  },
+                  ...(edit
+                    ? [
+                        {
+                          id: "add-tool",
+                          label: t("integrationEditor.toolsPolicy.addTool"),
+                          icon: Plus,
+                          onSelect: () => setPolicyTarget("new"),
+                        },
+                      ]
+                    : []),
+                  ...controls.listActions,
                 ]}
               />
-            )
-          }
-          rowActions={
-            policies
-              ? (tool) => (
-                  <TableRowActions
-                    menuLabel={t("editor.rowActions", { name: tool.name })}
-                    actions={[
-                      {
-                        id: "edit",
-                        label: t("integrationEditor.toolsPolicy.editScopes"),
-                        icon: Pencil,
-                        onSelect: () => setPolicyTarget(tool.name),
-                      },
-                      {
-                        id: "remove",
-                        label: t("integrationEditor.toolsPolicy.remove"),
-                        icon: Trash2,
-                        onSelect: () =>
-                          commit(policies.filter((policy) => policy.name !== tool.name)),
-                        hidden: !policies.some((policy) => policy.name === tool.name),
-                      },
-                    ]}
-                  />
-                )
-              : undefined
-          }
-        />
-      </div>
+            }
+            rowActions={
+              policies || access?.review || access?.declaration
+                ? (tool) => (
+                    <TableRowActions
+                      menuLabel={t("editor.rowActions", { name: tool.name })}
+                      isPending={controls.isBusy(tool.name)}
+                      actions={[
+                        ...(policies
+                          ? [
+                              {
+                                id: "edit",
+                                label: t("integrationEditor.toolsPolicy.editScopes"),
+                                icon: Pencil,
+                                onSelect: () => setPolicyTarget(tool.name),
+                              },
+                              {
+                                id: "remove",
+                                label: t("integrationEditor.toolsPolicy.remove"),
+                                icon: Trash2,
+                                onSelect: () =>
+                                  commit(policies.filter((policy) => policy.name !== tool.name)),
+                                hidden: !policies.some((policy) => policy.name === tool.name),
+                              },
+                            ]
+                          : []),
+                        ...controls.rowActions(tool),
+                      ]}
+                    />
+                  )
+                : undefined
+            }
+          />
+        )}
+      </IntegrationToolPolicySection>
 
       {edit && policies && policyTarget !== null && (
         <Modal
@@ -174,6 +219,69 @@ export function IntegrationToolsSection({
           />
         </Modal>
       )}
+    </div>
+  );
+}
+
+/**
+ * The last listing of the server (when, with which connection, what moved), the tools without a
+ * declared permission, and the button that lists again. `tools` is what the table shows: in the
+ * editor, the draft's policy.
+ */
+function ToolSnapshotSummary({
+  packageId,
+  snapshot,
+  tools,
+}: {
+  packageId: string;
+  snapshot: ToolSnapshot;
+  tools: PackageTool[];
+}) {
+  const { t } = useTranslation("agents");
+  const refresh = useToolSnapshotRefresh(packageId);
+  const withoutScopes = snapshot.oauth ? tools.filter(isToolWithoutPermission).length : 0;
+  const { summary, refreshBlock } = snapshot;
+  return (
+    <div className="flex flex-col gap-2" data-testid="integration-tool-snapshot">
+      <p className="text-muted-foreground text-sm">
+        {summary
+          ? t("integrationTools.snapshot.summary", {
+              date: formatDateField(summary.listed_at),
+              added: summary.added,
+              missing: summary.missing,
+              modified: summary.modified,
+            })
+          : t("integrationTools.snapshot.never")}
+      </p>
+      {snapshot.connectionLabel && (
+        <p className="text-muted-foreground text-sm">
+          {t("integrationTools.snapshot.connection", { label: snapshot.connectionLabel })}
+        </p>
+      )}
+      {summary?.truncated && (
+        <p className="text-warning text-sm" data-testid="integration-tool-snapshot-truncated">
+          {t("integrationTools.snapshot.truncated")}
+        </p>
+      )}
+      {withoutScopes > 0 && (
+        <p className="text-warning text-sm">
+          {t("integrationTools.withoutScopes", { count: withoutScopes })}
+        </p>
+      )}
+      <ServerReadControl
+        label={t("integrationTools.snapshot.refresh")}
+        blockedBy={refreshBlock}
+        isPending={refresh.isPending}
+        error={refresh.error}
+        onRun={refresh.run}
+        buttonTestId="integration-tool-snapshot-refresh"
+      >
+        {refreshBlock === null && (
+          <p className="text-muted-foreground text-xs" data-testid="integration-tool-snapshot-hint">
+            {t("integrationTools.snapshot.refreshHint")}
+          </p>
+        )}
+      </ServerReadControl>
     </div>
   );
 }

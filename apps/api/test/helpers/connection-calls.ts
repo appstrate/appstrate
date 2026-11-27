@@ -8,7 +8,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { connectionCalls } from "@appstrate/db/schema";
+import { connectionCalls, integrationConnections } from "@appstrate/db/schema";
 import { drainAudits } from "../../src/services/audit.ts";
 
 /** Waits for every pending journal (and audit) write of the process. */
@@ -24,4 +24,13 @@ export async function journaledCalls(scope: { orgId: string }, integrationId: st
       and(eq(connectionCalls.orgId, scope.orgId), eq(connectionCalls.integrationId, integrationId)),
     )
     .orderBy(connectionCalls.id);
+}
+
+/** The step-up demand held on a connection: the scopes a server asked for that it does not hold. */
+export async function requestedScopesOf(connectionId: string): Promise<string[]> {
+  const [row] = await db
+    .select({ requested: integrationConnections.requestedScopes })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId));
+  return row!.requested;
 }

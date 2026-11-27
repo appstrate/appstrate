@@ -38,6 +38,7 @@ const meConnectionEntrySchema = {
     "kind",
     "label",
     "scopes_granted",
+    "requested_scopes",
     "connected_at",
     "needs_reconnection",
     "expiresAt",
@@ -59,6 +60,12 @@ const meConnectionEntrySchema = {
     kind: { type: "string", enum: ["integration"] },
     label: { type: "string" },
     scopes_granted: { type: "array", items: { type: "string" } },
+    requested_scopes: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold; empty when none. Granted by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`).",
+    },
     connected_at: { type: "string", format: "date-time" },
     needs_reconnection: { type: "boolean" },
     expiresAt: {

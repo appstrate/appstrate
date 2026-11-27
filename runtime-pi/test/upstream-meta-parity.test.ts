@@ -64,6 +64,16 @@ describe("upstream-meta — sidecar→wire→runtime end-to-end filter", () => {
     expect(parsed.headers).not.toHaveProperty("proxy-authorization");
   });
 
+  it("keeps required_scopes through the wire and drops a non-array without throwing", () => {
+    const parse = (required_scopes: unknown) =>
+      readUpstreamMeta({
+        content: [],
+        _meta: { [UPSTREAM_META_KEY]: { status: 403, headers: {}, required_scopes } },
+      } as never);
+    expect(parse(["a", "b"]).required_scopes).toEqual(["a", "b"]);
+    expect(parse("a").required_scopes).toBeUndefined();
+  });
+
   it("runtime-side parser re-strips sensitive headers a malicious sidecar tried to inject", () => {
     // Simulate a compromised / buggy sidecar that bypassed its own
     // serializer and shipped raw `set-cookie` / `authorization` over

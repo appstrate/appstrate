@@ -3,7 +3,8 @@
 import type { TFunction } from "i18next";
 import { formatDateField } from "./format-date";
 import { catalogueHref } from "./catalogue-link";
-import { runDetailPath } from "./package-paths";
+import { packageDetailPath, runDetailPath } from "./package-paths";
+import { integrationSettingsHref } from "./settings-section-href";
 import { linkedSpacePath } from "./across-spaces";
 import type { paths } from "../api/client";
 
@@ -67,6 +68,38 @@ export function notificationRow(
       meta: date,
       target: canReach(RECONNECT_PATH) ? RECONNECT_PATH : null,
       targetLabel: "notifications.reconnect",
+    };
+  }
+  if (notification.type === "connection_scopes_requested") {
+    // The owner's own connections: the row offers to reconnect it with what was asked for.
+    const asked = notification.payload;
+    return {
+      title: t("notifications.connectionScopesRequested", {
+        label: asked?.label ?? "",
+        integration: asked?.integration_name ?? "",
+      }),
+      status: null,
+      message: t("notifications.connectionScopesRequestedHint"),
+      meta: date,
+      target: canReach(RECONNECT_PATH) ? RECONNECT_PATH : null,
+      targetLabel: "notifications.grantScopes",
+    };
+  }
+  if (notification.type === "integration_tools_review") {
+    // The tools wait in the integration's Outils section, where they are settled.
+    const review = notification.payload;
+    const href = review
+      ? integrationSettingsHref(packageDetailPath("integration", review.packageId), "tools")
+      : null;
+    return {
+      title: t("notifications.integrationToolsReview", {
+        name: review?.display_name ?? review?.packageId ?? "",
+      }),
+      status: null,
+      message: null,
+      meta: date,
+      target: href && canReach(href) ? href : null,
+      targetLabel: "notifications.reviewTools",
     };
   }
   const packageId = notification.payload?.packageId ?? null;

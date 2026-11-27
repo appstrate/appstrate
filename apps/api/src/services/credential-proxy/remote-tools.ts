@@ -13,6 +13,7 @@ import {
   isRequestTimeout,
   sanitiseToolDescriptor,
   stripReservedResultMeta,
+  toolDefinitionFingerprint,
   type AppstrateMcpClient,
   type ToolDescriptorReduction,
 } from "@appstrate/mcp-transport";
@@ -20,7 +21,6 @@ import { createCache } from "@appstrate/core/cache";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
   allowsUndeclaredTools,
-  getApiCallConfigs,
   isUnauthenticatedIntegration,
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
@@ -28,7 +28,7 @@ import {
 import type { Actor } from "../../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import { findCause } from "@appstrate/core/error-cause";
-import { ApiError, notFound, type ResolutionFieldError } from "../../lib/errors.ts";
+import { ApiError, conflict, notFound, type ResolutionFieldError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { isProxyRefusal, proxyProblem } from "../../lib/proxy-status.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -38,8 +38,19 @@ import {
   selectAccessibleConnection,
   type ProxyReach,
 } from "../integration-connections.ts";
-import { renderRemoteSource } from "../integration-manifest-helpers.ts";
-import { readIntegrationManifestForProxy } from "../integration-service.ts";
+import { renderRemoteSource, syntheticToolNames } from "../integration-manifest-helpers.ts";
+import {
+  readIntegrationManifestForProxy,
+  type ResolvedIntegrationVersion,
+} from "../integration-service.ts";
+import {
+  approvedFingerprintsByTool,
+  loadToolSpacePolicy,
+  type ToolSpacePolicy,
+  toolBlockedInSpace,
+  unblockedApprovedToolNames,
+} from "../integration-tool-catalog.ts";
+import { recordToolSnapshot } from "../integration-tool-snapshots.ts";
 import { ProxyCallError } from "./core.ts";
 import { assertActiveOutsideRun, noConnectionMessage } from "./integration-resolver.ts";
 import {
@@ -83,6 +94,8 @@ const MAX_CACHED_CATALOGS = 128;
 interface SanitisedTool {
   tool: Tool;
   reduced: ToolDescriptorReduction[];
+  /** Of the descriptor as listed, before sanitising: what a space approves. */
+  fingerprint: string;
 }
 
 interface ReadCatalog {
@@ -130,17 +143,36 @@ export interface RemoteToolsCaller {
 
 type RemoteToolsInput = RemoteToolsCaller & { integrationId: string };
 
-function streamableRemote(integrationId: string, manifest: IntegrationManifest) {
+export function streamableRemote(integrationId: string, manifest: IntegrationManifest) {
   const source = manifest.source;
-  if (source?.kind !== "remote" || source.remote.transport === "sse") {
+  if (source?.kind !== "remote") {
     throw new ApiError({
       status: 422,
       code: "integration_not_remote",
       title: "Not a Remote Integration",
-      detail: `Integration '${integrationId}' is not backed by a Streamable HTTP MCP server.`,
+      detail: `Integration '${integrationId}' is not backed by a remote MCP server.`,
+    });
+  }
+  if (source.remote.transport === "sse") {
+    throw new ApiError({
+      status: 422,
+      code: "sync_transport_unsupported",
+      title: "Transport Not Supported",
+      detail: `Integration '${integrationId}' uses the SSE transport; only Streamable HTTP servers are supported.`,
     });
   }
   return manifest;
+}
+
+/** The published manifest of an active remote integration over Streamable HTTP, for a call outside a run. */
+export async function loadStreamableRemote(
+  scope: SpaceScope,
+  integrationId: string,
+): Promise<IntegrationManifest> {
+  await assertActiveOutsideRun(scope, integrationId);
+  const loaded = await readIntegrationManifestForProxy(integrationId, scope.orgId, null);
+  if (!loaded.ok) throw notFound(`Integration '${integrationId}' has no published version`);
+  return streamableRemote(integrationId, loaded.manifest);
 }
 
 /**
@@ -148,11 +180,13 @@ function streamableRemote(integrationId: string, manifest: IntegrationManifest) 
  * server URL rendered from its variables (AFPS §7.12). An unauthenticated integration binds no
  * connection (`null`): one named is refused before any exchange.
  */
-async function remoteConnection(
-  input: RemoteToolsInput & { connectionId?: string },
+export async function resolveRemoteConnection(
+  input: Pick<RemoteToolsInput, "scope" | "actor" | "reach" | "integrationId" | "connectOffers"> & {
+    connectionId?: string;
+  },
   manifest: IntegrationManifest,
   tool?: string,
-): Promise<{ connectionId: string | null; url: string }> {
+): Promise<ResolvedRemote> {
   const unauthenticated = isUnauthenticatedIntegration(manifest);
   const connection = unauthenticated
     ? null
@@ -191,6 +225,9 @@ async function remoteConnection(
   return { connectionId: connection?.id ?? null, url: remote.url };
 }
 
+/** The connection a call goes through (`null`: an unauthenticated integration) and the server URL. */
+type ResolvedRemote = { connectionId: string | null; url: string };
+
 /** A `connection_id` named for an unauthenticated integration, which binds none. */
 export function connectionIdRefusedWithoutAuth(integrationId: string): ApiError {
   return proxyProblem(
@@ -200,7 +237,10 @@ export function connectionIdRefusedWithoutAuth(integrationId: string): ApiError 
   );
 }
 
-async function withConnectOffers(err: unknown, input: RemoteToolsInput): Promise<unknown> {
+async function withConnectOffers(
+  err: unknown,
+  input: Pick<RemoteToolsInput, "scope" | "actor" | "connectOffers">,
+): Promise<unknown> {
   const policy = input.connectOffers;
   if (!policy || !(err instanceof ApiError) || !err.fieldErrors?.length) return err;
   const errors = await attachConnectOffers({
@@ -212,32 +252,53 @@ async function withConnectOffers(err: unknown, input: RemoteToolsInput): Promise
   return err.with({ errors });
 }
 
-/** The catalog's `"*"` selection, less the `api_call` tools the platform itself serves. */
+/**
+ * The catalog's `"*"` selection, less the `api_call` tools the platform itself serves, and what the
+ * space blocked. On a closed catalog a listed tool the manifest does not declare is offered only
+ * at a definition the space approved; `listed` unread, only the declared tools are.
+ */
 export function offeredRemoteToolNames(
   manifest: IntegrationManifest,
-  listed: readonly Pick<Tool, "name" | "description">[] | undefined,
+  listed: readonly (Pick<Tool, "name" | "description"> & { fingerprint?: string })[] | undefined,
+  policy: ToolSpacePolicy,
 ): Set<string> {
+  const open = allowsUndeclaredTools(manifest);
   const catalog = resolveIntegrationToolCatalog({
     integration: manifest,
-    ...(allowsUndeclaredTools(manifest) && listed ? { listedTools: listed } : {}),
+    ...(open && listed ? { listedTools: listed } : {}),
   });
-  const synthetic = new Set(
-    getApiCallConfigs(manifest).flatMap((config) =>
-      config.uploadToolName ? [config.toolName, config.uploadToolName] : [config.toolName],
-    ),
+  const approved = approvedFingerprintsByTool(policy);
+  const approvedListed = open
+    ? []
+    : (listed ?? []).filter(
+        (tool) =>
+          tool.fingerprint !== undefined && approved.get(tool.name)?.includes(tool.fingerprint),
+      );
+  const synthetic = syntheticToolNames(manifest);
+  const blocked = new Set(policy.blocks);
+  return new Set(
+    [...catalog, ...approvedListed]
+      .map((entry) => entry.name)
+      .filter((name) => !synthetic.has(name) && !blocked.has(name)),
   );
-  return new Set(catalog.map((entry) => entry.name).filter((name) => !synthetic.has(name)));
 }
 
 /** A failed operation, with the HTTP status of the last exchange its server answered. */
 type OperationFailure = (err: unknown, receivedStatus: number | undefined) => unknown;
 
-/** One operation on the server: through `connectionId`, or directly when it is `null`. */
-async function withClient<T>(
+/**
+ * The one way a session is opened on a remote server, whoever asks (a catalog listing, a tool
+ * call, the editor's identity read): through `connectionId`, or directly when it is `null`, with
+ * the proxy's authorization, the egress guard, the journal and the deadline of either path.
+ * `version` is the one the proxy authorizes against: the draft for the editor, else the latest
+ * published, the one runs freeze.
+ */
+export async function withMcpSession<T>(
   input: Omit<RemoteToolsInput, "signal"> & {
     connectionId: string | null;
     timeoutMs: number;
     signal: AbortSignal | null;
+    version?: ResolvedIntegrationVersion;
   },
   url: string,
   use: (client: AppstrateMcpClient, signal: AbortSignal) => Promise<T>,
@@ -258,7 +319,12 @@ async function withClient<T>(
           // The activation check `proxyCall` makes on each exchange: switched off since, nothing is sent.
           beforeExchange: () => assertIntegrationActive(input.integrationId, input.scope.spaceId),
         })
-      : proxiedMcpOperation({ ...base, connectionId: input.connectionId, reach: input.reach });
+      : proxiedMcpOperation({
+          ...base,
+          connectionId: input.connectionId,
+          reach: input.reach,
+          ...(input.version ? { version: input.version } : {}),
+        });
   let client: AppstrateMcpClient | undefined;
   try {
     return await operation.guard(
@@ -305,8 +371,32 @@ interface ServerTool {
   schema_reduced?: ToolDescriptorReduction[];
 }
 
+/**
+ * The catalog could not be read to prove what `name` calls, `listing_failure` saying why when
+ * known. Retryable: a later listing may read it.
+ */
+export function catalogUnavailable(
+  integrationId: string,
+  name: string,
+  listingFailure: string | undefined,
+): ApiError {
+  return new ApiError({
+    status: 503,
+    code: "tool_catalog_unavailable",
+    title: "Tool Catalog Unavailable",
+    detail:
+      `The catalog of ${integrationId}'s MCP server could not be read` +
+      (listingFailure ? ` (${listingFailure})` : "") +
+      `, and only it can say which of its tools '${name}' names; nothing was sent. ` +
+      `The call may be retried once a listing reads the catalog.`,
+    ...(listingFailure ? { extensions: { listing_failure: listingFailure } } : {}),
+  });
+}
+
 export interface RemoteToolCatalog {
   tools: ServerTool[];
+  /** The connection the catalog was read through; `null` for an unauthenticated integration. */
+  connectionId: string | null;
   listed: boolean;
   /**
    * Unlisted, why when known: the proxy's problem code, `timeout`, or `not_cached` (a cache-only
@@ -330,11 +420,17 @@ export async function listRemoteTools(
     connectionId?: string;
     /** Read the cached `tools/list` only; nothing is sent. */
     cachedOnly?: boolean;
+    /** List again whatever is cached: the caller asked for the server's catalog as it is now. */
+    fresh?: boolean;
+    /** The space's policy on this integration when the caller already read it: read once, not again. */
+    policy?: ToolSpacePolicy;
+    /** The connection the caller already resolved: used as is, not selected again. */
+    resolved?: ResolvedRemote;
   },
 ): Promise<RemoteToolCatalog> {
   const manifest = streamableRemote(input.integrationId, input.manifest);
   const unauthenticated = isUnauthenticatedIntegration(manifest);
-  const { connectionId, url } = await remoteConnection(input, manifest);
+  const { connectionId, url } = input.resolved ?? (await resolveRemoteConnection(input, manifest));
   const key = remoteCatalogKey({
     orgId: input.scope.orgId,
     connectionId,
@@ -342,23 +438,56 @@ export async function listRemoteTools(
     version: manifest.version,
     url,
   });
+  if (input.fresh) catalogCache.invalidate(key);
+  let snapshotFailure: unknown;
   let described = catalogCache.peek(key);
   let listingFailure: string | undefined =
     described === undefined ? (input.cachedOnly ? "not_cached" : "timeout") : undefined;
   if (described === undefined && !input.signal.aborted && !input.cachedOnly) {
-    const load = () =>
-      withClient(
+    const load = async () => {
+      let listed: { tools: Tool[]; truncated: boolean } | undefined;
+      const catalog = await withMcpSession(
         { ...input, connectionId, timeoutMs: timeouts.listMs, signal: null },
         url,
         async (client, signal) => {
-          const { tools, truncated } = await listToolPages(client, signal);
-          return boundedCatalog(tools.map(sanitiseToolDescriptor), truncated);
+          listed = await listToolPages(client, signal);
+          return boundedCatalog(
+            listed.tools.map((tool) => ({
+              ...sanitiseToolDescriptor(tool),
+              fingerprint: toolDefinitionFingerprint(tool),
+            })),
+            listed.truncated,
+          );
         },
       );
+      // Written once the session is closed, so the snapshot never holds the server's connection
+      // open; one that cannot be written must not fail the listing it records.
+      if (listed) {
+        await recordToolSnapshot({
+          orgId: input.scope.orgId,
+          packageId: input.integrationId,
+          connectionId,
+          ...listed,
+        }).catch((err: unknown) => {
+          logger.warn("credential-proxy: tool snapshot not recorded", {
+            integrationId: input.integrationId,
+            error: getErrorMessage(err),
+          });
+          // A refresh exists to write the snapshot: the platform's own failure, not the server's.
+          if (input.fresh) {
+            snapshotFailure = err;
+            throw err;
+          }
+        });
+      }
+      return catalog;
+    };
     try {
       described = await untilAborted(catalogCache.get(key, load), input.signal);
     } catch (err) {
-      if (input.signal.aborted && err === input.signal.reason) {
+      if (snapshotFailure !== undefined) {
+        throw snapshotFailure;
+      } else if (input.signal.aborted && err === input.signal.reason) {
         // The listing runs on for the next one.
       } else if (isCatalogRefusal(err)) {
         throw mcpServerFailure(err, { integrationId: input.integrationId, url, unauthenticated });
@@ -381,11 +510,13 @@ export async function listRemoteTools(
   }
   const offered = offeredRemoteToolNames(
     manifest,
-    described?.tools.map(({ tool }) => tool),
+    described?.tools.map(({ tool, fingerprint }) => ({ ...tool, fingerprint })),
+    input.policy ?? (await loadToolSpacePolicy(input.scope, input.integrationId, manifest)),
   );
   if (described === undefined) {
     return {
       tools: [...offered].map((name) => ({ name, input_schema: { type: "object" } })),
+      connectionId,
       listed: false,
       ...(listingFailure ? { listingFailure } : {}),
       truncatedAt: null,
@@ -402,6 +533,7 @@ export async function listRemoteTools(
         ...(tool.outputSchema !== undefined ? { output_schema: tool.outputSchema } : {}),
         ...(reduced.length > 0 ? { schema_reduced: reduced } : {}),
       })),
+    connectionId,
     listed: true,
     truncatedAt: described.truncated ? described.tools.length : null,
   };
@@ -439,27 +571,43 @@ export async function callRemoteTool(
     arguments: Record<string, unknown>;
   },
 ): Promise<CallToolResult> {
-  await assertActiveOutsideRun(input.scope, input.integrationId);
-  const loaded = await readIntegrationManifestForProxy(
-    input.integrationId,
-    input.scope.orgId,
-    null,
-  );
-  if (!loaded.ok) throw notFound(`Integration '${input.integrationId}' has no published version`);
-  const manifest = streamableRemote(input.integrationId, loaded.manifest);
+  const manifest = await loadStreamableRemote(input.scope, input.integrationId);
+  const policy = await loadToolSpacePolicy(input.scope, input.integrationId, manifest);
+  if (policy.blocks.includes(input.name)) {
+    throw toolBlockedInSpace(input.integrationId, input.name);
+  }
+  const open = allowsUndeclaredTools(manifest);
   const offered = offeredRemoteToolNames(
     manifest,
-    allowsUndeclaredTools(manifest) ? [{ name: input.name }] : undefined,
+    open ? [{ name: input.name }] : undefined,
+    policy,
   );
-  if (!offered.has(input.name)) {
+  // On a closed catalog, an undeclared tool the space approved is judged on the listing below
+  // (the policy is judged: an open catalog or a declared tool has no approvals).
+  const approvedUndeclared = unblockedApprovedToolNames(policy).has(input.name);
+  if (!offered.has(input.name) && !approvedUndeclared) {
     throw notFound(`Integration '${input.integrationId}' offers no tool named '${input.name}'`);
   }
-  const { connectionId, url } = await remoteConnection(input, manifest, input.name);
+  const resolved = await resolveRemoteConnection(input, manifest, input.name);
+  const { connectionId, url } = resolved;
+  if (approvedUndeclared) {
+    // The listing offers it only at a definition the space approved.
+    const catalog = await listRemoteTools({ ...input, manifest, policy, resolved });
+    if (!catalog.listed) {
+      throw catalogUnavailable(input.integrationId, input.name, catalog.listingFailure);
+    }
+    if (!catalog.tools.some((tool) => tool.name === input.name)) {
+      throw conflict(
+        "tool_definition_not_approved",
+        `The definition of tool '${input.name}' on integration '${input.integrationId}' is not one this space approved; review it in the integration's settings.`,
+      );
+    }
+  }
   // Set once the session is open: a failure after it is the `tools/call` exchange's. No tool
   // definition was listed on this client, so the SDK validates no output and raises no -32602
   // of its own after the call: one caught here is the server's.
   let calling = false;
-  const result = await withClient(
+  const result = await withMcpSession(
     { ...input, connectionId, timeoutMs: timeouts.callMs },
     url,
     (client, signal) => {

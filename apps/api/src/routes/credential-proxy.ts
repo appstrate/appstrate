@@ -83,7 +83,7 @@ import { listResponse } from "@appstrate/core/list-query";
 import { getSpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import { callerPermissions } from "../lib/permissions.ts";
-import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
+import { remoteToolsCaller } from "../lib/remote-tools-caller.ts";
 import { assertBearerOnly, bearerCaller } from "../lib/bearer-only.ts";
 import { relayIdempotencyKey } from "../middleware/idempotency.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -362,6 +362,7 @@ export function createCredentialProxyRouter() {
           spaceId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
+          ...(streamRequest ? { upload: true as const } : {}),
           ...(run ? { run } : { reach: reach! }),
           integrationId,
           method,
@@ -502,16 +503,9 @@ export function createCredentialProxyRouter() {
   // `/proxy` outside a run. The limiter keys on the route pattern, so `/connections`, `/tools`,
   // `/tools/call` and `/proxy` each count in their own bucket: discovery never spends the budget
   // of calls, and each `tools/call` counts once.
-  const remoteToolsCaller = (c: Context<AppEnv>) => {
+  const proxiedToolsCaller = (c: Context<AppEnv>) => {
     assertBearerOnly(bearerCaller(c), "credential-proxy");
-    return {
-      scope: getSpaceScope(c),
-      actor: getActor(c),
-      reach: reachOutsideRun(callerPermissions(c), c.get("space")!),
-      caller: proxyCaller(c, null),
-      signal: c.req.raw.signal,
-      connectOffers: connectOfferPolicyFromRequest(c),
-    };
+    return remoteToolsCaller(c);
   };
 
   router.get(
@@ -519,7 +513,7 @@ export function createCredentialProxyRouter() {
     rateLimit(limits.rate_per_min),
     requirePermission("credential-proxy", "call-own"),
     async (c) => {
-      const caller = remoteToolsCaller(c);
+      const caller = proxiedToolsCaller(c);
       const query = parseBody(listIntegrationToolsQuerySchema, c.req.query());
       const listing = await listIntegrationTools(caller, {
         ...(query.integration_package_id ? { integrationId: query.integration_package_id } : {}),
@@ -536,7 +530,7 @@ export function createCredentialProxyRouter() {
     rateLimit(limits.rate_per_min),
     requirePermission("credential-proxy", "call-own"),
     async (c) => {
-      const caller = remoteToolsCaller(c);
+      const caller = proxiedToolsCaller(c);
       const body = await readJsonBody(c, callRemoteToolSchema);
       const result = await callRemoteTool({
         ...caller,

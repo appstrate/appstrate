@@ -38,6 +38,10 @@ import {
   seedRun,
 } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
+import {
+  _setSystemPackagesForTesting,
+  type SystemPackageEntry,
+} from "../../../src/services/system-packages.ts";
 import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import { leaveOrganization } from "../../../src/services/organizations.ts";
 import {
@@ -48,6 +52,7 @@ import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connec
 import {
   integrationConnections,
   integrationOauthClients,
+  integrationToolSnapshots,
   packages,
   runs,
   integrationConnectionShares,
@@ -55,7 +60,7 @@ import {
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { seedShares } from "../../helpers/connection-shares.ts";
-import { drainJournal, journaledCalls } from "../../helpers/connection-calls.ts";
+import { drainJournal, journaledCalls, requestedScopesOf } from "../../helpers/connection-calls.ts";
 
 const app = getTestApp();
 
@@ -556,6 +561,149 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
     expect(meta?.degraded_integrations ?? []).not.toContain(INTEGRATION);
   });
+
+  // ─── tools-observed ────────────────────────────────────
+
+  const observed = (connectionId: string, body: unknown, bearer = token) =>
+    app.request(
+      `/internal/integration-credentials/${INTEGRATION}/tools-observed?connection_id=${connectionId}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+  const report = {
+    tools: [{ name: "search", description: "Searches", inputSchema: { type: "object" } }],
+    truncated: false,
+    unavailable: [{ name: "send", reason: "not_listed" }],
+  };
+
+  const runMetadata = async () => {
+    const [run] = await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId));
+    return run!.metadata;
+  };
+
+  describe("tools-observed on a bound connection", () => {
+    let connectionId: string;
+
+    beforeEach(async () => {
+      await seedIntegration(INTEGRATION, true);
+      connectionId = await seedConnectionRow(INTEGRATION);
+      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    });
+
+    it("refuses a forged run token", async () => {
+      expect((await observed(connectionId, report, "not-a-real-token")).status).toBe(401);
+      expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
+    });
+
+    it("stamps the run's unavailable tools once and snapshots a platform run's listing", async () => {
+      const both = {
+        ...report,
+        unavailable: [
+          { name: "send", reason: "not_listed" },
+          { name: "write", reason: "blocked_in_space" },
+        ],
+      };
+      expect((await observed(connectionId, both)).status).toBe(204);
+      expect((await observed(connectionId, both)).status).toBe(204);
+
+      expect(await runMetadata()).toEqual({
+        unavailable_tools: [
+          { integration_id: INTEGRATION, name: "send", reason: "not_listed" },
+          { integration_id: INTEGRATION, name: "write", reason: "blocked_in_space" },
+        ],
+      });
+      const snapshots = await db.select().from(integrationToolSnapshots);
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0]).toMatchObject({ connectionId, packageId: INTEGRATION });
+      expect(snapshots[0]!.tools.map((t) => t.name)).toEqual(["search"]);
+    });
+
+    it("a report without tools records the unavailable tools and never a snapshot", async () => {
+      expect((await observed(connectionId, { unavailable: report.unavailable })).status).toBe(204);
+      // `truncated` qualifies `tools`: alone it is a malformed report.
+      expect(
+        (await observed(connectionId, { truncated: true, unavailable: report.unavailable })).status,
+      ).toBe(400);
+
+      expect(await runMetadata()).toEqual({
+        unavailable_tools: [{ integration_id: INTEGRATION, name: "send", reason: "not_listed" }],
+      });
+      expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
+    });
+
+    const stampedNeverSnapshotted: { title: string; arrange: () => Promise<() => void> }[] = [
+      {
+        title: "stamps a remote-origin run but writes no snapshot",
+        arrange: async () => {
+          await db.update(runs).set({ runOrigin: "remote" }).where(eq(runs.id, runId));
+          return () => {};
+        },
+      },
+      {
+        title: "stamps but never snapshots the platform's own endpoint integration",
+        arrange: async () =>
+          _setSystemPackagesForTesting(
+            new Map([
+              [
+                INTEGRATION,
+                {
+                  packageId: INTEGRATION,
+                  type: "integration",
+                  manifest: { _meta: { "dev.appstrate/platform": {} } },
+                } as unknown as SystemPackageEntry,
+              ],
+            ]),
+          ),
+      },
+    ];
+    for (const c of stampedNeverSnapshotted) {
+      it(c.title, async () => {
+        const restore = await c.arrange();
+        try {
+          expect((await observed(connectionId, report)).status).toBe(204);
+        } finally {
+          restore();
+        }
+
+        expect(await runMetadata()).toHaveProperty("unavailable_tools");
+        expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
+      });
+    }
+
+    it("drops one malformed descriptor, keeps the rest and still stamps the unavailable tools", async () => {
+      const res = await observed(connectionId, {
+        ...report,
+        tools: [report.tools[0], { name: "broken" }, { inputSchema: { type: "object" } }, "junk"],
+      });
+      expect(res.status).toBe(204);
+
+      expect(await runMetadata()).toHaveProperty("unavailable_tools");
+      const [snapshot] = await db.select().from(integrationToolSnapshots);
+      expect(snapshot!.tools.map((t) => t.name)).toEqual(["search"]);
+      expect(snapshot!.truncated).toBe(true);
+    });
+  });
+
+  it("DENY: tools-observed for an integration inactive in the space is a 404 and writes nothing", async () => {
+    await seedIntegration(INTEGRATION, false);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    expect((await observed(connectionId, report)).status).toBe(404);
+
+    expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
+    expect(await runMetadata()).not.toHaveProperty("unavailable_tools");
+  });
+
+  it("DENY: tools-observed for a connection the run did not bind is a 400", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    expect((await observed(connectionId, report)).status).toBe(400);
+    expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
+  });
 });
 
 describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
@@ -583,6 +731,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       userId: ctx.user.id,
       shared: false,
     },
+    clientRef?: string,
   ): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
     const [row] = await db
@@ -598,6 +747,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         credentialsEncrypted: ciphertext,
         scopesGranted: [],
         userId: owner.userId,
+        clientRef,
       })
       .returning({ id: integrationConnections.id });
     await seedShares(row!.id, owner.shared ? [ctx.defaultSpaceId] : []);
@@ -1057,6 +1207,76 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(res.status).toBe(204);
     expect(await streakOf(connectionId)).toBe(2);
     expect(await journaledCalls(ctx, INTEGRATION)).toEqual([]);
+  });
+
+  describe("integration-calls — required_scopes (step-up demand)", () => {
+    const report = (connectionId: string, scopes: string[], runToken = token) =>
+      reportCalls(
+        [callRecord({ connection_id: connectionId, outcome: "403", required_scopes: scopes })],
+        runToken,
+      );
+    afterEach(drainJournal);
+    // A step-up demand lands only on an OAuth2 connection: one with a minting client (`clientRef`).
+    const runMetadata = async () =>
+      (await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId)))[0]!
+        .metadata;
+    it("records the demand on the connection and stamps the run's metadata", async () => {
+      await seedIntegration(INTEGRATION, true);
+      const connectionId = await seedConnection(INTEGRATION, undefined, "test-client");
+      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+      expect((await report(connectionId, ["mail.send"])).status).toBe(204);
+      expect(await requestedScopesOf(connectionId)).toEqual(["mail.send"]);
+      expect(await runMetadata()).toMatchObject({
+        scope_requests: [
+          { integration_id: INTEGRATION, connection_id: connectionId, scopes: ["mail.send"] },
+        ],
+      });
+
+      // A later report replaces the connection's entry: one per connection.
+      await report(connectionId, ["mail.read"]);
+      expect(await runMetadata()).toMatchObject({
+        scope_requests: [{ connection_id: connectionId, scopes: ["mail.send", "mail.read"] }],
+      });
+    });
+
+    it("records nothing once the run's actor can no longer reach the connection", async () => {
+      await seedIntegration(INTEGRATION, true);
+      const colleague = await memberContext(ctx, "member");
+      const connectionId = await seedConnection(
+        INTEGRATION,
+        { userId: colleague.user.id, shared: true },
+        "test-client",
+      );
+      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+      await db
+        .delete(integrationConnectionShares)
+        .where(eq(integrationConnectionShares.connectionId, connectionId));
+
+      expect((await report(connectionId, ["mail.send"])).status).toBe(204);
+      expect(await requestedScopesOf(connectionId)).toEqual([]);
+      expect((await runMetadata()) ?? {}).not.toHaveProperty("scope_requests");
+    });
+
+    it("DENY: a misplaced or malformed required_scopes is a 400, recording nothing", async () => {
+      await seedIntegration(INTEGRATION, true);
+      const connectionId = await seedConnection(INTEGRATION, undefined, "test-client");
+      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+      const demand = (required_scopes: string[]) =>
+        callRecord({ connection_id: connectionId, outcome: "403", required_scopes });
+
+      const bodies = [
+        // Wrong placement: a non-403 outcome, or no connection.
+        callRecord({ connection_id: connectionId, outcome: "200", required_scopes: ["mail.send"] }),
+        callRecord({ outcome: "403", required_scopes: ["mail.send"] }),
+        // Bad list: empty, an invalid token, 21 items.
+        demand([]),
+        demand(["not a scope"]),
+        demand(Array.from({ length: 21 }, (_, i) => `s${i}`)),
+      ];
+      for (const body of bodies) expect((await reportCalls([body])).status).toBe(400);
+      expect(await requestedScopesOf(connectionId)).toEqual([]);
+    });
   });
 
   it("a 401 on a credential the connection no longer holds is not counted: 200 with the current one", async () => {

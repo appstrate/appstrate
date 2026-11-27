@@ -20,7 +20,6 @@ import {
   getRemoteSource,
   isUnauthenticatedIntegration,
   missingScopesForConnection,
-  resolveIntegrationToolCatalog,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
@@ -38,6 +37,13 @@ import { ApiError, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ProxyConnectionStatus } from "../integration-connections.ts";
 import {
+  apiCallBlocks,
+  declaredToolNames,
+  loadToolSpacePolicy,
+  unblockedApprovedToolNames,
+  type ToolSpacePolicy,
+} from "../integration-tool-catalog.ts";
+import {
   activeIntegrationIds,
   connectionsOutsideRun,
   integrationsOutsideRun,
@@ -46,6 +52,7 @@ import {
   type IntegrationOutsideRun,
 } from "./integration-resolver.ts";
 import {
+  catalogUnavailable,
   connectionIdRefusedWithoutAuth,
   listingDeadline,
   listRemoteTools,
@@ -252,9 +259,7 @@ function apiCallToolNames(
   namespace: string,
   manifest: IntegrationManifest,
 ): Map<string, string> {
-  const catalog = new Set(
-    resolveIntegrationToolCatalog({ integration: manifest }).map((entry) => entry.name),
-  );
+  const catalog = new Set(declaredToolNames(manifest));
   const holders = new Map<string, string[]>();
   for (const config of getApiCallConfigs(manifest)) {
     if (!catalog.has(config.toolName)) continue;
@@ -280,10 +285,12 @@ interface ListedIntegration {
   connections: readonly ConnectionOutsideRun[];
   /** Exposed name → `api_call` tool name. */
   apiCallNames: ReadonlyMap<string, string>;
+  /** What the space approved and blocked among the integration's tools. */
+  policy: ToolSpacePolicy;
 }
 
 function apiCallTools(entry: ListedIntegration): ApiCallTool[] {
-  const { id, namespace, manifest, connections } = entry;
+  const { id, namespace, manifest, connections, policy } = entry;
   const configs = getApiCallConfigs(manifest);
   const described = typeof manifest.description === "string" ? manifest.description.trim() : "";
   // A sentence follows it: a description left open is closed.
@@ -291,6 +298,7 @@ function apiCallTools(entry: ListedIntegration): ApiCallTool[] {
     described ? ` ${/[.!?…]$/.test(described) ? described : `${described}.`}` : ""
   }`;
   return configs.flatMap((config): ApiCallTool[] => {
+    if (apiCallBlocks(config, policy.blocks).callBlocked) return [];
     const name = apiCallToolName(namespace, config.toolName);
     const reached = connections.filter((c) => c.auth_key === config.authKey);
     if (entry.apiCallNames.get(name) !== config.toolName || reached.length === 0) return [];
@@ -328,6 +336,7 @@ async function readRemoteCatalog(
       ...caller,
       integrationId: entry.id,
       manifest: entry.manifest,
+      policy: entry.policy,
       ...(id ? { connectionId: id } : {}),
       cachedOnly,
     });
@@ -355,35 +364,15 @@ type RemoteListing =
  * namespace when it allows undeclared tools, else one of its declared tools' names.
  */
 function mayNameRemoteTool(entry: ListedIntegration, name: string): boolean {
+  const { policy } = entry;
   if (!name.startsWith(`${entry.namespace}__`)) return false;
   if (allowsUndeclaredTools(entry.manifest)) return true;
-  return exposeRemoteTools(
-    entry.id,
-    entry.namespace,
-    offeredRemoteToolNames(entry.manifest, undefined),
-  ).has(name);
-}
-
-/**
- * The catalog could not be read to prove what `name` calls, `listing_failure` saying why when
- * known. Retryable: a later listing may read it.
- */
-function catalogUnavailable(
-  integrationId: string,
-  name: string,
-  listingFailure: string | undefined,
-): ApiError {
-  return new ApiError({
-    status: 503,
-    code: "tool_catalog_unavailable",
-    title: "Tool Catalog Unavailable",
-    detail:
-      `The catalog of ${integrationId}'s MCP server could not be read` +
-      (listingFailure ? ` (${listingFailure})` : "") +
-      `, and only it can say which of its tools '${name}' names; nothing was sent. ` +
-      `The call may be retried once a listing reads the catalog.`,
-    ...(listingFailure ? { extensions: { listing_failure: listingFailure } } : {}),
-  });
+  // An approved tool is named like a declared one; its listing says whether it is offered.
+  const nameable = new Set([
+    ...offeredRemoteToolNames(entry.manifest, undefined, policy),
+    ...unblockedApprovedToolNames(policy),
+  ]);
+  return exposeRemoteTools(entry.id, entry.namespace, nameable).has(name);
 }
 
 /**
@@ -395,7 +384,7 @@ async function remoteTools(
   entry: ListedIntegration,
   query: Pick<IntegrationToolQuery, "name" | "connectionId" | "cachedOnly">,
 ): Promise<RemoteListing> {
-  const { id: integrationId, namespace, manifest, connections } = entry;
+  const { id: integrationId, namespace, manifest, connections, policy } = entry;
   if (
     query.name !== undefined &&
     query.connectionId !== undefined &&
@@ -483,6 +472,9 @@ async function remoteTools(
     // Its server unread, an undeclared tool is called by the name it was given, when that name
     // is its own; any other name needs the catalog.
     const upstream = selfNamedUpstream(namespace, named);
+    if (upstream !== undefined && policy.blocks.includes(upstream)) {
+      return { tools: [], truncatedAt: null };
+    }
     if (upstream === undefined) {
       return {
         unlisted: {
@@ -546,19 +538,22 @@ export async function listIntegrationTools(
     byIntegration.set(id, [...(byIntegration.get(id) ?? []), connection]);
   }
   const namespaces = integrationNamespaces(activeIds);
-  const integrations = [...byIntegration]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([id, connections]): ListedIntegration => {
-      const namespace = namespaces.get(id)!;
-      const manifest = manifests.get(id)!;
-      return {
-        id,
-        namespace,
-        manifest,
-        connections,
-        apiCallNames: apiCallToolNames(id, namespace, manifest),
-      };
-    });
+  const integrations = await Promise.all(
+    [...byIntegration]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(async ([id, connections]): Promise<ListedIntegration> => {
+        const namespace = namespaces.get(id)!;
+        const manifest = manifests.get(id)!;
+        return {
+          id,
+          namespace,
+          manifest,
+          connections,
+          apiCallNames: apiCallToolNames(id, namespace, manifest),
+          policy: await loadToolSpacePolicy(scope, id, manifest),
+        };
+      }),
+  );
 
   const httpTools = new Map(integrations.map((entry) => [entry.id, apiCallTools(entry)]));
   const named = (tools: IntegrationTool[]) =>

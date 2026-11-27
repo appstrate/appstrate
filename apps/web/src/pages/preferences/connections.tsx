@@ -4,7 +4,7 @@ import { Card } from "@appstrate/ui/components/card";
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Unplug, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { Unplug, Pencil, RefreshCw, ShieldPlus, Trash2 } from "lucide-react";
 import { DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
@@ -18,7 +18,10 @@ import { ItemList } from "../../components/item-list";
 import { PackageIcon } from "../../components/package-icon";
 import { InlineEditableLabel } from "../../components/inline-editable-label";
 import { TableRowActions } from "../../components/table-row-actions";
-import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
+import {
+  ConnectionRequestedScopesBadge,
+  ConnectionStatusBadge,
+} from "../../components/integration-connect/connection-status-badge";
 import { ConnectionDeleteConfirm } from "../../components/integration-connect/connection-delete-confirm";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { useCanReach } from "../../hooks/use-can-reach";
@@ -149,6 +152,7 @@ function ConnectionRow({
           />
           <ConnectionStatusBadge needsReconnection={conn.needs_reconnection} />
           <ConnectionScopeBadge scope={conn.scope} />
+          <ConnectionRequestedScopesBadge scopes={conn.requested_scopes} />
         </div>
 
         {/* Detail rows */}
@@ -210,6 +214,22 @@ function ConnectionRow({
               }),
             hidden: reconnectSpaceId === null,
             testId: `connection-reconnect-${conn.connection_id}`,
+          },
+          {
+            id: "reconnect-scopes",
+            label: t("integration.connection.reconnectWithScopes"),
+            icon: ShieldPlus,
+            onSelect: () =>
+              reconnectSpaceId &&
+              void openPopup({
+                packageId,
+                authKey: conn.auth_key,
+                connectionId: conn.connection_id,
+                scopes: conn.requested_scopes,
+                space: { orgId: conn.org.id, spaceId: reconnectSpaceId },
+              }),
+            hidden: reconnectSpaceId === null || conn.requested_scopes.length === 0,
+            testId: `connection-reconnect-scopes-${conn.connection_id}`,
           },
           {
             id: "delete",

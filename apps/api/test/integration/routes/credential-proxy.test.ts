@@ -62,6 +62,7 @@ import {
   integrationConnections,
   integrationOrgDefaults,
   integrationConnectionShares,
+  runs,
   spaces,
 } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
@@ -79,6 +80,8 @@ import {
   seedProxyConnection,
 } from "../../helpers/credential-proxy-fixtures.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
+import { requestedScopesOf } from "../../helpers/connection-calls.ts";
+import { until } from "../../helpers/credential-death-spy.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
 import { loopbackHeaders } from "../../helpers/loopback.ts";
 import { CHAT_LOOPBACK_AUTH_METHOD } from "@appstrate/core/chat-contract";
@@ -1017,6 +1020,10 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set", ()
   });
   afterEach(() => restoreFetch());
 
+  const runMetadata = async (runId: string) =>
+    (await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId)))[0]!
+      .metadata as Record<string, unknown> | null;
+
   /** The journal once the route's off-path writes have landed, oldest first. */
   async function journaled() {
     await drainAudits(5_000);
@@ -1185,6 +1192,32 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set", ()
     const res = await call({ "X-Run-Id": runId, "X-Connection-Id": own2 });
     expect(res.status).toBe(200);
     expect(upstreamAuth).toEqual(["Bearer tok-own-2"]);
+  });
+
+  it("stamps the run with the scopes a 403 insufficient_scope asks for on its OAuth2 connection", async () => {
+    await db
+      .update(integrationConnections)
+      .set({ clientRef: "test-client" })
+      .where(eq(integrationConnections.id, own1));
+    const runId = await runBinding([own1]);
+    mockUpstream(
+      async () =>
+        new Response("{}", {
+          status: 403,
+          headers: { "WWW-Authenticate": 'Bearer error="insufficient_scope", scope="mail.send"' },
+        }),
+    );
+
+    expect((await call({ "X-Run-Id": runId })).status).toBe(403);
+
+    await until(async () => (await requestedScopesOf(own1)).length > 0);
+    expect(await requestedScopesOf(own1)).toEqual(["mail.send"]);
+    await until(async () => ((await runMetadata(runId)) ?? {}).scope_requests !== undefined);
+    expect(await runMetadata(runId)).toMatchObject({
+      scope_requests: [
+        { integration_id: INTEGRATION_ID, connection_id: own1, scopes: ["mail.send"] },
+      ],
+    });
   });
 
   it("refuses a bound connection flagged needs_reconnection (409), as without a run", async () => {

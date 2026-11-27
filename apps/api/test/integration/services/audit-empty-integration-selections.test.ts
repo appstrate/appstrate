@@ -252,6 +252,7 @@ describe("auditEmptyIntegrationSelections", () => {
     const validationErrors = await validateAgentIntegrationSelections({
       manifest: agentManifest(AGENT_ID, "1.1.0"),
       orgId: ctx.orgId,
+      toolPolicySpaceId: null,
       requireCallableTools: true,
     });
     expect(validationErrors.map((e) => e.code)).toContain("no_tools_selected");

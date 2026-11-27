@@ -3,6 +3,21 @@
 /** Pure tool-selection transforms for the integration picker, kept DOM-free for unit tests. */
 
 import { apiUploadToolNameFor } from "@appstrate/core/integration";
+import { isUsableToolStatus, type ToolCatalogEntry } from "../../lib/integration-tool-policy";
+
+/**
+ * What « Tout sélectionner » may add: the usable tools, plus the ones already selected, which stay
+ * toggleable so they can be dropped. The checkbox of a saved tool dropped since stays enabled too
+ * (to take it back); this bulk action never re-adds it.
+ */
+export function selectableNativeToolNames(
+  catalog: readonly { name: string; status?: ToolCatalogEntry["status"] }[],
+  selected: ReadonlySet<string>,
+): string[] {
+  return catalog
+    .filter((tool) => isUsableToolStatus(tool.status) || selected.has(tool.name))
+    .map((tool) => tool.name);
+}
 
 /** Stale names are dropped on purpose: a bulk action must not keep capabilities the catalog can no longer show. */
 export function replaceNativeToolSelection(

@@ -872,6 +872,8 @@
   "integration.connection.lock.orgDefault": "Connexion utilisée par défaut dans l’espace. Choisissez-en une autre dans Paramètres › Gestion des connexions avant de la supprimer ou d’arrêter de la partager.",
   "integration.connection.deleteConfirm": "Elle sera supprimée pour tout le monde. Les collègues qui l’utilisaient devront en choisir une autre.",
   "integration.connection.statusConnected": "Connecté",
+  "integration.connection.requestedScopes": "Droits supplémentaires demandés : {{scopes}}",
+  "integration.connection.reconnectWithScopes": "Reconnecter avec ces droits",
   "integration.connection.variables": "Variables de connexion :",
   "integration.connection.col.owner": "Propriétaire",
   "integration.connection.filterMine": "Mes connexions",

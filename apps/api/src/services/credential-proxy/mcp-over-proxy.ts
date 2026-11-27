@@ -18,6 +18,8 @@ import {
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
+import { OBSERVED_TOOLS_MAX_COUNT } from "@appstrate/core/sidecar-types";
+import { requiredScopesFromChallenge } from "@appstrate/core/www-authenticate";
 import { templateHost } from "@appstrate/afps-runtime/resolvers";
 import type { Actor } from "../../lib/actor.ts";
 import { credentialMember, type CredentialStatus } from "../../lib/credential-status-header.ts";
@@ -79,15 +81,18 @@ class McpCredentialRejectedError extends Error {
     readonly status: number,
     /** The proxy's verdict after its forced refresh, on a 401 it judged. */
     readonly credential: CredentialStatus | undefined,
+    /** The scopes the server's `WWW-Authenticate` challenge asks for. */
+    readonly requiredScopes: string[] | undefined,
+    /** The connection whose credential was refused: what a reconnect with those scopes targets. */
+    readonly connectionId: string,
   ) {
     super(`the MCP server refused the connection's credential (HTTP ${status})`);
     this.name = "McpCredentialRejectedError";
   }
 }
 
-export const MAX_LISTED_TOOLS = 500;
 /** Bounds a server answering `nextCursor` forever with empty pages. */
-export const MAX_LISTED_PAGES = 20;
+const MAX_LISTED_PAGES = 20;
 /** The longest tool name read (MCP's own bound); a longer one is dropped. */
 const MAX_TOOL_NAME_LENGTH = 128;
 
@@ -108,11 +113,11 @@ export async function listToolPages(
         });
     }
     cursor = res.nextCursor;
-    if (!cursor || tools.length >= MAX_LISTED_TOOLS) break;
+    if (!cursor || tools.length >= OBSERVED_TOOLS_MAX_COUNT) break;
   }
   return {
-    tools: tools.slice(0, MAX_LISTED_TOOLS),
-    truncated: tools.length > MAX_LISTED_TOOLS || !!cursor,
+    tools: tools.slice(0, OBSERVED_TOOLS_MAX_COUNT),
+    truncated: tools.length > OBSERVED_TOOLS_MAX_COUNT || !!cursor,
   };
 }
 
@@ -295,6 +300,7 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperati
         actor: input.actor,
         ...(input.connectionId ? { connectionId: input.connectionId } : {}),
         connectionNaming: "connection_id",
+        mcpTransport: true,
         reach: input.reach,
         ...(input.version ? { version: input.version } : {}),
         integrationId: input.integrationId,
@@ -312,7 +318,14 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperati
     }
     reached(result.connectionId, String(result.status));
     if (result.status === 401 || result.status === 403) {
-      fail(new McpCredentialRejectedError(result.status, result.credential));
+      fail(
+        new McpCredentialRejectedError(
+          result.status,
+          result.credential,
+          requiredScopesFromChallenge(result.status, result.headers.get("www-authenticate")),
+          result.connectionId,
+        ),
+      );
     }
     const answered = result;
     const relayed = relayAnswer(result.body, {
@@ -613,7 +626,10 @@ export function mcpServerFailure(
         upstreamProxyStatus({ error: "http_protocol_error", receivedStatus: status }),
       );
     }
-    const credential = err instanceof McpCredentialRejectedError ? err.credential : undefined;
+    const rejected = err instanceof McpCredentialRejectedError ? err : undefined;
+    const credential = rejected?.credential;
+    const requiredScopes = rejected?.requiredScopes;
+    const connectionId = rejected?.connectionId;
     return new ApiError({
       status: 502,
       code: "upstream_credential_rejected",
@@ -622,9 +638,12 @@ export function mcpServerFailure(
         `${server} refused the connection's credential (HTTP ${status})` +
         (credential?.status === "needs_reconnection"
           ? ": the connection is now flagged for reconnection, and its owner must reconnect it."
-          : ": the credential may lack a permission the server requires, or have been revoked; reconnecting the integration renews it."),
+          : ": the credential may lack a permission the server requires, or have been revoked; reconnecting the integration renews it.") +
+        (requiredScopes ? ` The server asks for the scopes: ${requiredScopes.join(" ")}.` : ""),
       extensions: {
         upstream_status: status,
+        ...(requiredScopes ? { required_scopes: requiredScopes } : {}),
+        ...(connectionId ? { connection_id: connectionId } : {}),
         ...(credential ? { credential: credentialMember(credential) } : {}),
       },
       headers: upstreamProxyStatus({ receivedStatus: status }),

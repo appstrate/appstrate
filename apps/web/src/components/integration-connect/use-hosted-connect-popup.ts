@@ -117,8 +117,12 @@ export function useHostedConnectPopup() {
           toast.error(t("integration.popup.timeout"));
           return false;
         }
-        // The space's admin gate: retrying cannot help, so the reason is the message.
-        if (err instanceof ApiError && err.code === "connection_blocked_by_admin") {
+        // The space's admin gate, or a scope the auth's catalog does not offer: retrying cannot
+        // help, so the reason is the message.
+        if (
+          err instanceof ApiError &&
+          (err.code === "connection_blocked_by_admin" || err.code === "scope_not_in_catalog")
+        ) {
           toastError(err);
           return false;
         }

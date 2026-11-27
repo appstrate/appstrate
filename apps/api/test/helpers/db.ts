@@ -13,6 +13,7 @@ import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { withDeadlockRetry } from "./deadlock-retry.ts";
 import { clearAllCachesLocally } from "@appstrate/core/cache";
+import { drainAudits } from "../../src/services/audit.ts";
 
 export { db, closeDb };
 
@@ -98,6 +99,11 @@ const CORE_TABLES = [
   "package_shares",
   "space_packages",
   "org_package_offers",
+  // Tool snapshots, approvals and blocks cascade from packages / spaces (the snapshots also from
+  // connections), so they go before all three.
+  "integration_tool_snapshots",
+  "space_integration_tool_approvals",
+  "space_integration_tool_blocks",
   "integration_connections",
   "integration_oauth_clients",
   "package_schedules",
@@ -193,6 +199,14 @@ function buildTruncateSql(): string {
  * Call this in beforeEach() for full test isolation.
  */
 export async function truncateAll(): Promise<void> {
+  // Work tracked off the response path (audits, notification fan-out) lands in the next test's
+  // database, or fails on rows already deleted, if it is not flushed first.
+  const drain = await drainAudits(5_000);
+  if (!drain.drained) {
+    throw new Error(
+      `truncateAll: ${drain.pending} tracked audit/notification write(s) still pending after 5s; truncating now would let them land in the next test's database`,
+    );
+  }
   const truncateSql = (cachedTruncateSql ??= buildTruncateSql());
   await withDeadlockRetry(() => db.execute(sql.raw(truncateSql)), {
     onRetry: (err, attempt) => {

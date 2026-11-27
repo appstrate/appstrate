@@ -15,6 +15,7 @@ import {
   integrationConnections,
   integrationOauthClients,
   integrationOrgDefaults,
+  integrationToolSnapshots,
   spacePackages,
   spaces,
 } from "@appstrate/db/schema";
@@ -47,6 +48,8 @@ import { seedApiKey } from "../../helpers/seed.ts";
 import { loopbackHeaders } from "../../helpers/loopback.ts";
 import { CHAT_LOOPBACK_AUTH_METHOD } from "@appstrate/core/chat-contract";
 import { seedShares } from "../../helpers/connection-shares.ts";
+import { requestedScopesOf } from "../../helpers/connection-calls.ts";
+import { until } from "../../helpers/credential-death-spy.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
@@ -446,6 +449,42 @@ describe("the typed tools of a remote MCP integration", () => {
       expect(other.requests.some((r) => r.body.includes('"tools/list"'))).toBe(false);
       expect(await journaled(connectionId)).toEqual(["401"]);
     });
+  });
+
+  it("carries the scopes a refusing server asks for as `required_scopes`", async () => {
+    await withServer(
+      {
+        tools: ["search"],
+        bearer: "another-token",
+        rejectStatus: 403,
+        challenge: 'Bearer error="insufficient_scope", scope="a b"',
+      },
+      async (other) => {
+        await seedProxyIntegration(ctx, on(other, { tools_policy: { search: {} } }));
+        const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+        // A demand lands only on an OAuth2 connection: one with a minting client.
+        await db
+          .update(integrationConnections)
+          .set({ clientRef: "test-client" })
+          .where(eq(integrationConnections.id, connectionId));
+
+        const res = await post("call", { integration_package_id: ID, name: "search" });
+        expect(res.status).toBe(502);
+        const problem = (await res.json()) as {
+          code: string;
+          detail: string;
+          required_scopes?: string[];
+          connection_id?: string;
+        };
+        expect(problem.code).toBe("upstream_credential_rejected");
+        expect(problem.required_scopes).toEqual(["a", "b"]);
+        expect(problem.connection_id).toBe(connectionId);
+        expect(problem.detail).toContain("a b");
+        // The demand is recorded on the connection, minus what it holds: a fire-and-forget write.
+        await until(async () => (await requestedScopesOf(connectionId)).length > 0);
+        expect(await requestedScopesOf(connectionId)).toEqual(["a", "b"]);
+      },
+    );
   });
 
   it("journals one row for a tool call whose handshake the server refuses", async () => {
@@ -1832,7 +1871,7 @@ describe("the typed tools of a remote MCP integration", () => {
         enforce: true,
       });
 
-    it("answers 422 integration_not_remote for an integration without a Streamable HTTP server, before any exchange", async () => {
+    it("answers 422 integration_not_remote (not remote) or sync_transport_unsupported (SSE) for an integration without a Streamable HTTP server, before any exchange", async () => {
       const httpOnly = "@acme/http";
       await seedProxyIntegration(
         ctx,
@@ -1858,7 +1897,9 @@ describe("the typed tools of a remote MCP integration", () => {
       for (const id of [httpOnly, sse]) {
         const res = await post("call", { integration_package_id: id, name: "search" });
         expect(res.status).toBe(422);
-        expect((await problemOf(res)).code).toBe("integration_not_remote");
+        expect((await problemOf(res)).code).toBe(
+          id === sse ? "sync_transport_unsupported" : "integration_not_remote",
+        );
       }
       expect(server.requests).toEqual([]);
     });
@@ -2081,6 +2122,138 @@ describe("the typed tools of a remote MCP integration", () => {
       expect(hidden.status).toBe(404);
       expect((await problemOf(hidden)).code).toBe("not_found");
       expect(server.requests.length).toBe(exchanges);
+    });
+  });
+
+  describe("the tool snapshot", () => {
+    const toolsListed = () => server.requests.filter((r) => r.body.includes('"tools/list"')).length;
+    const snapshots = () => db.select().from(integrationToolSnapshots);
+
+    /** `POST /api/integrations/{id}/tool-snapshot/refresh`, authenticated as `key`. */
+    const refresh = (body?: unknown, key = apiKey) =>
+      getTestApp().request(`/api/integrations/${ID}/tool-snapshot/refresh`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "X-Org-Id": ctx.orgId,
+          "X-Space-Id": ctx.defaultSpaceId,
+          "Content-Type": "application/json",
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+
+    const key = async (scopes: string[]) =>
+      (
+        await seedApiKey({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          createdBy: ctx.user.id,
+          scopes,
+        })
+      ).rawKey;
+
+    beforeEach(async () => {
+      apiKey = await key(["credential-proxy:call-own", "integrations:read"]);
+    });
+
+    it("is recorded by a listing that reaches the server, not by one served from the cache", async () => {
+      await seedProxyIntegration(ctx, remote());
+      const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      await list({ connection_id: connectionId });
+      const [row] = await snapshots();
+      expect(row?.connectionId).toBe(connectionId);
+      expect(row?.tools.map((tool) => tool.name)).toEqual([
+        "search",
+        "create",
+        "delete",
+        "undeclared",
+        "forge",
+      ]);
+      // Every listed tool, hidden and undeclared ones included, with its raw fingerprint.
+      expect(row?.tools.every((tool) => /^[0-9a-f]{64}$/.test(tool.fingerprint))).toBe(true);
+
+      await db.delete(integrationToolSnapshots);
+      await list({ connection_id: connectionId });
+      expect(await snapshots()).toEqual([]);
+    });
+
+    it("refresh lists again whatever is cached and answers the snapshot", async () => {
+      await seedProxyIntegration(ctx, remote());
+      const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const first = await refresh({ connection_id: connectionId });
+      expect(first.status).toBe(200);
+      expect(await first.json()).toEqual({
+        tool_snapshot: {
+          connection_id: connectionId,
+          listed_at: expect.any(String),
+          truncated: false,
+          tool_count: 5,
+        },
+      });
+      const afterFirst = toolsListed();
+      expect(afterFirst).toBeGreaterThan(0);
+
+      expect((await refresh()).status).toBe(200);
+      expect(toolsListed()).toBe(afterFirst * 2);
+    });
+
+    it("refresh is refused in a space whose credential proxy is closed, before any exchange", async () => {
+      await seedProxyIntegration(ctx, remote());
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+      await db
+        .update(spaces)
+        .set({ credentialProxyOpen: false })
+        .where(eq(spaces.id, ctx.defaultSpaceId));
+
+      const res = await refresh();
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe("credential_proxy_closed");
+      expect(server.requests).toEqual([]);
+    });
+
+    it("refresh answers 502 when the server cannot be listed, and records nothing", async () => {
+      const dead = "http://127.0.0.1:9/mcp";
+      await seedProxyIntegration(
+        ctx,
+        remote({ url: dead, authorizedUris: ["http://127.0.0.1:9/**"] }),
+      );
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const res = await refresh();
+      expect(res.status).toBe(502);
+      expect(((await res.json()) as { code: string }).code).toBe("bad_gateway");
+      expect(await snapshots()).toEqual([]);
+    });
+
+    it("refresh refuses a connection of a colleague that is not shared with the caller", async () => {
+      await seedProxyIntegration(ctx, remote());
+      const colleague = await memberContext(ctx, "member");
+      const theirs = await seedProxyConnection(colleague, ID, "api_key", { token: TOKEN });
+
+      const res = await refresh({ connection_id: theirs });
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as { code: string }).code).toBe("credential_not_found");
+      expect(server.requests).toEqual([]);
+      expect(await snapshots()).toEqual([]);
+    });
+
+    it("refresh of an unauthenticated integration asks the same credential proxy right", async () => {
+      const open = startFakeMcpServer({ tools: ["search"] });
+      try {
+        await seedProxyIntegration(
+          ctx,
+          remoteIntegrationManifest({ name: ID, url: open.url, tools_policy: { search: {} } }),
+        );
+        const readOnly = await key(["integrations:read"]);
+
+        expect((await refresh(undefined, readOnly)).status).toBe(403);
+        expect(open.requests).toEqual([]);
+        expect((await refresh()).status).toBe(200);
+      } finally {
+        open.stop();
+      }
     });
   });
 });

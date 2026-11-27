@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Upgrade and client changes
 
+- Remote MCP integrations are now a closed catalog by default. On a remote integration whose manifest neither declares a tool in `tools_policy` nor sets `allow_undeclared_tools: true`, an agent keeps only the tools a space has approved. A run that selects any other tool continues without it and is marked degraded (`definition_not_approved`). Saving or publishing such an agent is refused until the tool is approved. After the upgrade, for each such integration, open its **Tools** tab, select **Read the server again**, then approve the tools under **Tools to review** in every space that uses them. To keep every listed tool usable without approval, publish a version of the integration that declares them or sets `allow_undeclared_tools: true`. See [Remote Tool Approvals](docs/site/integrations/remote-tool-approvals.mdx).
+- Creating an integration from an MCP URL no longer declares tools: the wizard asks whether to review each tool in each space (the default) or to trust every tool of the server (`allow_undeclared_tools: true`). **BREAKING**: `POST /api/integrations/{packageId}/discover` no longer returns `tools`, `tools_policy`, `default_tools` or the `tools_truncated` warning; it returns the server's identity and instructions only, and tools are read through `POST /api/integrations/{packageId}/tool-snapshot/refresh`.
+- The credential proxy refuses an integration's own MCP endpoint with `403 remote_mcp_endpoint_not_proxied`, and an in-run `api_call` refuses it as `not_authorized` (« its MCP endpoint is reached through its tools, not api_call »), redirects included. Reach its tools through the tool calls.
+- `POST /api/credential-proxy/tools/call` and the tool listing answer `422 sync_transport_unsupported` for an integration on the SSE transport (it was `integration_not_remote`): only Streamable HTTP servers are read and called.
+- A space can block a tool, including `api_call` and `api_upload`. A blocked tool is neither offered nor callable in that space.
 - A background sweep now keeps the refresh tokens of idle OAuth2 credentials alive, for integration connections and OAuth model-provider credentials alike (#2411). It runs on every install and needs no setting; mechanics in `docs/architecture/INTEGRATIONS_RUNTIME.md`.
 - `OAUTH_REFRESH_WORKER_ENABLED` is removed, together with the optional model-provider refresh worker it switched on. An `.env` that still sets it is ignored; remove the line.
 - The default of `INTEGRATION_REFRESH_GRACE_SECONDS` goes from 3600 to 259200 (3 days); see `docs/ENV.md`. An explicitly configured value is kept.
@@ -36,6 +41,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### MCP clients
 
 - Platform tools list `icons` (inline SVG, light and dark theme), and a tool result carries `_meta["dev.appstrate/presentation"]` when the server knows more of the call than its descriptor: the operation's tag and method, the subject acted on, a remote integration tool's title, and for `search` a count and its items (#2398, #2405). The `search` and `describe` descriptors that may read a remote catalog carry `_meta["dev.appstrate/lookup"]: true`. `GET /api/credential-proxy/tools` lists the tools' `integrations` and a remote tool's sanitised `title`. See [Showing a call](docs/guides/connecting-mcp-clients.md#showing-a-call).
+
+- A server that refuses a call with `403 insufficient_scope` now has its scopes recorded on the connection (`requested_scopes`, OAuth2 connections only, shown to the owner on the connection lists), and a run that hit it carries `metadata.scope_requests`. The owner gets a bell notice (`connection_scopes_requested`) and grants them with « Reconnecter avec ces droits »; `upstream_credential_rejected` also carries the refused `connection_id` (#2415). The sidecar reports the scopes as `required_scopes` on a `403` record of the call journal (`POST /internal/integration-calls`): update the platform before the runtime image.
 
 ## [1.0.0-beta.71] - 2026-11-24
 

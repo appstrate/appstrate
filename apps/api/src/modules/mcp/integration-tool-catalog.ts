@@ -123,7 +123,9 @@ const REMOTE_TOOL_USAGE =
   "it for less), or `upstream_credential_rejected` (the server refused the connection's " +
   "credential with HTTP `upstream_status`; do not retry: with `credential.status` " +
   "`needs_reconnection`, its owner must reconnect it, otherwise the connection may lack a " +
-  "permission the tool needs; tell the user). " +
+  "permission the tool needs; tell the user. With `required_scopes` the server asks for those " +
+  "scopes: when the user agrees, offer the grant with `initiateIntegrationConnect`, sending the " +
+  "refusal's `connection_id` and `required_scopes` verbatim as `connection_id` and `scopes`). " +
   connectionsUsage(true);
 
 /** Appended to a text block cut at the result budget. */

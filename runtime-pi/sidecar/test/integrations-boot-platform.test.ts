@@ -153,6 +153,7 @@ describe("bootIntegrations — an integration bound to the runtime", () => {
     const urls: string[] = [];
     const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const request = new Request(String(input), init);
+      if (request.url.includes("/tools-observed")) return new Response(null, { status: 204 });
       urls.push(request.url);
       return serve(request);
     }) as typeof fetch;
@@ -170,6 +171,40 @@ describe("bootIntegrations — an integration bound to the runtime", () => {
       expect(result.tools.map((t) => t.descriptor.name)).toEqual(["appstrate_platform__log"]);
       expect(urls.length).toBeGreaterThan(0);
       expect(urls.every((url) => url === `${PLATFORM_API_URL}/internal/mcp`)).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
+      else process.env.INTEGRATION_RUNTIME_ADAPTER = previous;
+      await result?.shutdown();
+    }
+  });
+});
+
+describe("bootIntegrations — platform endpoint tools-observed report", () => {
+  it("reports the unavailable tools of the platform's own endpoint", async () => {
+    const serve = handlerFetch(legacyMcpHandler({ tools: [log] }));
+    const reports: unknown[] = [];
+    const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const request = new Request(String(input), init);
+      if (request.url.includes("/tools-observed")) {
+        reports.push(await request.json());
+        return new Response(null, { status: 204 });
+      }
+      return serve(request);
+    }) as typeof fetch;
+    const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
+    process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
+    let result: Awaited<ReturnType<typeof bootIntegrations>> | undefined;
+    try {
+      result = await bootIntegrations([{ ...spec, toolAllowlist: ["log", "gone"] }], {
+        platformApiUrl: PLATFORM_API_URL,
+        runToken: "run-token",
+        callReporter: noCallReporter,
+        fetchFn,
+        retryDelayMs: () => 0,
+      });
+      // The boot awaited the report: it has landed.
+      expect(reports).toHaveLength(1);
+      expect(reports[0]).toMatchObject({ unavailable: [{ name: "gone", reason: "not_listed" }] });
     } finally {
       if (previous === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
       else process.env.INTEGRATION_RUNTIME_ADAPTER = previous;

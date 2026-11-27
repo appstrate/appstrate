@@ -3,13 +3,8 @@
 import { Fragment, useCallback, useContext, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { Versioned } from "../hooks/use-packages";
-import type {
-  AgentDetail,
-  IntegrationToolCatalogEntry,
-  OrgPackageItemDetail,
-} from "@appstrate/shared-types";
+import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { dropRetiredDependencyKeys } from "@appstrate/core/dependencies";
-import { $api } from "../api/client";
 import type { AgentDefinitionSection } from "../lib/settings-section-href";
 import { EditorDirtyReportContext, type EditorState } from "../hooks/use-editor-state";
 import { FormField } from "../components/form-field";
@@ -30,7 +25,9 @@ import { getSource, isRemoteSourceUrl } from "../components/integration-editor/u
 import { IntegrationIconField } from "../components/integration-editor/integration-icon-field";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
-import type { ServerSyncResult } from "../components/integration-editor/sync-from-server";
+import { ServerIdentityFill } from "../components/integration-editor/server-identity-fill";
+import type { ServerReadAvailability } from "../lib/integration-server-sync";
+import type { ToolPolicyAccess } from "../components/integration-editor/integration-tool-policy-section";
 
 import {
   manifestToSchemaFields,
@@ -40,9 +37,8 @@ import {
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
-import { INTEGRATION_DOC, mergeServerSync, serverSyncBody } from "../lib/integration-server-sync";
-import { fileTextOperation } from "../lib/package-file-drafts";
-import { encodeIconDataUri } from "../lib/icon-image";
+import type { ToolCatalogEntry } from "../lib/integration-tool-policy";
+import type { ToolSnapshot } from "../lib/integration-tool-snapshot";
 
 const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
 
@@ -51,11 +47,14 @@ const asNumber = (value: unknown) => (typeof value === "number" ? value : undefi
 function AgentEditorInner({
   initialState,
   packageId,
+  homeSpaceId,
   effectiveTimeoutSeconds,
   tab,
 }: {
   initialState: EditorState;
   packageId: string;
+  /** The space whose tool approvals judge the agent's selections at save (`null`: no home). */
+  homeSpaceId: string | null;
   /**
    * Timeout this deployment will actually enforce (server-computed: declared
    * value clamped to `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`). Read off
@@ -209,6 +208,7 @@ function AgentEditorInner({
           {...resourceTabs[resourceKey]}
           selectedEntries={getResourceEntries(state.manifest, resourceKey)}
           onChange={setResources(resourceKey)}
+          toolPolicySpaceId={homeSpaceId}
         />
       )}
     </PackageEditorFrame>
@@ -269,6 +269,7 @@ export function AgentDefinitionEditor({
           etag: detail.etag,
         }}
         packageId={detail.id}
+        homeSpaceId={detail.home_space_id}
         effectiveTimeoutSeconds={detail.effective_timeout_seconds}
         tab={section}
       />
@@ -302,15 +303,21 @@ function IntegrationEditorInner({
   packageId,
   tab,
   toolCatalog,
-  canSync,
+  snapshot,
+  serverRead,
+  toolPolicy,
 }: {
   initialState: EditorState;
   packageId: string;
   tab: PackageEditorTab;
   /** The saved package's tool catalog, shown with the draft's policy. */
-  toolCatalog: IntegrationToolCatalogEntry[];
-  /** The draft's server can be asked for its tools. */
-  canSync: boolean;
+  toolCatalog: ToolCatalogEntry[];
+  /** The server's last listing, summarised above the table. */
+  snapshot?: ToolSnapshot;
+  /** Whether the draft's server can be read for its identity; `null`: not a remote source. */
+  serverRead: ServerReadAvailability;
+  /** What the Tools section offers about the space's review and blocks, given the draft's declaration. */
+  toolPolicy?: ToolPolicyAccess;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   // Set by `validate` when it refuses the local server: the Source tab flags its empty fields.
@@ -339,42 +346,6 @@ function IntegrationEditorInner({
   const isLocal = getSource(state.manifest).kind === "local";
   const fileIndex = usePackageFileIndex(isLocal ? packageId : undefined);
   const serverFiles = fileIndex.data?.data.map((file) => file.path);
-  const [syncResult, setSyncResult] = useState<ServerSyncResult | null>(null);
-
-  // A raster the manifest does not accept as is (ICO, large PNG) is re-encoded here; one the
-  // browser cannot decode is skipped. The encoding is async: the icon lands only if the draft
-  // still has none.
-  const fillIcon = (proposal: { icon_source: string | null; manifest: { icon?: string } }) => {
-    if (!proposal.icon_source || proposal.manifest.icon) return;
-    void encodeIconDataUri(proposal.icon_source)
-      .then((icon) => {
-        editor.setState((s) => (s.manifest.icon ? s : { ...s, manifest: { ...s.manifest, icon } }));
-      })
-      .catch(() => {});
-  };
-
-  const sync = $api.useMutation("post", "/api/integrations/{packageId}/discover", {
-    meta: { errorHandledByCaller: true },
-    onSuccess: (proposal) => {
-      editor.setState((s) => ({ ...s, manifest: mergeServerSync(s.manifest, proposal) }));
-      // `null` when the package already has an `INTEGRATION.md`, which a sync never replaces.
-      const { instructions } = proposal;
-      setSyncResult({
-        count: proposal.tools.length,
-        warnings: proposal.warnings,
-        docProposed: Boolean(instructions),
-      });
-      if (instructions) {
-        const operation = fileTextOperation(INTEGRATION_DOC, instructions);
-        editor.setState((s) =>
-          (s.operations ?? []).some((o) => o.op === "write" && o.path === INTEGRATION_DOC)
-            ? s
-            : { ...s, operations: [...(s.operations ?? []), operation] },
-        );
-      }
-      fillIcon(proposal);
-    },
-  });
 
   return (
     <PackageEditorFrame
@@ -398,10 +369,24 @@ function IntegrationEditorInner({
           value={editor.metadata}
           onChange={editor.onMetadataChange}
           identityChildren={
-            <IntegrationIconField
-              icon={typeof state.manifest.icon === "string" ? state.manifest.icon : undefined}
-              onChange={(icon) => editor.updateManifest({ icon })}
-            />
+            <>
+              <IntegrationIconField
+                icon={typeof state.manifest.icon === "string" ? state.manifest.icon : undefined}
+                onChange={(icon) => editor.updateManifest({ icon })}
+              />
+              {serverRead && (
+                <ServerIdentityFill
+                  packageId={packageId}
+                  blockedBy={serverRead === "available" ? null : serverRead}
+                  manifest={state.manifest}
+                  onChange={onManifestChange}
+                  operations={state.operations}
+                  onOperationsChange={(operations) =>
+                    editor.setState((s) => ({ ...s, operations }))
+                  }
+                />
+              )}
+            </>
           }
         />
       )}
@@ -422,22 +407,11 @@ function IntegrationEditorInner({
 
       {activeTab === "tools" && (
         <IntegrationToolsSection
+          packageId={packageId}
           tools={toolCatalog}
+          snapshot={snapshot}
+          spacePolicy={toolPolicy}
           edit={{ manifest: state.manifest, onChange: onManifestChange }}
-          sync={
-            canSync
-              ? {
-                  run: (connectionId) =>
-                    sync.mutate({
-                      params: { path: { packageId } },
-                      body: serverSyncBody(connectionId),
-                    }),
-                  isPending: sync.isPending,
-                  error: sync.error,
-                  result: syncResult,
-                }
-              : undefined
-          }
         />
       )}
     </PackageEditorFrame>
@@ -451,13 +425,18 @@ export function IntegrationDefinitionEditor({
   detail,
   section,
   toolCatalog,
-  canSync,
+  snapshot,
+  serverRead,
+  toolPolicy,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
-  toolCatalog: IntegrationToolCatalogEntry[];
-  /** The draft is served by a Streamable HTTP server at a fixed URL the caller may read. */
-  canSync: boolean;
+  toolCatalog: ToolCatalogEntry[];
+  snapshot?: ToolSnapshot;
+  /** Whether the draft's remote server can be read for its identity; `null`: not remote. */
+  serverRead: ServerReadAvailability;
+  /** What the Tools section offers about the space's review and blocks. */
+  toolPolicy?: ToolPolicyAccess;
 }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
@@ -466,7 +445,9 @@ export function IntegrationDefinitionEditor({
         packageId={detail.id}
         tab={section}
         toolCatalog={toolCatalog}
-        canSync={canSync}
+        snapshot={snapshot}
+        serverRead={serverRead}
+        toolPolicy={toolPolicy}
       />
     </DraftEditorMount>
   );

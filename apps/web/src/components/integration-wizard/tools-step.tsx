@@ -4,11 +4,20 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ChevronDown } from "lucide-react";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
-import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { Badge } from "@appstrate/ui/components/badge";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@appstrate/ui/components/field";
+import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
+import { PendingButton } from "@/components/app-ui/pending-button";
+import { ChevronDown } from "lucide-react";
+import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { Button } from "@appstrate/ui/components/button";
 import {
   Collapsible,
@@ -16,65 +25,42 @@ import {
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
 import { CheckboxField } from "@/components/app-ui/checkbox-field";
-import { PendingButton } from "@/components/app-ui/pending-button";
 import { client } from "../../api/client";
 import { ApiError } from "../../api/errors";
-import { TextSkeleton } from "../loading-skeletons";
 import { RoleLimitNotice } from "../role-limit-notice";
 import { DiscoveryWarnings } from "../integration-editor/discovery-warnings";
-import { SyncConnectionChoice } from "../integration-editor/sync-connection-choice";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { getAllowUndeclaredTools } from "../integration-editor/utils";
 import { usePermissions } from "../../hooks/use-permissions";
-import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
+import { invalidateIntegrationQueries, useToolSnapshotRefresh } from "../../hooks/use-integrations";
 import { useUpdatePackage } from "../../hooks/use-mutations";
 import { useCreateVersion, type Versioned } from "../../hooks/use-packages";
 import { errorMessage } from "../../lib/mutation-error";
-import {
-  serverSyncBody,
-  syncConnectionCandidates,
-  type ServerSyncProposal,
-} from "../../lib/integration-server-sync";
 import { packageDetailPath } from "../../lib/package-paths";
-import {
-  catalogConnectionsKey,
-  catalogSourceKey,
-  docsChoice,
-  sameAuths,
-  syncConnectionRemedy,
-  initialToolSelection,
-  toolsUpdateBody,
-} from "../../lib/integration-wizard";
-import { ConnectStep } from "./connect-step";
+import { docsChoice, toolsPublishBody } from "../../lib/integration-wizard";
 import { WizardSection } from "./wizard-section";
-import type { IntegrationDetailWire } from "../../hooks/use-integrations";
-import { packageKeys } from "../../lib/query-keys";
 
 /**
- * The server's tools, read through the caller's connection once the step shows, to choose from
- * before anything is saved; then one save and one publish: the draft's first version, or the next.
+ * How the server's tools reach agents, then one save and one publish: the draft's first version,
+ * or the next. The tools themselves are never declared here: the server's listing is read into
+ * the tool snapshot, where each space reviews them.
  */
 export function ToolsStep({
   packageId,
   draft,
-  detail,
   version,
   published,
 }: {
   packageId: string;
   /** The package's working copy, saved under its `ETag`. */
   draft: Versioned<OrgPackageItemDetail>;
-  /** The integration detail: its published manifest and connections. */
-  detail: IntegrationDetailWire;
-  /** The version the tools are published as. */
+  /** The version published. */
   version: string;
   /** A version is already published: the draft's other changes ship with this one. */
   published: boolean;
 }) {
   const { t } = useTranslation("agents");
-  const { can } = usePermissions();
-  // A draft declaring no auths (AFPS §7.2) is read without the credential proxy.
-  const readsWithoutProxy = isUnauthenticatedIntegration(draft.manifest ?? {});
   return (
     <WizardSection
       title={t("integrationWizard.tools.title")}
@@ -83,13 +69,10 @@ export function ToolsStep({
       {/* The save is a write in the package's home space, the server's verdict on the draft. */}
       {!draft.home_writable ? (
         <RoleLimitNotice>{t("integrationWizard.tools.notWritable")}</RoleLimitNotice>
-      ) : !readsWithoutProxy && !can("credential-proxy:call-own") ? (
-        <RoleLimitNotice>{t("integrationWizard.tools.noPermission")}</RoleLimitNotice>
       ) : (
-        <ServerCatalog
+        <PublishChoice
           packageId={packageId}
           draft={draft}
-          detail={detail}
           version={version}
           published={published}
         />
@@ -98,66 +81,56 @@ export function ToolsStep({
   );
 }
 
-function ServerCatalog({
+function PublishChoice({
   packageId,
   draft,
-  detail,
   version,
   published,
 }: {
   packageId: string;
   draft: Versioned<OrgPackageItemDetail>;
-  detail: IntegrationDetailWire;
   version: string;
   published: boolean;
 }) {
-  const { t } = useTranslation("agents");
   const qc = useQueryClient();
+  const { can } = usePermissions();
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
-  const authsMatch = sameAuths(draft.manifest ?? {}, detail.manifest);
-  // Unset until the proxy asks for a choice: the first read lets it apply the space's governance.
-  const [connectionId, setConnectionId] = useState<string>();
-  // A read of the server, kept off the `/api/integrations` keys a save invalidates: it is not
-  // asked again behind the user's back — but it is keyed on the source and auths it was read
-  // from, so a draft pointing elsewhere since is read again, never answered from the cache.
-  const catalog = useQuery({
-    queryKey: [
-      "integration-server-catalog",
-      orgId,
-      spaceId,
-      packageId,
-      catalogSourceKey(draft.manifest ?? {}),
-      // A connection added or reconnected since (the connect step below) is read again — unless
-      // the draft's auths are not the ones a connection is made on (`unpublishedAuths`): then
-      // nothing a connect does changes the answer, and nothing reads again by itself.
-      authsMatch || !published ? catalogConnectionsKey(detail) : null,
-      connectionId ?? null,
-    ],
+  const mayRead =
+    isUnauthenticatedIntegration(draft.manifest ?? {}) || can("credential-proxy:call-own");
+  // The server's identity and instructions, best effort (the wizard offers no connection choice,
+  // so a `must_choose_connection` refusal proposes nothing): a refusal or a failure only means
+  // nothing is proposed, never that the publish is blocked. Each attempt is a call the journal
+  // records, so it is not retried behind the user's back.
+  const identity = useQuery({
+    queryKey: ["integration-server-identity", orgId, spaceId, packageId],
     queryFn: async () => {
       const { data } = await client.POST("/api/integrations/{packageId}/discover", {
         params: { path: { packageId } },
-        body: serverSyncBody(connectionId),
+        body: {},
       });
       return data!;
     },
+    enabled: mayRead,
     staleTime: Infinity,
-    // Each attempt is a credential-proxy call the space's journal records: the user retries.
     retry: false,
   });
-  const [selection, setSelection] = useState<ReadonlySet<string>>();
+  const proposal = identity.data;
   const [includeDocs, setIncludeDocs] = useState(true);
-  // Set once the draft is saved: a failed publish is retried alone, on that save.
-  const [saved, setSaved] = useState<{ etag: string | null }>();
   // Whether a save of THIS session wrote `INTEGRATION.md`: only that file is ever deleted.
   const [docsWritten, setDocsWritten] = useState(false);
+  const [trustAll, setTrustAll] = useState(getAllowUndeclaredTools(draft.manifest ?? {}));
+  // Set once the draft is saved: a failed publish is retried alone, on that save.
+  const [saved, setSaved] = useState<{ etag: string | null }>();
   // Read when the step opens: our own save sets it afterwards.
   const [unarchivedAtMount] = useState(draft.has_unarchived_changes === true);
   // A publish refused because the draft moved after our save: the next submit saves it again.
   const [draftMoved, setDraftMoved] = useState(false);
   const update = useUpdatePackage("integration", packageId);
   const publish = useCreateVersion("integration", packageId);
-  const detailPath = packageDetailPath("integration", packageId);
+  // The first snapshot the tools tab and the spaces' review read; the tab's « Relire le serveur »
+  // is the way back when it cannot be taken here.
+  const snapshot = useToolSnapshotRefresh(packageId);
   // A changed choice is no longer the save a failed publish would retry: the next submit saves it.
   const unsave = () => {
     setSaved(undefined);
@@ -165,93 +138,21 @@ function ServerCatalog({
     publish.reset();
   };
 
-  if (catalog.isLoading) return <TextSkeleton lines={4} />;
-  const remedy = syncConnectionRemedy(catalog.error, { published, authsMatch });
-  // The draft changes the authentication a connection is made on: no connect clears this.
-  if (remedy === "unpublishedAuths") {
-    return (
-      <Alert variant="warning" data-testid="integration-wizard-unpublished-auths">
-        <AlertDescription>
-          {t("integrationWizard.tools.unpublishedAuths")}{" "}
-          <Link className="underline underline-offset-4" to={detailPath}>
-            {t("integrationWizard.open")}
-          </Link>
-          <div className="mt-2">
-            {/* Re-reads the draft and the detail: a publish or a revert there changes the step.
-                Not the server read: through these auths it cannot answer otherwise. */}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                void qc.invalidateQueries({ queryKey: packageKeys.all });
-                void invalidateIntegrationQueries(qc);
-              }}
-            >
-              {t("integrationWizard.tools.checkAgain")}
-            </Button>
-          </div>
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  // No account the draft's auths reach (a connection gone, or never made): connect one here; the
-  // read runs again once the detail lists it.
-  if (remedy === "connect") {
-    return (
-      <div className="flex flex-col items-start gap-3">
-        <ConnectStep packageId={packageId} detail={detail} />
-        <Button type="button" variant="outline" onClick={() => void catalog.refetch()}>
-          {t("integrationWizard.tools.retry")}
-        </Button>
-      </div>
-    );
-  }
-  if (catalog.error || !catalog.data) {
-    const choosing = syncConnectionCandidates(catalog.error) !== null;
-    return (
-      <div className="flex flex-col items-start gap-3">
-        {!choosing && (
-          <p role="alert" className="text-destructive text-sm">
-            {errorMessage(catalog.error)}
-          </p>
-        )}
-        <SyncConnectionChoice error={catalog.error} onChoose={setConnectionId} />
-        {!choosing && (
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => void catalog.refetch()}>
-              {t("integrationWizard.tools.retry")}
-            </Button>
-            {connectionId && (
-              <Button type="button" variant="outline" onClick={() => setConnectionId(undefined)}>
-                {t("integrationWizard.tools.otherConnection")}
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  const proposal = catalog.data;
-  // Changes held at mount may be files the step cannot see, or an earlier save of its own: the
-  // whole draft is published, so the step warns.
-  const otherDraftChanges = published && unarchivedAtMount;
-  const selected = selection ?? initialToolSelection(draft.manifest ?? {}, proposal);
   const submit = async () => {
     try {
       let etag = saved?.etag;
       if (!saved) {
         const docs = docsChoice({
           include: includeDocs,
-          instructions: proposal.instructions,
+          instructions: proposal?.instructions ?? null,
           written: docsWritten,
         });
         const result = await update.mutateAsync({
           etag: draft.etag ?? "",
-          body: toolsUpdateBody(draft.manifest ?? {}, proposal, {
-            selected: proposal.tools.map((tool) => tool.name).filter((name) => selected.has(name)),
+          body: toolsPublishBody(draft.manifest ?? {}, {
+            trustAll,
             version,
+            ...(proposal ? { proposed: proposal.manifest } : {}),
             instructions: docs.instructions,
             removeDocs: docs.removeDocs,
           }),
@@ -271,7 +172,8 @@ function ServerCatalog({
         }
         throw err;
       }
-      // The published version is what the detail reads: once it lists the tools, the step is done.
+      if (mayRead) await snapshot.runAsync().catch(() => undefined);
+      // The published version is what the detail reads: once it is there, the step is done.
       await invalidateIntegrationQueries(qc);
     } catch {
       // Said inline from the mutation that failed.
@@ -280,24 +182,24 @@ function ServerCatalog({
 
   return (
     <ToolsChoice
-      proposal={proposal}
-      selected={selected}
-      onSelectedChange={(next) => {
-        setSelection(next);
+      trustAll={trustAll}
+      onTrustAllChange={(next) => {
+        setTrustAll(next);
         unsave();
       }}
+      proposal={proposal ?? null}
       includeDocs={includeDocs}
       onIncludeDocsChange={(next) => {
         setIncludeDocs(next);
         unsave();
       }}
-      otherDraftChanges={otherDraftChanges}
-      detailPath={detailPath}
-      onRetry={() => void catalog.refetch()}
-      refetching={catalog.isFetching}
+      // Changes held at mount may be files the step cannot see, or an earlier save of its own: the
+      // whole draft is published, so the step warns.
+      otherDraftChanges={published && unarchivedAtMount}
+      detailPath={packageDetailPath("integration", packageId)}
       version={version}
       onSubmit={() => void submit()}
-      pending={update.isPending || publish.isPending}
+      pending={update.isPending || publish.isPending || snapshot.isPending}
       saveError={update.error}
       publishError={saved ? publish.error : null}
       draftMoved={draftMoved}
@@ -305,14 +207,11 @@ function ServerCatalog({
   );
 }
 
-/**
- * Every tool the server lists, the read-only ones pre-checked. A tool left unchecked is still
- * declared: an agent may pick it, it is just not selected by default.
- */
+/** Review in each space (nothing declared) or trust the whole server (`allow_undeclared_tools`). */
 export function ToolsChoice({
+  trustAll,
+  onTrustAllChange,
   proposal,
-  selected,
-  onSelectedChange,
   includeDocs,
   onIncludeDocsChange,
   version,
@@ -323,12 +222,11 @@ export function ToolsChoice({
   draftMoved = false,
   otherDraftChanges,
   detailPath,
-  onRetry,
-  refetching,
 }: {
-  proposal: ServerSyncProposal;
-  selected: ReadonlySet<string>;
-  onSelectedChange: (next: ReadonlySet<string>) => void;
+  trustAll: boolean;
+  onTrustAllChange: (trustAll: boolean) => void;
+  /** The server's identity read, when it answered: its instructions and warnings. */
+  proposal: { instructions: string | null; warnings: { code: string; message: string }[] } | null;
   includeDocs: boolean;
   onIncludeDocsChange: (include: boolean) => void;
   version: string;
@@ -342,107 +240,39 @@ export function ToolsChoice({
   /** The draft already differs from the published version: those changes are published too. */
   otherDraftChanges: boolean;
   detailPath: string;
-  /** Reads the server's tools again. */
-  onRetry: () => void;
-  refetching: boolean;
 }) {
   const { t } = useTranslation("agents");
-  const names = proposal.tools.map((tool) => tool.name);
-  if (names.length === 0)
-    return (
-      <div className="flex flex-col items-start gap-3">
-        <DiscoveryWarnings warnings={proposal.warnings} />
-        <p className="text-sm" data-testid="integration-wizard-no-tools">
-          {t("integrationWizard.tools.none")}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <PendingButton type="button" variant="outline" onClick={onRetry} pending={refetching}>
-            {t("integrationWizard.tools.retry")}
-          </PendingButton>
-          <Button type="button" variant="outline" asChild>
-            <Link to={detailPath}>{t("integrationWizard.open")}</Link>
-          </Button>
-        </div>
-      </div>
-    );
-  const count = names.filter((name) => selected.has(name)).length;
-  const toggle = (name: string, checked: boolean) => {
-    const next = new Set(selected);
-    if (checked) next.add(name);
-    else next.delete(name);
-    onSelectedChange(next);
-  };
   return (
     <div className="flex flex-col gap-4">
-      <DiscoveryWarnings warnings={proposal.warnings} />
-      <div className="flex flex-col gap-1 text-sm">
-        <p>
-          {/* Nothing is declared yet: the server offers, the save declares. */}
-          {t("integrationWizard.tools.offered", { count: names.length })}{" "}
-          {t("integrationWizard.tools.toSelectCount", { count })}
-        </p>
-        <p className="text-muted-foreground">{t("integrationWizard.tools.selectionHint")}</p>
-      </div>
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={pending}
-          onClick={() => onSelectedChange(new Set(names))}
+      <FieldSet className="gap-3" disabled={pending}>
+        <FieldLegend variant="label" className="mb-0">
+          {t("integrationWizard.tools.modeLabel")}
+        </FieldLegend>
+        <RadioGroup
+          value={trustAll ? "trust" : "review"}
+          onValueChange={(next) => onTrustAllChange(next === "trust")}
         >
-          {t("integrationWizard.tools.selectAll")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={pending}
-          onClick={() => onSelectedChange(new Set())}
-        >
-          {t("integrationWizard.tools.selectNone")}
-        </Button>
-      </div>
-      <div
-        role="group"
-        aria-label={t("integrationWizard.tools.listLabel")}
-        className="border-border flex flex-col gap-3 rounded-md border p-4"
-      >
-        {proposal.tools.map((tool) => (
-          <CheckboxField
-            key={tool.name}
-            id={`integration-wizard-tool-${tool.name}`}
-            disabled={pending}
-            checked={selected.has(tool.name)}
-            onCheckedChange={(checked) => toggle(tool.name, checked === true)}
-            label={
-              <span className="flex flex-wrap items-center gap-2">
-                {tool.title ?? <code>{tool.name}</code>}
-                {/* One badge: a server marking a tool both read-only and destructive is shown
-                    read-only, but such a tool is never pre-checked (`initialToolSelection`). */}
-                {tool.read_only ? (
-                  <Badge variant="secondary" className="font-normal">
-                    {t("integrationWizard.tools.readOnly")}
-                  </Badge>
-                ) : tool.destructive ? (
-                  <Badge variant="destructive" className="font-normal">
-                    {t("integrationWizard.tools.destructive")}
-                  </Badge>
-                ) : null}
-              </span>
-            }
-            description={
-              // A server's description runs up to a kilobyte: two lines here, the rest on hover.
-              tool.description && (
-                <span className="line-clamp-2" title={tool.description}>
-                  {tool.description}
-                </span>
-              )
-            }
-          />
-        ))}
-      </div>
-      {proposal.instructions && (
+          {(["review", "trust"] as const).map((mode) => (
+            <Field key={mode} orientation="horizontal" className="items-start">
+              <RadioGroupItem
+                value={mode}
+                id={`integration-wizard-mode-${mode}`}
+                className="mt-1 shrink-0"
+              />
+              <FieldContent>
+                <FieldLabel htmlFor={`integration-wizard-mode-${mode}`} className="text-foreground">
+                  {t(`integrationWizard.tools.mode.${mode}.label`)}
+                </FieldLabel>
+                <FieldDescription>
+                  {t(`integrationWizard.tools.mode.${mode}.description`)}
+                </FieldDescription>
+              </FieldContent>
+            </Field>
+          ))}
+        </RadioGroup>
+      </FieldSet>
+      {proposal && <DiscoveryWarnings warnings={proposal.warnings} />}
+      {proposal?.instructions && (
         <div className="flex flex-col gap-2">
           <CheckboxField
             id="integration-wizard-docs"

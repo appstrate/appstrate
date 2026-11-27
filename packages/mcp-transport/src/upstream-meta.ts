@@ -111,6 +111,12 @@ export interface UpstreamMeta {
   status: number;
   /** Lowercased, allowlisted upstream response headers. */
   headers: Record<string, string>;
+  /**
+   * Scopes the upstream's `WWW-Authenticate` challenge asks for, on a 401 or a 403
+   * `insufficient_scope`. The raw header is never forwarded: its `realm` and
+   * `error_description` are server-controlled text.
+   */
+  required_scopes?: string[];
 }
 
 /** `_meta` key of the code of an `api_call` the sidecar answered itself (beside status 0). */
@@ -121,9 +127,17 @@ export interface ApiCallErrorMeta {
   code: string;
 }
 
-/** The line that tells the model an `api_call`'s status, and its failure code when it has one. */
-export function apiCallStatusLine(status: number, code?: string): string {
-  return `[api_call status=${status}${code ? ` code=${code}` : ""}]`;
+/**
+ * The line that tells the model an `api_call`'s status, its failure code when it has one, and
+ * the scopes the upstream asked for, as a quoted space-separated list (RFC 6750): a scope token
+ * holds no space, quote or backslash, so the quotes bound the list.
+ */
+export function apiCallStatusLine(
+  status: number,
+  code?: string,
+  requiredScopes?: readonly string[],
+): string {
+  return `[api_call status=${status}${code ? ` code=${code}` : ""}${requiredScopes?.length ? ` required_scopes="${requiredScopes.join(" ")}"` : ""}]`;
 }
 
 /**

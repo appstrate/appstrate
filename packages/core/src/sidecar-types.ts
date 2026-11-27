@@ -411,6 +411,12 @@ export interface IntegrationSpawnSpec {
    */
   hiddenTools?: readonly string[];
   /**
+   * Names the space blocks. Excluded like {@link hiddenTools}, but reported as `blocked_in_space`
+   * so the run says who withheld them. api_call / api_upload blocks never travel here: the
+   * platform removes those capabilities from the spec.
+   */
+  blockedTools?: readonly string[];
+  /**
    * Agent-declared MCP tool allowlist. When
    * non-undefined, restricts the set of tools the namespace advertises
    * via `tools/list`. Tools not in the allowlist are silently omitted
@@ -435,6 +441,13 @@ export interface IntegrationSpawnSpec {
    * servers that grow their surface between manifest republishes.
    */
   toolAllowlist?: readonly string[];
+  /**
+   * Fingerprints the space approved, per selected tool the manifest does not declare on a closed
+   * catalog (`allow_undeclared_tools` absent). The sidecar offers such a tool only when its
+   * listed definition hashes to one of them; an empty array means none is approved. Declared
+   * tools never appear here.
+   */
+  approvedToolFingerprints?: Record<string, string[]>;
   /**
    * connect.tool substrate — `runAt: "run-start"` acquisition (P2). When
    * set, the integration's session is NOT pre-resolved at spawn: only the
@@ -504,8 +517,26 @@ export interface IntegrationSpawnSpec {
   };
 }
 
+/** Bounds of the tools-observed report body: the sidecar caps to them, the platform refuses past them. */
+export const OBSERVED_TOOLS_MAX_COUNT = 500;
+export const OBSERVED_TOOLS_MAX_BYTES = 1024 * 1024;
+
+/** The name of an observed tool: bounded (MCP's own 128-character limit), non-empty. */
+export const observedToolNameSchema = z.string().min(1).max(128);
+
+/** One raw MCP descriptor as the platform can fingerprint it. */
+export const observedToolSchema = z.looseObject({
+  name: observedToolNameSchema,
+  inputSchema: z.looseObject({ type: z.literal("object") }),
+});
+
 const strings = z.record(z.string(), z.string());
 const uris = z.array(z.string());
+
+/** Approved definitions the space may hold for one tool: the spawn spec's bound, enforced on write. */
+export const MAX_APPROVED_FINGERPRINTS_PER_TOOL = 32;
+/** A tool definition fingerprint: SHA-256 as 64 lowercase hex characters, as `toolDefinitionFingerprint` (`@appstrate/mcp-transport`) produces. */
+export const toolFingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/);
 
 /** The platform's per-connection launch contract, decoded before any integration is started. */
 export const integrationSpawnSpecSchema = z.object({
@@ -562,7 +593,17 @@ export const integrationSpawnSpecSchema = z.object({
     .object({ authorizedUris: uris, declaredUris: uris, allowAllUris: z.boolean() })
     .optional(),
   hiddenTools: uris.optional(),
+  blockedTools: z.array(observedToolNameSchema).max(OBSERVED_TOOLS_MAX_COUNT).optional(),
   toolAllowlist: uris.optional(),
+  approvedToolFingerprints: z
+    .record(
+      observedToolNameSchema,
+      z.array(toolFingerprintSchema).max(MAX_APPROVED_FINGERPRINTS_PER_TOOL),
+    )
+    .refine((byTool) => Object.keys(byTool).length <= OBSERVED_TOOLS_MAX_COUNT, {
+      message: `approvedToolFingerprints names more than ${OBSERVED_TOOLS_MAX_COUNT} tools`,
+    })
+    .optional(),
   connectLogin: z
     .object({
       toolName: z.string(),
@@ -837,6 +878,21 @@ export interface IntegrationBootBreadcrumb {
   data?: Record<string, unknown>;
 }
 
+/** Why a tool the agent selected is not callable in this run. */
+export const UNAVAILABLE_TOOL_REASONS = [
+  "not_listed",
+  "hidden_tools",
+  "blocked_in_space",
+  "definition_not_approved",
+  "name_collision",
+] as const;
+export type UnavailableToolReason = (typeof UNAVAILABLE_TOOL_REASONS)[number];
+/** A selected tool this run cannot call, with the reason. */
+export interface UnavailableTool {
+  name: string;
+  reason: UnavailableToolReason;
+}
+
 /**
  * Result of the sidecar's integration boot pass, fetched by the agent from
  * `GET /integrations/boot-report` after the MCP handshake. The agent emits the
@@ -858,6 +914,8 @@ export interface IntegrationBootReport {
     /** Tells apart N entries sharing `integrationId` + `namespace`. */
     connectionLabel?: string;
     toolCount: number;
+    /** Selected tools this connection does not expose, with the reason. */
+    unavailableTools?: UnavailableTool[];
   }>;
   /**
    * Per-connection failure — the error that prevented spawn/connect/register,

@@ -24,6 +24,9 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import { MAX_REQUIRED_SCOPES, sanitiseRequiredScopes } from "@appstrate/core/www-authenticate";
+import { settleScopeRequestNotices } from "./state/notifications.ts";
+import { recordRunScopeRequest } from "./state/runs.ts";
 import {
   spacePackages,
   integrationConnections,
@@ -42,7 +45,10 @@ import {
   decryptCredentialsToStringMap,
 } from "@appstrate/connect";
 import type { CredentialDeathCause } from "@appstrate/core/sidecar-types";
-import { announceCredentialNeedsReconnection } from "./credential-reconnection.ts";
+import {
+  announceCredentialNeedsReconnection,
+  announceRequestedScopes,
+} from "./credential-reconnection.ts";
 import { issuerOfClientMetadataDocumentRef } from "../lib/integration-client-metadata.ts";
 import {
   resolveSystemClientForAuth,
@@ -94,6 +100,7 @@ import {
   ownRowInSpace,
   ownUsableInSpace,
   sharedInto,
+  usableByAnyUserInSpace,
   usableInSpace,
   type ConnectionCaller,
 } from "./connection-reach.ts";
@@ -129,14 +136,16 @@ import {
   displayAccountId,
   allowsUndeclaredTools,
   isUnauthenticatedIntegration,
-  resolveIntegrationToolCatalog,
+  partitionScopesByAuthCatalog,
   readDefaultTools,
   type ConnectionCandidate,
   type ConnectionOverrides,
   type ConnectionResolutionError,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
-import type { ConnectionReach, IntegrationToolCatalogEntry } from "@appstrate/shared-types";
+import type { ConnectionReach } from "@appstrate/shared-types";
+import { loadEffectiveToolCatalog, type EffectiveToolEntry } from "./integration-tool-catalog.ts";
+import type { ToolSnapshot } from "./integration-tool-snapshot-reads.ts";
 import type { ConnectionVariables } from "./connect/connection-variables.ts";
 import { connectionVariablesOf, sameConnectionVariables } from "../lib/connection-identity.ts";
 import {
@@ -239,7 +248,7 @@ async function loadConnectManifestOrThrow(
 }
 
 /** The manifest connecting reads ({@link readIntegrationManifestForConnect}), or a 404. */
-async function loadManifestOrThrow(
+export async function loadManifestOrThrow(
   scope: SpaceScope | OrgScope,
   packageId: string,
 ): Promise<IntegrationManifest> {
@@ -764,6 +773,26 @@ export async function listReachableConnections(
       inReach(context.spaceId, context.actor),
     ),
   );
+}
+
+/**
+ * Of `userIds`, those whose usable connections in `spaceId` include `connectionId`: everyone when
+ * it is shared into the space, else its owner when the space lets the owner bind it. One query.
+ */
+export async function usersReachingConnection(
+  spaceId: string,
+  connectionId: string,
+  userIds: readonly string[],
+): Promise<string[]> {
+  if (userIds.length === 0) return [];
+  const [row] = await db
+    .select({ userId: integrationConnections.userId, shared: sql<boolean>`${sharedInto(spaceId)}` })
+    .from(integrationConnections)
+    .where(
+      and(eq(integrationConnections.id, connectionId), usableByAnyUserInSpace(spaceId, userIds)),
+    );
+  if (!row) return [];
+  return row.shared ? [...userIds] : userIds.filter((id) => id === row.userId);
 }
 
 function loadSelectableRows(where: SQL | undefined) {
@@ -2337,7 +2366,9 @@ export async function persistCredentialBundle(
 
   // UPDATE — shared column set; WHERE differs by target.
   const clearsReconnection = !(input.needsReconnection ?? false);
-  const set: Partial<typeof integrationConnections.$inferInsert> = {
+  const set: Partial<Omit<typeof integrationConnections.$inferInsert, "requestedScopes">> & {
+    requestedScopes?: SQL;
+  } = {
     credentialsEncrypted: ciphertext,
     expiresAt: input.expiresAt ?? null,
     needsReconnection: input.needsReconnection ?? false,
@@ -2349,7 +2380,14 @@ export async function persistCredentialBundle(
   };
   if (input.accountId !== undefined) set.accountId = input.accountId;
   if (input.identityClaims !== undefined) set.identityClaims = input.identityClaims;
-  if (input.scopesGranted !== undefined) set.scopesGranted = input.scopesGranted;
+  if (input.scopesGranted !== undefined) {
+    set.scopesGranted = input.scopesGranted;
+    // What the grant now holds is no longer a demand.
+    set.requestedScopes = sql`array(select s from unnest(${integrationConnections.requestedScopes}) as s where s <> all(${sql`ARRAY[${sql.join(
+      input.scopesGranted.map((g) => sql`${g}`),
+      sql`, `,
+    )}]::text[]`}))`;
+  }
   // A reconnect re-stamps the minting client; the refresh write-back omits it.
   if (input.clientRef !== undefined) set.clientRef = input.clientRef;
   if (input.variables !== undefined) set.variables = input.variables;
@@ -2435,6 +2473,8 @@ export async function persistCredentialBundle(
         .where(eq(integrationConnections.id, target.connectionId))
         .returning();
       if (!updated) return undefined;
+      if (input.scopesGranted !== undefined && updated.requestedScopes.length === 0)
+        await settleScopeRequestNotices(tx, target.scope.orgId, updated.id);
       const shares = (await loadConnectionShares(tx, [updated.id])).get(updated.id) ?? [];
       return { updated, shares, widened };
     });
@@ -2461,12 +2501,15 @@ export async function persistCredentialBundle(
     eq(integrationConnections.credentialsEncrypted, credentialsEncrypted),
     clearsReconnection ? eq(integrationConnections.needsReconnection, false) : undefined,
   );
-  const [row] = await db
-    .update(integrationConnections)
-    .set(set)
-    .where(byIdWhere)
-    .returning({ credentialRevision });
-  return row ?? null;
+  const [row] = await db.update(integrationConnections).set(set).where(byIdWhere).returning({
+    credentialRevision,
+    orgId: integrationConnections.orgId,
+    requestedScopes: integrationConnections.requestedScopes,
+  });
+  if (!row) return null;
+  if (input.scopesGranted !== undefined && row.requestedScopes.length === 0)
+    await settleScopeRequestNotices(db, row.orgId, target.connectionId);
+  return { credentialRevision: row.credentialRevision };
 }
 
 /**
@@ -2497,8 +2540,8 @@ export async function getIntegrationConnectionCredentialFields(
   return fields === KEY_UNAVAILABLE ? null : fields;
 }
 
-/** The columns an announcement of a connection's death reads, off the row that flipped. */
-const deathColumns = {
+/** The columns an announcement to a connection's owner reads, off the row it is about. */
+const ownerColumns = {
   orgId: integrationConnections.orgId,
   spaceId: integrationConnections.spaceId,
   integrationId: integrationConnections.integrationId,
@@ -2510,7 +2553,7 @@ const deathColumns = {
 /** Announce the death of the connection `connectionId` to its owner (the CHECK: user XOR end user). */
 function announceConnectionDeath(
   connectionId: string,
-  row: Pick<typeof integrationConnections.$inferSelect, keyof typeof deathColumns>,
+  row: Pick<typeof integrationConnections.$inferSelect, keyof typeof ownerColumns>,
   cause: CredentialDeathCause,
 ): void {
   announceCredentialNeedsReconnection({
@@ -2539,7 +2582,7 @@ export async function markIntegrationConnectionNeedsReconnection(
         eq(integrationConnections.needsReconnection, false),
       ),
     )
-    .returning(deathColumns);
+    .returning(ownerColumns);
   if (flipped) announceConnectionDeath(connectionId, flipped, cause);
 }
 
@@ -2596,7 +2639,7 @@ export async function recordIntegrationRefreshFailure(
       failures: integrationConnections.refreshFailureCount,
       needsReconnection: integrationConnections.needsReconnection,
       wasFlagged: prev.wasFlagged,
-      ...deathColumns,
+      ...ownerColumns,
     });
   if (!row) return null;
   if (row.needsReconnection && !row.wasFlagged) {
@@ -2669,6 +2712,98 @@ export function clearReachableUpstreamRejections(
       eq(credentialRevision, revision),
     )!,
   );
+}
+
+/**
+ * Record the scopes a server asked for (`insufficient_scope`) that a connection does not hold, for
+ * a caller whose `reach` reaches it. The ONE writer of `requested_scopes`, whatever the door (the
+ * credential proxy outside a run, a run's report); {@link persistCredentialBundle} is the one
+ * that clears it. Only valid scope tokens are kept, at most `MAX_REQUIRED_SCOPES`. Only an
+ * OAuth2 connection (one with a minting client) takes a demand: a consent is what grants scopes,
+ * and only its grant ever clears them. A demand that gains a scope is announced to the owner; a
+ * call made by a `run` also stamps the standing demand on that run (`scope_requests`).
+ */
+export async function recordRequestedScopes(
+  connectionId: string,
+  integrationId: string,
+  reach: { spaceId: string; actor: Actor },
+  scopes: readonly string[],
+  run?: { orgId: string; id: string },
+): Promise<string[] | null> {
+  const asked = await scopesTheConnectCanRequest(connectionId, integrationId, reach, scopes);
+  if (asked.length === 0) return null;
+  // Read and written under the row's lock: two concurrent demands merge, never overwrite each other.
+  const outcome = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({
+        granted: integrationConnections.scopesGranted,
+        requested: integrationConnections.requestedScopes,
+        ...ownerColumns,
+      })
+      .from(integrationConnections)
+      .where(
+        and(
+          reachableConnection(connectionId, integrationId, reach),
+          isNotNull(integrationConnections.clientRef),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    if (!row) return null;
+    const granted = new Set(row.granted);
+    // At the cap the oldest demands give way: the latest refusal is the one the owner can act on.
+    const next = [...new Set([...row.requested, ...asked].filter((s) => !granted.has(s)))].slice(
+      -MAX_REQUIRED_SCOPES,
+    );
+    if (next.length === row.requested.length && next.every((s, i) => s === row.requested[i]))
+      return { next, announce: null };
+    await tx
+      .update(integrationConnections)
+      .set({ requestedScopes: next })
+      .where(reachableConnection(connectionId, integrationId, reach));
+    return { next, announce: next.some((s) => !row.requested.includes(s)) ? row : null };
+  });
+  if (!outcome) return null;
+  const { next, announce } = outcome;
+  if (announce) {
+    announceRequestedScopes({
+      orgId: announce.orgId,
+      spaceId: announce.spaceId,
+      connectionId,
+      owner: actorFromIds(announce.userId, announce.endUserId)!,
+    });
+  }
+  if (run && next.length > 0) {
+    await recordRunScopeRequest(run.orgId, run.id, { integrationId, connectionId, scopes: next });
+  }
+  return next;
+}
+
+/**
+ * The valid scope tokens of `scopes` that a reconnect of this connection may request: the connect
+ * kickoffs refuse a scope outside the auth's `scope_catalog` (`scope_not_in_catalog`), so a demand
+ * the catalog does not carry could never be granted, hence never cleared. No catalog: all of them.
+ */
+async function scopesTheConnectCanRequest(
+  connectionId: string,
+  integrationId: string,
+  reach: { spaceId: string; actor: Actor },
+  scopes: readonly string[],
+): Promise<string[]> {
+  const valid = sanitiseRequiredScopes(scopes);
+  if (valid.length === 0) return [];
+  const [row] = await db
+    .select({ orgId: integrationConnections.orgId, authKey: integrationConnections.authKey })
+    .from(integrationConnections)
+    .where(reachableConnection(connectionId, integrationId, reach))
+    .limit(1);
+  if (!row) return [];
+  const read = await readIntegrationManifestForConnect(
+    { orgId: row.orgId, spaceId: reach.spaceId },
+    integrationId,
+  );
+  if (!read.ok) return [];
+  return partitionScopesByAuthCatalog(read.manifest.auths?.[row.authKey], valid).declared;
 }
 
 /** The rejection streak a connection carries into a call: its count, for a non-OAuth2 auth only. */
@@ -3415,6 +3550,7 @@ export function serializeIntegrationConnection(
       ? ((row.identityClaims as Record<string, unknown> | null) ?? null)
       : null,
     scopes_granted: row.scopesGranted,
+    ...(view.owner ? { requested_scopes: row.requestedScopes } : {}),
     needs_reconnection: row.needsReconnection,
     expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
     owner_type: row.userId ? "user" : "end_user",
@@ -3449,6 +3585,46 @@ export async function getReconnectedConnection(
 // Aggregate views for the marketplace UI
 // ─────────────────────────────────────────────
 
+export interface ToolSnapshotSummary {
+  connection_id: string | null;
+  listed_at: string;
+  truncated: boolean;
+  added: number;
+  missing: number;
+  modified: number;
+}
+
+/** The most recent snapshot, with what the catalog says of the tools it listed. */
+function summariseToolSnapshot(
+  snapshots: readonly ToolSnapshot[],
+  catalog: readonly EffectiveToolEntry[],
+): ToolSnapshotSummary | null {
+  const latest = snapshots.reduce<ToolSnapshot | null>(
+    (best, s) => (best === null || s.listedAt > best.listedAt ? s : best),
+    null,
+  );
+  if (latest === null) return null;
+  return {
+    connection_id: latest.connectionId,
+    listed_at: latest.listedAt.toISOString(),
+    truncated: latest.truncated,
+    added: catalog.filter((e) => e.origin === "listed" && e.status !== "blocked").length,
+    missing: catalog.filter((e) => e.status === "missing").length,
+    modified: catalog.filter((e) => e.modified).length,
+  };
+}
+
+/**
+ * The snapshot targets that judge a space's tool catalog: the one shared target of an
+ * unauthenticated integration, otherwise the caller's listed connections.
+ */
+export function toolSnapshotConnectionIds(
+  manifest: IntegrationManifest,
+  connections: readonly { id: string }[],
+): (string | null)[] {
+  return isUnauthenticatedIntegration(manifest) ? [null] : connections.map((c) => c.id);
+}
+
 /** Marketplace detail view: the manifest and the per-auth status for the calling actor. */
 export async function getIntegrationAuthStatuses(
   scope: SpaceScope,
@@ -3460,8 +3636,10 @@ export async function getIntegrationAuthStatuses(
 ): Promise<{
   manifest: IntegrationManifest;
   auths: IntegrationAuthStatus[];
-  /** The agent-facing tool catalog ({@link resolveIntegrationToolCatalog}). */
-  tool_catalog: IntegrationToolCatalogEntry[];
+  /** The agent-facing tool catalog as this space can use it ({@link loadEffectiveToolCatalog}). */
+  tool_catalog: EffectiveToolEntry[];
+  /** The latest listing of the server behind it, summarised; `null` when none was recorded. */
+  tool_snapshot: ToolSnapshotSummary | null;
   /** AFPS §4.4: the tools an agent inherits without a `tools` selection; `undefined` when none. */
   default_tools: readonly string[] | "*" | undefined;
   /** AFPS §7.8, verbatim: gates the editor's "include all upstream tools" toggle. */
@@ -3481,10 +3659,6 @@ export async function getIntegrationAuthStatuses(
   const manifest = await loadManifestOrThrow(scope, packageId);
   const authsMap = manifest.auths ?? {};
 
-  const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
-    integration: manifest,
-  });
-
   const oauthClients = await readOAuthClientRegistrations(
     scope.orgId,
     [packageId],
@@ -3501,6 +3675,13 @@ export async function getIntegrationAuthStatuses(
     .select({ blocked: spacePackages.blockUserConnections })
     .from(spacePackages)
     .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, scope.spaceId)));
+  const { catalog: toolCatalog, snapshots } = await loadEffectiveToolCatalog({
+    orgId: scope.orgId,
+    spaceId: scope.spaceId,
+    packageId,
+    manifest,
+    connectionIds: toolSnapshotConnectionIds(manifest, allConnections),
+  });
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
     // The run-policy `required` flag lives under `_meta["dev.appstrate/auth"]` (absent = false).
     const auth = rawAuth as AfpsManifestAuth;
@@ -3525,6 +3706,7 @@ export async function getIntegrationAuthStatuses(
     manifest,
     auths,
     tool_catalog: toolCatalog,
+    tool_snapshot: summariseToolSnapshot(snapshots, toolCatalog),
     default_tools: readDefaultTools(manifest),
     allow_undeclared_tools: allowsUndeclaredTools(manifest),
     block_user_connections: settings?.blocked === true,

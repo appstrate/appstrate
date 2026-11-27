@@ -1341,9 +1341,35 @@ export function resolveIntegrationToolCatalog(
   return out;
 }
 
-function hiddenToolNames(
+/**
+ * The approvals of a space that can still count for an integration: an approval of a tool the
+ * manifest declares, of a name the platform withholds ({@link hiddenToolNames}), or on a catalog
+ * that is open (`allow_undeclared_tools`, where nothing needs approving) is dropped. Generic over
+ * the row: whatever else it carries is kept.
+ */
+export function judgeToolApprovals<T extends { tool_name: string }>(
+  manifest: IntegrationManifest,
+  approvals: readonly T[],
+): T[] {
+  const counts = approvalCounts(manifest);
+  return approvals.filter((a) => counts(a.tool_name));
+}
+
+/** Whether an approval of the named tool can count: the rule {@link judgeToolApprovals} applies per name. */
+function approvalCounts(
+  manifest: IntegrationManifest,
+  catalog = resolveIntegrationToolCatalog({ integration: manifest }),
+): (name: string) => boolean {
+  if (allowsUndeclaredTools(manifest)) return () => false;
+  const declared = new Set(catalog.map((e) => e.name));
+  const hidden = hiddenToolNames(manifest);
+  return (name) => !declared.has(name) && !hidden.has(name);
+}
+
+/** Names the platform withholds from every surface: `hidden_tools`, connect primitives, hidden uploads. */
+export function hiddenToolNames(
   integration: IntegrationManifest,
-  apiCallConfigs: readonly ApiCallConfig[],
+  apiCallConfigs: readonly ApiCallConfig[] = getApiCallConfigs(integration),
 ): Set<string> {
   const hidden = new Set<string>([
     ...(integration.hidden_tools ?? []),
@@ -1486,7 +1512,7 @@ function unexposedDefaultTools(manifest: IntegrationManifest): {
   const catalog = new Set(
     resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
   );
-  const hidden = hiddenToolNames(manifest, getApiCallConfigs(manifest));
+  const hidden = hiddenToolNames(manifest);
   return [...new Set(defaults)]
     .filter((name) => hidden.has(name) || (catalogIsKnown && !catalog.has(name)))
     .map((name) => ({
@@ -1805,14 +1831,19 @@ export interface AgentIntegrationScopeError {
  * the sparse `tools_policy` table (the resolver falls back to its keys).
  *
  * Default semantics:
- *   - Empty resolved catalog → no tool validation (caller is responsible
- *     for surfacing "no exposable tools").
+ *   - A catalog that allows undeclared tools (`allow_undeclared_tools`) → no
+ *     tool-name validation: the server's own listing is the authority. A
+ *     closed catalog refuses any name it neither declares nor has approved,
+ *     including every name when it declares nothing.
+ *   - `options.approvedTools`: names the space approved; they count as known, except a hidden
+ *     name ({@link judgeToolApprovals}).
  *   - No `scope_catalog` on any auth → any scope accepted (the IdP is the
  *     ultimate authority at consent time).
  */
 export function validateAgentIntegrationScopes(
   selection: Pick<ManifestIntegrationEntry, "id" | "tools" | "scopes">,
   integrationManifest: IntegrationManifest,
+  options?: { approvedTools?: readonly string[] },
 ): AgentIntegrationScopeError[] {
   const errors: AgentIntegrationScopeError[] = [];
 
@@ -1830,11 +1861,18 @@ export function validateAgentIntegrationScopes(
       });
     }
   } else if (selection.tools && selection.tools.length > 0) {
-    const catalog = resolveIntegrationToolCatalog({
-      integration: integrationManifest,
-    });
-    if (catalog.length > 0) {
-      const allowed = new Set(catalog.map((e) => e.name));
+    // AFPS §7.1: a `local` or `none` source declaring no tools has no catalog to check against;
+    // a remote source, or one of unknown kind, declaring none is a closed empty catalog.
+    const catalog = resolveIntegrationToolCatalog({ integration: integrationManifest });
+    const sourceKind = getIntegrationSourceKind(integrationManifest);
+    const catalogIsEmptyAdvisory =
+      (sourceKind === "local" || sourceKind === "none") && catalog.length === 0;
+    if (!allowsUndeclaredTools(integrationManifest) && !catalogIsEmptyAdvisory) {
+      const counts = approvalCounts(integrationManifest, catalog);
+      const allowed = new Set([
+        ...catalog.map((e) => e.name),
+        ...(options?.approvedTools ?? []).filter(counts),
+      ]);
       for (const tool of selection.tools) {
         if (allowed.has(tool)) continue;
         errors.push({

@@ -66,6 +66,7 @@ import { receiveSecrets } from "@appstrate/runner-pi/secret-env";
 import { resolvePiContextWindow } from "@appstrate/runner-pi/pi-model";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import { fetchIntegrationBootReport } from "./mcp/integration-boot-report.ts";
+import { unavailableToolsNote } from "./mcp/unavailable-tools-note.ts";
 import { flushBeforeFinalize, flushSidecarCallJournal } from "./mcp/call-journal-flush.ts";
 import {
   agentPackagePath,
@@ -521,10 +522,12 @@ await progress("MCP connected", { mcpConnectMs: phaseTimings.mcpConnectMs });
 // `tools/list` omits every integration still booting. Listing first would
 // freeze an empty toolset into a run whose report then says all is well.
 const bootResult = await fetchIntegrationBootReport(sidecarUrl, sidecarAuthToken);
+let unavailableTools = "";
 if ("error" in bootResult) {
   await die(`Could not verify integration boot status: ${bootResult.error}`);
 } else {
   const bootReport = bootResult.report;
+  unavailableTools = unavailableToolsNote(bootReport.spawned);
   for (const crumb of bootReport.breadcrumbs) {
     await emitBootProgress(sink, AGENT_RUN_ID!, crumb.message, {
       level: crumb.level,
@@ -566,7 +569,7 @@ try {
 
 // --- 3. Model + system prompt from env ---
 
-const systemPrompt = env.agentPrompt;
+const systemPrompt = `${env.agentPrompt}${unavailableTools}`;
 
 const model: Model<Api> = buildPiModelFromEnv(env);
 

@@ -21,6 +21,7 @@ import {
   seedSpacePackage,
   loseVersionArchive,
 } from "../../helpers/seed.ts";
+import { insertToolApprovals, policyTarget } from "../../helpers/tool-policy.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
@@ -1743,6 +1744,31 @@ describe("Packages API", () => {
       expect(body.errors?.[0]?.field).toBe(`integrations_configuration.${integrationId}.tools`);
     });
 
+    it("judges a package's selection against its home space's approvals, not the request's", async () => {
+      await seedGmailIntegration();
+      await insertToolApprovals(policyTarget(ctx, integrationId), [
+        { toolName: "delete_message", fingerprint: "a".repeat(64) },
+      ]);
+      const body = buildAgentBody({ version: "^1.0.0", tools: ["delete_message"] }, "homed");
+      const created = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      });
+      expect(created.status).toBe(201);
+      const other = await seedSpace({ orgId: ctx.orgId, name: "Other", createdBy: ctx.user.id });
+      const res = await app.request("/api/packages/agents/@pkgorg/agent-homed", {
+        method: "PATCH",
+        headers: {
+          ...authHeaders(ctx, { "Content-Type": "application/json" }),
+          "X-Space-Id": other.id,
+          ...ifMatch(etagVersion(created)),
+        },
+        body: JSON.stringify({ ...body, content: "Edited" }),
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+    });
+
     it("rejects an agent declaring a scope outside the integration's availableScopes", async () => {
       await seedGmailIntegration();
       const res = await app.request("/api/packages/agents", {
@@ -2697,6 +2723,38 @@ describe("Packages API", () => {
         via: "import:zip",
         force: false,
       });
+    });
+
+    it("answers name_collision for another organization's package before judging anything else", async () => {
+      const other = await createTestContext({ orgSlug: "otherorg" });
+      await seedAgent({ id: "@pkgorg/taken", orgId: other.orgId, createdBy: other.user.id });
+      const enc = (str: string) => new TextEncoder().encode(str);
+      const afps = zipSync({
+        "manifest.json": enc(
+          JSON.stringify({
+            name: "@pkgorg/taken",
+            version: "1.0.0",
+            type: "agent",
+            schema_version: "0.2",
+            display_name: "Taken",
+            description: "Names another org's package",
+            dependencies: { integrations: { "@nobody/ghost": "^1.0.0" } },
+            integrations_configuration: { "@nobody/ghost": { tools: ["anything"] } },
+          }),
+        ),
+        "prompt.md": enc("prompt"),
+      });
+      const form = new FormData();
+      form.append("file", new File([new Uint8Array(afps)], "agent.afps"));
+
+      const res = await app.request("/api/packages/import", {
+        method: "POST",
+        headers: authHeaders(ctx),
+        body: form,
+      });
+
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { code: string }).code).toBe("name_collision");
     });
 
     it("moves the draft version when it overwrites an existing package, so a stale editor save is refused", async () => {

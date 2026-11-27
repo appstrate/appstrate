@@ -13,6 +13,7 @@ import { $api } from "../../../api/client.ts";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { installFakeStorage } from "../../../test/fake-storage.ts";
 import { render } from "../../../test/render.tsx";
+import { memberSpaceClient, renderInSpace, testSpace } from "../../../test/space-context.ts";
 import { IntegrationToolPicker } from "../integration-tool-picker.tsx";
 import type { ResourceEntry } from "../types.ts";
 
@@ -145,5 +146,171 @@ describe("IntegrationToolPicker — inferred scopes", () => {
       expect(html.includes(WILDCARD_NOTICE)).toBe(selected);
       expect(html.includes('data-state="checked"')).toBe(selected);
     }
+  });
+});
+
+// A tool the space cannot serve (absent from the server, awaiting approval, blocked) is greyed and
+// cannot be added; one already selected stays selected and says it will not be there at launch.
+describe("IntegrationToolPicker — tool status", () => {
+  // The reader is in « Atelier »; `spaceName` reads the statuses in the space « Équipe Léa ».
+  const detailKey = (spaceId: string) =>
+    $api.queryOptions("get", "/api/integrations/{packageId}", {
+      params: { path: { packageId: ID }, header: { "X-Org-Id": "org_1", "X-Space-Id": spaceId } },
+    }).queryKey;
+
+  function renderOver(tools: string[], spaceName?: string): string {
+    const qc = memberSpaceClient([
+      testSpace("spc_a", ["integrations:read"]),
+      testSpace("spc_lea", ["integrations:read"], "Équipe Léa"),
+    ]);
+    const base = { modified: false, fingerprint: null, origin: "declared" };
+    qc.setQueryData(detailKey(spaceName ? "spc_lea" : "spc_a"), {
+      manifest: { auths: {} },
+      auths: [],
+      active: true,
+      allow_undeclared_tools: false,
+      tool_snapshot: { listed_at: "2026-11-20T10:00:00.000Z" },
+      tool_catalog: [
+        { ...base, name: "ok_tool", status: "available" },
+        { ...base, name: "gone_tool", status: "missing" },
+        { ...base, name: "new_tool", status: "pending", origin: "listed" },
+        { ...base, name: "no_tool", status: "blocked", modified: true },
+      ],
+    });
+    return renderInSpace(
+      <IntegrationToolPicker
+        packageId={ID}
+        spaceId={spaceName ? "spc_lea" : undefined}
+        entry={{ id: ID, version: "*", tools }}
+        onChange={() => {}}
+      />,
+      { queryClient: qc, overview: false },
+    );
+  }
+
+  it("names the space the statuses are read in when it is not the current one", () => {
+    const html = renderOver([], "Équipe Léa");
+    expect(html).toContain("En attente d’approbation dans Équipe Léa");
+    expect(html).toContain("Bloqué dans Équipe Léa");
+    expect(renderOver([])).toContain("En attente d’approbation dans cet espace");
+  });
+
+  it("shows the reason of each unusable tool and disables adding it", () => {
+    const html = renderOver([]);
+    expect(html).toContain("En attente d’approbation dans cet espace");
+    expect(html).toContain("Bloqué dans cet espace");
+    expect(html).toContain("Absent du serveur à la dernière lecture (");
+    expect(html).toContain(i18n.t("agents:packageTools.modified"));
+    const disabled = (name: string) =>
+      html
+        .match(new RegExp(`<button[^>]*aria-label="Sélectionner ${name}"[^>]*>`))?.[0]
+        ?.includes('disabled=""');
+    // missing, pending, blocked: not addable; the usable one is.
+    expect(["gone_tool", "new_tool", "no_tool"].map(disabled)).toEqual([true, true, true]);
+    expect(disabled("ok_tool")).toBe(false);
+    expect(html).not.toContain("tool-warning-");
+  });
+
+  it("keeps a selected unusable tool selected, with a warning", () => {
+    const html = renderOver(["gone_tool"]);
+    expect(html).toContain("tool-warning-gone_tool");
+    expect(html).toContain(i18n.t("agents:packageTools.unavailableSelected"));
+    expect(html).not.toContain("tool-warning-ok_tool");
+  });
+});
+
+// A tool with no declared permission is flagged only on an OAuth integration, the one that asks
+// for scopes, whatever the tool's origin.
+describe("IntegrationToolPicker — unknown permissions", () => {
+  const DETAIL_KEY = $api.queryOptions("get", "/api/integrations/{packageId}", {
+    params: {
+      path: { packageId: ID },
+      header: { "X-Org-Id": undefined, "X-Space-Id": undefined },
+    },
+  }).queryKey;
+
+  function renderWith(authType: string, origin = "approved"): string {
+    const qc = new QueryClient();
+    qc.setQueryData(DETAIL_KEY, {
+      manifest: { auths: {} },
+      auths: [{ auth_key: "primary", type: authType, connections: [] }],
+      active: true,
+      allow_undeclared_tools: false,
+      tool_catalog: [
+        {
+          name: "extra",
+          status: "available",
+          origin,
+          modified: false,
+          fingerprint: "f",
+        },
+      ],
+    });
+    return render(
+      <IntegrationToolPicker
+        packageId={ID}
+        entry={{ id: ID, version: "*", tools: [] }}
+        onChange={() => {}}
+      />,
+      { queryClient: qc },
+    );
+  }
+
+  it("flags them on an OAuth integration only", () => {
+    const flag = i18n.t("agents:packageTools.scopesUnknown");
+    expect(renderWith("oauth2")).toContain(flag);
+    expect(renderWith("api_key")).not.toContain(flag);
+    expect(renderWith("oauth2", "declared")).toContain(flag);
+  });
+});
+
+describe("IntegrationToolPicker — a blocked api_call", () => {
+  const key = $api.queryOptions("get", "/api/integrations/{packageId}", {
+    params: { path: { packageId: ID }, header: { "X-Org-Id": "org_1", "X-Space-Id": "spc_a" } },
+  }).queryKey;
+
+  function renderOver(tools: string[]): string {
+    const qc = memberSpaceClient([testSpace("spc_a", ["integrations:read"])]);
+    qc.setQueryData(key, {
+      manifest: {
+        auths: { primary: { type: "api_key" } },
+        _meta: { "dev.appstrate/api": { auths: { primary: {} } } },
+      },
+      auths: [],
+      active: true,
+      allow_undeclared_tools: false,
+      tool_catalog: [
+        {
+          name: "api_call",
+          status: "blocked",
+          origin: "declared",
+          modified: false,
+          fingerprint: null,
+        },
+      ],
+    });
+    return renderInSpace(
+      <IntegrationToolPicker
+        packageId={ID}
+        entry={{ id: ID, version: "*", tools }}
+        onChange={() => {}}
+      />,
+      { queryClient: qc, overview: false },
+    );
+  }
+
+  /** The api_call checkbox's own tag (its classes name `disabled:` variants, not the attribute). */
+  const apiCallTag = (html: string) =>
+    /<button[^>]*data-testid="integ-apicall-@acme\/gmail"[^>]*>/.exec(html)?.[0] ?? "";
+
+  it("says the space blocks it and cannot be added, but a kept selection stays", () => {
+    const fresh = renderOver([]);
+    expect(fresh).toContain('data-testid="tool-reason-api_call"');
+    expect(fresh).toContain("Bloqué dans cet espace");
+    expect(apiCallTag(fresh)).toContain(' disabled=""');
+    const kept = renderOver(["api_call"]);
+    expect(kept).toContain("Bloqué dans cet espace");
+    expect(apiCallTag(kept)).not.toBe("");
+    expect(apiCallTag(kept)).not.toContain(' disabled=""');
   });
 });

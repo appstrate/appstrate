@@ -10,7 +10,18 @@
  * Every predicate is over the unaliased `integration_connections` table.
  */
 
-import { and, asc, eq, isNull, not, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNull,
+  not,
+  or,
+  sql,
+  type SQL,
+  type SQLWrapper,
+} from "drizzle-orm";
 import type { ConnectionAction } from "@appstrate/shared-types";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { displayAccountId } from "@appstrate/core/integration";
@@ -66,15 +77,17 @@ export function userConnectionsBlocked(spaceId: string, integrationId: SQLWrappe
     AND ${spacePackages.blockUserConnections})`;
 }
 
+/** An own row may be bound in `spaceId`: unblocked there, or made there. */
+function ownRowBindableIn(spaceId: string): SQL {
+  return or(
+    not(userConnectionsBlocked(spaceId, c.integrationId)),
+    sql`coalesce(${c.spaceId}, ${c.originSpaceId}) = ${spaceId}`,
+  )!;
+}
+
 /** An own row the actor may bind in `spaceId`: unblocked there, or made there. */
 function ownUsableIn(spaceId: string, actor: Actor): SQL {
-  return and(
-    actorFilter(actor, c),
-    or(
-      not(userConnectionsBlocked(spaceId, c.integrationId)),
-      sql`coalesce(${c.spaceId}, ${c.originSpaceId}) = ${spaceId}`,
-    ),
-  )!;
+  return and(actorFilter(actor, c), ownRowBindableIn(spaceId))!;
 }
 
 /** The actor's own rows reaching `spaceId`, blocked or not: what the owner manages. */
@@ -93,6 +106,14 @@ export function sharedInSpace(spaceId: string): SQL {
 
 export function usableInSpace(spaceId: string, actor: Actor): SQL {
   return and(connectionInSpace(spaceId), or(sharedInto(spaceId), ownUsableIn(spaceId, actor)))!;
+}
+
+/** {@link usableInSpace} for any of `userIds` (non-empty): a row one of them reaches there. */
+export function usableByAnyUserInSpace(spaceId: string, userIds: readonly string[]): SQL {
+  return and(
+    connectionInSpace(spaceId),
+    or(sharedInto(spaceId), and(inArray(c.userId, [...userIds]), ownRowBindableIn(spaceId))),
+  )!;
 }
 
 /**

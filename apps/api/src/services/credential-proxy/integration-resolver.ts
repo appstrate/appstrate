@@ -28,6 +28,8 @@ import {
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type ProxyCredentialsPayload,
 } from "@appstrate/connect";
+import { getApiCallConfigs } from "@appstrate/core/integration";
+import type { McpEndpoint } from "@appstrate/core/mcp-endpoint";
 import { credentialTemplateRefs } from "@appstrate/afps-shared/credential-template";
 import {
   renderAuthAuthorizedUris,
@@ -56,6 +58,12 @@ import {
   type ResolvedConnectionRow,
   type RunBoundSelection,
 } from "../integration-connections.ts";
+import { renderRemoteSource } from "../integration-manifest-helpers.ts";
+import {
+  apiCallBlocks,
+  loadToolSpacePolicy,
+  toolBlockedInSpace,
+} from "../integration-tool-catalog.ts";
 import { listOrgDefaultsForResolver } from "../integration-org-defaults-service.ts";
 import { listActivePackages } from "../space-packages.ts";
 import type { ConnectionVariables } from "../connect/connection-variables.ts";
@@ -143,6 +151,15 @@ type ResolveIntegrationProxyInput = {
   connectionId?: string;
   /** How the caller names `connectionId`; the header when omitted. */
   connectionNaming?: ConnectionNaming;
+  /**
+   * The call is the remote MCP transport itself: the space's tool policy is the caller's, per
+   * tool, and the MCP endpoint is its own to reach. Otherwise the policy applies here: a
+   * connection whose auth's `api_call` the space blocked is refused (its `api_upload` too, on a
+   * streamed `upload`), and the result names the remote MCP endpoint the call must not reach.
+   */
+  mcpTransport?: true;
+  /** A streamed upload (the `api_upload` door). */
+  upload?: true;
 } & ProxyCallPath;
 
 interface ResolvedIntegrationProxyCredentials {
@@ -157,6 +174,8 @@ interface ResolvedIntegrationProxyCredentials {
   authKey: string;
   /** Consecutive upstream rejections counted before this call (`upstreamRejectionStreak`). */
   rejectionStreak: number;
+  /** Unless `mcpTransport`: the connection's rendered remote MCP endpoint, `null` when it has none. */
+  remoteMcp: McpEndpoint | null;
 }
 
 /**
@@ -177,6 +196,27 @@ export async function resolveIntegrationProxyCredentials(
 
   let connection = await resolveConnection(input, manifest);
   if (!connection) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
+
+  // The space's policy refuses before anything is refreshed: a refused call must not touch the credential.
+  const policy = input.mcpTransport
+    ? null
+    : await loadToolSpacePolicy(
+        { orgId: input.orgId, spaceId: input.spaceId },
+        input.integrationId,
+        manifest,
+      );
+  const assertNotBlocked = (authKey: string): void => {
+    if (!policy) return;
+    for (const config of getApiCallConfigs(manifest)) {
+      if (config.authKey !== authKey) continue;
+      const { callBlocked, uploadBlocked } = apiCallBlocks(config, policy.blocks);
+      if (callBlocked) throw toolBlockedInSpace(input.integrationId, config.toolName);
+      if (input.upload && uploadBlocked) {
+        throw toolBlockedInSpace(input.integrationId, config.uploadToolName!);
+      }
+    }
+  };
+  assertNotBlocked(connection.authKey);
 
   // A credential about to expire is refreshed before it is sent, not after its first 401.
   let payload: ProxyCredentialsPayload | null = null;
@@ -211,12 +251,17 @@ export async function resolveIntegrationProxyCredentials(
       // Flagged just now: the selection answers as it does for a connection flagged before the call.
       const reselected = await resolveConnection(input, manifest);
       if (!reselected) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
+      if (reselected.authKey !== connection.authKey) assertNotBlocked(reselected.authKey);
       connection = reselected;
       credentialRevision = connection.credentialRevision;
       break;
     }
     // `kept`: nothing to do. `retry`: the stored credential is served, the upstream decides.
   }
+
+  const remoteMcp: McpEndpoint | null = input.mcpTransport
+    ? null
+    : renderRemoteSource(manifest, connection.variables);
 
   return {
     payload: payload ?? buildPayload(input.integrationId, manifest, connection),
@@ -225,6 +270,7 @@ export async function resolveIntegrationProxyCredentials(
     credentialRevision,
     authKey: connection.authKey,
     rejectionStreak: upstreamRejectionStreak(connection),
+    remoteMcp,
   };
 }
 

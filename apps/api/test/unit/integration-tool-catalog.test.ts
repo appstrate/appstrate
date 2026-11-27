@@ -1,0 +1,255 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, it, expect } from "bun:test";
+import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  allApprovedToolNames,
+  judgeToolSpacePolicy,
+  namedToolSelection,
+  resolveEffectiveToolCatalog,
+  unblockedApprovedToolNames,
+  type ToolSnapshotView,
+} from "../../src/services/integration-tool-catalog.ts";
+
+const FP_A = "a".repeat(64);
+const FP_B = "b".repeat(64);
+
+function manifest(opts: { declared?: string[]; open?: boolean }): IntegrationManifest {
+  return {
+    schema_version: "0.1",
+    type: "integration",
+    name: "@me/remote",
+    version: "1.0.0",
+    display_name: "Remote",
+    source: { kind: "remote", url: "https://mcp.example.com/mcp" },
+    ...(opts.declared
+      ? { tools_policy: Object.fromEntries(opts.declared.map((n) => [n, {}])) }
+      : {}),
+    ...(opts.open ? { allow_undeclared_tools: true } : {}),
+  } as unknown as IntegrationManifest;
+}
+
+function snap(
+  tools: Record<string, { fp?: string; changed?: boolean }>,
+  truncated = false,
+): ToolSnapshotView {
+  return {
+    truncated,
+    tools: Object.entries(tools).map(([name, t]) => ({
+      name,
+      fingerprint: t.fp ?? FP_A,
+      changed_at: t.changed ? "2026-01-01T00:00:00Z" : null,
+    })),
+  };
+}
+
+const policy = (approvals: [string, string][] = [], blocks: string[] = []) => ({
+  approvals: approvals.map(([tool_name, fingerprint]) => ({ tool_name, fingerprint })),
+  blocks,
+});
+
+function one(
+  m: IntegrationManifest,
+  name: string,
+  p: ReturnType<typeof policy> | null,
+  snapshots: ToolSnapshotView[],
+) {
+  return resolveEffectiveToolCatalog({
+    integration: m,
+    policy: p && judgeToolSpacePolicy(p, m),
+    snapshots,
+  }).find((e) => e.name === name)!;
+}
+
+describe("resolveEffectiveToolCatalog — declared tools", () => {
+  const m = manifest({ declared: ["t"] });
+  it("available when listed; modified mirrors changed_at", () => {
+    expect(one(m, "t", null, [snap({ t: {} })])).toMatchObject({
+      status: "available",
+      origin: "declared",
+      modified: false,
+    });
+    expect(one(m, "t", null, [snap({ t: { changed: true } })]).modified).toBe(true);
+  });
+  it("missing when a snapshot exists and lacks it", () => {
+    expect(one(m, "t", null, [snap({ x: {} })]).status).toBe("missing");
+  });
+  it("available without any snapshot", () => {
+    expect(one(m, "t", null, []).status).toBe("available");
+  });
+  it("never missing when any snapshot is truncated", () => {
+    expect(one(m, "t", null, [snap({ x: {} }), snap({}, true)]).status).toBe("available");
+  });
+  it("missing only when every snapshot lacks it; present in one is enough", () => {
+    expect(one(m, "t", null, [snap({ x: {} }), snap({ y: {} })]).status).toBe("missing");
+    expect(one(m, "t", null, [snap({ x: {} }), snap({ t: { fp: FP_B } })]).status).toBe(
+      "available",
+    );
+  });
+  it("modified when any listing snapshot changed", () => {
+    const e = one(m, "t", null, [
+      snap({ t: { fp: FP_A } }),
+      snap({ t: { fp: FP_B, changed: true } }),
+    ]);
+    expect(e.modified).toBe(true);
+  });
+  it("blocked wins", () => {
+    expect(one(m, "t", policy([], ["t"]), [snap({ t: {} })]).status).toBe("blocked");
+    expect(one(m, "t", policy([], ["t"]), [snap({})]).status).toBe("blocked");
+  });
+  it("an approval of a declared tool is ignored", () => {
+    const entries = resolveEffectiveToolCatalog({
+      integration: m,
+      policy: judgeToolSpacePolicy(policy([["t", FP_B]]), m),
+      snapshots: [snap({ t: {} })],
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ origin: "declared", status: "available" });
+  });
+});
+
+describe("resolveEffectiveToolCatalog — undeclared tools on a closed catalog", () => {
+  const m = manifest({ declared: ["d"] });
+  it("listed and not approved: pending, origin listed", () => {
+    expect(one(m, "u", policy(), [snap({ d: {}, u: {} })])).toMatchObject({
+      status: "pending",
+      origin: "listed",
+      modified: false,
+    });
+  });
+  it("carries the description the server listed; none when no listing has one", () => {
+    const described: ToolSnapshotView = {
+      truncated: false,
+      tools: [
+        { name: "u", fingerprint: FP_A, changed_at: null, definition: null },
+        { name: "u", fingerprint: FP_B, changed_at: null, definition: { description: "Search" } },
+      ],
+    };
+    expect(one(m, "u", policy(), [described]).description).toBe("Search");
+    expect(one(m, "u", policy(), [snap({ u: {} })]).description).toBeUndefined();
+  });
+  it("approved with the live fingerprint: available", () => {
+    expect(one(m, "u", policy([["u", FP_A]]), [snap({ u: {} })])).toMatchObject({
+      status: "available",
+      origin: "approved",
+      modified: false,
+    });
+  });
+  it("approved under another fingerprint only: pending, modified", () => {
+    expect(one(m, "u", policy([["u", FP_B]]), [snap({ u: {} })])).toMatchObject({
+      status: "pending",
+      origin: "approved",
+      modified: true,
+    });
+  });
+  it("several approved fingerprints: any snapshot matching one is enough", () => {
+    const p = policy([
+      ["u", FP_B],
+      ["u", FP_A],
+    ]);
+    expect(
+      one(m, "u", p, [snap({ u: { fp: FP_B } }), snap({ u: { fp: "c".repeat(64) } })]).status,
+    ).toBe("available");
+    expect(
+      one(m, "u", policy([["u", FP_B]]), [
+        snap({ u: { fp: "c".repeat(64) } }),
+        snap({ u: { fp: FP_B } }),
+      ]).status,
+    ).toBe("available");
+  });
+  it("approved but absent from every snapshot: missing; no snapshot: available", () => {
+    expect(one(m, "u", policy([["u", FP_A]]), [snap({ d: {} })]).status).toBe("missing");
+    expect(one(m, "u", policy([["u", FP_A]]), []).status).toBe("available");
+    expect(one(m, "u", policy([["u", FP_A]]), [snap({ d: {} }, true)]).status).toBe("available");
+  });
+  it("approved tool: modified is a listed fingerprint nobody approved, not changed_at", () => {
+    expect(one(m, "u", policy([["u", FP_A]]), [snap({ u: { changed: true } })]).modified).toBe(
+      false,
+    );
+    expect(
+      one(m, "u", policy([["u", FP_A]]), [snap({ u: {} }), snap({ u: { fp: FP_B } })]),
+    ).toMatchObject({ status: "available", modified: true });
+  });
+  it("blocked wins over approval", () => {
+    expect(one(m, "u", policy([["u", FP_A]], ["u"]), [snap({ u: {} })]).status).toBe("blocked");
+  });
+});
+
+describe("resolveEffectiveToolCatalog — hidden tools", () => {
+  const hiddenManifest = (open: boolean) =>
+    ({ ...manifest({ declared: ["d"], open }), hidden_tools: ["h"] }) as IntegrationManifest;
+  it("never listed nor approved, closed or open catalog", () => {
+    for (const open of [false, true]) {
+      const hidden = hiddenManifest(open);
+      const names = resolveEffectiveToolCatalog({
+        integration: hidden,
+        policy: judgeToolSpacePolicy(policy([["h", FP_A]]), hidden),
+        snapshots: [snap({ d: {}, h: {}, u: {} })],
+      }).map((e) => e.name);
+      expect(names).toEqual(["d", "u"]);
+    }
+  });
+});
+
+describe("resolveEffectiveToolCatalog — open catalog and ordering", () => {
+  it("listed undeclared tools are available, origin listed", () => {
+    expect(
+      one(manifest({ declared: ["d"], open: true }), "u", null, [snap({ u: {} })]),
+    ).toMatchObject({
+      status: "available",
+      origin: "listed",
+    });
+  });
+  it("blocking applies on an open catalog", () => {
+    expect(one(manifest({ open: true }), "u", policy([], ["u"]), [snap({ u: {} })]).status).toBe(
+      "blocked",
+    );
+  });
+  it("declared first in catalog order, then the rest by name", () => {
+    const ordered = manifest({ declared: ["z", "a"] });
+    const names = resolveEffectiveToolCatalog({
+      integration: ordered,
+      policy: judgeToolSpacePolicy(policy([["m", FP_A]]), ordered),
+      snapshots: [snap({ z: {}, a: {}, q: {}, b: {} })],
+    }).map((e) => e.name);
+    expect(names).toEqual(["z", "a", "b", "m", "q"]);
+  });
+});
+
+describe("namedToolSelection", () => {
+  const closed = manifest({ declared: ["d"] });
+  const p = policy(
+    [
+      ["u", FP_A],
+      ["blocked", FP_A],
+    ],
+    ["blocked"],
+  );
+  it("names an explicit selection as written", () => {
+    expect(namedToolSelection(closed, ["x", "d"], p)).toEqual(["x", "d"]);
+    expect(namedToolSelection(closed, undefined, p)).toEqual([]);
+  });
+  it("a wildcard on a closed remote catalog names the declared and the approved unblocked tools", () => {
+    expect(namedToolSelection(closed, "*", p)).toEqual(["d", "u"]);
+  });
+  it("a wildcard on an open catalog or a non-remote source names none", () => {
+    expect(namedToolSelection(manifest({ open: true }), "*", p)).toEqual([]);
+    const local = { ...closed, source: { kind: "none" } } as unknown as IntegrationManifest;
+    expect(namedToolSelection(local, "*", p)).toEqual([]);
+  });
+});
+
+describe("allApprovedToolNames and unblockedApprovedToolNames", () => {
+  const p = policy(
+    [
+      ["u", FP_A],
+      ["u", FP_B],
+      ["v", FP_A],
+    ],
+    ["v"],
+  );
+  it("allApprovedToolNames keeps blocked names, unblockedApprovedToolNames drops them", () => {
+    expect([...allApprovedToolNames(p)]).toEqual(["u", "v"]);
+    expect([...unblockedApprovedToolNames(p)]).toEqual(["u"]);
+  });
+});

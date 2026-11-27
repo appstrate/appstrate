@@ -68,6 +68,21 @@ describe("upstream-meta — buildUpstreamMeta", () => {
   });
 });
 
+describe("upstream-meta — required scopes", () => {
+  it("surfaces the scopes of a 403 insufficient_scope challenge, never the raw header", () => {
+    const res = new Response("no", {
+      status: 403,
+      headers: {
+        "WWW-Authenticate": 'Bearer error="insufficient_scope", error_description="x", scope="a b"',
+      },
+    });
+    const meta = buildUpstreamMeta(res);
+    expect(meta.required_scopes).toEqual(["a", "b"]);
+    expect(Object.keys(meta.headers)).not.toContain("www-authenticate");
+    expect(JSON.stringify(meta)).not.toContain("error_description");
+  });
+});
+
 describe("upstream-meta — allowlist sanity", () => {
   it("includes every header required by the four upload protocols", () => {
     const required = [

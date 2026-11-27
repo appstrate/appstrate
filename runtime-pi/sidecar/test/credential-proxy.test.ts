@@ -10,12 +10,7 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { cookieScope, type ApiCallFailureCode } from "@appstrate/afps-runtime/resolvers";
-import {
-  credentialScope,
-  executeApiCall,
-  targetsMcpEndpoint,
-  type ApiCallDeps,
-} from "../credential-proxy.ts";
+import { credentialScope, executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 import type { DispatchedCall } from "../call-reporter.ts";
@@ -690,6 +685,31 @@ describe("executeApiCall — 401 retry path", () => {
     expect(journaled.map((c) => [c.host, c.outcome, c.credential])).toEqual([
       ["api.example.com", "upstream_unreachable", null],
     ]);
+  });
+
+  it("journals the response's WWW-Authenticate challenge with the final answer", async () => {
+    const journaled: DispatchedCall[] = [];
+    const challenge = 'Bearer error="insufficient_scope", scope="mail.send a"';
+    const deps = makeDeps({
+      fetchFn: (async () =>
+        new Response("{}", {
+          status: 403,
+          headers: { "www-authenticate": challenge },
+        })) as unknown as typeof fetch,
+      journal: (call) => journaled.push(call),
+    });
+    await executeApiCall(
+      {
+        integrationId: "gmail",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(journaled.map((c) => [c.outcome, c.challenge])).toEqual([["403", challenge]]);
   });
 
   it("judges nothing once a redirect hop stripped the credential, even back on its origin", async () => {
@@ -3194,34 +3214,5 @@ describe("executeApiCall — the integration's own MCP endpoint", () => {
     expect(fetchFn).not.toHaveBeenCalled();
     expect((await call("https://files.example.com/v1/items", "GET")).ok).toBe(true);
     expect(fetchFn).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("targetsMcpEndpoint", () => {
-  it("matches the endpoint path and below it, on the same origin only", () => {
-    const endpoint = { url: "https://mcp.example.com/v1/mcp", transport: "streamable-http" };
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/?x=1#f", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/sse", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcpx", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("http://mcp.example.com/v1/mcp", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("https://mcp.example.com:8443/v1/mcp", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("https://other.example.com/v1/mcp", endpoint)).toBe(false);
-  });
-
-  it("matches only the root path for an endpoint at the origin root", () => {
-    const endpoint = { url: "https://mcp.example.com/" };
-    expect(targetsMcpEndpoint("https://mcp.example.com", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/?a=b", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/items", endpoint)).toBe(false);
-  });
-
-  it("matches every path of the origin for an SSE endpoint, and that origin only", () => {
-    const endpoint = { url: "https://mcp.example.com/v1/sse", transport: "sse" };
-    expect(targetsMcpEndpoint("https://mcp.example.com/messages?sessionId=1", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://other.example.com/messages", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("http://mcp.example.com/messages", endpoint)).toBe(false);
   });
 });

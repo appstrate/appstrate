@@ -22,6 +22,7 @@ import {
 } from "drizzle-orm";
 import { runListConditions, type GlobalRunListFilters } from "../../lib/run-list-filters.ts";
 import { db, type Db } from "@appstrate/db/client";
+import type { UnavailableToolReason } from "@appstrate/core/sidecar-types";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import {
   runs,
@@ -47,6 +48,7 @@ import {
   type RunStatus,
 } from "@appstrate/core/run-status";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { extractFileIds } from "@appstrate/core/file-uri";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
@@ -965,6 +967,7 @@ export async function setRunCheckpoint(
  * throws into the caller; a metadata write must not break the refresh path.
  */
 export async function recordRunDegradedIntegration(
+  orgId: string,
   runId: string,
   integrationId: string,
 ): Promise<void> {
@@ -978,6 +981,7 @@ export async function recordRunDegradedIntegration(
           || to_jsonb(${integrationId}::text)
       )
       WHERE ${runs.id} = ${runId}
+        AND ${runs.orgId} = ${orgId}
         AND NOT (COALESCE(${runs.metadata} -> 'degraded_integrations', '[]'::jsonb)
                  ? ${integrationId})
     `);
@@ -985,7 +989,109 @@ export async function recordRunDegradedIntegration(
     logger.warn("Failed to record degraded integration on run metadata", {
       runId,
       integrationId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
+    });
+  }
+}
+
+/**
+ * Stamp `metadata.scope_requests[]` with the scopes a server asked for that a connection of the run
+ * does not hold, `{ integration_id, connection_id, scopes }`: one entry per connection, replaced by
+ * a later report (`scopes` is then the connection's whole standing demand). Best-effort, never throws.
+ */
+export async function recordRunScopeRequest(
+  orgId: string,
+  runId: string,
+  request: { integrationId: string; connectionId: string; scopes: readonly string[] },
+): Promise<void> {
+  const entry = JSON.stringify({
+    integration_id: request.integrationId,
+    connection_id: request.connectionId,
+    scopes: request.scopes,
+  });
+  try {
+    await db.execute(sql`
+      UPDATE ${runs}
+      SET metadata = jsonb_set(
+        COALESCE(${runs.metadata}, '{}'::jsonb),
+        '{scope_requests}',
+        COALESCE((
+          SELECT jsonb_agg(kept)
+          FROM jsonb_array_elements(COALESCE(${runs.metadata} -> 'scope_requests', '[]'::jsonb)) AS kept
+          WHERE kept ->> 'connection_id' <> ${request.connectionId}
+        ), '[]'::jsonb) || ${entry}::jsonb
+      )
+      WHERE ${runs.id} = ${runId}
+        AND ${runs.orgId} = ${orgId}
+    `);
+  } catch (err) {
+    logger.warn("Failed to record scope request on run metadata", {
+      runId,
+      error: getErrorMessage(err),
+    });
+  }
+}
+
+/** Unavailable tools kept per integration on a run: a report past it is cut, not refused. */
+const MAX_UNAVAILABLE_TOOLS_PER_INTEGRATION = 50;
+
+/**
+ * Stamp `metadata.unavailable_tools[]` with the tools the run selected and could not expose,
+ * `{ integration_id, name, reason }` each (the whole list, whatever integrations it names, in one
+ * update), so the finished run says why a tool was missing. Same atomic append and dedupe as
+ * {@link recordRunDegradedIntegration}, keyed by integration and tool name; an integration keeps at
+ * most {@link MAX_UNAVAILABLE_TOOLS_PER_INTEGRATION} entries over every report (the first listed
+ * win, the cap is applied in SQL). The run is the organization's: another's is never touched.
+ * Best-effort: never throws into the caller.
+ */
+export async function recordRunUnavailableTools(
+  orgId: string,
+  runId: string,
+  tools: readonly { integrationId: string; name: string; reason: UnavailableToolReason }[],
+): Promise<void> {
+  if (tools.length === 0) return;
+  const entries = tools.map(({ integrationId, name, reason }) => ({
+    integration_id: integrationId,
+    name,
+    reason,
+  }));
+  try {
+    await db.execute(sql`
+      UPDATE ${runs}
+      SET metadata = jsonb_set(
+        COALESCE(${runs.metadata}, '{}'::jsonb),
+        '{unavailable_tools}',
+        COALESCE(${runs.metadata} -> 'unavailable_tools', '[]'::jsonb) || COALESCE((
+          SELECT jsonb_agg(ranked.e ORDER BY ranked.ord)
+          FROM (
+            SELECT fresh.e, fresh.ord,
+              row_number() OVER (PARTITION BY fresh.e ->> 'integration_id' ORDER BY fresh.ord) AS rn
+            FROM (
+              SELECT DISTINCT ON (t.e ->> 'integration_id', t.e ->> 'name') t.e, t.ord
+              FROM jsonb_array_elements(${JSON.stringify(entries)}::jsonb) WITH ORDINALITY AS t(e, ord)
+              WHERE NOT EXISTS (
+                SELECT 1
+                FROM jsonb_array_elements(COALESCE(${runs.metadata} -> 'unavailable_tools', '[]'::jsonb)) AS seen
+                WHERE seen ->> 'integration_id' = t.e ->> 'integration_id'
+                  AND seen ->> 'name' = t.e ->> 'name'
+              )
+              ORDER BY t.e ->> 'integration_id', t.e ->> 'name', t.ord
+            ) AS fresh
+          ) AS ranked
+          WHERE ranked.rn <= GREATEST(${MAX_UNAVAILABLE_TOOLS_PER_INTEGRATION}::int - (
+            SELECT count(*)
+            FROM jsonb_array_elements(COALESCE(${runs.metadata} -> 'unavailable_tools', '[]'::jsonb)) AS kept
+            WHERE kept ->> 'integration_id' = ranked.e ->> 'integration_id'
+          ), 0)
+        ), '[]'::jsonb)
+      )
+      WHERE ${runs.id} = ${runId}
+        AND ${runs.orgId} = ${orgId}
+    `);
+  } catch (err) {
+    logger.warn("Failed to record unavailable tools on run metadata", {
+      runId,
+      error: getErrorMessage(err),
     });
   }
 }

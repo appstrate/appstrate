@@ -42,6 +42,12 @@ import type {
 } from "@appstrate/connect/integration-credentials";
 import type { ActiveConnectInputs, MitmCredentialSource } from "./integration-mitm-listener.ts";
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
+import { computeBackoffDelayMs, isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
+import {
+  OBSERVED_TOOLS_MAX_BYTES,
+  OBSERVED_TOOLS_MAX_COUNT,
+  type UnavailableTool,
+} from "@appstrate/core/sidecar-types";
 import { logger } from "./logger.ts";
 
 /**
@@ -666,6 +672,79 @@ export function postIntegrationCredentialsRefresh(
       headers: { Authorization: `Bearer ${opts.runToken}` },
     },
   );
+}
+
+/**
+ * The longest prefix of `tools` within the platform's count and `maxBytes` of serialisation;
+ * the platform judges each entry. `truncated` says any tool was left out.
+ */
+export function capObservedTools<T>(
+  tools: readonly T[],
+  maxBytes: number = OBSERVED_TOOLS_MAX_BYTES,
+): { tools: T[]; truncated: boolean } {
+  const encoder = new TextEncoder();
+  let bytes = 2; // "[]"
+  const kept: T[] = [];
+  for (const tool of tools) {
+    bytes += encoder.encode(JSON.stringify(tool)).byteLength + (kept.length > 0 ? 1 : 0);
+    if (kept.length >= OBSERVED_TOOLS_MAX_COUNT || bytes > maxBytes)
+      return { tools: kept, truncated: true };
+    kept.push(tool);
+  }
+  return { tools: kept, truncated: false };
+}
+
+/** Budget of a whole tools-observed report, every attempt and pause included: boot waits for it. */
+const TOOLS_OBSERVED_TIMEOUT_MS = 10_000;
+/** Retries after the first attempt: the route is idempotent, so a network error or 5xx is retried. */
+const TOOLS_OBSERVED_RETRIES = 2;
+/** Backoff of a retry (`computeBackoffDelayMs`: 500 ms, then 1 s, capped). */
+const TOOLS_OBSERVED_BACKOFF = { baseMs: 500, capMs: 2_000 } as const;
+
+/**
+ * What a run's remote upstream listed, reported so the platform can snapshot it. The whole report
+ * shares one deadline; a network error or a 5xx is retried after a short pause within it, any
+ * other answer is final.
+ */
+export async function postIntegrationToolsObserved(
+  integrationId: string,
+  connectionId: string | undefined,
+  observed: {
+    /** Omitted: the report only carries `unavailable` and records no snapshot. */
+    tools?: readonly unknown[];
+    truncated?: boolean;
+    unavailable: readonly UnavailableTool[];
+  },
+  opts: {
+    platformApiUrl: string;
+    runToken: string;
+    fetchFn?: typeof fetch;
+    /** Retry pauses; tests inject a zero delay. Defaults to `computeBackoffDelayMs`. */
+    retryDelayMs?: (attempt: number) => number;
+  },
+): Promise<Response> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  const delayMs =
+    opts.retryDelayMs ??
+    ((attempt: number) => computeBackoffDelayMs(attempt, TOOLS_OBSERVED_BACKOFF));
+  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/tools-observed${credentialsQuery(connectionId)}`;
+  const body = JSON.stringify(observed);
+  const deadline = AbortSignal.timeout(TOOLS_OBSERVED_TIMEOUT_MS);
+  for (let attempt = 0; ; attempt++) {
+    const last = attempt >= TOOLS_OBSERVED_RETRIES;
+    try {
+      const res = await fetchFn(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${opts.runToken}`, "Content-Type": "application/json" },
+        body,
+        signal: deadline,
+      });
+      if (!isRetryableHttpStatus(res.status) || last) return res;
+    } catch (err) {
+      if (last || deadline.aborted) throw err;
+    }
+    await Bun.sleep(delayMs(attempt + 1));
+  }
 }
 
 /**

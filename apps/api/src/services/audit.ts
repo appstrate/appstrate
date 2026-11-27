@@ -99,10 +99,10 @@ export function auditDiff(
 }
 
 /**
- * In-flight audit inserts. A caller that must not wait for the insert on its
- * response path (the MCP router — every chat tool call goes through it) hands
- * the promise to `trackAudit` instead of awaiting it; graceful shutdown then
- * `drainAudits` so a process recycle still flushes the trail. Same shape as
+ * In-flight audit inserts and other work a response does not wait for (tool-review notifications).
+ * A caller that must not wait for the insert on its response path (the MCP router, through which
+ * every chat tool call goes) hands the promise to `trackAudit` instead of awaiting it; graceful
+ * shutdown then `drainAudits` so a process recycle still flushes the trail. Same shape as
  * `packages/module-chat/src/inflight.ts` for chat turns.
  */
 const inFlightAudits = createInFlightRegistry();

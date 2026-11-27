@@ -72,7 +72,7 @@ const CALLERS = [
     from: '"../lib/blob-download"',
     calls: [
       'parseAs: "blob", }), `${stripScope(scope)}-${name}-${version}.afps`',
-      'parseAs: "blob", }), `${stripScope(scope)}-${name}.afps-bundle`',
+      'parseAs: "blob", }); approvedTools = result.response.headers.get(APPROVED_TOOLS_HEADER); return result; }, `${stripScope(scope)}-${name}.afps-bundle`',
     ],
   },
   {

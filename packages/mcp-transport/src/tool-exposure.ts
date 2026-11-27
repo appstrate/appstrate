@@ -77,15 +77,18 @@ export function withToolIntegration(descriptor: Tool, integrationId: string, ups
 /**
  * Why the upstream tool `name` is not exposed: absent from the agent's selection (`allowlist`,
  * `null` = every tool), or listed in the integration's `hidden_tools` (checked after the
- * selection). Both match the upstream name exactly. `null`: the tool is exposed.
+ * selection) or in `blocked` (the space's blocks, checked last). All match the upstream name
+ * exactly. `null`: the tool is exposed.
  */
 export function toolExclusion(
   name: string,
   allowlist: ReadonlySet<string> | null,
   hidden: ReadonlySet<string> | null,
-): "allowlist" | "hidden_tools" | null {
+  blocked: ReadonlySet<string> | null = null,
+): "allowlist" | "hidden_tools" | "blocked_in_space" | null {
   if (allowlist && !allowlist.has(name)) return "allowlist";
   if (hidden?.has(name)) return "hidden_tools";
+  if (blocked?.has(name)) return "blocked_in_space";
   return null;
 }
 

@@ -211,7 +211,6 @@ const NOT_SURFACED = new Set([
   // under `integrationEditor.discover.warning.*`.
   "manual_client_required",
   "authorization_server_blocked",
-  "tools_truncated",
   "instructions_truncated",
   // A refusal of a chat turn, worded by the chat's turn errors (`chat:turn.error.*`).
   "chat_turn_scope_changed",

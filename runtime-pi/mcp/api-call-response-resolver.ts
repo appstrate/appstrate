@@ -82,10 +82,10 @@ interface ShapeApiCallResponseOptions {
   readResource: ReadResource;
 }
 
-/** Upstream status, or `null` when the sidecar attached no `_meta` (defensive). */
-function safeStatus(result: ToolResult): number | null {
+/** Upstream status + meta, or `null` when the sidecar attached no `_meta` (defensive). */
+function safeUpstream(result: ToolResult): ReturnType<typeof readUpstreamMeta> | null {
   try {
-    return readUpstreamMeta(result as Parameters<typeof readUpstreamMeta>[0]).status;
+    return readUpstreamMeta(result as Parameters<typeof readUpstreamMeta>[0]);
   } catch {
     return null;
   }
@@ -232,7 +232,8 @@ export async function shapeApiCallResponse(
   opts: ShapeApiCallResponseOptions,
 ): Promise<ToolResult> {
   opts.signal?.throwIfAborted();
-  const status = safeStatus(result);
+  const upstream = safeUpstream(result);
+  const status = upstream?.status ?? null;
   // The shared code describes an exchange the sidecar answered itself, so it is rendered only
   // at status 0: next to a real upstream status it would contradict it.
   const code =
@@ -282,7 +283,10 @@ export async function shapeApiCallResponse(
   return {
     ...spilled,
     content: [
-      { type: "text", text: apiCallStatusLine(status, code ?? undefined) },
+      {
+        type: "text",
+        text: apiCallStatusLine(status, code ?? undefined, upstream?.required_scopes),
+      },
       ...spilled.content,
     ],
   };

@@ -55,6 +55,7 @@ interface ConnectionDTO {
   owner_name?: string | null;
   locked_by?: "admin_pin" | "org_default" | null;
   identity_claims: Record<string, unknown> | null;
+  requested_scopes?: string[];
   scope: "org" | "space";
   shared_here: boolean;
   /** Owner's own session only. */
@@ -101,6 +102,7 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
+        requestedScopes: ["mail.send"],
         identityClaims: { email: `${opts.accountId}@example.com`, sub: `sub-${opts.accountId}` },
         needsReconnection: opts.needsReconnection ?? false,
         ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
@@ -243,6 +245,9 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
     // `account_id` stays: the picker DTO already exposes it, and a connection
     // you are allowed to pick has to be identifiable.
     expect(rows.find((c) => c.id === sharedId)!.account_id).toBe("mike-shared");
+    // The step-up demand is the owner's too: shown on their own row, absent from the colleague's.
+    expect(rows.find((c) => c.id === ownId)!.requested_scopes).toEqual(["mail.send"]);
+    expect(rows.find((c) => c.id === sharedId)).not.toHaveProperty("requested_scopes");
   });
 
   it("is symmetric — the sharing member still sees only their own rows plus shares", async () => {

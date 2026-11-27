@@ -23,6 +23,7 @@ import { $api, client, type paths } from "../api/client";
 import { invalidatePaths } from "../lib/query-keys";
 import { spaceHeader } from "../lib/scoping-headers";
 import { splitPackageRef } from "../lib/package-paths";
+import { connectionChoiceBody } from "../lib/integration-server-sync";
 
 // Spec-pinned: the generated response shape verbatim (a rename/removal of any non-`manifest`
 // field breaks compilation), narrowing only the freeform AFPS `manifest` to IntegrationManifestView.
@@ -265,6 +266,96 @@ export function useIntegrationConnections(packageId: string | undefined) {
       select: (envelope): IntegrationConnection[] => envelope.data,
     },
   );
+}
+
+/** What the working space decided about the integration's tools (`integrations:configure` reads it to review). */
+export function useIntegrationToolPolicy(packageId: string | undefined, enabled: boolean) {
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/integrations/{packageId}/tool-policy",
+    { params: { path: { packageId: packageId ?? "" }, header: scope.header } },
+    { enabled: enabled && scope.enabled && !!packageId },
+  );
+}
+
+export type ToolPolicyAction = "approve" | "revoke" | "block" | "unblock";
+
+/**
+ * The tool policy's four writes. Each refreshes every integrations read: the detail's
+ * `tool_catalog` statuses move with the policy. A refusal is toasted by the mutation cache.
+ */
+export function useIntegrationToolPolicyActions(packageId: string) {
+  const qc = useQueryClient();
+  const onSuccess = () => invalidateIntegrationQueries(qc);
+  const path = { packageId };
+  const approve = $api.useMutation("post", "/api/integrations/{packageId}/tool-policy/approvals", {
+    onSuccess,
+  });
+  const revoke = $api.useMutation(
+    "delete",
+    "/api/integrations/{packageId}/tool-policy/approvals/{toolName}",
+    { onSuccess },
+  );
+  const block = $api.useMutation("post", "/api/integrations/{packageId}/tool-policy/blocks", {
+    onSuccess,
+  });
+  const unblock = $api.useMutation(
+    "delete",
+    "/api/integrations/{packageId}/tool-policy/blocks/{toolName}",
+    { onSuccess },
+  );
+  const isPending = (action: ToolPolicyAction, name: string): boolean => {
+    switch (action) {
+      case "approve":
+        return approve.isPending && !!approve.variables?.body.tools.some((t) => t.name === name);
+      case "block":
+        return block.isPending && !!block.variables?.body.tools.includes(name);
+      case "revoke":
+        return revoke.isPending && revoke.variables?.params.path.toolName === name;
+      case "unblock":
+        return unblock.isPending && unblock.variables?.params.path.toolName === name;
+    }
+  };
+  return {
+    /** `onDone` runs once the write succeeded (a confirmation closes then). */
+    approve: (items: Parameters<typeof approve.mutate>[0]["body"]["tools"], onDone?: () => void) =>
+      approve.mutate({ params: { path }, body: { tools: items } }, { onSuccess: onDone }),
+    revoke: (toolName: string, onDone?: () => void) =>
+      revoke.mutate({ params: { path: { ...path, toolName } } }, { onSuccess: onDone }),
+    block: (name: string, onDone?: () => void) =>
+      block.mutate({ params: { path }, body: { tools: [name] } }, { onSuccess: onDone }),
+    unblock: (toolName: string) => unblock.mutate({ params: { path: { ...path, toolName } } }),
+    /** Whether `action` is in flight for the tool `name`: a row waits on its own write only. */
+    isPending,
+    /** Whether any write is in flight for the tool `name`: its row is locked. */
+    isBusy: (name: string): boolean =>
+      (["approve", "revoke", "block", "unblock"] as const).some((action) =>
+        isPending(action, name),
+      ),
+  };
+}
+
+/**
+ * « Relire le serveur »: lists the remote server again and stores the snapshot. The refusal is
+ * shown by the caller under its button, with the connection choice it may offer.
+ */
+export function useToolSnapshotRefresh(packageId: string) {
+  const qc = useQueryClient();
+  const refresh = $api.useMutation("post", "/api/integrations/{packageId}/tool-snapshot/refresh", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: () => invalidateIntegrationQueries(qc),
+  });
+  const request = (connectionId?: string) => ({
+    params: { path: { packageId } },
+    body: connectionChoiceBody(connectionId),
+  });
+  return {
+    isPending: refresh.isPending,
+    error: refresh.error,
+    run: (connectionId?: string) => refresh.mutate(request(connectionId)),
+    runAsync: (connectionId?: string) => refresh.mutateAsync(request(connectionId)),
+  };
 }
 
 /** Query options of an agent's connection readiness: readers of the same version share one key, so they cannot disagree. */

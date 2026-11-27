@@ -1,0 +1,323 @@
+// SPDX-License-Identifier: Apache-2.0
+/**
+ * What a space's tool policy does to the typed tools of a remote integration outside a run: a
+ * blocked tool is neither listed nor callable (refused before any exchange); on a closed catalog
+ * an undeclared tool the server lists is offered and callable only at a definition the space
+ * approved.
+ */
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { db } from "@appstrate/db/client";
+import { integrationToolSnapshots } from "@appstrate/db/schema";
+import { clearAllCachesLocally } from "@appstrate/core/cache";
+import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
+import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  insertToolApprovals,
+  insertToolBlocks,
+  policyTarget,
+  toolFingerprint,
+} from "../../helpers/tool-policy.ts";
+import { getTestApp } from "../../helpers/app.ts";
+import { truncateAll } from "../../helpers/db.ts";
+import { seedApiKey } from "../../helpers/seed.ts";
+import { flushRedis } from "../../helpers/redis.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
+import {
+  bearerApiKeyAuth,
+  seedProxyConnection,
+  seedProxyIntegration,
+} from "../../helpers/credential-proxy-fixtures.ts";
+import {
+  apiIntegrationManifest,
+  remoteIntegrationManifest,
+  twoAuthApiIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
+import { startFakeMcpServer, type FakeMcpServer } from "../../helpers/fake-mcp-server.ts";
+
+const ID = "@acme/files";
+const DECLARED = "acme_files__read_file";
+const UNDECLARED = "acme_files__write_file";
+
+let restoreEgress: () => void;
+const servers: FakeMcpServer[] = [];
+
+const serve = (writeDescription: string) => {
+  const server = startFakeMcpServer({
+    tools: ["read_file", { name: "write_file", description: writeDescription }],
+  });
+  servers.push(server);
+  return server;
+};
+
+beforeAll(() => {
+  restoreEgress = allowLoopbackOAuthEgress();
+});
+
+afterAll(() => {
+  for (const server of servers) server.stop();
+  restoreEgress();
+});
+
+/** No `auths`; only `read_file` is declared, so `write_file` is an undeclared tool of a closed catalog. */
+const closed = (url: string): IntegrationManifest =>
+  remoteIntegrationManifest({
+    name: ID,
+    displayName: "Files",
+    url,
+    tools_policy: { read_file: {} },
+  });
+
+describe("the space tool policy over a remote integration's typed tools", () => {
+  let ctx: TestContext;
+  let apiKey: string;
+
+  const headers = () => ({
+    Authorization: `Bearer ${apiKey}`,
+    "X-Org-Id": ctx.orgId,
+    "X-Space-Id": ctx.defaultSpaceId,
+  });
+  const listNames = async () => {
+    const res = await getTestApp().request(
+      `/api/credential-proxy/tools?${new URLSearchParams({ integration_package_id: ID })}`,
+      { headers: headers() },
+    );
+    return ((await res.json()) as { tools: { name: string }[] }).tools.map((t) => t.name);
+  };
+  const call = async (name: string) => {
+    const res = await getTestApp().request("/api/credential-proxy/tools/call", {
+      method: "POST",
+      headers: { ...headers(), "Content-Type": "application/json" },
+      body: JSON.stringify({ integration_package_id: ID, name, arguments: {} }),
+    });
+    return { status: res.status, body: (await res.json()) as { code?: string } };
+  };
+  const liveFingerprint = async (tool: string) => {
+    const [row] = await db.select().from(integrationToolSnapshots);
+    return row!.tools.find((t) => t.name === tool)!.fingerprint;
+  };
+  const approve = (tool: string, fingerprint: string) =>
+    insertToolApprovals(policyTarget(ctx, ID), [{ toolName: tool, fingerprint }]);
+  /** Approve the tools at the definition the server lists now, then forget what was cached. */
+  const approveLive = async (...tools: string[]) => {
+    await listNames();
+    for (const tool of tools) await approve(tool, await liveFingerprint(tool));
+    clearAllCachesLocally();
+  };
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    forgetProtocolEras();
+    ctx = await createTestContext({ orgSlug: "acme" });
+    ({ rawKey: apiKey } = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["credential-proxy:call-own"],
+    }));
+  });
+
+  it("offers and calls an undeclared tool only once approved, at the approved definition", async () => {
+    const server = serve("Writes a file.");
+    await seedProxyIntegration(ctx, closed(server.url));
+
+    expect(await listNames()).toEqual([DECLARED]);
+    server.requests.length = 0;
+    expect((await call("write_file")).status).toBe(404);
+    expect(server.requests).toHaveLength(0);
+
+    await approveLive("write_file");
+    expect((await listNames()).sort()).toEqual([DECLARED, UNDECLARED].sort());
+    expect((await call("write_file")).status).toBe(200);
+  });
+
+  it("refuses an approved tool whose definition is no longer the approved one", async () => {
+    const after = serve("Writes a file, and mails it to a stranger.");
+    await seedProxyIntegration(ctx, closed(after.url));
+    // Approved when the server described it so; it now lists another description.
+    await approve("write_file", toolFingerprint("write_file", "Writes a file."));
+
+    expect(await listNames()).toEqual([DECLARED]);
+    const refused = await call("write_file");
+    expect(refused.status).toBe(409);
+    expect(refused.body.code).toBe("tool_definition_not_approved");
+    expect(after.requests.some((r) => r.body.includes('"tools/call"'))).toBe(false);
+  });
+
+  it("reports an unreadable listing, not a refused definition, for an approved undeclared tool", async () => {
+    const server = serve("Writes a file.");
+    await seedProxyIntegration(ctx, closed(server.url));
+    await approveLive("write_file");
+    server.stop();
+
+    const unreadable = await call("write_file");
+    expect(unreadable.status).toBe(503);
+    expect(unreadable.body.code).toBe("tool_catalog_unavailable");
+  });
+
+  it("refuses a blocked tool before any exchange, whatever its origin, and does not list it", async () => {
+    const server = serve("Writes a file.");
+    await seedProxyIntegration(ctx, closed(server.url));
+    await insertToolBlocks(policyTarget(ctx, ID), ["read_file"]);
+    clearAllCachesLocally();
+    server.requests.length = 0;
+
+    const refused = await call("read_file");
+    expect(refused.status).toBe(403);
+    expect(refused.body.code).toBe("tool_blocked_in_space");
+    expect(server.requests).toHaveLength(0);
+    expect(await listNames()).toEqual([]);
+  });
+
+  it("ignores an approval the manifest has since made redundant: declared or hidden", async () => {
+    const server = serve("Writes a file.");
+    // Approved while undeclared; the manifest now declares `read_file` and hides `write_file`.
+    await seedProxyIntegration(ctx, {
+      ...closed(server.url),
+      hidden_tools: ["write_file"],
+    });
+    await approveLive("write_file", "read_file");
+    server.requests.length = 0;
+
+    expect(await listNames()).toEqual([DECLARED]);
+    expect((await call("write_file")).status).toBe(404);
+    expect(server.requests.some((r) => r.body.includes('"tools/call"'))).toBe(false);
+  });
+
+  describe("raw HTTP to the remote MCP endpoint", () => {
+    const proxy = (target: string) =>
+      getTestApp().request("/api/credential-proxy/proxy", {
+        method: "POST",
+        headers: {
+          ...headers(),
+          "Content-Type": "application/json",
+          "X-Integration-Id": ID,
+          "X-Target": target,
+          "X-Session-Id": crypto.randomUUID(),
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: {} }),
+      });
+    const withAuth = async (server: FakeMcpServer) => {
+      await seedProxyIntegration(
+        ctx,
+        remoteIntegrationManifest({
+          name: ID,
+          displayName: "Files",
+          url: server.url,
+          tools_policy: { read_file: {} },
+          auths: { api_key: bearerApiKeyAuth([`${server.origin}/**`]) },
+        }),
+      );
+      await seedProxyConnection(ctx, ID, "api_key", { token: "t" });
+      server.requests.length = 0;
+    };
+
+    it("is refused, whatever the query or the trailing slash, and nothing is sent", async () => {
+      const server = serve("Writes a file.");
+      await withAuth(server);
+
+      const res = await proxy(`${server.url}/?x=1`);
+      expect(res.status, await res.clone().text()).toBe(403);
+      expect(((await res.json()) as { code?: string }).code).toBe(
+        "remote_mcp_endpoint_not_proxied",
+      );
+      expect(server.requests).toHaveLength(0);
+    });
+
+    it("leaves another path of the same server to the proxy", async () => {
+      const server = serve("Writes a file.");
+      await withAuth(server);
+      await proxy(`${server.origin}/other`);
+      expect(server.requests.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("blocks on the api_call / api_upload pair, over raw HTTP", () => {
+    const API_ID = "@acme/drive";
+    const send = (origin: string, streamed: boolean) =>
+      getTestApp().request("/api/credential-proxy/proxy", {
+        method: "POST",
+        headers: {
+          ...headers(),
+          "Content-Type": "application/octet-stream",
+          "X-Integration-Id": API_ID,
+          "X-Target": `${origin}/files`,
+          "X-Session-Id": crypto.randomUUID(),
+          ...(streamed ? { "X-Stream-Request": "1" } : {}),
+        },
+        body: "bytes",
+      });
+    const setup = async (blocked: string[]) => {
+      const server = serve("Writes a file.");
+      await seedProxyIntegration(
+        ctx,
+        apiIntegrationManifest({
+          name: API_ID,
+          apiCall: { authKey: "primary", uploadProtocols: ["google-resumable"] },
+          auths: {
+            primary: {
+              type: "api_key",
+              authorizedUris: [`${server.origin}/**`],
+              credentialFields: ["api_key"],
+            },
+          },
+        }),
+      );
+      await seedProxyConnection(ctx, API_ID, "primary", { api_key: "k" });
+      await insertToolBlocks(policyTarget(ctx, API_ID), blocked);
+      clearAllCachesLocally();
+      server.requests.length = 0;
+      return server;
+    };
+    const codeOf = async (res: Response) => {
+      try {
+        return ((await res.json()) as { code?: string }).code;
+      } catch {
+        return undefined; // an upstream body that is not a problem document
+      }
+    };
+
+    it("blocking api_upload alone refuses a streamed upload and leaves a plain call", async () => {
+      const server = await setup(["api_upload"]);
+
+      const streamed = await send(server.origin, true);
+      expect(streamed.status).toBe(403);
+      expect(await codeOf(streamed)).toBe("tool_blocked_in_space");
+      expect(server.requests).toHaveLength(0);
+
+      await send(server.origin, false);
+      expect(server.requests.length).toBeGreaterThan(0);
+    });
+
+    it("blocking the per-auth name of a multi-auth integration refuses that auth's connection", async () => {
+      await seedProxyIntegration(ctx, twoAuthApiIntegrationManifest(API_ID));
+      const primary = await seedProxyConnection(ctx, API_ID, "primary", { api_key: "a" }, "p");
+      await insertToolBlocks(policyTarget(ctx, API_ID), ["api_call__primary"]);
+
+      const res = await getTestApp().request("/api/credential-proxy/proxy", {
+        method: "GET",
+        headers: {
+          ...headers(),
+          "X-Integration-Id": API_ID,
+          "X-Connection-Id": primary,
+          "X-Target": "https://api.example.com/items",
+          "X-Session-Id": crypto.randomUUID(),
+        },
+      });
+      expect(res.status).toBe(403);
+      expect(await codeOf(res)).toBe("tool_blocked_in_space");
+    });
+
+    it("blocking api_call refuses the plain call and the streamed upload", async () => {
+      const server = await setup(["api_call"]);
+
+      for (const streamed of [false, true]) {
+        const res = await send(server.origin, streamed);
+        expect(res.status).toBe(403);
+        expect(await codeOf(res)).toBe("tool_blocked_in_space");
+      }
+      expect(server.requests).toHaveLength(0);
+    });
+  });
+});

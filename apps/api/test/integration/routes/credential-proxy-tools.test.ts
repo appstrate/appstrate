@@ -21,6 +21,7 @@ import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
+import { insertToolBlocks, policyTarget } from "../../helpers/tool-policy.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
@@ -337,6 +338,18 @@ describe("GET /api/credential-proxy/tools", () => {
   });
 
   describe("api_call tools", () => {
+    it("leaves out an api_call the space blocked", async () => {
+      const id = "@acme/items";
+      await seedProxyIntegration(ctx, twoAuthApiIntegrationManifest(id));
+      await seedProxyConnection(ctx, id, "primary", { api_key: "a" }, "p");
+      await seedProxyConnection(ctx, id, "backup", { api_key: "b" }, "b1");
+      await insertToolBlocks(policyTarget(ctx, id), ["api_call__primary"]);
+
+      expect((await list()).body.tools.map((tool) => tool.name)).toEqual([
+        "acme_items__api_call__backup",
+      ]);
+    });
+
     it("names one tool per auth exposing api_call, each with its own connections", async () => {
       const id = "@acme/items";
       await seedProxyIntegration(ctx, twoAuthApiIntegrationManifest(id));

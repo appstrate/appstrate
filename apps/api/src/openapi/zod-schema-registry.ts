@@ -38,7 +38,7 @@ import {
 // --- API Key schemas (routes/api-keys.ts) ---
 import { createApiKeySchema } from "../routes/api-keys.ts";
 import { callRemoteToolSchema } from "../routes/credential-proxy.ts";
-import { integrationCallsBodySchema } from "../routes/internal.ts";
+import { integrationCallsBodySchema, toolsObservedSchema } from "../routes/internal.ts";
 
 // --- Organization schemas (routes/organizations.ts) ---
 import {
@@ -129,6 +129,8 @@ import {
   importConnectionSchema,
   connectOAuthSchema,
   updateSettingsSchema,
+  approveToolsSchema,
+  blockToolsSchema,
   setPinSchema,
   setOrgDefaultSchema,
   oauthClientCreateSchema,
@@ -139,7 +141,7 @@ import {
   connectSubmitSchema,
   setDefaultClientSchema,
   discoverIntegrationSchema,
-  syncFromServerSchema,
+  connectionIdBodySchema,
 } from "../routes/integrations.ts";
 
 // ---------------------------------------------------------------------------
@@ -571,6 +573,14 @@ const coreSchemas: OpenApiSchemaEntry[] = [
 
   // ─── Package draft file tree ────────────────────────────────────────────
 
+  // ─── Sidecar reports ────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/internal/integration-credentials/{scope}/{name}/tools-observed",
+    jsonSchema: toJsonSchema(toolsObservedSchema),
+    description: "Report the tools a run listed from a remote integration",
+  },
+
   // ─── Credential proxy ───────────────────────────────────────────────────
   {
     method: "POST",
@@ -597,8 +607,14 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "POST",
     path: "/api/integrations/{packageId}/discover",
-    jsonSchema: toJsonSchema(syncFromServerSchema),
+    jsonSchema: toJsonSchema(connectionIdBodySchema),
     description: "Propose manifest fields from the integration's connected MCP server",
+  },
+  {
+    method: "POST",
+    path: "/api/integrations/{packageId}/tool-snapshot/refresh",
+    jsonSchema: toJsonSchema(connectionIdBodySchema),
+    description: "List the remote server's tools again into the integration's snapshot",
   },
   {
     method: "POST",
@@ -623,6 +639,18 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
     jsonSchema: toJsonSchema(connectOAuthSchema),
     description: "Headless OAuth2 start for an integration auth",
+  },
+  {
+    method: "POST",
+    path: "/api/integrations/{packageId}/tool-policy/approvals",
+    jsonSchema: toJsonSchema(approveToolsSchema),
+    description: "Approve undeclared tool definitions in the space",
+  },
+  {
+    method: "POST",
+    path: "/api/integrations/{packageId}/tool-policy/blocks",
+    jsonSchema: toJsonSchema(blockToolsSchema),
+    description: "Block tools of the integration in the space",
   },
   {
     method: "PATCH",

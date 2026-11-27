@@ -199,6 +199,7 @@ export async function runInlinePreflight(params: {
     const selectionErrors = await validateAgentIntegrationSelections({
       manifest: manifest as unknown as Record<string, unknown>,
       orgId,
+      toolPolicySpaceId: spaceId,
       manifestCache,
     });
     if (selectionErrors.length > 0) {

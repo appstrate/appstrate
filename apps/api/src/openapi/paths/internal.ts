@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import { CREDENTIAL_FAILURE_CAUSES } from "@appstrate/core/sidecar-types";
+import { CREDENTIAL_FAILURE_CAUSES, UNAVAILABLE_TOOL_REASONS } from "@appstrate/core/sidecar-types";
 import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
 import { jsonRpcRequestBody } from "../responses.ts";
 import {
@@ -385,6 +385,14 @@ export const internalPaths = {
                         description:
                           "Set on a 2xx answered with the injected credential when it ends a rejection streak the sidecar knows of: the `credential_revision` of that credential. Only with a non-null `connection_id` and a 2xx `outcome`.",
                       },
+                      required_scopes: {
+                        type: "array",
+                        minItems: 1,
+                        maxItems: 20,
+                        items: { type: "string" },
+                        description:
+                          "Set on a `403` answered through a connection whose `WWW-Authenticate` challenge is `insufficient_scope` and names scopes: the valid scope tokens it named. The platform records them as the connection's step-up demand (`requested_scopes`, minus what it holds) when it is an OAuth2 connection the run's actor still reaches, and stamps the run's `metadata.scope_requests[]` with the connection's whole standing demand. Only with a non-null `connection_id` and a `403` `outcome`.",
+                      },
                     },
                   },
                 },
@@ -397,7 +405,7 @@ export const internalPaths = {
         "204": { description: "Journaled (nothing with no actor)." },
         "400": {
           description:
-            "`invalid_request`: a malformed body (more than 100 records, an unknown field, a value out of its bounds, a `credential_revision` on a record that cannot end a streak), or a record with a null `connection_id` names an integration the run did not resolve (`param` points at it); or `connection_not_in_run`: a record names a connection the run did not bind to its integration (`param` points at it).",
+            "`invalid_request`: a malformed body (more than 100 records, an unknown field, a value out of its bounds, a `credential_revision` on a record that cannot end a streak, a `required_scopes` on a record that is no 403 through a connection), or a record with a null `connection_id` names an integration the run did not resolve (`param` points at it); or `connection_not_in_run`: a record names a connection the run did not bind to its integration (`param` points at it).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -407,6 +415,88 @@ export const internalPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "500": { $ref: "#/components/responses/InternalServerError" },
+      },
+    },
+  },
+  "/internal/integration-credentials/{scope}/{name}/tools-observed": {
+    post: {
+      operationId: "reportIntegrationToolsObserved",
+      "x-appstrate-space": { kind: "organization" },
+      tags: ["Internal"],
+      summary: "Report the tools a run's boot listed from a remote integration",
+      description:
+        "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. Sent once per connection after the sidecar registered the integration's tools; the sidecar awaits the report within its retry budget and a refusal never fails the boot. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar caps them by count and bytes and sets `truncated`, which is sent only with `tools`. A report without `tools` (a local integration's unavailable list) records only `unavailable`, never a snapshot. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped; the platform's own endpoint integration never gets a snapshot.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          ...boundConnectionIdParam,
+          required: false,
+          description:
+            "The connection this run bound to the integration (a member of `runs.resolved_connections[<integration id>]`). Required unless the run bound none. An id the run did not bind is a `400 connection_not_in_run`.",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["unavailable"],
+              properties: {
+                tools: {
+                  type: "array",
+                  maxItems: 500,
+                  items: {
+                    description:
+                      "An MCP tool descriptor as the server returned it. Entries are judged one by one, not by this schema: a valid one has a non-empty `name` (at most 256 characters) and an object `inputSchema`; any other entry is dropped.",
+                  },
+                },
+                truncated: { type: "boolean" },
+                unavailable: {
+                  type: "array",
+                  maxItems: 500,
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["name", "reason"],
+                    properties: {
+                      name: { type: "string", minLength: 1, maxLength: 256 },
+                      reason: {
+                        type: "string",
+                        enum: [...UNAVAILABLE_TOOL_REASONS],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "204": { description: "Report recorded." },
+        "400": {
+          ...connectionSelector400,
+          description: `${connectionSelector400.description} A body that is not parseable JSON is an \`invalid_request\`; JSON of the wrong shape (or \`truncated\` without \`tools\`) is a \`validation_failed\`.`,
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          ...integrationCredentialsConflict409,
+          description:
+            "The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run.",
+        },
+        "413": {
+          description: "The body exceeds 1 MiB plus the 256 KiB envelope margin.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },

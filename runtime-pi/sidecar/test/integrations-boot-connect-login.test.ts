@@ -158,7 +158,7 @@ describe("runConnectLoginHook", () => {
     try {
       // Mirror the boot order: register the upstream with the agent-facing
       // allowlist (login excluded), THEN run the connect-login hook.
-      const allocatedNs = await host.register({
+      const { namespace: allocatedNs } = await host.register({
         integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client,
@@ -196,7 +196,7 @@ describe("runConnectLoginHook", () => {
     const host = new McpHost();
     const source = makeSource();
     try {
-      const allocatedNs = await host.register({
+      const { namespace: allocatedNs } = await host.register({
         integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client,
@@ -231,7 +231,7 @@ describe("runConnectLoginHook", () => {
     const host = new McpHost();
     const source = makeSource();
     try {
-      const allocatedNs = await host.register({
+      const { namespace: allocatedNs } = await host.register({
         integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client,
@@ -265,7 +265,7 @@ describe("runConnectLoginHook", () => {
     const host = new McpHost();
     const source = makeSource();
     try {
-      const allocatedNs = await host.register({
+      const { namespace: allocatedNs } = await host.register({
         integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client,
@@ -306,7 +306,7 @@ describe("runConnectLoginHook", () => {
     const host = new McpHost();
     const source = makeSource();
     try {
-      const allocatedNs = await host.register({
+      const { namespace: allocatedNs } = await host.register({
         integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client,
@@ -339,7 +339,7 @@ describe("runConnectLoginHook", () => {
     const sourceB = makeSource("conn-b");
     try {
       // Boot order: each connection registers, then logs in; B registers last.
-      const nsA = await host.register({
+      const { namespace: nsA } = await host.register({
         integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client: clientA,
@@ -347,7 +347,7 @@ describe("runConnectLoginHook", () => {
         allowedTools: [],
       });
       await runConnectLoginHook(spec(), clientA, sourceA, nsA);
-      const nsB = await host.register({
+      const { namespace: nsB } = await host.register({
         integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client: clientB,

@@ -700,6 +700,22 @@ export function SettingsSkeleton({ rows = 3, className }: { rows?: number; class
 }
 
 /**
+ * The space's tool review while the policy loads: what `ToolPolicyView` draws under its heading
+ * and hint (the heading stays, the policy is not needed to draw it) in the common case, a card.
+ */
+export function ToolPolicySkeleton() {
+  return (
+    <Waiting>
+      <div className="flex flex-col gap-3 rounded-lg border p-4">
+        <SkeletonLine className="w-40 text-sm" />
+        <SkeletonLine className="w-2/3 text-sm" />
+        <Skeleton className="h-8 w-44" />
+      </div>
+    </Waiting>
+  );
+}
+
+/**
  * A package's definition editor while its code loads: `PackageEditorFrame`'s padded column, its
  * section heading, then the section's rows.
  */

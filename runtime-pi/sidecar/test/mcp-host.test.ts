@@ -302,38 +302,6 @@ describe("McpHost — buildTools", () => {
     }
   });
 
-  it("drops, with a warning, a tool listed more times than the allocator can name", async () => {
-    const upstream = await makeUpstream(notionTool());
-    const listed = (await upstream.client.listTools()).tools[0]!;
-    // One name listed four times: plain, hash, salted hash, then nothing left —
-    // the fourth is dropped and must not abort the others.
-    const client = Object.assign(Object.create(upstream.client), {
-      listTools: async () => ({ tools: [listed, listed, listed, listed] }),
-    }) as typeof upstream.client;
-    try {
-      const logs: { level: string; data: unknown }[] = [];
-      const host = new McpHost({ onLog: (e) => logs.push(e) });
-      await host.register({ integrationId: "notion", namespace: "notion", client });
-      const names = host.buildTools().map((t) => t.descriptor.name);
-      expect(names).toHaveLength(3);
-      expect(names[0]).toBe("notion__search_pages");
-      expect(new Set(names).size).toBe(3);
-      expect(logs).toContainEqual(
-        expect.objectContaining({
-          level: "warn",
-          data: {
-            event: "tool_rejected",
-            reason: "name_collision",
-            namespace: "notion",
-            originalName: "search_pages",
-          },
-        }),
-      );
-    } finally {
-      await upstream.pair.close();
-    }
-  });
-
   it("keeps upstream case, hyphens and inner __ and routes back to the exact upstream name", async () => {
     const seen: string[] = [];
     const tool = (name: string): AppstrateToolDefinition => ({
@@ -470,7 +438,7 @@ describe("McpHost — integration identity", () => {
     ]);
     try {
       const host = new McpHost();
-      const ns = await host.register({
+      const { namespace: ns } = await host.register({
         connection: CONN_A,
         integrationId: "@acme/notion",
         namespace: "@acme/notion",
@@ -1046,7 +1014,7 @@ describe("McpHost — trusted (first-party) bypass of the poisoning sanitiser", 
     ]);
     try {
       const host = new McpHost();
-      const namespace = await host.register({
+      const { namespace } = await host.register({
         connection: CONN_A,
         integrationId: "drive",
         namespace: "drive",
@@ -1089,7 +1057,7 @@ describe("McpHost — trusted (first-party) bypass of the poisoning sanitiser", 
     ]);
     try {
       const host = new McpHost();
-      const namespace = await host.register({
+      const { namespace } = await host.register({
         connection: CONN_A,
         integrationId: "drive",
         namespace: "drive",
@@ -1343,13 +1311,13 @@ describe("McpHost — intoNamespace (attachable api_call)", () => {
     const apiCall = await makeUpstream(apiCallTool());
     const host = new McpHost();
     try {
-      const ns = await host.register({
+      const { namespace: ns } = await host.register({
         connection: CONN_A,
         integrationId: "kijiji",
         namespace: "kijiji",
         client: server.client,
       });
-      const merged = await host.register({
+      const { namespace: merged } = await host.register({
         connection: CONN_A,
         integrationId: "kijiji",
         namespace: "kijiji",
@@ -1372,7 +1340,7 @@ describe("McpHost — intoNamespace (attachable api_call)", () => {
     const apiCall = await makeUpstream(apiCallTool());
     const host = new McpHost();
     try {
-      const ns = await host.register({
+      const { namespace: ns } = await host.register({
         connection: CONN_A,
         integrationId: "kijiji",
         namespace: "kijiji",

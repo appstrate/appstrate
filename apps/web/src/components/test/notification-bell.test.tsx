@@ -72,6 +72,24 @@ describe("NotificationContent", () => {
     expect(html).not.toContain('href="/runs/');
   });
 
+  it("renders an `integration_tools_review` row as the integration to review, on its own page", () => {
+    const html = renderList([
+      {
+        id: "n20",
+        spaceId: SPACE,
+        type: "integration_tools_review",
+        runId: null,
+        payload: { packageId: "@acme/notion", display_name: "Notion" },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ]);
+
+    expect(html).toContain("Outils à examiner : Notion");
+    expect(html).toContain('href="/notifications/n20"');
+    expect(html).not.toContain("Agent supprimé");
+  });
+
   it("renders a failed run as its agent and status, linking to the run", () => {
     const html = renderList([
       {
@@ -155,6 +173,31 @@ describe("NotificationContent", () => {
     expect(html).toContain("Gmail : la connexion pierre@acme.test doit être reconnectée");
     expect(html).toContain("Le fournisseur a révoqué l'accès");
     expect(html).toContain('href="/notifications/n12"');
+  });
+
+  it("renders a `connection_scopes_requested` row as the connection to grant, on its own page", () => {
+    const html = renderList([
+      {
+        id: "n13",
+        spaceId: SPACE,
+        type: "connection_scopes_requested",
+        runId: null,
+        payload: {
+          packageId: "@acme/notes",
+          integration_name: "Notes",
+          connection_id: "conn_1",
+          label: "sam@notes.test",
+        },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ]);
+
+    expect(html).toContain(
+      "Notes : la connexion sam@notes.test a besoin de droits supplémentaires",
+    );
+    expect(html).toContain("Le service a refusé un appel faute de droits");
+    expect(html).toContain('href="/notifications/n13"');
   });
 
   it("names the sender of an `agent_message` from an unlisted agent by the name stamped on its run", () => {

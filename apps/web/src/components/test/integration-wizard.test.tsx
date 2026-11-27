@@ -3,13 +3,12 @@
 /**
  * The guided addition from an MCP server URL: the creation hand-off offers it first for an
  * integration only, the review lists what this space already reaches at that address, and the
- * tools step shows every tool with the read-only ones pre-checked and the version it publishes.
+ * tools step is one choice (review each tool, or trust the server) and the version it publishes.
  */
 
 import { describe, expect, it } from "bun:test";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import type { DiscoveryResult } from "../../lib/integration-wizard.ts";
-import type { ServerSyncProposal } from "../../lib/integration-server-sync.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -19,8 +18,6 @@ installFakeStorage({
 const { CreationHandoffChoices } = await import("../creation-handoff-modal.tsx");
 const { ReviewStep } = await import("../integration-wizard/review-step.tsx");
 const { ToolsChoice, ToolsStep } = await import("../integration-wizard/tools-step.tsx");
-const { catalogConnectionsKey, catalogSourceKey } = await import("../../lib/integration-wizard.ts");
-const { QueryClient } = await import("@tanstack/react-query");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
 const settingsFr = (await import("../../locales/fr/settings.json")).default;
@@ -157,45 +154,26 @@ describe("the review", () => {
   });
 });
 
-const catalog = {
-  manifest: { default_tools: ["search"], tools_policy: { search: {}, delete_page: {} } },
-  icon_source: null,
-  instructions: "# Acme",
-  tools: [
-    {
-      name: "search",
-      title: "Rechercher",
-      description: "Cherche des pages.",
-      read_only: true,
-      destructive: false,
-    },
-    { name: "delete_page", read_only: false, destructive: true },
-    { name: "purge", read_only: true, destructive: true },
-  ],
-  warnings: [],
-} as unknown as ServerSyncProposal;
+/** The choice's radio, which Radix draws as a `button`. */
+const radio = (html: string, mode: "review" | "trust") =>
+  new RegExp(`<button[^>]*id="integration-wizard-mode-${mode}"[^>]*>`).exec(html)?.[0] ?? "";
+const checked = (html: string, mode: "review" | "trust") =>
+  radio(html, mode).includes('aria-checked="true"');
 
 describe("the tools step", () => {
   const choice = (
-    selected: string[],
-    over: {
-      proposal?: ServerSyncProposal;
-      otherDraftChanges?: boolean;
-      pending?: boolean;
-      draftMoved?: boolean;
-    } = {},
+    trustAll: boolean,
+    over: { otherDraftChanges?: boolean; pending?: boolean; draftMoved?: boolean } = {},
   ) =>
     render(
       <ToolsChoice
-        proposal={over.proposal ?? catalog}
-        otherDraftChanges={over.otherDraftChanges ?? false}
-        detailPath="/integrations/@org/acme"
-        onRetry={noop}
-        refetching={false}
-        selected={new Set(selected)}
-        onSelectedChange={noop}
+        trustAll={trustAll}
+        onTrustAllChange={noop}
+        proposal={null}
         includeDocs
         onIncludeDocsChange={noop}
+        otherDraftChanges={over.otherDraftChanges ?? false}
+        detailPath="/integrations/@org/acme"
         version="1.1.0"
         onSubmit={noop}
         pending={over.pending ?? false}
@@ -204,105 +182,75 @@ describe("the tools step", () => {
         draftMoved={over.draftMoved ?? false}
       />,
     );
-  /** Whether the tool's box renders checked (Radix draws it as a `button`). */
-  const checked = (html: string, name: string) => {
-    const tag = new RegExp(`<button[^>]*id="integration-wizard-tool-${name}"[^>]*>`).exec(html);
-    return tag?.[0].includes('aria-checked="true"');
-  };
-
-  it("shows every tool, the read-only one badged and pre-checked", () => {
-    const html = choice(["search"]);
-    expect(html).toContain("Rechercher");
-    expect(html).toContain("Cherche des pages.");
-    expect(html).toContain("delete_page");
-    expect(html.match(new RegExp(agentsFr["integrationWizard.tools.readOnly"], "g"))).toHaveLength(
-      2,
-    );
-    expect(checked(html, "search")).toBe(true);
-    expect(checked(html, "delete_page")).toBe(false);
+  it("offers the review in each space, by default, and trusting the whole server", () => {
+    const html = choice(false);
+    expect(html).toContain(agentsFr["integrationWizard.tools.mode.review.label"]);
+    expect(html).toContain(agentsFr["integrationWizard.tools.mode.trust.label"]);
+    expect(checked(html, "review")).toBe(true);
+    expect(checked(html, "trust")).toBe(false);
+    expect(checked(choice(true), "trust")).toBe(true);
   });
 
-  it("badges a destructive tool, a tool marked both read-only and destructive as read-only", () => {
-    const html = choice(["search"]);
-    const label = agentsFr["integrationWizard.tools.destructive"];
-    // `delete_page` alone: `purge` says both, and read-only wins the badge.
-    expect(html.match(new RegExp(`>${label}<`, "g"))).toHaveLength(1);
-    const at = (name: string) => html.indexOf(`id="integration-wizard-tool-${name}"`);
-    expect(html.slice(at("delete_page"), at("purge"))).toContain(`>${label}<`);
-    expect(html.slice(at("purge"))).not.toContain(`>${label}<`);
+  it("declares no tool to pick and names the version it publishes", () => {
+    const html = choice(false);
+    expect(html).not.toContain("integration-wizard-tool-");
+    expect(html).toContain("Publier la version 1.1.0");
   });
 
-  it("counts the declared and selected tools and names the version it publishes", () => {
-    const html = choice(["search"]);
-    // Nothing is declared before the save: the server offers.
-    expect(html).toContain("3 outils proposés par le serveur.");
-    expect(html).not.toContain("déclaré");
-    expect(html).toContain("1 sera sélectionné par défaut pour les agents.");
-    expect(html).toContain("Enregistrer et publier la version 1.1.0");
-    expect(html).toContain(agentsFr["integrationWizard.tools.docs"]);
-  });
-
-  it("warns that the draft's other unpublished changes ship with the tools", () => {
-    expect(choice(["search"])).not.toContain("integration-wizard-draft-changes");
-    const html = choice(["search"], { otherDraftChanges: true });
+  it("warns that the draft's other unpublished changes ship with it", () => {
+    expect(choice(false)).not.toContain("integration-wizard-draft-changes");
+    const html = choice(false, { otherDraftChanges: true });
     expect(html).toContain("integration-wizard-draft-changes");
     expect(html).toContain('href="/integrations/@org/acme"');
-    expect(html).toContain("Enregistrer et publier la version 1.1.0");
-  });
-
-  it("freezes the whole selection, the select-all and select-none buttons included, while saving", () => {
-    const button = (html: string, label: string) =>
-      new RegExp(`<button[^>]*>${label}</button>`).exec(html)?.[0] ?? "";
-    for (const key of ["integrationWizard.tools.selectAll", "integrationWizard.tools.selectNone"]) {
-      const label = agentsFr[key as keyof typeof agentsFr];
-      expect(button(choice(["search"]), label)).not.toContain(" disabled=");
-      expect(button(choice(["search"], { pending: true }), label)).toContain(" disabled=");
-    }
   });
 
   it("says the draft moved after a publish refused with 412, and offers the full submit again", () => {
-    expect(choice(["search"])).not.toContain("integration-wizard-draft-moved");
-    const html = choice(["search"], { draftMoved: true });
+    expect(choice(false)).not.toContain("integration-wizard-draft-moved");
+    const html = choice(false, { draftMoved: true });
     expect(html).toContain("integration-wizard-draft-moved");
-    expect(html).toContain("Enregistrer et publier la version 1.1.0");
+    expect(html).toContain("Publier la version 1.1.0");
   });
 
-  it("offers no publish when the server lists no tool", () => {
-    const empty = { ...catalog, tools: [], instructions: null } as ServerSyncProposal;
-    const html = choice([], { proposal: empty });
-    expect(html).toContain(agentsFr["integrationWizard.tools.none"]);
-    expect(html).toContain(agentsFr["integrationWizard.tools.retry"]);
-    expect(html).toContain('href="/integrations/@org/acme"');
-    expect(html).not.toContain("integration-wizard-publish");
+  it("offers the server's instructions as INTEGRATION.md, with the truncation warning", () => {
+    const html = render(
+      <ToolsChoice
+        trustAll={false}
+        onTrustAllChange={noop}
+        proposal={{
+          instructions: "# Acme\nCall search first.",
+          warnings: [{ code: "instructions_truncated", message: "cut" }],
+        }}
+        includeDocs
+        onIncludeDocsChange={noop}
+        version="1.1.0"
+        onSubmit={noop}
+        pending={false}
+        saveError={null}
+        publishError={null}
+        otherDraftChanges={false}
+        detailPath="/integrations/@org/acme"
+      />,
+    );
+    expect(html).toContain(agentsFr["integrationWizard.tools.docs"]);
+    expect(html).toContain(agentsFr["integrationWizard.tools.docsPreview"]);
+    expect(html).toContain(agentsFr["integrationEditor.discover.warning.instructions_truncated"]);
+    expect(choice(false)).not.toContain(agentsFr["integrationWizard.tools.docs"]);
+  });
+
+  it("freezes the choice while saving", () => {
+    // The fieldset disables every control it holds.
+    expect(choice(false)).not.toMatch(/<fieldset[^>]*disabled/);
+    expect(choice(false, { pending: true })).toMatch(/<fieldset[^>]*disabled/);
   });
 });
 
 describe("the tools step, resumed", () => {
-  // An open server (AFPS §7.2): the step reads it without the proxy permission.
   const source = {
     kind: "remote",
     remote: { url: "https://mcp.acme.test/mcp", transport: "streamable-http" },
   };
-  const published = { name: "@org/acme", version: "1.0.0", display_name: "Acme", source };
-  const detail = { manifest: published, auths: [] } as unknown as Parameters<
-    typeof ToolsStep
-  >[0]["detail"];
-  const step = (draft: Record<string, unknown>, hasUnarchivedChanges: boolean) => {
-    const qc = new QueryClient();
-    // The server read, as the step keys it (no org or space selected in this harness).
-    qc.setQueryData(
-      [
-        "integration-server-catalog",
-        null,
-        null,
-        "@org/acme",
-        catalogSourceKey(draft),
-        catalogConnectionsKey(detail),
-        null,
-      ],
-      catalog,
-    );
-    return render(
+  const step = (draft: Record<string, unknown>, hasUnarchivedChanges: boolean) =>
+    render(
       <ToolsStep
         packageId="@org/acme"
         draft={
@@ -314,27 +262,38 @@ describe("the tools step, resumed", () => {
             etag: '"3"',
           } as unknown as Parameters<typeof ToolsStep>[0]["draft"]
         }
-        detail={detail}
         version="1.1.0"
         published
       />,
-      { queryClient: qc },
     );
-  };
+  const draft = { name: "@org/acme", version: "1.1.0", display_name: "Acme", source };
 
   it("follows the server flag has_unarchived_changes: the publication ships the whole draft", () => {
-    // The warning follows the server flag read at mount and states that the publication ships the
-    // whole draft; it also shows after a wizard save whose publish failed.
-    const savedByWizard = {
-      ...published,
-      version: "1.1.0",
-      tools_policy: { search: {}, delete_page: {} },
-      default_tools: ["search"],
-    };
-    expect(step(savedByWizard, true)).toContain("integration-wizard-draft-changes");
-    const clean = step(savedByWizard, false);
-    // The catalogue rendered: the absence below is the step's verdict, not a loading state.
+    expect(step(draft, true)).toContain("integration-wizard-draft-changes");
+    const clean = step(draft, false);
     expect(clean).toContain("integration-wizard-publish");
     expect(clean).not.toContain("integration-wizard-draft-changes");
+  });
+
+  it("starts on the choice an earlier save wrote", () => {
+    const html = step({ ...draft, allow_undeclared_tools: true }, false);
+    expect(checked(html, "trust")).toBe(true);
+  });
+
+  it("asks a caller who cannot write the home for nothing", () => {
+    const html = render(
+      <ToolsStep
+        packageId="@org/acme"
+        draft={
+          { id: "@org/acme", manifest: draft, home_writable: false } as unknown as Parameters<
+            typeof ToolsStep
+          >[0]["draft"]
+        }
+        version="1.1.0"
+        published
+      />,
+    );
+    expect(html).toContain(agentsFr["integrationWizard.tools.notWritable"]);
+    expect(html).not.toContain("integration-wizard-publish");
   });
 });

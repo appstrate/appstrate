@@ -55,6 +55,7 @@ import {
 } from "@appstrate/afps-runtime/resolvers";
 import { buildInjectedCredentialHeader } from "@appstrate/connect/proxy-primitives";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { targetsMcpEndpoint, type McpEndpoint } from "@appstrate/core/mcp-endpoint";
 import { logger } from "./logger.ts";
 import { filterSensitiveHeaders } from "./redact.ts";
 import type { CallJournal } from "./call-reporter.ts";
@@ -215,48 +216,6 @@ function* jsonStringLeaves(value: unknown): Generator<string> {
   }
 }
 
-/** Lower-cased, percent-decoded path with repeated and trailing slashes collapsed. */
-function normalisedPath(url: URL): string {
-  let path = url.pathname;
-  try {
-    path = decodeURIComponent(path);
-  } catch {
-    // A malformed escape stays as written: the comparison is then on the raw path.
-  }
-  return path
-    .toLowerCase()
-    .replace(/\/{2,}/g, "/")
-    .replace(/\/+$/, "");
-}
-
-/** A remote MCP server as its integration declares it: `server.url` and `server.transport`. */
-export interface McpEndpoint {
-  url: string;
-  transport?: string;
-}
-
-/**
- * Whether `target` falls on the MCP endpoint: same origin (scheme, host without a trailing dot,
- * port), and
- *   - over SSE, any path: the server announces the endpoint its messages are POSTed to, at a path
- *     of its choosing on that origin (often outside `server.url`'s), so the whole origin is it;
- *   - otherwise, a path equal to the endpoint's or under it (`<path>/…`), compared
- *     case-insensitively after percent-decoding, with repeated and trailing slashes collapsed;
- *     query and fragment ignored. An endpoint at the origin root matches the root path only, so
- *     the other paths of that host stay reachable.
- */
-export function targetsMcpEndpoint(target: string | URL, endpoint: McpEndpoint): boolean {
-  if (!URL.canParse(String(target)) || !URL.canParse(endpoint.url)) return false;
-  const t = new URL(target);
-  const e = new URL(endpoint.url);
-  const host = (u: URL) => u.hostname.replace(/\.$/, "");
-  if (t.protocol !== e.protocol || host(t) !== host(e) || t.port !== e.port) return false;
-  if (endpoint.transport === "sse") return true;
-  const base = normalisedPath(e);
-  const path = normalisedPath(t);
-  return path === base || (base !== "" && path.startsWith(`${base}/`));
-}
-
 /** Exhaustiveness guard: a new body kind without a buildBody case fails to compile here. */
 function assertNever(value: never): never {
   throw new Error(`Unhandled request-body kind: ${JSON.stringify(value)}`);
@@ -368,13 +327,18 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   const targetHost = templateHost(targetUrl);
   // Journaled on the template's host: a `{{field}}` stays as written, never its value.
   const journalStarted = performance.now();
-  const journalCall = (outcome: string, answeredBy: CredentialsResponse | null) =>
+  const journalCall = (
+    outcome: string,
+    answeredBy: CredentialsResponse | null,
+    challenge?: string | null,
+  ) =>
     deps.journal({
       method,
       host: targetHost,
       outcome,
       durationMs: performance.now() - journalStarted,
       credential: answeredBy ? { revision: answeredBy.credentialRevision } : null,
+      challenge,
     });
   const failedCall = (err: unknown): ApiCallFailure => {
     const { failure, dispatched } = wrapRequestError(err, integrationId, targetHost);
@@ -587,7 +551,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     });
   }
 
-  journalCall(String(upstream.status), answered);
+  journalCall(String(upstream.status), answered, upstream.headers.get("www-authenticate"));
 
   // 7. Success-path diagnostic envelope. One structured line per
   //    completed call — resolved auth mode, hop count, status, duration,

@@ -91,6 +91,15 @@ const packageIdParam = {
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
 } as const;
 
+const toolNameParam = {
+  name: "toolName",
+  in: "path",
+  required: true,
+  description:
+    "The tool's name as the server lists it, 1 to 128 characters (percent-encode a `/`).",
+  schema: { type: "string", minLength: 1, maxLength: 128 },
+} as const;
+
 export const authKeyParam = {
   name: "authKey",
   in: "path",
@@ -349,6 +358,12 @@ export const integrationConnectionSchema = {
     account_id: { type: "string" },
     identity_claims: { type: ["object", "null"], additionalProperties: true },
     scopes_granted: { type: "array", items: { type: "string" } },
+    requested_scopes: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only.",
+    },
     needs_reconnection: { type: "boolean" },
     expiresAt: { type: ["string", "null"], format: "date-time" },
     owner_type: { type: "string", enum: ["user", "end_user"] },
@@ -613,10 +628,27 @@ const authStatusSchema = {
 
 const toolCatalogEntrySchema = {
   type: "object",
-  required: ["name"],
+  required: ["name", "status", "origin", "modified"],
   properties: {
     name: { type: "string" },
     description: { type: "string" },
+    status: {
+      type: "string",
+      enum: ["available", "missing", "pending", "blocked"],
+      description:
+        "What this space can do with the tool. `available`: usable. `missing`: the manifest or an approval names it and the server no longer lists it. `pending`: the server lists an undeclared tool (or a new definition of an approved one) on a closed catalog and the space has not approved it. `blocked`: the space refuses it, whatever its definition.",
+    },
+    origin: {
+      type: "string",
+      enum: ["declared", "approved", "listed"],
+      description:
+        "`declared`: in the manifest's catalog. `approved`: undeclared, approved in this space. `listed`: only the server lists it.",
+    },
+    modified: {
+      type: "boolean",
+      description:
+        "Declared tool: a listing carries a definition that changed since first seen (a signal only: it stays `available`, and nothing acknowledges it). Approved undeclared tool: a listed definition is not one the space approved.",
+    },
     policy: {
       type: "object",
       properties: {
@@ -665,6 +697,7 @@ const integrationDetailSchema = {
     "manifest",
     "auths",
     "tool_catalog",
+    "tool_snapshot",
     "allow_undeclared_tools",
     "active",
     "block_user_connections",
@@ -682,6 +715,35 @@ const integrationDetailSchema = {
     // auto-hidden connect.tool primitives. Falls back to
     // `manifest.tools_policy` keys when a local server declares no catalog.
     tool_catalog: { type: "array", items: toolCatalogEntrySchema },
+    tool_snapshot: {
+      oneOf: [
+        {
+          type: "object",
+          required: ["connection_id", "listed_at", "truncated", "added", "missing", "modified"],
+          properties: {
+            connection_id: { type: ["string", "null"], format: "uuid" },
+            listed_at: { type: "string", format: "date-time" },
+            truncated: { type: "boolean" },
+            added: {
+              type: "integer",
+              description:
+                "Tools the server lists that the manifest does not declare and the space has neither approved nor blocked.",
+            },
+            missing: {
+              type: "integer",
+              description: "Tools the manifest or an approval names that no listing returns.",
+            },
+            modified: {
+              type: "integer",
+              description: "Tools whose definition changed since first seen.",
+            },
+          },
+        },
+        { type: "null" },
+      ],
+      description:
+        "The latest stored listing of the server behind `tool_catalog`, summarised; `null` when none was recorded yet.",
+    },
     // AFPS §4.4 — the tool(s) an agent inherits when it declares this
     // integration without an `integrations_configuration.<id>.tools`
     // selection. Pairs with `tool_catalog` so a builder sees what is on by
@@ -823,6 +885,13 @@ const connectLogin502Headers = {
 const problemJson = {
   "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
 } as const;
+/** The refusal of a tool-policy write: a credential that is not the dashboard's session, or a missing permission. */
+const dashboardSessionRequired = {
+  description:
+    "`dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing.",
+  headers: STD_RESPONSE_HEADERS,
+  content: problemJson,
+};
 const grantMayBeRedeemedProperty = {
   grant_may_be_redeemed: {
     type: "boolean",
@@ -1234,9 +1303,9 @@ export const integrationsPaths = {
     post: {
       operationId: "syncIntegrationFromServer",
       tags: ["Integrations"],
-      summary: "Propose manifest fields from the integration's connected MCP server",
+      summary: "Propose identity fields from the integration's connected MCP server",
       description:
-        "Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, its listing journaled as one call of the connection (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.",
+        "Opens a session on the remote MCP server of the integration's draft (the working copy being edited, published or not) and returns the identity it reports: manifest fields (`display_name`, `description`, `homepage`, `icon`), an icon source, the server's instructions and warnings. Lists no tool and persists nothing (tools: `…/tool-snapshot/refresh`). The session is the same as the snapshot's: through the credential proxy, authorized against the draft (the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, journaled as one call of the connection, `GET /api/integrations/calls`); an integration declaring no auths (AFPS §7.2) is reached directly, egress-guarded on every hop, without a connection. The proposal holds `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning; omitted when the package already has its own `INTEGRATION.md`). Bounded to 20 seconds, the icon lookup included (best-effort). Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space. Rate limited to 10 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1253,7 +1322,7 @@ export const integrationsPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "The connection to call the server with; omitted, the proxy's selection (`X-Connection-Id` semantics). Ignored for an integration declaring no auths, whose server is reached without a connection.",
+                    "The connection to call the server with, whose variables render a templated server URL; omitted, the proxy's selection (`X-Connection-Id` semantics). Refused for an integration declaring no auths, whose server is reached without a connection.",
                 },
               },
               additionalProperties: false,
@@ -1269,25 +1338,13 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["manifest", "icon_source", "instructions", "tools", "warnings"],
+                required: ["manifest", "icon_source", "instructions", "warnings"],
                 properties: {
                   manifest: {
                     type: "object",
-                    required: ["default_tools", "tools_policy"],
                     description:
-                      "A partial AFPS integration manifest: only the fields the server reported.",
+                      "A partial AFPS integration manifest: only the identity fields the server reported.",
                     properties: {
-                      default_tools: {
-                        type: "array",
-                        items: { type: "string" },
-                        description:
-                          "The selection an agent inherits: only the tools the server annotates `readOnlyHint: true` and not `destructiveHint: true`, in server order; empty when it annotates none. Discovering a tool never selects it otherwise.",
-                      },
-                      tools_policy: {
-                        type: "object",
-                        additionalProperties: { type: "object" },
-                        description: "Every tool listed, each with an empty policy.",
-                      },
                       display_name: { type: "string" },
                       description: { type: "string" },
                       homepage: { type: "string", format: "uri" },
@@ -1304,41 +1361,6 @@ export const integrationsPaths = {
                     description:
                       "The server's `initialize` instructions, for the editor to propose as `INTEGRATION.md`; null when it sent none, or when the package's draft already holds an `INTEGRATION.md` (whatever its content, empty included).",
                   },
-                  tools: {
-                    type: "array",
-                    description:
-                      "Every tool listed, in server order, one entry per name (the first listed wins), for the editor to show and select from. MCP annotations are the server's untrusted hints: `read_only` only drives the `default_tools` pre-selection.",
-                    items: {
-                      type: "object",
-                      required: ["name", "read_only", "destructive"],
-                      properties: {
-                        name: { type: "string" },
-                        title: {
-                          type: "string",
-                          maxLength: 200,
-                          description:
-                            "The tool's `title` (else `annotations.title`), trimmed, at most 200 characters (a cut ends with `…`); absent when empty.",
-                        },
-                        description: {
-                          type: "string",
-                          maxLength: 1024,
-                          description:
-                            "The tool's `description`, trimmed, at most 1024 characters (a cut ends with `…`); absent when empty.",
-                        },
-                        read_only: {
-                          type: "boolean",
-                          description:
-                            "True only when the server annotates the tool `readOnlyHint: true`.",
-                        },
-                        destructive: {
-                          type: "boolean",
-                          description:
-                            "True only when the server annotates the tool `destructiveHint: true`. An untrusted hint like `read_only`; a destructive tool is never in the proposal's `default_tools`, even when also annotated read-only.",
-                        },
-                      },
-                      additionalProperties: false,
-                    },
-                  },
                   warnings: {
                     type: "array",
                     items: {
@@ -1347,7 +1369,7 @@ export const integrationsPaths = {
                       properties: {
                         code: {
                           type: "string",
-                          enum: ["tools_truncated", "instructions_truncated"],
+                          enum: ["instructions_truncated"],
                         },
                         message: { type: "string" },
                       },
@@ -1379,7 +1401,7 @@ export const integrationsPaths = {
         },
         "422": {
           description:
-            "`integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `sync_url_templated` — its server URL is chosen per connection (`{$variable.…}`).",
+            "`integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `remote_url_unrenderable` — the server URL is built from connection variables (`{$variable.…}`) and the selected connection's do not render it.",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
@@ -1396,6 +1418,356 @@ export const integrationsPaths = {
           headers: { ...STD_RESPONSE_HEADERS, ...PROXY_STATUS_HEADER },
           content: problemJson,
         },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/tool-snapshot/refresh": {
+    post: {
+      operationId: "refreshIntegrationToolSnapshot",
+      tags: ["Integrations"],
+      summary: "List the remote server's tools again into the integration's snapshot",
+      description:
+        "Lists the tools of the integration's published remote MCP server now, bypassing the cached listing, through the credential proxy with the connection the caller's selection picks (or `connection_id`): the same selection, `authorized_uris` allowlist and egress guard as a credential-proxy call outside a run, journaled as one call of the connection. It reads the latest published version, not the draft. The listing is recorded as the snapshot of that connection (of the integration alone when it declares no auths); it feeds the per-space tool review (approve or block a tool) and the author's action to declare a listed tool in the integration. Requires `integrations:read` and `credential-proxy:call-own`. Rate limited to 10 requests per minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                connection_id: {
+                  type: "string",
+                  format: "uuid",
+                  description:
+                    "The connection to list with; omitted, the proxy's selection. Refused for an integration declaring no auths.",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "The snapshot as it now stands.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["tool_snapshot"],
+                properties: {
+                  tool_snapshot: {
+                    type: "object",
+                    required: ["connection_id", "listed_at", "truncated", "tool_count"],
+                    properties: {
+                      connection_id: {
+                        type: ["string", "null"],
+                        format: "uuid",
+                        description:
+                          "The connection listed with; null for an integration declaring no auths.",
+                      },
+                      listed_at: { type: "string", format: "date-time" },
+                      truncated: {
+                        type: "boolean",
+                        description: "The server lists more tools than are read.",
+                      },
+                      tool_count: { type: "integer", minimum: 0 },
+                    },
+                    additionalProperties: false,
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        "400": {
+          description: "`validation_failed` — the request body is invalid.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "403": {
+          description:
+            "`integrations:read` or `credential-proxy:call-own` missing, `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`, `blocked_target`).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "404": {
+          description:
+            "The integration is unknown, has no published version, or is not active in the space; `credential_not_found` — the caller has no connection of the integration to list with (or the one named by `connection_id`).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "409": {
+          description:
+            "The proxy's connection-selection conflicts: `must_choose_connection` when the caller holds several usable connections and the body names none, `needs_reconnection`.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "422": {
+          description:
+            "`integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport (only Streamable HTTP is listed); `remote_url_unrenderable` — the connection's variables do not render the server URL.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "500": {
+          description:
+            "`internal_error` — the server was listed but the snapshot could not be recorded.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "502": {
+          description:
+            "`bad_gateway` — the server could not be listed (no `Proxy-Status`); `upstream_credential_rejected` — it refused the connection's credential; `credential_unusable` — the stored credential cannot be sent as the integration declares; the proxy's other relayed codes carry their `Proxy-Status`.",
+          headers: { ...STD_RESPONSE_HEADERS, ...PROXY_STATUS_HEADER },
+          content: problemJson,
+        },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/tool-policy": {
+    get: {
+      operationId: "getIntegrationToolPolicy",
+      tags: ["Integrations"],
+      summary: "Read what the space decided about the integration's tools",
+      description:
+        "What a space can review about a remote integration's tools: `listed`, every distinct (name, fingerprint) the caller's connections last listed (`definition` is null for a tool past the snapshot's size cap), the space's `approvals` of undeclared tools' definitions (several fingerprints per tool may coexist) and its `blocks`. Requires `integrations:read`.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+      ],
+      responses: {
+        "200": {
+          description: "The tool policy view.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["listed", "approvals", "blocks"],
+                properties: {
+                  listed: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["name", "fingerprint", "definition"],
+                      properties: {
+                        name: { type: "string" },
+                        fingerprint: { type: "string" },
+                        definition: { type: ["object", "null"], additionalProperties: true },
+                      },
+                      additionalProperties: false,
+                    },
+                  },
+                  approvals: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "tool_name",
+                        "fingerprint",
+                        "definition",
+                        "approved_by",
+                        "approved_at",
+                      ],
+                      properties: {
+                        tool_name: { type: "string" },
+                        fingerprint: { type: "string" },
+                        definition: {
+                          type: "object",
+                          additionalProperties: true,
+                          description: "The definition the space reviewed when it approved.",
+                        },
+                        approved_by: { type: ["string", "null"] },
+                        approved_at: { type: "string", format: "date-time" },
+                      },
+                      additionalProperties: false,
+                    },
+                  },
+                  blocks: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["tool_name", "blocked_by", "blocked_at"],
+                      properties: {
+                        tool_name: { type: "string" },
+                        blocked_by: { type: ["string", "null"] },
+                        blocked_at: { type: "string", format: "date-time" },
+                      },
+                      additionalProperties: false,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/tool-policy/approvals": {
+    post: {
+      operationId: "approveIntegrationTools",
+      tags: ["Integrations"],
+      summary: "Approve the current definition of undeclared tools in the space",
+      description:
+        "Approves each `{ name, fingerprint }` as the server last listed it, for an undeclared tool of the integration. Another fingerprint already approved for the same tool stays approved. Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.approved`, one event per tool newly approved. Rate limited to 30 requests per minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["tools"],
+              properties: {
+                tools: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 100,
+                  items: {
+                    type: "object",
+                    required: ["name", "fingerprint"],
+                    properties: {
+                      name: { type: "string", minLength: 1, maxLength: 128 },
+                      fingerprint: {
+                        type: "string",
+                        pattern: "^[0-9a-f]{64}$",
+                        description:
+                          "A SHA-256 tool definition fingerprint, as the tool policy lists it.",
+                      },
+                    },
+                    additionalProperties: false,
+                  },
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "204": { description: "Approved", headers: STD_RESPONSE_HEADERS },
+        "400": {
+          description: "`validation_failed` — the body is invalid.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "403": dashboardSessionRequired,
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again; `tool_definition_unavailable` — the listed definition of the named tools (`tools`) was too large to keep, so it cannot be reviewed nor approved; `tool_approvals_limit` — the named tools (`tools`) would exceed 32 approved definitions. Refusals by the manifest's state: `tool_already_declared` — the manifest declares the named tools (`tools`): a declared tool needs no approval; `tool_catalog_open` — the integration allows undeclared tools (none needs an approval; `tools` names the request's tools); `tool_hidden` — the named tools (`tools`) are ones the platform hides (`hidden_tools`, the connect tool).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/tool-policy/approvals/{toolName}": {
+    delete: {
+      operationId: "revokeIntegrationToolApproval",
+      tags: ["Integrations"],
+      summary: "Withdraw every approval of a tool in the space",
+      description:
+        "Removes all approved fingerprints of the tool in this space. Answers 204 whether or not there was one. Audited as `integration.tool.approval_revoked`, one event per approval removed (tool and fingerprint). Requires `integrations:configure` and a dashboard session. Rate limited to 30 requests per minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+        toolNameParam,
+      ],
+      responses: {
+        "204": { description: "No approval of the tool remains", headers: STD_RESPONSE_HEADERS },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": dashboardSessionRequired,
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/tool-policy/blocks": {
+    post: {
+      operationId: "blockIntegrationTools",
+      tags: ["Integrations"],
+      summary: "Block tools of the integration in the space",
+      description:
+        "Blocks the named tools, declared or not: a blocked tool is neither offered nor callable in this space. Already blocked names are ignored. Blocking an `api_call` tool also removes its `api_upload` companion; blocking an `api_upload` tool alone leaves the `api_call` and refuses an upload (a streamed request) through the credential proxy as it does in runs. A space blocks at most 500 tools per integration (`409 tool_blocks_limit`). Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.blocked`, one event per tool newly blocked. Rate limited to 30 requests per minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["tools"],
+              properties: {
+                tools: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 100,
+                  items: { type: "string", minLength: 1, maxLength: 128 },
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "204": { description: "Blocked", headers: STD_RESPONSE_HEADERS },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": dashboardSessionRequired,
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`tool_blocks_limit` — the space would block more than 500 tools of this integration (`tools` names the ones it would add): lift a block first.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/tool-policy/blocks/{toolName}": {
+    delete: {
+      operationId: "unblockIntegrationTool",
+      tags: ["Integrations"],
+      summary: "Lift the block on a tool in the space",
+      description:
+        "Answers 204 whether or not the tool was blocked (the audit event `integration.tool.unblocked` is recorded only when a block was lifted). Requires `integrations:configure` and a dashboard session. Rate limited to 30 requests per minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+        toolNameParam,
+      ],
+      responses: {
+        "204": { description: "The tool is not blocked", headers: STD_RESPONSE_HEADERS },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": dashboardSessionRequired,
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

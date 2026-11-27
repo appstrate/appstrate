@@ -12,6 +12,7 @@ import { API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME } from "@appstrate/core/integr
 import {
   isApiCallToolSelectionEnabled,
   replaceNativeToolSelection,
+  selectableNativeToolNames,
   toggleApiCallToolSelection,
 } from "../tool-selection.ts";
 
@@ -138,5 +139,25 @@ describe("toggleApiCallToolSelection", () => {
     expect(replaceNativeToolSelection(selection, native, visibleSynthetic, false)).toEqual([
       API_CALL_TOOL_NAME,
     ]);
+  });
+});
+
+describe("selectableNativeToolNames", () => {
+  const catalog = [
+    { name: "ok", status: "available" as const },
+    { name: "plain" },
+    { name: "gone", status: "missing" as const },
+    { name: "new", status: "pending" as const },
+    { name: "no", status: "blocked" as const },
+  ];
+
+  it("leaves a missing, pending or blocked tool out of « select all »", () => {
+    const names = selectableNativeToolNames(catalog, new Set());
+    expect(names).toEqual(["ok", "plain"]);
+    expect(replaceNativeToolSelection([], names, new Set(), true)).toEqual(["ok", "plain"]);
+  });
+
+  it("keeps an already selected unusable tool, which stays toggleable", () => {
+    expect(selectableNativeToolNames(catalog, new Set(["gone"]))).toEqual(["ok", "plain", "gone"]);
   });
 });

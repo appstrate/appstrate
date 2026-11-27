@@ -81,6 +81,15 @@ export const integrationConnections = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
+    /**
+     * Scopes a server asked for (RFC 6750 `insufficient_scope`) that `scopes_granted` does not hold:
+     * the step-up demand the dashboard offers to grant. Bounded, valid scope tokens only; cleared
+     * by the credential write that grants them (`persistCredentialBundle`).
+     */
+    requestedScopes: text("requested_scopes")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
     // Which OAuth client minted this connection — a flat client id: the env id
     // of a system client (SYSTEM_INTEGRATIONS), the `integration_oauth_clients.id`

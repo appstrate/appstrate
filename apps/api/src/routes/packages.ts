@@ -212,12 +212,15 @@ function manifestErrorsToFieldErrors(result: {
  */
 async function assertAgentIntegrationScopesValid(
   manifest: Record<string, unknown>,
-  orgId: string,
+  c: Context<AppEnv>,
+  homeSpaceId: string | null | undefined,
   requireCallableTools = false,
 ): Promise<void> {
   const scopeErrors = await validateAgentIntegrationSelections({
     manifest,
-    orgId,
+    orgId: c.get("orgId"),
+    // The package's home space, else the request's.
+    toolPolicySpaceId: homeSpaceId ?? c.get("spaceId"),
     requireCallableTools,
   });
   if (scopeErrors.length > 0) {
@@ -255,7 +258,15 @@ async function validateManifestForRoute(
   expectedType: PackageType,
   c: Context<AppEnv>,
   direction: "author" | "stored",
-  opts: { requireCallableTools?: boolean; previous?: Record<string, unknown> } = {},
+  opts: {
+    requireCallableTools?: boolean;
+    previous?: Record<string, unknown>;
+    /**
+     * The space whose approved tools the selection is judged against: an existing package's home,
+     * the space that governs its edits. Absent (a new package), the request's own.
+     */
+    homeSpaceId?: string | null;
+  } = {},
 ): Promise<Record<string, unknown> & { name: string }> {
   const result = validateManifest(
     manifest,
@@ -286,7 +297,12 @@ async function validateManifestForRoute(
     assertManifestConforms(expectedType, validated);
     await assertPackageDependenciesAccessible(c, validated, opts.previous);
   }
-  await assertAgentIntegrationScopesValid(validated, c.get("orgId"), opts.requireCallableTools);
+  await assertAgentIntegrationScopesValid(
+    validated,
+    c,
+    opts.homeSpaceId,
+    opts.requireCallableTools,
+  );
   return validated;
 }
 
@@ -450,6 +466,7 @@ export const shareTargetSchema = z
 async function createVersionSafe(params: {
   packageId: string;
   orgId: string;
+  spaceId: string;
   userId: string;
   manifest: Record<string, unknown>;
   normalizedFiles: Record<string, Uint8Array>;
@@ -465,6 +482,7 @@ async function createVersionSafe(params: {
   const gateErrors = await validateAgentIntegrationSelections({
     manifest: params.manifest,
     orgId: params.orgId,
+    toolPolicySpaceId: params.spaceId,
     requireCallableTools: true,
   });
   if (gateErrors.length > 0) {
@@ -699,6 +717,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       ? await createVersionSafe({
           packageId,
           orgId,
+          spaceId: c.get("spaceId"),
           userId: user.id,
           manifest,
           normalizedFiles: draft.files,
@@ -951,7 +970,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       rcfg.cfg.type,
       c,
       authoredManifest ? "author" : "stored",
-      { previous: asRecord(existing.manifest) },
+      { previous: asRecord(existing.manifest), homeSpaceId: existing.homeSpaceId },
     );
     const manifestText = JSON.stringify(validatedManifest, null, 2);
 
@@ -1177,7 +1196,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${rcfg.cfg.labelSingular} '${itemId}' is a system package`);
     }
 
-    await loadOrgItemOr404(rcfg, orgId, itemId);
+    const existing = await loadOrgItemOr404(rcfg, orgId, itemId);
 
     // Parse optional version override from request body. The body itself is
     // optional (OpenAPI `requestBody.required: false` — the SPA omits it
@@ -1202,6 +1221,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       validateManifest: (manifest, type) =>
         validateManifestForRoute(manifest, type, c, "stored", {
           requireCallableTools: true,
+          homeSpaceId: existing.homeSpaceId,
         }),
     });
 
@@ -2417,8 +2437,12 @@ export function createPackagesRouter() {
 
     // Check for existing user package
     const existing = await getPackageById(packageId);
+    // Another org's package never informs a judgment below: refused before any of them.
+    if (existing && existing.orgId !== orgId) {
+      throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);
+    }
 
-    if (existing?.orgId === orgId) {
+    if (existing) {
       await assertPackageMutationAccess(c, packageId, "write");
       await assertExistingPackageActivationAccess(c, packageId, existing.type);
     }
@@ -2427,11 +2451,13 @@ export function createPackagesRouter() {
       asRecord(manifest),
       asRecord(existing?.draftManifest),
     );
-    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
+    await assertAgentIntegrationScopesValid(
+      manifest as Record<string, unknown>,
+      c,
+      existing?.homeSpaceId,
+      true,
+    );
     if (existing) {
-      if (existing.orgId !== orgId) {
-        throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);
-      }
       if (existing.type !== packageType) {
         throw new ApiError({
           status: 400,

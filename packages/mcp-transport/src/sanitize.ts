@@ -162,6 +162,15 @@ function sanitiseSchemaDescriptions(schema: unknown, depth = 0): unknown {
   return out;
 }
 
+/** A first-party capability marker: stripped from an untrusted descriptor, never part of its fingerprint. */
+export function isToolMarkerMetaKey(key: string): boolean {
+  return (
+    key === API_CALL_TOOL_META_KEY ||
+    key === API_UPLOAD_TOOL_META_KEY ||
+    key === TOOL_INTEGRATION_META_KEY
+  );
+}
+
 /**
  * Strip first-party capability markers from an untrusted tool descriptor while
  * preserving every unrelated metadata entry. The runtime treats these markers
@@ -176,14 +185,7 @@ function sanitiseToolMeta(meta: Tool["_meta"]): Tool["_meta"] | undefined {
   if (!meta) return undefined;
   const out: NonNullable<Tool["_meta"]> = {};
   for (const [key, value] of Object.entries(meta)) {
-    if (
-      key === API_CALL_TOOL_META_KEY ||
-      key === API_UPLOAD_TOOL_META_KEY ||
-      key === TOOL_INTEGRATION_META_KEY
-    ) {
-      continue;
-    }
-    out[key] = value;
+    if (!isToolMarkerMetaKey(key)) out[key] = value;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }

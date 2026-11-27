@@ -47,6 +47,7 @@ import {
 } from "@appstrate/afps-runtime/resolvers";
 import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 import type { HostResolver } from "@appstrate/core/ssrf";
+import { targetsMcpEndpoint, type McpEndpoint } from "@appstrate/core/mcp-endpoint";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
@@ -61,7 +62,13 @@ import {
   type ProxyCallPath,
 } from "./integration-resolver.ts";
 import type { CredentialStatus } from "../../lib/credential-status-header.ts";
-import { clearUpstreamRejections, type ConnectionNaming } from "../integration-connections.ts";
+import { remoteMcpEndpointNotProxied } from "../integration-tool-catalog.ts";
+import {
+  clearUpstreamRejections,
+  recordRequestedScopes,
+  type ConnectionNaming,
+} from "../integration-connections.ts";
+import { requiredScopesFromChallenge } from "@appstrate/core/www-authenticate";
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
@@ -92,6 +99,10 @@ type ProxyCallInput = {
   connectionId?: string;
   /** How the caller names `connectionId`; the header when omitted. */
   connectionNaming?: ConnectionNaming;
+  /** The call is the remote MCP transport itself; what that changes is on `ResolveIntegrationProxyInput` (`integration-resolver.ts`). */
+  mcpTransport?: true;
+  /** A streamed upload (the `api_upload` door), as `ResolveIntegrationProxyInput` documents it. */
+  upload?: true;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
   integrationId: string;
@@ -237,6 +248,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     actor: input.actor,
     ...(input.connectionId ? { connectionId: input.connectionId } : {}),
     ...(input.connectionNaming ? { connectionNaming: input.connectionNaming } : {}),
+    ...(input.mcpTransport ? { mcpTransport: true as const } : {}),
+    ...(input.upload ? { upload: true as const } : {}),
     ...(input.run
       ? { run: input.run }
       : { reach: input.reach, ...(input.version ? { version: input.version } : {}) }),
@@ -248,6 +261,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   let connectionId: string;
   let credentialRevision: string;
   let rejectionStreak: number;
+  let remoteMcp: McpEndpoint | null;
   try {
     const result = await resolveIntegrationProxyCredentials(selection);
     resolved = result.payload;
@@ -255,6 +269,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     connectionId = result.connectionId;
     credentialRevision = result.credentialRevision;
     rejectionStreak = result.rejectionStreak;
+    remoteMcp = result.remoteMcp;
     refreshSelection = { ...selection, connectionId };
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
@@ -280,6 +295,9 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     throw new ProxyCallError(kind === "unresolved_placeholder" ? kind : "invalid_request", message);
   }
   const { url: target, templates } = prepared.request;
+  if (remoteMcp !== null && targetsMcpEndpoint(target, remoteMcp)) {
+    throw remoteMcpEndpointNotProxied(input.integrationId);
+  }
 
   const authorizedUris = resolved.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
@@ -373,6 +391,16 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         // The platform's network is not the manifest author's to declare: a literal
         // `authorized_uris` host skips the SSRF gate only when `EGRESS_ALLOW_INTERNAL_HOSTS` lists it.
         internalHost: isAllowedInternalIdpHost,
+        // The MCP endpoint is refused on every hop, not only the first target: a redirect from an
+        // allowlisted URL onto it would otherwise reach the server without the tool policy.
+        ...(remoteMcp !== null
+          ? {
+              refusedTarget: {
+                matches: (url: URL) => targetsMcpEndpoint(url, remoteMcp),
+                message: remoteMcpEndpointNotProxied(input.integrationId).message,
+              },
+            }
+          : {}),
         ...(cookies ? { cookies } : {}),
         integrationId: input.integrationId,
         ...(input.fetch ? { fetchFn: input.fetch } : {}),
@@ -485,6 +513,25 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         error: getErrorMessage(err),
       }),
     );
+  }
+
+  // A 403 `insufficient_scope` naming scopes: the connection's demand, offered to its owner.
+  if (res.status === 403 && credentialInjection.kind === "inject" && credentialForwarded) {
+    const asked = requiredScopesFromChallenge(res.status, res.headers.get("www-authenticate"));
+    if (asked) {
+      recordRequestedScopes(
+        connectionId,
+        input.integrationId,
+        selection,
+        asked,
+        input.run ? { orgId: input.orgId, id: input.run.id } : undefined,
+      ).catch((err: unknown) =>
+        logger.warn("credential-proxy: could not record the scopes the server asked for", {
+          connectionId,
+          error: getErrorMessage(err),
+        }),
+      );
+    }
   }
 
   // Streaming body on 401: credentials may be stale. Force-refresh them

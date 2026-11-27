@@ -16,6 +16,7 @@ import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { IntegrationOverview } from "../components/package-detail/integration-overview";
 import { IntegrationFunctioning } from "../components/package-detail/integration-structure";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
+import type { ToolPolicyAccess } from "../components/integration-editor/integration-tool-policy-section";
 
 const INTEGRATION_TABS = ["overview", "connections", "settings"] as const;
 import { useTranslation } from "react-i18next";
@@ -67,14 +68,15 @@ import { IntegrationActivateButton } from "../components/integration-detail/inte
 import { ConfigurationSpace } from "../components/configuration-space";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
+import { toolSnapshot } from "../lib/integration-tool-snapshot";
 import { readIntegrationSource } from "../lib/package-manifest";
+import { serverReadAvailability } from "../lib/integration-server-sync";
+import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import {
   INTEGRATION_DEFINITION_SECTIONS,
   isIntegrationSpaceSection,
   resolveIntegrationSettingsSection,
 } from "../lib/integration-settings-sections";
-import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
-import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
 import { useIntegrationDetail, useIntegrationDetailsIn } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
@@ -125,6 +127,7 @@ export function IntegrationSettings({
   configureIn,
   definition,
   isOwned,
+  published,
   versionGrants,
 }: {
   packageId: string;
@@ -141,6 +144,8 @@ export function IntegrationSettings({
   definition?: Versioned<OrgPackageItemDetail>;
   /** A system integration has no version history of its own. */
   isOwned: boolean;
+  /** A version is published: the server's tools are read from the latest one. */
+  published: boolean;
   /** What the version history may do: restore needs the home space's write, delete its delete. */
   versionGrants: { canRestore: boolean; canDelete: boolean };
 }) {
@@ -164,18 +169,57 @@ export function IntegrationSettings({
     if (clientTarget !== null && !hasClientTable) closeClient();
   }, [clientTarget, hasClientTable, closeClient]);
 
-  // The sync calls the server of the DRAFT, published or not: the copy this editor writes.
-  const draftSource = definition
-    ? readIntegrationSource((definition.manifest as Record<string, unknown>).source)
-    : null;
-  const syncable =
-    draftSource?.kind === "remote" &&
-    draftSource.transport !== "sse" &&
-    !isVariableTemplate(draftSource.url) &&
-    // A draft declaring no auths (AFPS §7.2) is read without the credential proxy nor a connection.
-    (isUnauthenticatedIntegration(definition?.manifest ?? {}) ||
-      (can("credential-proxy:call-own") &&
-        detail.auths.some((auth) => auth.connections.length > 0)));
+  // The identity read calls the server of the DRAFT, published or not: the copy this editor writes.
+  // A reader without the draft reads the saved one. The tool listing is read from the latest
+  // PUBLISHED version: its availability follows the published manifest.
+  const readAvailability = (
+    manifest: NonNullable<NonNullable<typeof definition>["manifest"] | typeof detail.manifest>,
+  ) =>
+    serverReadAvailability(readIntegrationSource(manifest.source), {
+      unauthenticated: isUnauthenticatedIntegration(manifest),
+      mayProxy: can("credential-proxy:call-own"),
+      hasConnection: detail.auths.some((auth) => auth.connections.length > 0),
+    });
+  const serverRead = readAvailability(definition?.manifest ?? detail.manifest);
+  const snapshot = toolSnapshot(detail, readAvailability(detail.manifest), published);
+  // The space this configuration is set in, and why its decisions may be out of reach.
+  const spaceBanner = (showSpace: boolean, spaceLine: boolean) => (
+    <>
+      {showSpace && (
+        <ConfigurationSpace
+          label={t("detail.configuration.spaceLabel", { ns: "agents" })}
+          choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
+          spaceIds={spaceIds}
+          enter={configureIn}
+        />
+      )}
+      {spaceLine &&
+        (!detail.active ? (
+          <ActivationHint />
+        ) : (
+          overview &&
+          !can("integrations:configure") &&
+          workingSpace && (
+            <RoleLimitNotice>
+              {t("integration.config.roleLimitIn", { space: workingSpace })}
+            </RoleLimitNotice>
+          )
+        ))}
+    </>
+  );
+  // Only a remote integration lists tools a space can review. The review is one space's: it
+  // follows the sections set in a space (`isIntegrationSpaceSection`) in « Tous les espaces ».
+  // An author of the draft reads it too, to declare the listed tools.
+  // The decisions are the working space's; declaring is the integration's, whatever the space.
+  const spaceLine = canConfigure && fromWorkingSpace;
+  const toolPolicy: ToolPolicyAccess | undefined =
+    snapshot && (canConfigure || !!definition)
+      ? {
+          packageId,
+          review: spaceLine && detail.active && can("integrations:configure"),
+          banner: spaceBanner(canConfigure && overview, spaceLine),
+        }
+      : undefined;
   const resolve = (requested: string | null): IntegrationSettingsSection =>
     resolveIntegrationSettingsSection(requested, {
       canConfigure,
@@ -185,8 +229,8 @@ export function IntegrationSettings({
   const steps = detail.manifest.setup_guide?.steps ?? [];
   // Same order as an agent's: Explorer (see it: files, versions), then
   // what is set here, then the AFPS package, what the integration IS for every
-  // space, edited in place when the reader may. The tool catalogue belongs to
-  // the package: nothing about it is set per organization or per space.
+  // space, edited in place when the reader may. The tool catalogue is the package's; what a
+  // server exposes is read per connection and kept as a snapshot.
   const item = (
     id: IntegrationSettingsSection,
     icon: SectionRailItem["icon"],
@@ -250,7 +294,9 @@ export function IntegrationSettings({
               detail={definition}
               section={definitionSection}
               toolCatalog={detail.tool_catalog ?? []}
-              canSync={syncable}
+              snapshot={snapshot}
+              serverRead={serverRead}
+              toolPolicy={toolPolicy}
             />
           </Suspense>
         ) : isPackageCommonSection(active) ? (
@@ -275,31 +321,19 @@ export function IntegrationSettings({
               description={t("integrationEditor.description.tools", { ns: "agents" })}
             />
             <IntegrationToolsSection
+              packageId={packageId}
               tools={detail.tool_catalog ?? []}
               allowUndeclaredTools={detail.allow_undeclared_tools}
+              snapshot={snapshot}
+              spacePolicy={toolPolicy}
             />
           </div>
         ) : isIntegrationSpaceSection(active) ? (
           // In « Tous les espaces » the space it is set in comes first.
           <div className="p-6">
-            {overview && (
-              <ConfigurationSpace
-                label={t("detail.configuration.spaceLabel", { ns: "agents" })}
-                choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
-                spaceIds={spaceIds}
-                enter={configureIn}
-              />
-            )}
+            {spaceBanner(overview, fromWorkingSpace)}
             {/* In the mode, the section is the working space's only when the line names it. */}
-            {!fromWorkingSpace ? null : !detail.active ? (
-              <ActivationHint />
-            ) : overview && !can("integrations:configure") ? (
-              workingSpace && (
-                <RoleLimitNotice>
-                  {t("integration.config.roleLimitIn", { space: workingSpace })}
-                </RoleLimitNotice>
-              )
-            ) : (
+            {fromWorkingSpace && detail.active && !(overview && !can("integrations:configure")) && (
               <>
                 <SettingsHeading
                   title={t(SPACE_SECTION_HEADINGS[active].title)}
@@ -539,6 +573,8 @@ export function IntegrationDetailPage() {
 
       {needsWizardFinish({
         manifest: m,
+        // Unread, a package is not yet known to be unpublished.
+        published: pkgLoading || (pkg?.version_count ?? 0) > 0,
         homeWritable: !!homeWritable,
         canOpenWizard: canReach("/integrations/new/mcp"),
       }) && (
@@ -609,6 +645,7 @@ export function IntegrationDetailPage() {
             // Write authority is the package's HOME space, never the space being browsed.
             definition={homeWritable && pkg ? pkg : undefined}
             isOwned={isOwned}
+            published={(pkg?.version_count ?? 0) > 0}
             versionGrants={{
               canRestore: isOwned && !!homeWritable,
               canDelete: isOwned && !!homeDeletable,

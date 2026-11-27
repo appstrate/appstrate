@@ -250,6 +250,8 @@ for (const runsAs of ["colleague", "viewer"] as const) {
             kind: "remote",
             remote: { url: "https://example.invalid/mcp", transport: "streamable-http" },
           },
+          // A remote catalog is closed: the agent can only select a declared tool.
+          tools_policy: { ping: {} },
         },
       },
       { "If-Match": detail.headers()["etag"]! },
@@ -267,7 +269,7 @@ for (const runsAs of ["colleague", "viewer"] as const) {
         display_name: "Scheduled",
         description: "Schedule test",
         dependencies: { integrations: { [integration]: "^2.0.0" } },
-        integrations_configuration: { [integration]: { tools: ["*"] } },
+        integrations_configuration: { [integration]: { tools: ["ping"] } },
       },
       content: "Use the selected connection.",
     });

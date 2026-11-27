@@ -47,15 +47,35 @@ const DETAIL = {
 } as unknown as IntegrationDetailWire;
 
 /** The page's wiring: the configuration space is the page's, handed down. */
-function Settings({ spaceIds, active }: { spaceIds: string[]; active: boolean }) {
+function Settings({
+  spaceIds,
+  active,
+  remote = false,
+}: {
+  spaceIds: string[];
+  active: boolean;
+  remote?: boolean;
+}) {
   const configureIn = useIntegrationSpaceAction("@acme/crm", "integrations:configure", spaceIds);
   return (
     <IntegrationSettings
       packageId="@acme/crm"
-      detail={{ ...DETAIL, active }}
+      detail={{
+        ...DETAIL,
+        active,
+        manifest: (remote
+          ? {
+              source: {
+                kind: "remote",
+                remote: { url: "https://mcp.acme.test", transport: "streamable-http" },
+              },
+            }
+          : {}) as typeof DETAIL.manifest,
+      }}
       blockUserConnections={false}
       spaceIds={spaceIds}
       configureIn={configureIn}
+      published
       isOwned={false}
       versionGrants={{ canRestore: false, canDelete: false }}
     />
@@ -129,5 +149,72 @@ describe("an integration's configuration with a space selected", () => {
     expect(html).toContain(HINT);
     expect(html).toContain(settingsT("integrations.activate.hint").replace(/'/g, "&#x27;"));
     expect(html).not.toContain(ACTIVATE);
+  });
+});
+
+// The tool review is one space's, like the sections of the Configuration group: it follows the
+// same lines and never reads or writes a space the page does not name.
+describe("an integration's tool review", () => {
+  const POLICY = 'data-testid="integration-tool-policy"';
+  const REVIEW = 'data-testid="tool-review"';
+  const POLICY_KEY = [
+    "get",
+    "/api/integrations/{packageId}/tool-policy",
+    {
+      params: {
+        path: { packageId: "@acme/crm" },
+        header: { "X-Org-Id": "org_1", "X-Space-Id": "spc_a" },
+      },
+    },
+  ];
+
+  function tools(
+    overview: boolean,
+    workingGrants: string[],
+    spaceIds = ["spc_a", "spc_b"],
+    active = true,
+  ) {
+    const queryClient = memberSpaceClient([
+      testSpace("spc_a", ["integrations:read", ...workingGrants], "Studio"),
+      testSpace("spc_b", ["integrations:read", "integrations:configure"], "Coffre"),
+    ]);
+    queryClient.setQueryData(POLICY_KEY, { listed: [], approvals: [], blocks: [] });
+    return renderInSpace(<Settings spaceIds={spaceIds} active={active} remote />, {
+      overview,
+      queryClient,
+      initialEntries: ["/integrations/@acme/crm?integrationSettings=tools#settings"],
+    });
+  }
+
+  it("names the space it is set in, in « Tous les espaces »", () => {
+    const html = tools(true, ["integrations:configure"]);
+    expect(html).toContain(SPACE_LINE);
+    expect(html).toContain(REVIEW);
+  });
+
+  it("reads nothing of the working space it is off in", () => {
+    const html = tools(true, ["integrations:configure"], ["spc_b"]);
+    expect(html).toContain(SPACE_LINE);
+    expect(html).not.toContain(REVIEW);
+  });
+
+  it("points at « Activer » while the integration is off, and says what the role refuses", () => {
+    expect(tools(false, ["integrations:configure"], ["spc_b"], false)).toContain(HINT);
+    const refused = tools(true, []);
+    expect(refused).toContain(
+      settingsT("integration.config.roleLimitIn", { space: "Studio" }).replace(/'/g, "&#x27;"),
+    );
+    expect(refused).not.toContain(REVIEW);
+  });
+
+  it("is absent where no space of the integration offers configuring it", () => {
+    expect(tools(true, [], ["spc_a"])).not.toContain(POLICY);
+    expect(tools(false, [])).not.toContain(POLICY);
+  });
+
+  it("shows plainly with a space selected", () => {
+    const html = tools(false, ["integrations:configure"]);
+    expect(html).toContain(REVIEW);
+    expect(html).not.toContain(SPACE_LINE);
   });
 });

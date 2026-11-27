@@ -3,138 +3,24 @@
 import { describe, expect, it } from "bun:test";
 import { ApiError } from "../../api/errors.ts";
 import {
-  mergeServerSync,
-  serverSyncBody,
-  syncConnectionCandidates,
-  type ServerSyncProposal,
+  mergeServerIdentity,
+  serverReadAvailability,
+  connectionChoiceBody,
+  stageServerDoc,
+  connectionChoiceCandidates,
 } from "../integration-server-sync.ts";
 
-describe("mergeServerSync", () => {
-  const remote = { kind: "remote", remote: { url: "https://x.test/mcp" } };
-  const sync = (
-    manifest: Record<string, unknown>,
-    warnings: { code: string; message: string }[] = [],
-  ) => ({ manifest, warnings }) as unknown as Pick<ServerSyncProposal, "manifest" | "warnings">;
-  /** The server's answer: every listed tool in `tools_policy`, the read-only ones in `default_tools`. */
-  const listing = (names: string[], readOnly: string[] = names) => ({
-    default_tools: readOnly,
-    tools_policy: Object.fromEntries(names.map((name) => [name, {}])),
-  });
-
-  it("keeps the policy of tools still listed, adds new ones and drops the others", () => {
-    const current = {
-      source: remote,
-      tools_policy: {
-        a: { required_scopes: { oauth: ["x"] } },
-        gone: { required_scopes: { oauth: ["y"] } },
-      },
-    };
-    const manifest = mergeServerSync(current, sync(listing(["a", "b"])));
-    expect(manifest.tools_policy).toEqual({ a: { required_scopes: { oauth: ["x"] } }, b: {} });
-  });
-
-  it("keeps the draft's tools_policy order so an unchanged server reads as no edit", () => {
-    const current = { source: remote, tools_policy: { ping: {}, stats: {}, search: {} } };
-    const manifest = mergeServerSync(current, sync(listing(["search", "ping", "stats"])));
-    expect(JSON.stringify(manifest.tools_policy)).toBe(JSON.stringify(current.tools_policy));
-  });
-
-  it("appends new tools after the draft's order and drops unlisted ones in place", () => {
-    const current = { source: remote, tools_policy: { ping: {}, gone: {}, search: {} } };
-    const manifest = mergeServerSync(current, sync(listing(["fresh", "search", "ping"])));
-    expect(Object.keys(manifest.tools_policy as object)).toEqual(["ping", "search", "fresh"]);
-  });
-
-  it("drops no policy entry when the server's list was truncated", () => {
-    const current = { source: remote, tools_policy: { kept: { required_scopes: { o: ["s"] } } } };
-    const manifest = mergeServerSync(
-      current,
-      sync(listing(["a"]), [{ code: "tools_truncated", message: "en" }]),
-    );
-    expect(manifest.tools_policy).toEqual({ kept: { required_scopes: { o: ["s"] } }, a: {} });
-  });
-
-  it("fills an absent default_tools with the exposed tools only", () => {
-    const current = {
-      source: remote,
-      hidden_tools: ["secret"],
-      auths: { primary: { type: "api_key", connect: { tool: { name: "login" } } } },
-    };
-    const listed = sync(listing(["a", "secret", "login"]));
-    expect(mergeServerSync(current, listed).default_tools).toEqual(["a"]);
-  });
-
-  it("declares every listed tool but pre-selects only the read-only ones", () => {
-    const manifest = mergeServerSync(
-      { source: remote },
-      sync(listing(["read", "delete"], ["read"])),
-    );
-    expect(manifest.tools_policy).toEqual({ read: {}, delete: {} });
-    expect(manifest.default_tools).toEqual(["read"]);
-  });
-
-  it("keeps an explicitly empty default_tools", () => {
-    const current = {
-      source: remote,
-      default_tools: [],
-      tools_policy: { read: {}, delete: {} },
-    };
-    const proposed = sync(listing(["read", "delete"]));
-    expect(mergeServerSync(current, proposed).default_tools).toEqual([]);
-  });
-
-  it("never adds to the author's default_tools, only removes tools no longer exposed", () => {
-    const current = { source: remote, default_tools: ["a", "gone"], tools_policy: { a: {} } };
-    const manifest = mergeServerSync(current, sync(listing(["a", "b"])));
-    expect(manifest.default_tools).toEqual(["a"]);
-  });
-
-  it("keeps a wildcard default_tools", () => {
-    const current = { source: remote, default_tools: "*" };
-    expect(mergeServerSync(current, sync(listing(["a"]))).default_tools).toBe("*");
-  });
-
-  it("handles a tool named like an Object.prototype member", () => {
-    const manifest = mergeServerSync(
-      { source: remote, tools_policy: {} },
-      sync(listing(["constructor", "toString"])),
-    );
-    expect(manifest.tools_policy).toEqual({ constructor: {}, toString: {} });
-    expect(manifest.default_tools).toEqual(["constructor", "toString"]);
-  });
-
-  it("fills identity only when empty", () => {
-    const proposed = {
-      ...listing([]),
-      display_name: "Theirs",
-      description: "Server",
-      homepage: "https://x.test",
-    };
-    const manifest = mergeServerSync({ display_name: "Mine", description: "" }, sync(proposed));
-    expect(manifest.display_name).toBe("Mine");
-    expect(manifest.description).toBe("Server");
-    expect(manifest.homepage).toBe("https://x.test");
-  });
-
-  it("does not mutate the current manifest", () => {
-    const current = { source: remote, default_tools: ["a"], tools_policy: { a: {} } };
-    const copy = structuredClone(current);
-    mergeServerSync(current, sync(listing(["b"])));
-    expect(current).toEqual(copy);
-  });
-});
-
-describe("serverSyncBody", () => {
+describe("connectionChoiceBody", () => {
   it("lets the proxy apply governance and choose on the initial request", () => {
-    expect(serverSyncBody()).toEqual({});
+    expect(connectionChoiceBody()).toEqual({});
   });
 
   it("names only a connection the caller explicitly selected", () => {
-    expect(serverSyncBody("chosen")).toEqual({ connection_id: "chosen" });
+    expect(connectionChoiceBody("chosen")).toEqual({ connection_id: "chosen" });
   });
 });
 
-describe("sync connection choice", () => {
+describe("connection choice", () => {
   const candidate = {
     id: "conn_b",
     label: "Notion",
@@ -150,8 +36,97 @@ describe("sync connection choice", () => {
     ]);
 
   it("reads the candidates of a must_choose_connection refusal", () => {
-    expect(syncConnectionCandidates(refusal("must_choose_connection"))).toEqual([candidate]);
-    expect(syncConnectionCandidates(refusal("needs_reconnection"))).toBeNull();
-    expect(syncConnectionCandidates(new Error("x"))).toBeNull();
+    expect(connectionChoiceCandidates(refusal("must_choose_connection"))).toEqual([candidate]);
+    expect(connectionChoiceCandidates(refusal("needs_reconnection"))).toBeNull();
+    expect(connectionChoiceCandidates(new Error("x"))).toBeNull();
+  });
+});
+
+describe("mergeServerIdentity", () => {
+  it("fills only the empty identity fields and reports them", () => {
+    const { manifest, filled } = mergeServerIdentity(
+      { display_name: "Mine", description: "", keywords: [] },
+      {
+        display_name: "Server",
+        description: "From server",
+        homepage: "https://x.test",
+        icon: "data:",
+      },
+    );
+    expect(manifest).toMatchObject({
+      display_name: "Mine",
+      description: "From server",
+      homepage: "https://x.test",
+      icon: "data:",
+    });
+    expect(filled).toEqual(["description", "homepage", "icon"]);
+  });
+
+  it("never overwrites an authored field and reports nothing when all are set", () => {
+    const current = { display_name: "A", description: "B", homepage: "C", icon: "D" };
+    const { manifest, filled } = mergeServerIdentity(current, {
+      display_name: "x",
+      description: "y",
+      homepage: "z",
+      icon: "w",
+    });
+    expect(manifest).toEqual(current);
+    expect(filled).toEqual([]);
+  });
+
+  it("skips what the server does not propose", () => {
+    expect(mergeServerIdentity({}, { display_name: "S" }).filled).toEqual(["display_name"]);
+  });
+});
+
+describe("serverReadAvailability", () => {
+  const ok = { unauthenticated: false, mayProxy: true, hasConnection: true };
+  const remote = { kind: "remote", transport: "streamable-http" };
+
+  it("is null for a source that is not remote", () => {
+    expect(serverReadAvailability({ kind: "local" }, ok)).toBeNull();
+    expect(serverReadAvailability(undefined, ok)).toBeNull();
+  });
+
+  it("blocks SSE whatever the access", () => {
+    expect(serverReadAvailability({ kind: "remote", transport: "sse" }, ok)).toBe("sse");
+  });
+
+  it("needs no proxy right nor connection when the draft declares no auths", () => {
+    expect(
+      serverReadAvailability(remote, {
+        unauthenticated: true,
+        mayProxy: false,
+        hasConnection: false,
+      }),
+    ).toBe("available");
+  });
+
+  it("blocks without the proxy right, then without a connection", () => {
+    expect(serverReadAvailability(remote, { ...ok, mayProxy: false })).toBe("no_permission");
+    expect(serverReadAvailability(remote, { ...ok, hasConnection: false })).toBe("no_connection");
+    expect(serverReadAvailability(remote, ok)).toBe("available");
+  });
+});
+
+describe("stageServerDoc", () => {
+  const write = { op: "write" as const, path: "INTEGRATION.md", text: "mine" };
+
+  it("stages the server's instructions as INTEGRATION.md", () => {
+    expect(stageServerDoc(undefined, "Be kind")).toEqual([
+      { op: "write", path: "INTEGRATION.md", text: "Be kind" },
+    ]);
+    const other = { op: "delete" as const, path: "a.md" };
+    expect(stageServerDoc([other], "Be kind")).toEqual([
+      other,
+      { op: "write", path: "INTEGRATION.md", text: "Be kind" },
+    ]);
+  });
+
+  it("leaves the staged operations alone without instructions or over a staged write", () => {
+    const ops = [write];
+    expect(stageServerDoc(ops, null)).toBe(ops);
+    expect(stageServerDoc(ops, "Be kind")).toBe(ops);
+    expect(stageServerDoc(undefined, "")).toBeUndefined();
   });
 });

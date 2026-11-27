@@ -63,6 +63,7 @@ async function seedConnection(
       ...actor,
       credentialsEncrypted: "x",
       scopesGranted: [],
+      requestedScopes: ["mail.send"],
       label: "Mail",
     })
     .returning({ id: integrationConnections.id });
@@ -82,6 +83,7 @@ async function expectRenewal(
   expectedSpace: string,
 ) {
   const row = await listed(headers, connectionId);
+  expect(row.requested_scopes).toEqual(["mail.send"]);
   expect(row.allowed_actions).toContain("reconnect");
   expect(row.reconnect_space_id).toBe(expectedSpace);
   const start = await app.request(`/api/integrations/${packageId}/auths/api/connect/session`, {

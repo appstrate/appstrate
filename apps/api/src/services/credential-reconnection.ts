@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Announces a credential's death: one call per `needs_reconnection` false-to-true flip. */
+/**
+ * The bell notices to a connection's owner: its credential died (one call per
+ * `needs_reconnection` false-to-true flip), or a server asked it for scopes it does not hold.
+ */
 
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -11,18 +14,27 @@ import { logger } from "../lib/logger.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { getPackageDisplayName } from "../lib/package-helpers.ts";
 import { findPersonalSpace } from "./spaces.ts";
-import { createCredentialNeedsReconnectionNotification } from "./state/notifications.ts";
+import { createConnectionNotice } from "./state/notifications.ts";
 
-type IntegrationDeath = Extract<
-  CredentialNeedsReconnectionParams,
-  { kind: "integration_connection" }
+/** A connection and its owner, as an announcement names them. */
+type ConnectionOwner = Pick<
+  Extract<CredentialNeedsReconnectionParams, { kind: "integration_connection" }>,
+  "orgId" | "spaceId" | "connectionId" | "owner"
 >;
 
+/** What every notice to the owner shows, and the space it is written in. */
+interface OwnerNotice {
+  spaceId: string;
+  packageId: string;
+  integration_name: string;
+  label: string;
+}
+
 /**
- * The bell notice for the connection's owner, in the connection's space, else the space it was
- * connected from, else the owner's personal space (never created here); none: skipped.
+ * The notice's space is the connection's, else the space it was connected from, else the owner's
+ * personal space (never created here); none: `null`, and the notice is skipped.
  */
-async function notifyConnectionOwner(params: IntegrationDeath): Promise<void> {
+async function readOwnerNotice(target: ConnectionOwner): Promise<OwnerNotice | null> {
   const [row] = await db
     .select({
       label: integrationConnections.label,
@@ -32,36 +44,42 @@ async function notifyConnectionOwner(params: IntegrationDeath): Promise<void> {
     })
     .from(integrationConnections)
     .innerJoin(packages, eq(packages.id, integrationConnections.integrationId))
-    .where(eq(integrationConnections.id, params.connectionId))
+    .where(eq(integrationConnections.id, target.connectionId))
     .limit(1);
-  if (!row) return;
+  if (!row) return null;
   const spaceId =
-    params.spaceId ??
+    target.spaceId ??
     row.originSpaceId ??
-    (params.owner.type === "user"
-      ? ((await findPersonalSpace(params.orgId, params.owner.id))?.id ?? null)
+    (target.owner.type === "user"
+      ? ((await findPersonalSpace(target.orgId, target.owner.id))?.id ?? null)
       : null);
   if (!spaceId) {
-    logger.warn("credential needs reconnection: no space to notify the owner in", {
-      connectionId: params.connectionId,
-      ownerType: params.owner.type,
+    logger.warn("connection notice: no space to notify the owner in", {
+      connectionId: target.connectionId,
+      ownerType: target.owner.type,
     });
-    return;
+    return null;
   }
-  await createCredentialNeedsReconnectionNotification({
-    orgId: params.orgId,
+  return {
     spaceId,
-    recipient: params.owner,
-    payload: {
-      packageId: params.packageId,
-      integration_name: getPackageDisplayName({
-        id: row.packageId,
-        draftManifest: row.draftManifest,
-      }),
-      label: row.label,
-      cause: params.cause,
-    },
-  });
+    packageId: row.packageId,
+    integration_name: getPackageDisplayName({
+      id: row.packageId,
+      draftManifest: row.draftManifest,
+    }),
+    label: row.label,
+  };
+}
+
+/** Write the owner's notice off the main path: best effort, never throws. */
+function notifyOwner(
+  target: ConnectionOwner,
+  what: string,
+  write: (notice: OwnerNotice) => Promise<void>,
+): void {
+  readOwnerNotice(target)
+    .then((notice) => (notice ? write(notice) : undefined))
+    .catch((err) => logger.warn(`${what}: notification failed`, { error: getErrorMessage(err) }));
 }
 
 /** Best effort, never throws. Bell notice for integration connections only (no model-credential recipient, #1310). */
@@ -69,11 +87,29 @@ export function announceCredentialNeedsReconnection(
   params: CredentialNeedsReconnectionParams,
 ): void {
   if (params.kind === "integration_connection") {
-    notifyConnectionOwner(params).catch((err) =>
-      logger.warn("credential needs reconnection: notification failed", {
-        error: getErrorMessage(err),
+    notifyOwner(params, "credential needs reconnection", ({ spaceId, ...notice }) =>
+      createConnectionNotice("credential_needs_reconnection", {
+        orgId: params.orgId,
+        spaceId,
+        recipient: params.owner,
+        payload: { ...notice, cause: params.cause },
       }),
     );
   }
   void emitEvent("onCredentialNeedsReconnection", params);
+}
+
+/**
+ * Tell a connection's owner that a server asked it for scopes it does not hold, so they can
+ * reconnect it with them. Called when the demand gained a scope; best effort, never throws.
+ */
+export function announceRequestedScopes(target: ConnectionOwner): void {
+  notifyOwner(target, "requested scopes", ({ spaceId, ...notice }) =>
+    createConnectionNotice("connection_scopes_requested", {
+      orgId: target.orgId,
+      spaceId,
+      recipient: target.owner,
+      payload: { ...notice, connection_id: target.connectionId },
+    }),
+  );
 }

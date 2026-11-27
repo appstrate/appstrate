@@ -38,7 +38,7 @@
  *     and hands the {@link HttpDeliveryPlan} in as part of the
  *     {@link MitmRequestContext}. Keeps this file dependency-free.
  *   - Step-up auth via `WWW-Authenticate: Bearer scope="..."` — that
- *     belongs in `mcp-http-auth.ts` for the HTTP transport. The MITM
+ *     belongs in `packages/mcp-transport` for the HTTP transport. The MITM
  *     listener does NOT step up because the spec only requires step-up
  *     for the runtime-as-MCP-client direction, not the
  *     MCP-server-talks-to-upstream direction §4.1.4 covers.

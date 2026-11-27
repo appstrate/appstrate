@@ -44,6 +44,7 @@ import type { ManifestIntegrationEntry } from "@appstrate/core/dependencies";
 import { planCreateVersionOutcome } from "@appstrate/core/version-policy";
 import {
   getLocalServerTools,
+  hiddenToolNames,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
   validateAgentIntegrationScopes,
@@ -51,6 +52,11 @@ import {
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { ValidationFieldError } from "@appstrate/core/api-errors";
 import { db } from "@appstrate/db/client";
+import {
+  currentlyApprovedToolNames,
+  isClosedRemoteCatalog,
+  loadToolSpacePolicy,
+} from "./integration-tool-catalog.ts";
 import { packageDistTags, packageVersions, packages } from "@appstrate/db/schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 
@@ -165,6 +171,11 @@ interface ValidateAgentIntegrationSelectionsInput {
   /** Org owning the agent — bounds the integration visibility lookup. */
   orgId: string;
   /**
+   * The space whose approved tools count as selectable. `null` when no space is in play (a
+   * whole-organization audit): only the manifest's own catalog is.
+   */
+  toolPolicySpaceId: string | null;
+  /**
    * Also refuse a DECLARED integration whose effective tool selection is
    * empty (AFPS §4.4) — the state `assertIntegrationExposesTools` turns into
    * a failed run — and an `auth_key` serving none of the selected tools.
@@ -175,6 +186,12 @@ interface ValidateAgentIntegrationSelectionsInput {
    * — publishing a version, and ZIP/GitHub/`.afps-bundle` import.
    */
   requireCallableTools?: boolean;
+  /**
+   * Count every name the space COULD approve as approved: a bundle import carries an agent into a
+   * space whose approvals do not exist yet (they cannot, before the integration is there to read).
+   * Until they are given, its runs go without those tools (`definition_not_approved`).
+   */
+  approvalsFollow?: boolean;
   /** Per-run integration pins, used by the pre-deploy schedule audit. */
   dependencyOverrides?: Record<string, string>;
   /**
@@ -214,6 +231,18 @@ interface ValidateAgentIntegrationSelectionsInput {
   manifestCache?: IntegrationManifestCache;
 }
 
+/** The names of `tools` a space could approve on `manifest`: undeclared, not hidden, closed remote catalog. */
+function approvableSelection(
+  tools: ManifestIntegrationEntry["tools"],
+  manifest: IntegrationManifest,
+  catalog: ReadonlyArray<{ name: string }>,
+): string[] {
+  if (!Array.isArray(tools) || !isClosedRemoteCatalog(manifest)) return [];
+  const declared = new Set(catalog.map((e) => e.name));
+  const hidden = hiddenToolNames(manifest);
+  return tools.filter((name) => !declared.has(name) && !hidden.has(name));
+}
+
 /**
  * True when the agent would end up with no callable tool from this integration.
  *
@@ -232,6 +261,7 @@ function selectsNoCallableTool(
   entry: ManifestIntegrationEntry,
   integrationManifest: IntegrationManifest,
   catalog: ReadonlyArray<{ name: string }>,
+  approvedTools: readonly string[],
   surfaceIsKnown: boolean,
 ): boolean {
   const effective = resolveEffectiveToolSelection(entry.tools, integrationManifest);
@@ -240,14 +270,13 @@ function selectsNoCallableTool(
   // Intersect only when the catalog is KNOWABLE here. A remote integration that
   // enumerates nothing in its manifest discovers its tools at connect time, so
   // an empty catalog means "unknown", not "none" — intersecting would refuse a
-  // perfectly good publish. Same reason `validateAgentIntegrationScopes` skips
-  // its own subset check on an empty catalog.
+  // perfectly good publish.
   //
   // A DECLARED surface that `hidden_tools` empties is the opposite case and must
   // refuse: the integration told us its tools and then hid all of them, so the
   // selection provably registers nothing.
   if (!surfaceIsKnown) return false;
-  const callable = new Set(catalog.map((e) => e.name));
+  const callable = new Set([...catalog.map((e) => e.name), ...approvedTools]);
   return !effective.some((t) => callable.has(t));
 }
 
@@ -329,7 +358,9 @@ export async function validateAgentIntegrationSelections(
   const {
     manifest,
     orgId,
+    toolPolicySpaceId,
     requireCallableTools = false,
+    approvalsFollow = false,
     dependencyOverrides,
     extraManifests,
     manifestCache,
@@ -429,9 +460,26 @@ export async function validateAgentIntegrationSelections(
     // ONE catalog, both checks. `resolveIntegrationToolCatalog` already
     // subtracts `hidden_tools` and appends the synthetic api_call/api_upload
     // entries, so this is the set the sidecar will actually register.
-    const catalog = resolveIntegrationToolCatalog({
-      integration: judgedManifest,
-    });
+    // Undeclared tools the space approved: callable and nameable like declared ones.
+    // An approval the server's current definition moved past counts for nothing: the picker
+    // shows that tool as pending, and the run would go without it.
+    const approvedTools = toolPolicySpaceId
+      ? [
+          ...(await currentlyApprovedToolNames({
+            orgId,
+            packageId: entry.id,
+            manifest: judgedManifest,
+            policy: await loadToolSpacePolicy(
+              { orgId, spaceId: toolPolicySpaceId },
+              entry.id,
+              judgedManifest,
+            ),
+          })),
+        ]
+      : [];
+    const catalog = resolveIntegrationToolCatalog({ integration: judgedManifest });
+    if (approvalsFollow)
+      approvedTools.push(...approvableSelection(entry.tools, judgedManifest, catalog));
 
     // The integration told us its tool surface when it declares `tools_policy`,
     // or when its local server enumerates `tools`. Absent both, the surface is
@@ -441,7 +489,10 @@ export async function validateAgentIntegrationSelections(
       Object.keys((judgedManifest as { tools_policy?: Record<string, unknown> }).tools_policy ?? {})
         .length > 0;
 
-    if (pinnedManifest && selectsNoCallableTool(entry, pinnedManifest, catalog, surfaceIsKnown)) {
+    if (
+      pinnedManifest &&
+      selectsNoCallableTool(entry, pinnedManifest, catalog, approvedTools, surfaceIsKnown)
+    ) {
       errors.push({
         field: `integrations_configuration.${entry.id}.tools`,
         code: "no_tools_selected",
@@ -473,6 +524,7 @@ export async function validateAgentIntegrationSelections(
     const issues = validateAgentIntegrationScopes(
       { id: entry.id, tools: entry.tools, scopes: entry.scopes },
       judgedManifest,
+      { approvedTools },
     );
     for (const issue of issues) {
       errors.push({

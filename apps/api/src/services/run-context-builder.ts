@@ -17,7 +17,11 @@ import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { clampToBackingLevel, requireBoundModel, type ModelCascade } from "./org-models.ts";
-import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
+import {
+  resolveIntegrationSpawns,
+  type DroppedIntegration,
+  type UnavailableSelectedTool,
+} from "./integration-spawn-resolver.ts";
 import { appendRunLog } from "./state/runs.ts";
 import type { OrgScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
@@ -147,6 +151,8 @@ export async function buildRunContext(params: {
    * caller MUST surface these — see {@link recordDroppedIntegrations}.
    */
   droppedIntegrations: DroppedIntegration[];
+  /** Selected tools the space blocks, removed from the spawn: the caller stamps them on the run. */
+  unavailableTools: UnavailableSelectedTool[];
   /**
    * Stored generation settings (space defaults, a schedule's override) that
    * `modelLabel`'s model refuses, dropped for this run. The caller MUST surface
@@ -179,6 +185,7 @@ export async function buildRunContext(params: {
   // from `dependencies.integrations[id]` (§4.1) and the tool/scope selection
   // from `integrations_configuration[id]` (§4.4).
   const integrationSpawnsPromise = resolveIntegrationSpawns({
+    orgId,
     spaceId,
     actor,
     agentManifest: agent.manifest as Record<string, unknown>,
@@ -323,7 +330,11 @@ export async function buildRunContext(params: {
   };
 
   // Converge the integration spawn resolution kicked off at entry.
-  const { specs: integrationSpawns, dropped: droppedIntegrations } = await integrationSpawnsPromise;
+  const {
+    specs: integrationSpawns,
+    dropped: droppedIntegrations,
+    unavailable: unavailableTools,
+  } = await integrationSpawnsPromise;
 
   const resourceHints = getAgentResourceHints(agent.manifest);
   const resources = resolveAgentResources(
@@ -360,6 +371,7 @@ export async function buildRunContext(params: {
     modelCost,
     generationConfig,
     droppedIntegrations,
+    unavailableTools,
     droppedGenerationSettings,
     unavailablePinnedModelId,
   };

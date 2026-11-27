@@ -871,6 +871,8 @@
   "integration.connection.lock.orgDefault": "Space default: remove it in Settings › Connection management before deleting or unsharing it.",
   "integration.connection.deleteConfirm": "Permanently delete this connection? Any change to your own agents and schedules is listed below; your colleagues' agents and schedules that chose it will fail until they pick another one.",
   "integration.connection.statusConnected": "Connected",
+  "integration.connection.requestedScopes": "Additional permissions requested: {{scopes}}",
+  "integration.connection.reconnectWithScopes": "Reconnect with these permissions",
   "integration.connection.variables": "Connection variables:",
   "integration.connection.col.owner": "Owner",
   "integration.connection.filterMine": "My connections",

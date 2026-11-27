@@ -68,12 +68,18 @@ export function ResourceSection({
   emptyLabel,
   selectedEntries,
   onChange,
+  toolPolicySpaceId,
 }: {
   type: PackageType;
   title: string;
   emptyLabel: string;
   selectedEntries: ResourceEntry[];
   onChange: (update: (prev: ResourceEntry[]) => ResourceEntry[]) => void;
+  /**
+   * The agent's home space: its approvals and blocks are the ones a save judges against. Used
+   * where the integration is placed there; elsewhere the row's own space reads it.
+   */
+  toolPolicySpaceId: string | null;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   // The picker offers the index, what the working space runs (in « Tous les espaces », any space
@@ -116,6 +122,14 @@ export function ResourceSection({
     return new Set(selectedEntries.map((e) => e.id).filter((id) => !present.has(id)));
   }, [canReadCatalog, items, selectedEntries]);
   const byId = new Map((items ?? []).map((item) => [item.id, item] as const));
+  // A read of a package in a space it is not placed in is a 404: the policy's space only serves a
+  // row that proves it carries it.
+  const toolsItem = toolsEntry ? byId.get(toolsEntry.id) : undefined;
+  const toolsSpaceId = toolsEntry
+    ? toolPolicySpaceId && toolsItem?.space_ids?.includes(toolPolicySpaceId)
+      ? toolPolicySpaceId
+      : readSpace(toolsItem)
+    : undefined;
 
   const updateVersion = (id: string, version: string) =>
     onChange((prev) => prev.map((e) => (e.id === id ? { ...e, version } : e)));
@@ -349,7 +363,7 @@ export function ResourceSection({
         <ToolsModal
           name={byId.get(toolsEntry.id)?.name || toolsEntry.id}
           entry={toolsEntry}
-          spaceId={readSpace(byId.get(toolsEntry.id))}
+          spaceId={toolsSpaceId}
           onClose={() => setToolsId(null)}
           onApply={(next) => {
             replaceEntry(toolsEntry.id, next);

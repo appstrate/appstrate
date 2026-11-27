@@ -26,6 +26,9 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { runLogs, runs } from "@appstrate/db/schema";
+import { seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
+import { insertToolBlocks, policyTarget } from "../../helpers/tool-policy.ts";
+import { apiIntegrationManifest, httpHeaderDelivery } from "../../helpers/integration-manifests.ts";
 import {
   createFakeOrchestrator,
   inlineAgentManifest as inlineManifest,
@@ -36,7 +39,7 @@ import {
 } from "../../helpers/run-connection-fixtures.ts";
 import { INTEGRATION_DROPPED_EVENT } from "../../../src/services/run-context-builder.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
-import { deactivatePackage } from "../../../src/services/space-packages.ts";
+import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
 
@@ -154,5 +157,54 @@ describe("run launch — dropped-integration marker in run_logs", () => {
       .from(runLogs)
       .where(and(eq(runLogs.runId, created.id), eq(runLogs.event, INTEGRATION_DROPPED_EVENT)));
     expect(rows).toHaveLength(0);
+  });
+
+  it("stamps a selected api_call the space blocks on the run as unavailable (blocked_in_space)", async () => {
+    const API = "@dropmark/apiish";
+    const manifest = apiIntegrationManifest({
+      name: API,
+      apiCall: { authKey: "primary" },
+      auths: {
+        primary: {
+          type: "api_key",
+          authorizedUris: ["https://api.example.com/**"],
+          credentialFields: ["api_key"],
+          delivery: httpHeaderDelivery({
+            name: "Authorization",
+            prefix: "Bearer ",
+            field: "api_key",
+          }),
+        },
+      },
+    });
+    await seedPackage({
+      id: API,
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+    await seedPublishedVersion(API, "1.0.0", {
+      manifest: manifest as unknown as Record<string, unknown>,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, API);
+    await seedIntegrationConnection(ctx, API);
+    await seedDefaultOrgModel(ctx);
+    await insertToolBlocks(policyTarget(ctx, API), ["api_call"]);
+
+    const res = await launch({
+      manifest: {
+        ...inlineManifest([API]),
+        integrations_configuration: { [API]: { tools: ["api_call"] } },
+      },
+    });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+
+    const [run] = await db.select().from(runs).where(eq(runs.id, created.id));
+    expect(run!.metadata).toMatchObject({
+      unavailable_tools: [{ integration_id: API, name: "api_call", reason: "blocked_in_space" }],
+    });
   });
 });

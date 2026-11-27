@@ -6,6 +6,7 @@ import type { RunAgentIdentity } from "../hooks/use-run-agent-identity";
 import { formatDateField } from "../lib/format-date";
 import { PackageIcon } from "./package-icon";
 import { RunProvenanceBadges } from "./run-provenance-badges";
+import { RunDegradedBadge } from "./run-detail/run-warnings";
 import { RunDuration } from "./run-duration";
 
 /**
@@ -52,6 +53,7 @@ export function RunIdentity({
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-medium">{title}</span>
           <RunProvenanceBadges run={run} />
+          <RunDegradedBadge metadata={run.metadata} />
         </div>
         <p className="text-muted-foreground mt-0.5 truncate text-xs">
           {subtitle}

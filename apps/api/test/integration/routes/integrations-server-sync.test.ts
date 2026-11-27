@@ -10,7 +10,9 @@ import { db } from "@appstrate/db/client";
 import {
   connectionCalls,
   integrationConnectionShares,
+  integrationConnections,
   integrationOrgDefaults,
+  integrationToolSnapshots,
   packages,
   spacePackages,
   spaces,
@@ -45,7 +47,7 @@ import {
   type FakeMcpTool,
 } from "../../helpers/fake-mcp-server.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
-import { serverSyncBody } from "../../../../web/src/lib/integration-server-sync.ts";
+import { connectionChoiceBody } from "../../../../web/src/lib/integration-server-sync.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 
 /** A 1×1 PNG header: what `isIconImage` reads (signature + `IHDR` size). */
@@ -58,7 +60,7 @@ const ICON = `data:image/png;base64,${PNG.toBase64()}`;
 const SVG = `data:image/svg+xml;base64,${btoa("<svg xmlns='http://www.w3.org/2000/svg'/>")}`;
 const TOKEN = "tok-live-123";
 const ID = "@acme/docs";
-/** Annotated read-only, explicitly not, and not at all: only the first two are pre-selected. */
+/** What the server lists: this route never asks for it. */
 const TOOLS: FakeMcpTool[] = [
   {
     name: "search",
@@ -71,8 +73,6 @@ const TOOLS: FakeMcpTool[] = [
   "update",
   { name: "delete", annotations: { destructiveHint: true } },
 ];
-const TOOL_NAMES = ["search", "fetch", "create", "update", "delete"];
-const READ_ONLY = ["search", "fetch"];
 
 let server: FakeMcpServer;
 let restoreEgress: () => void;
@@ -133,7 +133,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     forgetProtocolEras();
   });
 
-  it("lists every tool through the proxy, with the connection's bearer, pre-selecting the read-only ones", async () => {
+  it("reads the server's identity through the proxy, with the connection's bearer, and lists no tool", async () => {
     await seedProxyIntegration(ctx, remote());
     const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
 
@@ -141,8 +141,6 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       manifest: {
-        default_tools: READ_ONLY,
-        tools_policy: Object.fromEntries(TOOL_NAMES.map((name) => [name, {}])),
         display_name: "Acme Docs",
         description: "Search and edit Acme documents.",
         homepage: "https://acme.example/",
@@ -150,30 +148,14 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       },
       icon_source: ICON,
       instructions: "Call search before fetch.",
-      tools: [
-        {
-          name: "search",
-          title: "Search documents",
-          description: "Full-text search.",
-          read_only: true,
-          destructive: false,
-        },
-        { name: "fetch", read_only: true, destructive: false },
-        {
-          name: "create",
-          description: "Create a document.",
-          read_only: false,
-          destructive: false,
-        },
-        { name: "update", description: "Tool update", read_only: false, destructive: false },
-        { name: "delete", read_only: false, destructive: true },
-      ],
       warnings: [],
     });
-    // The era probe (refused: a legacy server), initialize + initialized + three tools/list
-    // pages, each carrying the injected credential; the standalone GET stream is never opened.
-    expect(server.methods).toEqual(["POST", "POST", "POST", "POST", "POST", "POST"]);
+    // The era probe (refused: a legacy server), initialize + initialized: no `tools/list`; each
+    // carrying the injected credential, the standalone GET stream never opened.
+    expect(server.methods).toEqual(["POST", "POST", "POST"]);
     expect(server.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
+    // The draft is read, the snapshot is the published integration's: nothing recorded.
+    expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
   });
 
   it("is refused in a space whose credential proxy is closed, before any exchange", async () => {
@@ -216,7 +198,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     );
   });
 
-  it("journals the listing as one proxied call of the connection", async () => {
+  it("journals the session as one proxied call of the connection", async () => {
     await seedProxyIntegration(ctx, remote());
     const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
     expect((await sync(ctx, { connection_id: connectionId })).status).toBe(200);
@@ -227,8 +209,9 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       .select()
       .from(connectionCalls)
       .where(eq(connectionCalls.connectionId, connectionId));
-    // The listing's first page alone: the era probe, the handshake and the later pages add none.
-    expect(rows.map((row) => row.outcome)).toEqual(["200"]);
+    // The first exchange after the handshake (the `initialized` notification, accepted with a 202)
+    // alone: the era probe and the handshake itself add none.
+    expect(rows.map((row) => row.outcome)).toEqual(["202"]);
     for (const row of rows) {
       expect(row).toMatchObject({
         connectionId,
@@ -267,8 +250,8 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     const res = await sync(ctx);
     expect(res.status).toBe(200);
     expect(
-      ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,
-    ).toEqual(READ_ONLY);
+      ((await res.json()) as { manifest: { display_name: string } }).manifest.display_name,
+    ).toBe("Acme Docs");
   });
 
   it("syncs with the imposed org connection instead of the caller's only own account", async () => {
@@ -298,11 +281,11 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     const detail = (await listed.json()) as { auths: IntegrationAuthStatus[] };
     expect(detail.auths.flatMap((auth) => auth.connections.map((c) => c.id))).toContain(own);
 
-    const res = await sync(caller, serverSyncBody());
+    const res = await sync(caller, connectionChoiceBody());
     expect(res.status).toBe(200);
     expect(
-      ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,
-    ).toEqual(READ_ONLY);
+      ((await res.json()) as { manifest: { display_name: string } }).manifest.display_name,
+    ).toBe("Acme Docs");
     expect(server.authorizations.every((value) => value === `Bearer ${TOKEN}`)).toBe(true);
   });
 
@@ -336,7 +319,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(server.methods).toEqual([]);
   });
 
-  it("syncs a draft never published, through the draft's auth, journaling its listing", async () => {
+  it("syncs a draft never published, through the draft's auth, journaling its session", async () => {
     await seedPackage({
       id: ID,
       orgId: ctx.orgId,
@@ -352,15 +335,15 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     const res = await sync(ctx, { connection_id: connectionId });
     expect(res.status).toBe(200);
     expect(
-      ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,
-    ).toEqual(READ_ONLY);
+      ((await res.json()) as { manifest: { display_name: string } }).manifest.display_name,
+    ).toBe("Acme Docs");
     expect(server.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
     await drainAudits(5_000);
     const rows = await db
       .select()
       .from(connectionCalls)
       .where(eq(connectionCalls.connectionId, connectionId));
-    // One row for the listing, over three pages.
+    // One row for the session.
     expect(rows).toHaveLength(1);
   });
 
@@ -449,25 +432,50 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(((await res.json()) as { code: string }).code).toBe("sync_transport_unsupported");
   });
 
-  it("answers 422 for a server URL chosen per connection", async () => {
-    await seedProxyIntegration(ctx, {
-      ...remote(),
-      schema_version: "0.3",
-      source: {
-        kind: "remote",
-        remote: { url: "{$variable.base_url}/mcp", transport: "streamable-http" },
-      },
-      variables: {
-        schema: {
-          type: "object",
-          properties: { base_url: { type: "string", format: "uri" } },
-          required: ["base_url"],
+  describe("a server URL built from the connection's variables", () => {
+    const templated = () =>
+      ({
+        ...remote({
+          url: `{$variable.base_url}${server.url.slice(server.origin.length)}`,
+          authorizedUris: ["{$variable.base_url}/**"],
+        }),
+        schema_version: "0.3",
+        variables: {
+          schema: {
+            type: "object",
+            properties: { base_url: { type: "string" } },
+            required: ["base_url"],
+          },
         },
-      },
-    } as unknown as IntegrationManifest);
-    const res = await sync(ctx, {});
-    expect(res.status).toBe(422);
-    expect(((await res.json()) as { code: string }).code).toBe("sync_url_templated");
+      }) as unknown as IntegrationManifest;
+
+    // A variable heads the origin, which the egress guard refuses on loopback: no test server can
+    // be listed end to end, but the refusal names the host the connection's variable rendered.
+    it("renders the URL from the selected connection's variables and holds it to the egress guard", async () => {
+      await seedProxyIntegration(ctx, templated());
+      const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+      await db
+        .update(integrationConnections)
+        .set({ variables: { base_url: server.origin } })
+        .where(eq(integrationConnections.id, connectionId));
+
+      const res = await sync(ctx, { connection_id: connectionId });
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { code: string; detail: string };
+      expect(body.code).toBe("blocked_target");
+      expect(body.detail).toContain("127.0.0.1");
+      expect(server.methods).toEqual([]);
+    });
+
+    it("answers 422 remote_url_unrenderable when the connection's variables do not render it", async () => {
+      await seedProxyIntegration(ctx, templated());
+      const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const res = await sync(ctx, { connection_id: connectionId });
+      expect(res.status).toBe(422);
+      expect(((await res.json()) as { code: string }).code).toBe("remote_url_unrenderable");
+      expect(server.methods).toEqual([]);
+    });
   });
 
   it("answers 422 for an integration that is not remote", async () => {
@@ -557,7 +565,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       expect(res.status).toBe(200);
       // Past the era probe and `initialize`, every MCP exchange (the icon lookup's GETs carry no body).
       const echoed = hostile.requests.slice(2).filter(({ body }) => body !== "");
-      expect(echoed).toHaveLength(4);
+      expect(echoed).toHaveLength(1);
       for (const { headers } of echoed) {
         expect(headers.get("mcp-session-id")).toBe("{{token}}");
         const sent = [...headers].filter(([name]) => name !== "authorization");
@@ -590,7 +598,6 @@ describe("POST /api/integrations/{packageId}/discover", () => {
           manifest: Record<string, unknown>;
           instructions: string | null;
         };
-        expect(body.manifest.default_tools).toEqual(READ_ONLY);
         expect(body.manifest.display_name).toBe("Acme Docs");
         expect(body.instructions).toBe("Call search before fetch.");
         const posted = upstream.requests
@@ -599,13 +606,8 @@ describe("POST /api/integrations/{packageId}/discover", () => {
             method: (JSON.parse(text) as { method: string }).method,
             version: headers.get("mcp-protocol-version"),
           }));
-        // `server/discover`, then three pages: no `initialize`, no session, the credential on each.
-        expect(posted).toEqual([
-          { method: "server/discover", version: "2026-07-28" },
-          { method: "tools/list", version: "2026-07-28" },
-          { method: "tools/list", version: "2026-07-28" },
-          { method: "tools/list", version: "2026-07-28" },
-        ]);
+        // `server/discover` alone: no `initialize`, no session, no `tools/list`, the credential on it.
+        expect(posted).toEqual([{ method: "server/discover", version: "2026-07-28" }]);
         expect(upstream.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
       } finally {
         upstream.stop();
@@ -663,22 +665,24 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
     const member = await memberHolding(ctx, ["integrations:read", "integrations:write"]);
     const res = await syncOpen(member);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { tools: { name: string }[] };
-    expect(body.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
+    expect(
+      ((await res.json()) as { manifest: { display_name: string } }).manifest.display_name,
+    ).toBe("fake-legacy");
   });
 
-  it("lists the server's tools with no connection and no credential", async () => {
+  it("reads the server with no connection and no credential", async () => {
     await seedProxyIntegration(ctx, unauthenticated(open.url));
     const res = await syncOpen();
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { tools: { name: string }[] };
-    expect(body.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
+    expect(
+      ((await res.json()) as { manifest: { display_name: string } }).manifest.display_name,
+    ).toBe("fake-legacy");
     expect(open.authorizations.length).toBeGreaterThan(0);
     expect(open.authorizations.every((a) => a === null)).toBe(true);
     // Journaled like any operation outside a run: one row, without a connection.
     const rows = await journaled();
     expect(rows.map((row) => [row.connectionId, row.actorId, row.outcome])).toEqual([
-      [null, ctx.user.id, "200"],
+      [null, ctx.user.id, "202"],
     ]);
   });
 
@@ -704,8 +708,9 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
       await seedProxyIntegration(ctx, unauthenticated(`http://127.0.0.1:${redirecting.port}/mcp`));
       const res = await syncOpen();
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { tools: { name: string }[] };
-      expect(body.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
+      expect(
+        ((await res.json()) as { manifest: { display_name: string } }).manifest.display_name,
+      ).toBe("fake-legacy");
     } finally {
       redirecting.stop(true);
     }
@@ -719,8 +724,9 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
       .where(eq(spaces.id, ctx.defaultSpaceId));
     const res = await syncOpen();
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { tools: { name: string }[] };
-    expect(body.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
+    expect(
+      ((await res.json()) as { manifest: { display_name: string } }).manifest.display_name,
+    ).toBe("fake-legacy");
   });
 
   it("answers 502 when the server asks for a credential: never authorized ad hoc", async () => {

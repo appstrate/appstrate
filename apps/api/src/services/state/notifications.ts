@@ -167,23 +167,82 @@ export async function createPackageShareNotification(params: {
 }
 
 /**
- * Tell a connection's owner that it died. No dedup index: one announcement per flip, and there is
- * no `runId`. Model-provider credentials write no row here: who receives it is undecided (#1310).
+ * Writes one `integration_tools_review` notice per recipient in `spaceId`; the partial unique
+ * index (one unread notice per space, recipient and integration) absorbs the rest. Who to ask, and
+ * whether to, is `services/integration-tool-review.ts`'s judgement.
  */
-export async function createCredentialNeedsReconnectionNotification(params: {
+export async function insertToolReviewNotifications(params: {
   orgId: string;
   spaceId: string;
-  recipient: Actor;
-  payload: NotificationPayloads["credential_needs_reconnection"];
+  recipientUserIds: readonly string[];
+  payload: NotificationPayloads["integration_tools_review"];
 }): Promise<void> {
-  await db.insert(notifications).values({
-    orgId: params.orgId,
-    spaceId: params.spaceId,
-    recipientType: params.recipient.type,
-    recipientId: params.recipient.id,
-    type: "credential_needs_reconnection",
-    payload: toPgSafe(params.payload),
-  });
+  if (params.recipientUserIds.length === 0) return;
+  await db
+    .insert(notifications)
+    .values(
+      params.recipientUserIds.map((userId) => ({
+        orgId: params.orgId,
+        spaceId: params.spaceId,
+        recipientType: "user" as const,
+        recipientId: userId,
+        type: "integration_tools_review" as const,
+        payload: toPgSafe(params.payload),
+      })),
+    )
+    .onConflictDoNothing();
+}
+
+/**
+ * Tell a connection's owner about it: `credential_needs_reconnection` (it died; one announcement per
+ * flip, no `runId`; model-provider credentials write no row here, who receives it is undecided
+ * #1310) or `connection_scopes_requested` (a server asked for scopes it does not hold; its partial
+ * unique index holds it to one unread notice per (recipient, connection), the rest is absorbed).
+ */
+export async function createConnectionNotice<
+  K extends "credential_needs_reconnection" | "connection_scopes_requested",
+>(
+  type: K,
+  params: {
+    orgId: string;
+    spaceId: string;
+    recipient: Actor;
+    payload: NotificationPayloads[K];
+  },
+): Promise<void> {
+  await db
+    .insert(notifications)
+    .values({
+      orgId: params.orgId,
+      spaceId: params.spaceId,
+      recipientType: params.recipient.type,
+      recipientId: params.recipient.id,
+      type,
+      payload: toPgSafe(params.payload),
+    })
+    .onConflictDoNothing();
+}
+
+/**
+ * Read the unread `connection_scopes_requested` notice of a connection once a grant left it no
+ * demand: the request it announced is settled, so the bell stops asking for it.
+ */
+export async function settleScopeRequestNotices(
+  executor: DbOrTx,
+  orgId: string,
+  connectionId: string,
+): Promise<void> {
+  await executor
+    .update(notifications)
+    .set({ readAt: new Date() })
+    .where(
+      and(
+        eq(notifications.orgId, orgId),
+        eq(notifications.type, "connection_scopes_requested"),
+        isNull(notifications.readAt),
+        sql`${notifications.payload}->>'connection_id' = ${connectionId}`,
+      ),
+    );
 }
 
 // --- The feed ---

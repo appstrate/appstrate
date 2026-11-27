@@ -27,6 +27,7 @@
 
 import { isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import { guardedFetch, SsrfBlockedError } from "@appstrate/core/ssrf";
+import { parseBearerChallenge, type BearerChallenge } from "@appstrate/core/www-authenticate";
 import { readJsonUnder } from "./bounded-body.ts";
 import { sameUrlIdentifier } from "./oauth-discovery.ts";
 
@@ -104,55 +105,6 @@ export function buildProtectedResourceProbes(resourceServerUrl: string): Metadat
   } catch {
     return [];
   }
-}
-
-/** Split the challenge list in one pass, preserving quoted commas and quoted-pairs. */
-function* challengeFields(header: string) {
-  let start = 0;
-  let quoted = false;
-  for (let i = 0; i < header.length; i++) {
-    const c = header[i];
-    if (quoted && c === "\\") i++;
-    else if (c === '"') quoted = !quoted;
-    else if (!quoted && c === ",") {
-      yield header.slice(start, i);
-      start = i + 1;
-    }
-  }
-  if (!quoted) yield header.slice(start);
-}
-
-export interface BearerChallenge {
-  resourceMetadataUrl?: string;
-  scopes?: string[];
-}
-
-/** The first Bearer challenge, including only its own RFC 9110 auth-params. */
-export function parseBearerChallenge(header: string): BearerChallenge | undefined {
-  let bearer: Map<string, string> | undefined;
-  for (const part of challengeFields(header)) {
-    let field = part.trim();
-    if (!field) continue;
-    // A leading token followed by '=' is another parameter of the current challenge.
-    if (!/^[!#$%&'*+.^_`|~\w-]+\s*=/.test(field)) {
-      if (bearer) break;
-      const scheme = /^([^\s]+)(?:\s+([\s\S]*))?$/.exec(field);
-      if (scheme?.[1]?.toLowerCase() !== "bearer") continue;
-      bearer = new Map();
-      field = scheme[2] ?? "";
-    }
-    if (!bearer) continue;
-    const param =
-      /^([!#$%&'*+.^_`|~\w-]+)\s*=\s*(?:"((?:\\.|[^"\\])*)"|([!#$%&'*+.^_`|~\w-]+))$/.exec(field);
-    if (param) bearer.set(param[1]!.toLowerCase(), param[2]?.replace(/\\(.)/g, "$1") ?? param[3]!);
-  }
-  if (!bearer) return undefined;
-  const resourceMetadataUrl = bearer.get("resource_metadata");
-  const scopes = bearer.get("scope")?.split(/\s+/).filter(Boolean);
-  return {
-    ...(resourceMetadataUrl ? { resourceMetadataUrl } : {}),
-    ...(scopes?.length ? { scopes } : {}),
-  };
 }
 
 interface RawResourceMetadata {

@@ -21,6 +21,7 @@
  * this is the second layer behind the sidecar's own filter.
  */
 
+import { sanitiseRequiredScopes } from "@appstrate/core/www-authenticate";
 import {
   API_CALL_ERROR_META_KEY,
   UPSTREAM_HEADER_ALLOWLIST,
@@ -47,7 +48,7 @@ export function readUpstreamMeta(result: CallToolResult): UpstreamMeta {
   if (typeof raw !== "object" || raw === null) {
     throw new Error(`api_call: _meta['${UPSTREAM_META_KEY}'] must be an object, got ${typeof raw}`);
   }
-  const obj = raw as { status?: unknown; headers?: unknown };
+  const obj = raw as { status?: unknown; headers?: unknown; required_scopes?: unknown };
   if (typeof obj.status !== "number" || !Number.isInteger(obj.status)) {
     throw new Error(`api_call: _meta['${UPSTREAM_META_KEY}'].status must be an integer`);
   }
@@ -63,7 +64,15 @@ export function readUpstreamMeta(result: CallToolResult): UpstreamMeta {
       headers[lower] = value;
     }
   }
-  return { status: obj.status, headers };
+  // Optional and advisory: rendered into the model's status line, so re-validated here and
+  // never a protocol violation.
+  const scopes = obj.required_scopes;
+  const requiredScopes = sanitiseRequiredScopes(Array.isArray(scopes) ? scopes : undefined);
+  return {
+    status: obj.status,
+    headers,
+    ...(requiredScopes.length ? { required_scopes: requiredScopes } : {}),
+  };
 }
 
 /** The code under {@link API_CALL_ERROR_META_KEY}; `null` if absent or malformed. */

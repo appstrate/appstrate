@@ -45,7 +45,6 @@ export type {
   IntegrationOrgDefault,
   IntegrationPin,
   IntegrationSummary,
-  IntegrationToolCatalogEntry,
 } from "./integrations.ts";
 
 export type { UserProfile } from "@appstrate/db/schema";
@@ -533,6 +532,8 @@ export interface MeConnectionEntry {
   /** Display label set by the user. */
   label: string;
   scopes_granted: string[];
+  /** Scopes a server asked for (`insufficient_scope`) that the connection does not hold. */
+  requested_scopes: string[];
   connected_at: string;
   needs_reconnection: boolean;
   expiresAt: string | null;

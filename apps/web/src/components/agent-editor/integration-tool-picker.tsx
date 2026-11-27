@@ -14,6 +14,7 @@
  */
 
 import { toggleValue } from "../../lib/toggle-value";
+import { hasOAuthAuth, isToolWithoutPermission } from "../../lib/integration-tool-policy";
 import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
@@ -27,6 +28,7 @@ import {
 import {
   isApiCallToolSelectionEnabled,
   replaceNativeToolSelection,
+  selectableNativeToolNames,
   toggleApiCallToolSelection,
 } from "./tool-selection.ts";
 import { cn } from "@appstrate/ui/cn";
@@ -46,6 +48,8 @@ import {
 import { Button } from "@appstrate/ui/components/button";
 import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import type { ResourceEntry } from "./types";
 import { isPlatformEntry } from "./utils";
 import { TextSkeleton } from "../loading-skeletons";
@@ -101,6 +105,10 @@ function RequiredIntegrationToggle({ packageId, entry, onChange }: IntegrationTo
 
 function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: IntegrationToolPickerProps) {
   const { t } = useTranslation("settings");
+  // The statuses are the space's the detail is read in: named when it is not the reader's own.
+  const spaceLabelOf = useSpaceLabelOf();
+  const workingSpaceId = useCurrentSpaceId();
+  const spaceName = spaceId && spaceId !== workingSpaceId ? spaceLabelOf(spaceId) : undefined;
   const { data: detail, isLoading } = useIntegrationDetail(packageId, spaceId);
 
   if (isLoading) {
@@ -181,8 +189,10 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
   const arrayTools = Array.isArray(effectiveTools) ? [...new Set(effectiveTools)] : [];
   const selectedTools = new Set(arrayTools);
   const selectedScopes = new Set(entry.scopes ?? []);
+  // "Select all" adds what a checkbox could add: a tool the space cannot call stays out.
+  const selectableToolNames = selectableNativeToolNames(nativeCatalog, selectedTools);
   const allSelected =
-    declaredToolNames.length > 0 && declaredToolNames.every((name) => selectedTools.has(name));
+    selectableToolNames.length > 0 && selectableToolNames.every((name) => selectedTools.has(name));
   // "Select none" clears the NATIVE slice only (api_call selections are preserved).
   const noneSelected = declaredToolNames.every((name) => !selectedTools.has(name));
   // Mirrors `selectsNoCallableTool` on the API side: the whole selection, api_call rows included.
@@ -250,7 +260,7 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
       ...entry,
       tools: replaceNativeToolSelection(
         arrayTools,
-        declaredToolNames,
+        selectableToolNames,
         visibleSyntheticToolNames,
         all,
       ),
@@ -347,10 +357,13 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
             tool.name,
             visibleSyntheticApiUploadNames,
           );
+          // Blocked by the space: the run goes without it. Not addable; a kept selection can be removed.
+          const blocked = tool.status === "blocked";
           return (
             <label key={tool.name} className="flex cursor-pointer items-start gap-2">
               <Checkbox
                 checked={pairSelected}
+                disabled={blocked && !pairSelected}
                 onCheckedChange={() => toggleApiCallTool(tool.name)}
                 data-testid={
                   apiCallEntries.length > 1
@@ -374,6 +387,16 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
                       : "agentEditor.integrations.apiCall.description",
                   )}
                 </span>
+                {blocked && (
+                  <span
+                    className="text-muted-foreground text-[11px]"
+                    data-testid={`tool-reason-${tool.name}`}
+                  >
+                    {t("agents:packageTools.reason.blocked", {
+                      space: spaceName ?? t("agents:packageTools.thisSpace"),
+                    })}
+                  </span>
+                )}
               </span>
             </label>
           );
@@ -411,11 +434,22 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
             {t("agentEditor.integrations.tools.explicitNotice")}
           </p>
           <PackageToolCatalog
-            tools={nativeCatalog.map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-              permissions: tool.policy?.required_scopes,
-            }))}
+            listedAt={detail.tool_snapshot?.listed_at}
+            spaceName={spaceName}
+            tools={nativeCatalog.map((tool) => {
+              const permissions = tool.policy?.required_scopes;
+              return {
+                name: tool.name,
+                description: tool.description,
+                permissions,
+                status: tool.status,
+                origin: tool.origin,
+                modified: tool.modified,
+                scopesUnknown:
+                  hasOAuthAuth(detail.auths) &&
+                  isToolWithoutPermission({ status: tool.status, permissions }),
+              };
+            })}
             selection={{ values: selectedTools, onToggle: toggleTool }}
           />
         </div>

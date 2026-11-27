@@ -102,8 +102,13 @@ const DEFAULT_SERVER_INFO: Implementation = {
 // poorly through any client that surfaces the name in a generated symbol.
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
 
+/** Whether a tool name is a plain token: safe to quote in a prompt or a log line. */
+export function isMcpToolName(name: string): boolean {
+  return TOOL_NAME_PATTERN.test(name);
+}
+
 function validateDescriptor(descriptor: Tool): void {
-  if (typeof descriptor.name !== "string" || !TOOL_NAME_PATTERN.test(descriptor.name)) {
+  if (typeof descriptor.name !== "string" || !isMcpToolName(descriptor.name)) {
     throw new Error(
       `createMcpServer: tool name must match ${TOOL_NAME_PATTERN} (got '${String(descriptor.name)}')`,
     );
@@ -468,6 +473,9 @@ export {
 // the model sees under the exposed name, stamped with the integration tool it exposes. Shared by
 // the sidecar's McpHost and the CLI.
 export { exposeTool, toolExclusion, withToolIntegration } from "./tool-exposure.ts";
+
+// Identity of a listed tool definition (what an approval binds to).
+export { toolDefinitionFingerprint } from "./tool-fingerprint.ts";
 
 // The `fetch` an MCP client transport is given, built from a `(url, init)` sender.
 export { boundResourceResponse } from "./resource-response.ts";

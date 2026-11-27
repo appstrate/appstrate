@@ -252,6 +252,7 @@ describe("t() keys", () => {
  * alone. Kept alphabetical.
  */
 const DYNAMIC_KEY_PREFIXES = [
+  "agents:integrationWizard.tools.mode.", // components/integration-wizard/tools-step.tsx — t(`…mode.${option.value}.label`)
   "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
   "chat:skills.load.live.", // packages/module-chat/src/ui/skill-load.tsx — one live line per load state
   "chat:skills.state.refused.", // packages/module-chat/src/ui/skills-picker.tsx — one per refusal
@@ -263,6 +264,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "settings:creation.title.", // components/creation-handoff-modal.tsx — one per package type
   "files:type.", // components/document-columns.tsx, components/file-artifact.tsx — t(`type.${mimeKind(…)}`)
   "agents:integrationEditor.discover.warning.", // components/integration-editor/discovery-warnings.tsx — one key per warning code
+  "agents:serverRead.blocked.", // components/integration-editor/server-read-control.tsx — one per block reason
   "integration.admin.creation.", // components/integration-detail/access-rules-section.tsx
   "integration.admin.orgDefault.connection.", // components/integration-detail/org-default-section.tsx — forced / default
   "integration.admin.usage.", // components/integration-detail/org-default-section.tsx — t(`integration.admin.usage.${mode}Help`)

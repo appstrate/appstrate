@@ -1814,8 +1814,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Propose manifest fields from the integration's connected MCP server
-         * @description Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, its listing journaled as one call of the connection (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.
+         * Propose identity fields from the integration's connected MCP server
+         * @description Opens a session on the remote MCP server of the integration's draft (the working copy being edited, published or not) and returns the identity it reports: manifest fields (`display_name`, `description`, `homepage`, `icon`), an icon source, the server's instructions and warnings. Lists no tool and persists nothing (tools: `…/tool-snapshot/refresh`). The session is the same as the snapshot's: through the credential proxy, authorized against the draft (the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, journaled as one call of the connection, `GET /api/integrations/calls`); an integration declaring no auths (AFPS §7.2) is reached directly, egress-guarded on every hop, without a connection. The proposal holds `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning; omitted when the package already has its own `INTEGRATION.md`). Bounded to 20 seconds, the icon lookup included (best-effort). Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space. Rate limited to 10 requests per minute.
          */
         post: operations["syncIntegrationFromServer"];
         delete?: never;
@@ -1924,6 +1924,126 @@ export interface paths {
         head?: never;
         /** Toggle the per-(space, integration) block_user_connections gate (admin) */
         patch: operations["updateIntegrationSettings"];
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/tool-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read what the space decided about the integration's tools
+         * @description What a space can review about a remote integration's tools: `listed`, every distinct (name, fingerprint) the caller's connections last listed (`definition` is null for a tool past the snapshot's size cap), the space's `approvals` of undeclared tools' definitions (several fingerprints per tool may coexist) and its `blocks`. Requires `integrations:read`.
+         */
+        get: operations["getIntegrationToolPolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/tool-policy/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve the current definition of undeclared tools in the space
+         * @description Approves each `{ name, fingerprint }` as the server last listed it, for an undeclared tool of the integration. Another fingerprint already approved for the same tool stays approved. Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.approved`, one event per tool newly approved. Rate limited to 30 requests per minute.
+         */
+        post: operations["approveIntegrationTools"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/tool-policy/approvals/{toolName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Withdraw every approval of a tool in the space
+         * @description Removes all approved fingerprints of the tool in this space. Answers 204 whether or not there was one. Audited as `integration.tool.approval_revoked`, one event per approval removed (tool and fingerprint). Requires `integrations:configure` and a dashboard session. Rate limited to 30 requests per minute.
+         */
+        delete: operations["revokeIntegrationToolApproval"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/tool-policy/blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Block tools of the integration in the space
+         * @description Blocks the named tools, declared or not: a blocked tool is neither offered nor callable in this space. Already blocked names are ignored. Blocking an `api_call` tool also removes its `api_upload` companion; blocking an `api_upload` tool alone leaves the `api_call` and refuses an upload (a streamed request) through the credential proxy as it does in runs. A space blocks at most 500 tools per integration (`409 tool_blocks_limit`). Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.blocked`, one event per tool newly blocked. Rate limited to 30 requests per minute.
+         */
+        post: operations["blockIntegrationTools"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/tool-policy/blocks/{toolName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Lift the block on a tool in the space
+         * @description Answers 204 whether or not the tool was blocked (the audit event `integration.tool.unblocked` is recorded only when a block was lifted). Requires `integrations:configure` and a dashboard session. Rate limited to 30 requests per minute.
+         */
+        delete: operations["unblockIntegrationTool"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/tool-snapshot/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the remote server's tools again into the integration's snapshot
+         * @description Lists the tools of the integration's published remote MCP server now, bypassing the cached listing, through the credential proxy with the connection the caller's selection picks (or `connection_id`): the same selection, `authorized_uris` allowlist and egress guard as a credential-proxy call outside a run, journaled as one call of the connection. It reads the latest published version, not the draft. The listing is recorded as the snapshot of that connection (of the integration alone when it declares no auths); it feeds the per-space tool review (approve or block a tool) and the author's action to declare a listed tool in the integration. Requires `integrations:read` and `credential-proxy:call-own`. Rate limited to 10 requests per minute.
+         */
+        post: operations["refreshIntegrationToolSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/library": {
@@ -5706,6 +5826,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/integration-credentials/{scope}/{name}/tools-observed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report the tools a run's boot listed from a remote integration
+         * @description Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. Sent once per connection after the sidecar registered the integration's tools; the sidecar awaits the report within its retry budget and a refusal never fails the boot. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar caps them by count and bytes and sets `truncated`, which is sent only with `tools`. A report without `tools` (a local integration's unavailable list) records only `unavailable`, never a snapshot. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped; the platform's own endpoint integration never gets a snapshot.
+         */
+        post: operations["reportIntegrationToolsObserved"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/llm-proxy/anthropic-messages/v1/messages": {
         parameters: {
             query?: never;
@@ -9025,6 +9165,8 @@ export interface operations {
                     "X-Bundle-Integrity"?: string;
                     /** @description Resolved version label of the served bundle: a concrete semver for `source=published`, or `"draft"` for `source=draft`. Lets a CLI/runner attribute its run via `POST /api/runs/remote` `kind: "registry"` without parsing the manifest. */
                     "X-Bundle-Version"?: string;
+                    /** @description Comma-separated list, each element `encodeURIComponent("<integrationId>:<tool>")` (a tool name may itself contain a comma or non-ASCII characters; decode each element after splitting on `,`). Present only when the exported agent selects tools that run in the current space because the space approved their definition (undeclared tools of a closed catalog). The archive does not carry that approval: whoever imports it elsewhere must review those tools there. */
+                    "Appstrate-Space-Approved-Tools"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -11793,7 +11935,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked, or (on a streamed upload, `X-Stream-Request`) an `api_upload` tool it blocked; `remote_mcp_endpoint_not_proxied` — `X-Target` is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy (a redirect hop onto it is refused too, as `unauthorized_target`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -11979,7 +12121,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked, or (on a streamed upload, `X-Stream-Request`) an `api_upload` tool it blocked; `remote_mcp_endpoint_not_proxied` — `X-Target` is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy (a redirect hop onto it is refused too, as `unauthorized_target`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12165,7 +12307,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked, or (on a streamed upload, `X-Stream-Request`) an `api_upload` tool it blocked; `remote_mcp_endpoint_not_proxied` — `X-Target` is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy (a redirect hop onto it is refused too, as `unauthorized_target`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12346,7 +12488,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked, or (on a streamed upload, `X-Stream-Request`) an `api_upload` tool it blocked; `remote_mcp_endpoint_not_proxied` — `X-Target` is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy (a redirect hop onto it is refused too, as `unauthorized_target`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12532,7 +12674,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked, or (on a streamed upload, `X-Stream-Request`) an `api_upload` tool it blocked; `remote_mcp_endpoint_not_proxied` — `X-Target` is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy (a redirect hop onto it is refused too, as `unauthorized_target`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12765,6 +12907,13 @@ export interface operations {
                                  * @enum {integer}
                                  */
                                 upstream_status?: 401 | 403;
+                                /** @description `upstream_credential_rejected`, when the server's `WWW-Authenticate` challenge (401, or 403 `insufficient_scope`) names the OAuth scopes it asks for: the scopes to reconnect with. */
+                                required_scopes?: string[];
+                                /**
+                                 * Format: uuid
+                                 * @description `upstream_credential_rejected`: the connection whose credential the server refused. With `required_scopes`, what a reconnect in place targets (`initiateIntegrationConnect` with this `connection_id` and those `scopes`).
+                                 */
+                                connection_id?: string;
                                 /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
                                 credential?: {
                                     /** @enum {string} */
@@ -12885,7 +13034,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie or another credential the bearer-only proxy refuses (the chat's MCP loopback bearer included); `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role; `call_permission_required` — an enforced org default governs the integration and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's refusals of the server URL, before anything is sent: `unauthorized_target` (`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), `credential_exfiltration_refused` (`http_request_denied`). `blocked_target` also answers the egress guard refusing a redirect hop, after the first hop was sent; for an integration declaring no auths, also plain `http` to a host the operator does not trust, on the server URL (nothing sent) or a hop. */
+            /** @description `forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie or another credential the bearer-only proxy refuses (the chat's MCP loopback bearer included); `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role; `call_permission_required` — an enforced org default governs the integration and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's refusals of the server URL, before anything is sent: `unauthorized_target` (`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), `credential_exfiltration_refused` (`http_request_denied`). `blocked_target` also answers the egress guard refusing a redirect hop, after the first hop was sent; for an integration declaring no auths, also plain `http` to a host the operator does not trust, on the server URL (nothing sent) or a hop; `tool_blocked_in_space` — the space blocked that tool (declared or not), before any exchange. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12896,7 +13045,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `not_found` — the integration is not active in this space, has no published version, or its catalog offers no tool of that `name` (hidden, the connect tool, an `api_call` tool, or undeclared while `allow_undeclared_tools` is not `true`), before any exchange; `credential_not_found` — no connection the caller reaches, or `connection_id` names nothing the caller reaches (the same body whether it is another member's connection out of reach or no connection at all), or `connection_id` is passed for an integration that declares no authentication (call it without `connection_id`). */
+            /** @description `not_found` — the integration is not active in this space, has no published version, or its catalog offers no tool of that `name` (hidden, the connect tool, an `api_call` tool, or undeclared while `allow_undeclared_tools` is not `true` and the space approved none of its definitions), before any exchange; `credential_not_found` — no connection the caller reaches, or `connection_id` names nothing the caller reaches (the same body whether it is another member's connection out of reach or no connection at all), or `connection_id` is passed for an integration that declares no authentication (call it without `connection_id`). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -12905,7 +13054,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The connection selection of `/api/credential-proxy/proxy` refused, judged for the named tool: `must_choose_connection` (`errors[0].candidate_connections`, each with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`, and under an enforced org default that cannot bind `required_integration_unbound` (an empty set) or `connection_set_too_large`; `insufficient_scopes` — the connection lacks scopes the tool's `tools_policy` entry requires (`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, `owned_by_actor`, `remedy`). With `X-Appstrate-Connect-Offers: 1` and `integrations:connect`, an item a connect flow clears carries a `connect_url` (a reconnection of the caller's own connection; never `insufficient_scopes`, whose `remedy` says what to do). */
+            /** @description The connection selection of `/api/credential-proxy/proxy` refused, judged for the named tool: `must_choose_connection` (`errors[0].candidate_connections`, each with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`, and under an enforced org default that cannot bind `required_integration_unbound` (an empty set) or `connection_set_too_large`; `tool_definition_not_approved` — the tool is undeclared on a closed catalog and the server lists it at a definition this space did not approve (review it in the integration's settings); `insufficient_scopes` — the connection lacks scopes the tool's `tools_policy` entry requires (`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, `owned_by_actor`, `remedy`). With `X-Appstrate-Connect-Offers: 1` and `integrations:connect`, an item a connect flow clears carries a `connect_url` (a reconnection of the caller's own connection; never `insufficient_scopes`, whose `remedy` says what to do). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12914,7 +13063,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it; `upstream_invalid_params` — the server answered the `tools/call` JSON-RPC error -32602 (Invalid params): it refused the arguments or the tool name (`mcp_error: { code, message }`, its message untrusted text; `Proxy-Status: appstrate; error=http_request_error; received-status=<status>`, the HTTP status it came in). */
+            /** @description `integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport, only Streamable HTTP is called; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it; `upstream_invalid_params` — the server answered the `tools/call` JSON-RPC error -32602 (Invalid params): it refused the arguments or the tool name (`mcp_error: { code, message }`, its message untrusted text; `Proxy-Status: appstrate; error=http_request_error; received-status=<status>`, the HTTP status it came in). */
             422: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12928,6 +13077,13 @@ export interface operations {
                          * @enum {integer}
                          */
                         upstream_status?: 401 | 403;
+                        /** @description `upstream_credential_rejected`, when the server's `WWW-Authenticate` challenge (401, or 403 `insufficient_scope`) names the OAuth scopes it asks for: the scopes to reconnect with. */
+                        required_scopes?: string[];
+                        /**
+                         * Format: uuid
+                         * @description `upstream_credential_rejected`: the connection whose credential the server refused. With `required_scopes`, what a reconnect in place targets (`initiateIntegrationConnect` with this `connection_id` and those `scopes`).
+                         */
+                        connection_id?: string;
                         /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
                         credential?: {
                             /** @enum {string} */
@@ -12962,6 +13118,13 @@ export interface operations {
                          * @enum {integer}
                          */
                         upstream_status?: 401 | 403;
+                        /** @description `upstream_credential_rejected`, when the server's `WWW-Authenticate` challenge (401, or 403 `insufficient_scope`) names the OAuth scopes it asks for: the scopes to reconnect with. */
+                        required_scopes?: string[];
+                        /**
+                         * Format: uuid
+                         * @description `upstream_credential_rejected`: the connection whose credential the server refused. With `required_scopes`, what a reconnect in place targets (`initiateIntegrationConnect` with this `connection_id` and those `scopes`).
+                         */
+                        connection_id?: string;
                         /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
                         credential?: {
                             /** @enum {string} */
@@ -12981,7 +13144,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description `encryption_key_unavailable` — the connection's stored credential is encrypted under a key id missing from the platform's keyring; nothing was sent (`Proxy-Status` error `proxy_configuration_error`). */
+            /** @description `encryption_key_unavailable` — the connection's stored credential is encrypted under a key id missing from the platform's keyring; nothing was sent (`Proxy-Status` error `proxy_configuration_error`); `tool_catalog_unavailable` — the server's catalog could not be read to judge an approved undeclared tool, nothing was sent; retry once a listing reads it. */
             503: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -14153,6 +14316,8 @@ export interface operations {
                                 [key: string]: unknown;
                             } | null;
                             scopes_granted: string[];
+                            /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                            requested_scopes?: string[];
                             needs_reconnection: boolean;
                             /** Format: date-time */
                             expiresAt: string | null;
@@ -14465,6 +14630,8 @@ export interface operations {
                                     [key: string]: unknown;
                                 } | null;
                                 scopes_granted: string[];
+                                /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                                requested_scopes?: string[];
                                 needs_reconnection: boolean;
                                 /** Format: date-time */
                                 expiresAt: string | null;
@@ -14525,12 +14692,38 @@ export interface operations {
                         tool_catalog: {
                             name: string;
                             description?: string;
+                            /**
+                             * @description What this space can do with the tool. `available`: usable. `missing`: the manifest or an approval names it and the server no longer lists it. `pending`: the server lists an undeclared tool (or a new definition of an approved one) on a closed catalog and the space has not approved it. `blocked`: the space refuses it, whatever its definition.
+                             * @enum {string}
+                             */
+                            status: "available" | "missing" | "pending" | "blocked";
+                            /**
+                             * @description `declared`: in the manifest's catalog. `approved`: undeclared, approved in this space. `listed`: only the server lists it.
+                             * @enum {string}
+                             */
+                            origin: "declared" | "approved" | "listed";
+                            /** @description Declared tool: a listing carries a definition that changed since first seen (a signal only: it stays `available`, and nothing acknowledges it). Approved undeclared tool: a listed definition is not one the space approved. */
+                            modified: boolean;
                             policy?: {
                                 required_scopes?: {
                                     [key: string]: string[];
                                 };
                             };
                         }[];
+                        /** @description The latest stored listing of the server behind `tool_catalog`, summarised; `null` when none was recorded yet. */
+                        tool_snapshot: {
+                            /** Format: uuid */
+                            connection_id: string | null;
+                            /** Format: date-time */
+                            listed_at: string;
+                            truncated: boolean;
+                            /** @description Tools the server lists that the manifest does not declare and the space has neither approved nor blocked. */
+                            added: number;
+                            /** @description Tools the manifest or an approval names that no listing returns. */
+                            missing: number;
+                            /** @description Tools whose definition changed since first seen. */
+                            modified: number;
+                        } | null;
                         default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
@@ -14677,6 +14870,8 @@ export interface operations {
                             [key: string]: unknown;
                         } | null;
                         scopes_granted: string[];
+                        /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                        requested_scopes?: string[];
                         needs_reconnection: boolean;
                         /** Format: date-time */
                         expiresAt: string | null;
@@ -15097,6 +15292,8 @@ export interface operations {
                                 [key: string]: unknown;
                             } | null;
                             scopes_granted: string[];
+                            /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                            requested_scopes?: string[];
                             needs_reconnection: boolean;
                             /** Format: date-time */
                             expiresAt: string | null;
@@ -15196,6 +15393,8 @@ export interface operations {
                             [key: string]: unknown;
                         } | null;
                         scopes_granted: string[];
+                        /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                        requested_scopes?: string[];
                         needs_reconnection: boolean;
                         /** Format: date-time */
                         expiresAt: string | null;
@@ -15610,7 +15809,7 @@ export interface operations {
                 "application/json": {
                     /**
                      * Format: uuid
-                     * @description The connection to call the server with; omitted, the proxy's selection (`X-Connection-Id` semantics). Ignored for an integration declaring no auths, whose server is reached without a connection.
+                     * @description The connection to call the server with, whose variables render a templated server URL; omitted, the proxy's selection (`X-Connection-Id` semantics). Refused for an integration declaring no auths, whose server is reached without a connection.
                      */
                     connection_id?: string;
                 };
@@ -15626,14 +15825,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @description A partial AFPS integration manifest: only the fields the server reported. */
+                        /** @description A partial AFPS integration manifest: only the identity fields the server reported. */
                         manifest: {
-                            /** @description The selection an agent inherits: only the tools the server annotates `readOnlyHint: true` and not `destructiveHint: true`, in server order; empty when it annotates none. Discovering a tool never selects it otherwise. */
-                            default_tools: string[];
-                            /** @description Every tool listed, each with an empty policy. */
-                            tools_policy: {
-                                [key: string]: Record<string, never>;
-                            };
                             display_name?: string;
                             description?: string;
                             /** Format: uri */
@@ -15644,21 +15837,9 @@ export interface operations {
                         icon_source: string | null;
                         /** @description The server's `initialize` instructions, for the editor to propose as `INTEGRATION.md`; null when it sent none, or when the package's draft already holds an `INTEGRATION.md` (whatever its content, empty included). */
                         instructions: string | null;
-                        /** @description Every tool listed, in server order, one entry per name (the first listed wins), for the editor to show and select from. MCP annotations are the server's untrusted hints: `read_only` only drives the `default_tools` pre-selection. */
-                        tools: {
-                            name: string;
-                            /** @description The tool's `title` (else `annotations.title`), trimmed, at most 200 characters (a cut ends with `…`); absent when empty. */
-                            title?: string;
-                            /** @description The tool's `description`, trimmed, at most 1024 characters (a cut ends with `…`); absent when empty. */
-                            description?: string;
-                            /** @description True only when the server annotates the tool `readOnlyHint: true`. */
-                            read_only: boolean;
-                            /** @description True only when the server annotates the tool `destructiveHint: true`. An untrusted hint like `read_only`; a destructive tool is never in the proposal's `default_tools`, even when also annotated read-only. */
-                            destructive: boolean;
-                        }[];
                         warnings: {
                             /** @enum {string} */
-                            code: "tools_truncated" | "instructions_truncated";
+                            code: "instructions_truncated";
                             message: string;
                         }[];
                     };
@@ -15698,7 +15879,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `sync_url_templated` — its server URL is chosen per connection (`{$variable.…}`). */
+            /** @description `integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `remote_url_unrenderable` — the server URL is built from connection variables (`{$variable.…}`) and the selected connection's do not render it. */
             422: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -16113,6 +16294,8 @@ export interface operations {
                                     [key: string]: unknown;
                                 } | null;
                                 scopes_granted: string[];
+                                /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                                requested_scopes?: string[];
                                 needs_reconnection: boolean;
                                 /** Format: date-time */
                                 expiresAt: string | null;
@@ -16173,12 +16356,38 @@ export interface operations {
                         tool_catalog: {
                             name: string;
                             description?: string;
+                            /**
+                             * @description What this space can do with the tool. `available`: usable. `missing`: the manifest or an approval names it and the server no longer lists it. `pending`: the server lists an undeclared tool (or a new definition of an approved one) on a closed catalog and the space has not approved it. `blocked`: the space refuses it, whatever its definition.
+                             * @enum {string}
+                             */
+                            status: "available" | "missing" | "pending" | "blocked";
+                            /**
+                             * @description `declared`: in the manifest's catalog. `approved`: undeclared, approved in this space. `listed`: only the server lists it.
+                             * @enum {string}
+                             */
+                            origin: "declared" | "approved" | "listed";
+                            /** @description Declared tool: a listing carries a definition that changed since first seen (a signal only: it stays `available`, and nothing acknowledges it). Approved undeclared tool: a listed definition is not one the space approved. */
+                            modified: boolean;
                             policy?: {
                                 required_scopes?: {
                                     [key: string]: string[];
                                 };
                             };
                         }[];
+                        /** @description The latest stored listing of the server behind `tool_catalog`, summarised; `null` when none was recorded yet. */
+                        tool_snapshot: {
+                            /** Format: uuid */
+                            connection_id: string | null;
+                            /** Format: date-time */
+                            listed_at: string;
+                            truncated: boolean;
+                            /** @description Tools the server lists that the manifest does not declare and the space has neither approved nor blocked. */
+                            added: number;
+                            /** @description Tools the manifest or an approval names that no listing returns. */
+                            missing: number;
+                            /** @description Tools whose definition changed since first seen. */
+                            modified: number;
+                        } | null;
                         default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
@@ -16203,6 +16412,416 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getIntegrationToolPolicy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tool policy view. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        listed: {
+                            name: string;
+                            fingerprint: string;
+                            definition: {
+                                [key: string]: unknown;
+                            } | null;
+                        }[];
+                        approvals: {
+                            tool_name: string;
+                            fingerprint: string;
+                            /** @description The definition the space reviewed when it approved. */
+                            definition: {
+                                [key: string]: unknown;
+                            };
+                            approved_by: string | null;
+                            /** Format: date-time */
+                            approved_at: string;
+                        }[];
+                        blocks: {
+                            tool_name: string;
+                            blocked_by: string | null;
+                            /** Format: date-time */
+                            blocked_at: string;
+                        }[];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    approveIntegrationTools: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    tools: {
+                        name: string;
+                        /** @description A SHA-256 tool definition fingerprint, as the tool policy lists it. */
+                        fingerprint: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Approved */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `validation_failed` — the body is invalid. */
+            400: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description `tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again; `tool_definition_unavailable` — the listed definition of the named tools (`tools`) was too large to keep, so it cannot be reviewed nor approved; `tool_approvals_limit` — the named tools (`tools`) would exceed 32 approved definitions. Refusals by the manifest's state: `tool_already_declared` — the manifest declares the named tools (`tools`): a declared tool needs no approval; `tool_catalog_open` — the integration allows undeclared tools (none needs an approval; `tools` names the request's tools); `tool_hidden` — the named tools (`tools`) are ones the platform hides (`hidden_tools`, the connect tool). */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    revokeIntegrationToolApproval: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description The tool's name as the server lists it, 1 to 128 characters (percent-encode a `/`). */
+                toolName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No approval of the tool remains */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            /** @description `dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    blockIntegrationTools: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    tools: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Blocked */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            /** @description `dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description `tool_blocks_limit` — the space would block more than 500 tools of this integration (`tools` names the ones it would add): lift a block first. */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    unblockIntegrationTool: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description The tool's name as the server lists it, 1 to 128 characters (percent-encode a `/`). */
+                toolName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tool is not blocked */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            /** @description `dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    refreshIntegrationToolSnapshot: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The connection to list with; omitted, the proxy's selection. Refused for an integration declaring no auths.
+                     */
+                    connection_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The snapshot as it now stands. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tool_snapshot: {
+                            /**
+                             * Format: uuid
+                             * @description The connection listed with; null for an integration declaring no auths.
+                             */
+                            connection_id: string | null;
+                            /** Format: date-time */
+                            listed_at: string;
+                            /** @description The server lists more tools than are read. */
+                            truncated: boolean;
+                            tool_count: number;
+                        };
+                    };
+                };
+            };
+            /** @description `validation_failed` — the request body is invalid. */
+            400: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `integrations:read` or `credential-proxy:call-own` missing, `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`, `blocked_target`). */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The integration is unknown, has no published version, or is not active in the space; `credential_not_found` — the caller has no connection of the integration to list with (or the one named by `connection_id`). */
+            404: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The proxy's connection-selection conflicts: `must_choose_connection` when the caller holds several usable connections and the body names none, `needs_reconnection`. */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport (only Streamable HTTP is listed); `remote_url_unrenderable` — the connection's variables do not render the server URL. */
+            422: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description `internal_error` — the server was listed but the snapshot could not be recorded. */
+            500: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `bad_gateway` — the server could not be listed (no `Proxy-Status`); `upstream_credential_rejected` — it refused the connection's credential; `credential_unusable` — the stored credential cannot be sent as the integration declares; the proxy's other relayed codes carry their `Proxy-Status`. */
+            502: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     getLibrary: {
@@ -17314,6 +17933,8 @@ export interface operations {
                                 kind: "integration";
                                 label: string;
                                 scopes_granted: string[];
+                                /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold; empty when none. Granted by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). */
+                                requested_scopes: string[];
                                 /** Format: date-time */
                                 connected_at: string;
                                 needs_reconnection: boolean;
@@ -17442,6 +18063,8 @@ export interface operations {
                             [key: string]: unknown;
                         } | null;
                         scopes_granted: string[];
+                        /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                        requested_scopes?: string[];
                         needs_reconnection: boolean;
                         /** Format: date-time */
                         expiresAt: string | null;
@@ -19708,6 +20331,59 @@ export interface operations {
                             /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
                             spaceId: string;
                             /** @constant */
+                            type: "integration_tools_review";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                /** @description The remote integration whose tools to review. */
+                                packageId: string;
+                                display_name: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
+                            type: "connection_scopes_requested";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                packageId: string;
+                                /** @description The integration's display name when the notice was written. */
+                                integration_name: string;
+                                /** @description The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection. */
+                                connection_id: string;
+                                label: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
                             type: "agent_message";
                             /** @description Originating run id, when the notification references one */
                             runId: string | null;
@@ -19933,6 +20609,59 @@ export interface operations {
                             /** @enum {string} */
                             package_type: "agent" | "skill" | "integration";
                             shared_by_name: string;
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    } | {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
+                        /** @constant */
+                        type: "integration_tools_review";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            /** @description The remote integration whose tools to review. */
+                            packageId: string;
+                            display_name: string;
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    } | {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
+                        /** @constant */
+                        type: "connection_scopes_requested";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            packageId: string;
+                            /** @description The integration's display name when the notice was written. */
+                            integration_name: string;
+                            /** @description The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection. */
+                            connection_id: string;
+                            label: string;
                         } | null;
                         /**
                          * Format: date-time
@@ -22471,6 +23200,59 @@ export interface operations {
                             /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
                             spaceId: string;
                             /** @constant */
+                            type: "integration_tools_review";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                /** @description The remote integration whose tools to review. */
+                                packageId: string;
+                                display_name: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
+                            type: "connection_scopes_requested";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                packageId: string;
+                                /** @description The integration's display name when the notice was written. */
+                                integration_name: string;
+                                /** @description The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection. */
+                                connection_id: string;
+                                label: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
                             type: "agent_message";
                             /** @description Originating run id, when the notification references one */
                             runId: string | null;
@@ -22656,6 +23438,59 @@ export interface operations {
                             /** @enum {string} */
                             package_type: "agent" | "skill" | "integration";
                             shared_by_name: string;
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    } | {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
+                        /** @constant */
+                        type: "integration_tools_review";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            /** @description The remote integration whose tools to review. */
+                            packageId: string;
+                            display_name: string;
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    } | {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
+                        /** @constant */
+                        type: "connection_scopes_requested";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            packageId: string;
+                            /** @description The integration's display name when the notice was written. */
+                            integration_name: string;
+                            /** @description The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection. */
+                            connection_id: string;
+                            label: string;
                         } | null;
                         /**
                          * Format: date-time
@@ -30567,6 +31402,8 @@ export interface operations {
                         duration_ms: number;
                         /** @description Set on a 2xx answered with the injected credential when it ends a rejection streak the sidecar knows of: the `credential_revision` of that credential. Only with a non-null `connection_id` and a 2xx `outcome`. */
                         credential_revision?: string;
+                        /** @description Set on a `403` answered through a connection whose `WWW-Authenticate` challenge is `insufficient_scope` and names scopes: the valid scope tokens it named. The platform records them as the connection's step-up demand (`requested_scopes`, minus what it holds) when it is an OAuth2 connection the run's actor still reaches, and stamps the run's `metadata.scope_requests[]` with the connection's whole standing demand. Only with a non-null `connection_id` and a `403` `outcome`. */
+                        required_scopes?: string[];
                     }[];
                 };
             };
@@ -30579,7 +31416,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description `invalid_request`: a malformed body (more than 100 records, an unknown field, a value out of its bounds, a `credential_revision` on a record that cannot end a streak), or a record with a null `connection_id` names an integration the run did not resolve (`param` points at it); or `connection_not_in_run`: a record names a connection the run did not bind to its integration (`param` points at it). */
+            /** @description `invalid_request`: a malformed body (more than 100 records, an unknown field, a value out of its bounds, a `credential_revision` on a record that cannot end a streak, a `required_scopes` on a record that is no 403 through a connection), or a record with a null `connection_id` names an integration the run did not resolve (`param` points at it); or `connection_not_in_run`: a record names a connection the run did not bind to its integration (`param` points at it). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -30758,6 +31595,75 @@ export interface operations {
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
+        };
+    };
+    reportIntegrationToolsObserved: {
+        parameters: {
+            query?: {
+                /** @description The connection this run bound to the integration (a member of `runs.resolved_connections[<integration id>]`). Required unless the run bound none. An id the run did not bind is a `400 connection_not_in_run`. */
+                connection_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    tools?: unknown[];
+                    truncated?: boolean;
+                    unavailable: {
+                        name: string;
+                        /** @enum {string} */
+                        reason: "not_listed" | "hidden_tools" | "blocked_in_space" | "definition_not_approved" | "name_collision";
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Report recorded. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A body that is not parseable JSON is an `invalid_request`; JSON of the wrong shape (or `truncated` without `tools`) is a `validation_failed`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The body exceeds 1 MiB plus the 256 KiB envelope margin. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
         };
     };
     runLlmProxyAnthropicMessages: {

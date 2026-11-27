@@ -11,15 +11,19 @@ import {
   packageVersions,
   type runs,
 } from "@appstrate/db/schema";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { asRecord } from "@appstrate/core/safe-json";
 import { readJsonBody } from "@appstrate/core/request-body";
 import type { ApiCallFailureCode } from "@appstrate/afps-runtime/resolvers";
 import { parseBearer } from "@appstrate/core/bearer";
 import { zipArtifact } from "@appstrate/core/zip";
-import { getLocalServer } from "@appstrate/core/integration";
+import { getLocalServer, scopeTokenSchema } from "@appstrate/core/integration";
 import { downloadVersionZipForExecution } from "../services/package-storage.ts";
 import { readPackageSnapshot } from "../services/package-files.ts";
-import { getSystemPackages } from "../services/system-packages.ts";
+import {
+  getSystemPackages,
+  listRuntimeBoundSystemIntegrationIds,
+} from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
 import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
@@ -29,7 +33,17 @@ import { trackAudit } from "../services/audit.ts";
 import { recordConnectionCalls } from "../services/credential-proxy/call-journal.ts";
 import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { RUN_ROUTE_RATE_PER_MIN, rateLimitByBearer } from "../middleware/rate-limit.ts";
-import { recordRunDegradedIntegration } from "../services/state/runs.ts";
+import { recordRunDegradedIntegration, recordRunUnavailableTools } from "../services/state/runs.ts";
+import { MAX_REQUIRED_SCOPES } from "@appstrate/core/www-authenticate";
+import { recordToolSnapshot } from "../services/integration-tool-snapshots.ts";
+import {
+  OBSERVED_TOOLS_MAX_BYTES,
+  OBSERVED_TOOLS_MAX_COUNT,
+  UNAVAILABLE_TOOL_REASONS,
+  observedToolNameSchema,
+  observedToolSchema,
+} from "@appstrate/core/sidecar-types";
+import { bodyLimit } from "../middleware/body-limit.ts";
 import {
   getRunEffectiveAgent,
   runAgentGoneDetail,
@@ -64,6 +78,7 @@ import {
 } from "../services/integration-service.ts";
 import {
   clearReachableUpstreamRejections,
+  recordRequestedScopes,
   isIntegrationActive,
 } from "../services/integration-connections.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -220,6 +235,34 @@ const EMPTY_CREDENTIALS_WIRE = {
   expiresAtEpochMs: {},
 };
 
+/**
+ * The body bound: the sidecar cuts `tools` at `OBSERVED_TOOLS_MAX_BYTES`; the rest is the envelope
+ * (`truncated`, and up to `OBSERVED_TOOLS_MAX_COUNT` unavailable entries of ~300 bytes each),
+ * which the margin covers with room for JSON escaping.
+ */
+const TOOLS_OBSERVED_MAX_BODY_BYTES = OBSERVED_TOOLS_MAX_BYTES + 256 * 1024;
+
+export const toolsObservedSchema = z
+  .strictObject({
+    /**
+     * The descriptors as the server returned them, each judged on its own: a malformed one is
+     * dropped (the listing counts as truncated) and never refuses the report, which also carries the
+     * run's unavailable tools. The platform fingerprints the rest itself. Absent for a local
+     * integration, whose server's catalog is no listing of a remote one: only `unavailable` counts.
+     */
+    tools: z.array(z.unknown()).max(OBSERVED_TOOLS_MAX_COUNT).optional(),
+    /** Whether the listing was cut short; meaningful only with `tools`. */
+    truncated: z.boolean().optional(),
+    unavailable: z
+      .array(
+        z.strictObject({ name: observedToolNameSchema, reason: z.enum(UNAVAILABLE_TOOL_REASONS) }),
+      )
+      .max(OBSERVED_TOOLS_MAX_COUNT),
+  })
+  .refine((body) => (body.tools === undefined) === (body.truncated === undefined), {
+    message: "`truncated` qualifies `tools`: send both or neither",
+    path: ["truncated"],
+  });
 /** A credential's revision as a credentials payload carries it (`credential_revision`). */
 const credentialRevisionSchema = z.string().regex(/^[0-9a-f]{16}$/);
 
@@ -264,6 +307,7 @@ const integrationCallRecordSchema = z
     outcome: z.union([z.string().regex(/^[0-9]{3}$/), z.enum(DISPATCHED_FAILURE_CODES)]),
     duration_ms: z.int().min(0).max(2_147_483_647),
     credential_revision: credentialRevisionSchema.optional(),
+    required_scopes: z.array(scopeTokenSchema).min(1).max(MAX_REQUIRED_SCOPES).optional(),
   })
   .strict()
   .refine(
@@ -273,6 +317,15 @@ const integrationCallRecordSchema = z
     {
       message: "`credential_revision` ends a streak: only on a 2xx outcome through a connection.",
       path: ["credential_revision"],
+    },
+  )
+  .refine(
+    (call) =>
+      call.required_scopes === undefined || (call.connection_id !== null && call.outcome === "403"),
+    {
+      message:
+        "`required_scopes` names a step-up demand: only on a 403 outcome through a connection.",
+      path: ["required_scopes"],
     },
   );
 
@@ -464,11 +517,12 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
    */
   async function recordTerminalCredentialFailure(
     err: unknown,
+    orgId: string,
     runId: string,
     packageId: string,
   ): Promise<void> {
     if (err instanceof ApiError && err.status === 410) {
-      await recordRunDegradedIntegration(runId, packageId);
+      await recordRunDegradedIntegration(orgId, runId, packageId);
     }
   }
 
@@ -518,7 +572,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
         resolvedIntegrationVersions: run.resolvedIntegrationVersions,
       });
     } catch (err) {
-      await recordTerminalCredentialFailure(err, runId, packageId);
+      await recordTerminalCredentialFailure(err, run.orgId, runId, packageId);
       throw err;
     }
     logger.info("Integration credentials delivered", {
@@ -569,7 +623,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
       // 410 = the connection was flagged needsReconnection (terminal). Record
       // it on the run so the run-detail banner can surface it, then re-throw so
       // the sidecar sees the 410 and stops retrying.
-      await recordTerminalCredentialFailure(err, runId, packageId);
+      await recordTerminalCredentialFailure(err, run.orgId, runId, packageId);
       throw err;
     }
     logger.info("Integration credentials refreshed", {
@@ -648,8 +702,75 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
         call.credential_revision,
       );
     }
+    for (const [i, call] of calls.entries()) {
+      const connectionId = connectionIds[i];
+      if (call.required_scopes === undefined || !connectionId) continue;
+      await recordRequestedScopes(
+        connectionId,
+        call.integration_id,
+        { spaceId: run.spaceId, actor },
+        call.required_scopes,
+        { orgId: run.orgId, id: runId },
+      );
+    }
     return c.body(null, 204);
   });
+
+  // POST /internal/integration-credentials/:scope/:name/tools-observed
+  // Sidecar-only: what a run's boot listed from a remote integration's server (the raw MCP
+  // descriptors) and which selected tools it could not expose. Same run checks as the credentials GET.
+  // The run's metadata always records the unavailable tools; the listing becomes the integration's
+  // snapshot only for a platform-origin run (a remote-origin sidecar runs on the caller's
+  // machine and is no authority on org state) and never for the platform's own endpoint integration.
+  router.post(
+    `/integration-credentials/${SCOPED_PACKAGE_ROUTE}/tools-observed`,
+    bodyLimit(TOOLS_OBSERVED_MAX_BODY_BYTES),
+    async (c) => {
+      const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+      await refuseConnectRun(c, packageId);
+      const { runId, run } = await verifyRunToken(c);
+      await assertAgentDeclaresIntegration(packageId, run, runId);
+      let connectionId: string | null = null;
+      if (c.req.query("connection_id") !== undefined) {
+        connectionId = requireBoundConnection(c, packageId, run, runId).connectionId;
+      } else if ((run.resolvedConnections?.[packageId] ?? []).length > 0) {
+        throw invalidRequest(
+          `\`connection_id\` is required: this run bound connections to '${packageId}'.`,
+          "connection_id",
+        );
+      }
+      const body = await readJsonBody(c, toolsObservedSchema);
+      await recordRunUnavailableTools(
+        run.orgId,
+        runId,
+        body.unavailable.map((tool) => ({ integrationId: packageId, ...tool })),
+      );
+      if (
+        body.tools !== undefined &&
+        run.runOrigin === "platform" &&
+        !listRuntimeBoundSystemIntegrationIds().includes(packageId)
+      ) {
+        const tools = body.tools.flatMap((tool) => {
+          const parsed = observedToolSchema.safeParse(tool);
+          return parsed.success ? [parsed.data] : [];
+        });
+        await recordToolSnapshot({
+          orgId: run.orgId,
+          packageId,
+          connectionId,
+          tools,
+          truncated: body.truncated || tools.length < body.tools.length,
+        }).catch((err: unknown) =>
+          logger.warn("tools-observed: tool snapshot not recorded", {
+            runId,
+            packageId,
+            error: getErrorMessage(err),
+          }),
+        );
+      }
+      return c.body(null, 204);
+    },
+  );
 
   // GET /internal/integration-bundle/:scope/:name[?version=]
   // Returns a LOCAL integration's own archive (manifest, INTEGRATION.md and the runnable server

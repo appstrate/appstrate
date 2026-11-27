@@ -7,6 +7,7 @@
  * failed POST is logged and its records dropped, never retried nor thrown into the call path.
  */
 
+import { requiredScopesFromChallenge } from "@appstrate/core/www-authenticate";
 import type { IntegrationCredentialsSource } from "./integration-credentials-source.ts";
 import { logger } from "./logger.ts";
 
@@ -23,6 +24,8 @@ export interface IntegrationCallRecord {
   duration_ms: number;
   /** Set only on a record that ends the connection's rejection streak. */
   credential_revision?: string;
+  /** Set only on a 403 `insufficient_scope` through a connection: the scopes the challenge named. */
+  required_scopes?: string[];
 }
 
 export interface CallReporter {
@@ -142,6 +145,8 @@ export interface DispatchedCall {
   durationMs: number;
   /** The injected credential the final response answered, `null` when it answered none. */
   credential: { revision: string | undefined } | null;
+  /** The response's `WWW-Authenticate` header, when it answered with one. */
+  challenge?: string | null;
 }
 
 export type CallJournal = (call: DispatchedCall) => void;
@@ -151,7 +156,8 @@ const SUCCESS_OUTCOME = /^2\d\d$/;
 /**
  * The journal of one integration's calls through one bound connection (or none). A 2xx answered
  * with the injected credential carries the revision when it ends a pending rejection streak
- * (`streakEndingRevision`), and re-arms it when that record does not land (`streakNotEnded`).
+ * (`streakEndingRevision`), and re-arms it when that record does not land (`streakNotEnded`). A 403
+ * `insufficient_scope` answered on it carries the scopes the challenge named (`required_scopes`).
  */
 export function connectionCallJournal(
   reporter: CallReporter,
@@ -167,6 +173,12 @@ export function connectionCallJournal(
         ? binding.source.streakEndingRevision(call.credential.revision)
         : undefined;
     const source = binding.source;
+    // A 403 `insufficient_scope` on the injected credential names the connection's step-up demand.
+    const status = Number(call.outcome);
+    const requiredScopes =
+      call.credential && binding.connectionId && status === 403
+        ? requiredScopesFromChallenge(status, call.challenge ?? null)
+        : undefined;
     reporter.report(
       {
         integration_id: binding.integrationId,
@@ -176,6 +188,7 @@ export function connectionCallJournal(
         outcome: call.outcome,
         duration_ms: Math.max(0, Math.round(call.durationMs)),
         ...(revision !== undefined ? { credential_revision: revision } : {}),
+        ...(requiredScopes ? { required_scopes: requiredScopes } : {}),
       },
       revision !== undefined && source ? () => source.streakNotEnded(revision) : undefined,
     );

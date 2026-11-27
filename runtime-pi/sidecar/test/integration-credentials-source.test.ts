@@ -21,10 +21,13 @@
 
 import { describe, it, expect, spyOn } from "bun:test";
 import {
+  capObservedTools,
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
+  postIntegrationToolsObserved,
   type IntegrationCredentialsWire,
 } from "../integration-credentials-source.ts";
+import { OBSERVED_TOOLS_MAX_COUNT } from "@appstrate/core/sidecar-types";
 import { logger } from "../logger.ts";
 
 function makePayload(token: string): IntegrationCredentialsWire {
@@ -799,5 +802,115 @@ describe("fetchInitialIntegrationCredentials", () => {
     );
     expect(source.deliveryPlans().session?.value).toBe("sess-1");
     expect(source.current().auths).toHaveLength(1);
+  });
+});
+
+describe("postIntegrationToolsObserved", () => {
+  it("posts the raw tools, the truncation flag and the unavailable list to the tools-observed route", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchFn = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    const res = await postIntegrationToolsObserved(
+      "@scope/name",
+      "conn-a",
+      {
+        tools: [{ name: "a", inputSchema: { type: "object" } }],
+        truncated: false,
+        unavailable: [{ name: "b", reason: "not_listed" }],
+      },
+      { platformApiUrl: "http://api", runToken: "tok", fetchFn },
+    );
+    expect(res.status).toBe(204);
+    expect(calls[0]!.url).toBe(
+      "http://api/internal/integration-credentials/@scope/name/tools-observed?connection_id=conn-a",
+    );
+    expect(calls[0]!.init.method).toBe("POST");
+    expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
+    expect(JSON.parse(calls[0]!.init.body as string)).toEqual({
+      tools: [{ name: "a", inputSchema: { type: "object" } }],
+      truncated: false,
+      unavailable: [{ name: "b", reason: "not_listed" }],
+    });
+  });
+});
+
+describe("postIntegrationToolsObserved — resilience", () => {
+  const observed = { tools: [], truncated: false, unavailable: [] };
+  const opts = { platformApiUrl: "http://api", runToken: "tok", retryDelayMs: () => 0 };
+
+  it("retries a network error and a 5xx, then returns the answer", async () => {
+    const answers = [new Error("down"), new Response(null, { status: 503 }), 204] as const;
+    let calls = 0;
+    const fetchFn = (async (_url: string, init: RequestInit) => {
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      const answer = answers[calls++]!;
+      if (answer instanceof Error) throw answer;
+      return answer instanceof Response ? answer : new Response(null, { status: answer });
+    }) as unknown as typeof fetch;
+    const res = await postIntegrationToolsObserved("@scope/name", undefined, observed, {
+      ...opts,
+      fetchFn,
+    });
+    expect(res.status).toBe(204);
+    expect(calls).toBe(3);
+  });
+
+  it("does not retry a 4xx", async () => {
+    let calls = 0;
+    const fetchFn = (async () => {
+      calls++;
+      return new Response(null, { status: 400 });
+    }) as unknown as typeof fetch;
+    const res = await postIntegrationToolsObserved("@scope/name", undefined, observed, {
+      ...opts,
+      fetchFn,
+    });
+    expect(res.status).toBe(400);
+    expect(calls).toBe(1);
+  });
+
+  it("gives up after the bounded retries", async () => {
+    let calls = 0;
+    const fetchFn = (async () => {
+      calls++;
+      throw new Error("down");
+    }) as unknown as typeof fetch;
+    await expect(
+      postIntegrationToolsObserved("@scope/name", undefined, observed, { ...opts, fetchFn }),
+    ).rejects.toThrow("down");
+    expect(calls).toBe(3);
+  });
+});
+
+describe("capObservedTools", () => {
+  const t = (name: string, pad = "") => ({ name, inputSchema: { type: "object" }, pad });
+
+  it("keeps everything under the cap", () => {
+    expect(capObservedTools([t("a"), t("b")], 1000)).toEqual({
+      tools: [t("a"), t("b")],
+      truncated: false,
+    });
+  });
+
+  it("drops trailing tools past the cap and flags truncation", () => {
+    const tools = [t("a", "x".repeat(40)), t("b", "y".repeat(40)), t("c", "z".repeat(40))];
+    const one = JSON.stringify(tools[0]).length;
+    const capped = capObservedTools(tools, 2 + one * 2 + 1);
+    expect(capped.tools).toEqual([tools[0]!, tools[1]!]);
+    expect(capped.truncated).toBe(true);
+    expect(JSON.stringify(capped.tools).length).toBeLessThanOrEqual(2 + one * 2 + 1);
+  });
+
+  it("drops a single tool larger than the cap", () => {
+    expect(capObservedTools([t("a", "x".repeat(100))], 50)).toEqual({ tools: [], truncated: true });
+  });
+
+  it("keeps at most the platform's tool count", () => {
+    const tools = Array.from({ length: OBSERVED_TOOLS_MAX_COUNT + 1 }, (_, i) => t(`t${i}`));
+    const capped = capObservedTools(tools);
+    expect(capped.tools).toHaveLength(OBSERVED_TOOLS_MAX_COUNT);
+    expect(capped.truncated).toBe(true);
   });
 });

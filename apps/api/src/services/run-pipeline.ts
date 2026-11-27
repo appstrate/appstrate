@@ -16,9 +16,9 @@ import {
   ModelNotConfiguredError,
   ModelCredentialMissingError,
 } from "./run-context-builder.ts";
-import type { DroppedIntegration } from "./integration-spawn-resolver.ts";
+import type { DroppedIntegration, UnavailableSelectedTool } from "./integration-spawn-resolver.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
-import { createRun, appendRunLog } from "./state/runs.ts";
+import { createRun, appendRunLog, recordRunUnavailableTools } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
 import { requireBoundModel, resolveModelCascade } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
@@ -510,6 +510,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // after `createRun` below — the `run_logs.run_id` FK forbids writing them
   // any earlier.
   let droppedIntegrations: DroppedIntegration[];
+  let unavailableTools: UnavailableSelectedTool[];
   let droppedGenerationSettings: DroppedGenerationSetting[];
   let unavailablePinnedModelId: string | null;
   let contextMs: number;
@@ -527,6 +528,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
       modelCost,
       generationConfig,
       droppedIntegrations,
+      unavailableTools,
       droppedGenerationSettings,
       unavailablePinnedModelId,
     } = await runWithSpan("appstrate.run.context", { attributes: spanAttributes }, () =>
@@ -726,6 +728,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // every healthy run, and it swallows its own write failures, so it can
   // neither slow down nor fail a normal kickoff.
   await recordDroppedIntegrations({ orgId }, runId, droppedIntegrations, integrationsUnbound);
+  await recordRunUnavailableTools(orgId, runId, unavailableTools);
   await recordDroppedGenerationSettings({ orgId }, runId, modelLabel, droppedGenerationSettings);
   await recordModelFallback({ orgId }, runId, modelLabel, unavailablePinnedModelId);
 

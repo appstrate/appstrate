@@ -324,7 +324,12 @@ const proxyResponses = {
       "caller holds `credential-proxy:call-own` without `credential-proxy:call` " +
       "(`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's " +
       "`credential_proxy_open` is `false`, whatever the caller's role " +
-      "(`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path " +
+      "(`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an " +
+      "`api_call` tool the space blocked, or (on a streamed upload, `X-Stream-Request`) an " +
+      "`api_upload` tool it blocked; `remote_mcp_endpoint_not_proxied` — `X-Target` is the connection's " +
+      "remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin " +
+      "of an SSE endpoint): that server is reached through its tools, which apply the space's tool " +
+      "policy (a redirect hop onto it is refused too, as `unauthorized_target`); `forbidden` — the principal lacks the permission of the path " +
       "the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` " +
       "or `credential-proxy:call` without), session " +
       "bound to a different principal, cookie session used, or `X-Run-Id` names another " +
@@ -590,6 +595,23 @@ const upstreamMcpProblemSchema = {
           type: "integer",
           enum: [401, 403],
           description: "`upstream_credential_rejected`: the server's HTTP status.",
+        },
+        required_scopes: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: 20,
+          description:
+            "`upstream_credential_rejected`, when the server's `WWW-Authenticate` challenge " +
+            "(401, or 403 `insufficient_scope`) names the OAuth scopes it asks for: the scopes " +
+            "to reconnect with.",
+        },
+        connection_id: {
+          type: "string",
+          format: "uuid",
+          description:
+            "`upstream_credential_rejected`: the connection whose credential the server refused. " +
+            "With `required_scopes`, what a reconnect in place targets (`initiateIntegrationConnect` " +
+            "with this `connection_id` and those `scopes`).",
         },
         credential: {
           type: "object",
@@ -1125,7 +1147,8 @@ export const credentialProxyPaths = {
             "`credential_exfiltration_refused` (`http_request_denied`). `blocked_target` also " +
             "answers the egress guard refusing a redirect hop, after the first hop was sent; for " +
             "an integration declaring no auths, also plain `http` to a host the operator does " +
-            "not trust, on the server URL (nothing sent) or a hop.",
+            "not trust, on the server URL (nothing sent) or a hop; `tool_blocked_in_space` — " +
+            "the space blocked that tool (declared or not), before any exchange.",
           headers: PROXY_STATUS_HEADER,
           content: problemContent,
         },
@@ -1133,8 +1156,8 @@ export const credentialProxyPaths = {
           description:
             "`not_found` — the integration is not active in this space, has no published version, " +
             "or its catalog offers no tool of that `name` (hidden, the connect tool, an " +
-            "`api_call` tool, or undeclared while `allow_undeclared_tools` is not `true`), " +
-            "before any exchange; `credential_not_found` — no connection the caller reaches, or " +
+            "`api_call` tool, or undeclared while `allow_undeclared_tools` is not `true` and the " +
+            "space approved none of its definitions), before any exchange; `credential_not_found` — no connection the caller reaches, or " +
             "`connection_id` names nothing the caller reaches (the same body whether it is " +
             "another member's connection out of reach or no connection at all), or " +
             "`connection_id` is passed for an integration that declares no authentication " +
@@ -1148,7 +1171,9 @@ export const credentialProxyPaths = {
             "with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), " +
             "`needs_reconnection`, `pinned_connection_unavailable`, and under an enforced org " +
             "default that cannot bind `required_integration_unbound` (an empty set) or " +
-            "`connection_set_too_large`; `insufficient_scopes` — the " +
+            "`connection_set_too_large`; `tool_definition_not_approved` — the tool is undeclared " +
+            "on a closed catalog and the server lists it at a definition this space did not " +
+            "approve (review it in the integration's settings); `insufficient_scopes` — the " +
             "connection lacks scopes the tool's `tools_policy` entry requires " +
             "(`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, " +
             "`owned_by_actor`, `remedy`). With `X-Appstrate-Connect-Offers: 1` and " +
@@ -1159,8 +1184,9 @@ export const credentialProxyPaths = {
         },
         "422": {
           description:
-            "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP " +
-            "server; `remote_url_unrenderable` — its server URL is built from the connection's " +
+            "`integration_not_remote` — the integration is not backed by a remote MCP server; " +
+            "`sync_transport_unsupported` — its server uses the SSE transport, only Streamable " +
+            "HTTP is called; `remote_url_unrenderable` — its server URL is built from the connection's " +
             "variables and they do not render it; `upstream_invalid_params` — the server answered " +
             "the `tools/call` JSON-RPC error -32602 (Invalid params): it refused the arguments or " +
             "the tool name (`mcp_error: { code, message }`, its message untrusted text; " +
@@ -1199,7 +1225,9 @@ export const credentialProxyPaths = {
           description:
             "`encryption_key_unavailable` — the connection's stored credential is encrypted under " +
             "a key id missing from the platform's keyring; nothing was sent (`Proxy-Status` error " +
-            "`proxy_configuration_error`).",
+            "`proxy_configuration_error`); `tool_catalog_unavailable` — the server's catalog could " +
+            "not be read to judge an approved undeclared tool, nothing was sent; retry once a " +
+            "listing reads it.",
           headers: PROXY_STATUS_HEADER,
           content: problemContent,
         },
