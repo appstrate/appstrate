@@ -24,6 +24,7 @@ import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  ChevronDownIcon,
   EllipsisIcon,
   MessagesSquareIcon,
   PencilIcon,
@@ -85,6 +86,12 @@ import {
   SESSIONS_QUERY_KEY,
   type SessionSummary,
 } from "./sessions.ts";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
+import { readCollapsedGroups, setGroupFolded } from "./collapsed-groups.ts";
 import { ConversationGroupSkeleton } from "./conversation-skeleton.tsx";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
 import {
@@ -107,6 +114,14 @@ const GROUP_LABEL_KEY: Record<SessionGroupKey, string> = {
   month: "threads.group.month",
   older: "threads.group.older",
 };
+
+/** The folded date groups: read once on mount, written through on each toggle. */
+function useCollapsedGroups() {
+  const [collapsed, setCollapsed] = useState(readCollapsedGroups);
+  const setFolded = (key: string, folded: boolean) =>
+    setCollapsed((current) => setGroupFolded(current, key, folded));
+  return [collapsed, setFolded] as const;
+}
 
 /** The trimmed search term, settled `delay` ms after the last keystroke (cleared at once). */
 function useDebouncedTerm(input: string, delay: number): string {
@@ -175,6 +190,7 @@ export function ChatConversationList({
   } = searching ? found : base;
   const now = useNowTick();
   const list = sessions ?? [];
+  const [collapsedGroups, setFolded] = useCollapsedGroups();
   const groups = searching ? [] : groupSessionsByDate(list, new Date(now));
   // Starting a conversation is a write, as are rename and delete; a reader also gets its own empty copy.
   const canWrite = can("chat:write");
@@ -313,12 +329,30 @@ export function ChatConversationList({
           {searching
             ? list.map(row)
             : groups.map((group) => (
-                <li key={group.key} className="flex flex-col gap-1">
-                  <SidebarGroupLabel className="mt-1 h-6 px-2 text-sm md:text-[11px]">
-                    {t(GROUP_LABEL_KEY[group.key])}
-                  </SidebarGroupLabel>
-                  <ul className="flex flex-col gap-1">{group.sessions.map(row)}</ul>
-                </li>
+                <Collapsible
+                  key={group.key}
+                  asChild
+                  open={!collapsedGroups.has(group.key)}
+                  onOpenChange={(open) => setFolded(group.key, !open)}
+                >
+                  <li className="flex flex-col gap-1">
+                    <SidebarGroupLabel
+                      asChild
+                      className="group/label desktop-pointer:hover:bg-sidebar-accent desktop-pointer:hover:text-sidebar-accent-foreground mt-1 h-6 gap-1 px-2 text-sm md:text-[11px]"
+                    >
+                      <CollapsibleTrigger>
+                        {t(GROUP_LABEL_KEY[group.key])}
+                        <ChevronDownIcon
+                          aria-hidden
+                          className="size-3 transition-transform group-data-[state=closed]/label:-rotate-90"
+                        />
+                      </CollapsibleTrigger>
+                    </SidebarGroupLabel>
+                    <CollapsibleContent asChild>
+                      <ul className="flex flex-col gap-1">{group.sessions.map(row)}</ul>
+                    </CollapsibleContent>
+                  </li>
+                </Collapsible>
               ))}
           {/* A plain button, not a menu row: a menu row closes the phone's
               drawer, and loading more must leave it open on the list. */}
