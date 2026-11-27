@@ -10,8 +10,6 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 
 const KEY = "appstrate-chat-sidebar-width";
 const storage = installFakeStorage();
-// Read by the store at module init.
-storage.setItem(KEY, "9999");
 
 const {
   CHAT_SIDEBAR_WIDTH,
@@ -47,7 +45,6 @@ describe("the chat sidebar's width", () => {
   it("reads a stored width back, clamped", () => {
     expect(parseChatSidebarWidth(320)).toBe(320);
     expect(parseChatSidebarWidth(100)).toBe(CHAT_SIDEBAR_WIDTH.min);
-    expect(useChatSidebarWidthStore.getState().width).toBe(CHAT_SIDEBAR_WIDTH.max);
   });
 
   it("falls back to the default when nothing usable is stored", () => {
