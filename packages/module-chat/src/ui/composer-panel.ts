@@ -68,10 +68,10 @@ export const useComposerPanel = () => useContext(ComposerPanelContext);
 
 /** A composer setting off its default, and the panel level that changes it. */
 export type ComposerDeparture =
-  "contextAllSpaces" | "creationOff" | "inlineRunModel" | "limit" | "skills";
+  "contextAllSpacesOff" | "creationOff" | "inlineRunModel" | "limit" | "skills";
 
 export const DEPARTURE_LEVEL: Record<ComposerDeparture, ComposerPanelLevel> = {
-  contextAllSpaces: "tools",
+  contextAllSpacesOff: "tools",
   creationOff: "tools",
   inlineRunModel: "models",
   limit: "tools",
@@ -98,7 +98,7 @@ export function useComposerDepartures(authorsPackages: boolean): readonly Compos
   if (authorsPackages && !creationMode) departures.push("creationOff");
   if (offersInlineRunModel && inlineRunModel) departures.push("inlineRunModel");
   if (scope.restricted) departures.push("limit");
-  if (offersContextAllSpaces && contextAllSpaces) departures.push("contextAllSpaces");
+  if (offersContextAllSpaces && !contextAllSpaces) departures.push("contextAllSpacesOff");
   if (conversation !== null && canResetSkills(conversation.skills)) departures.push("skills");
   return departures;
 }

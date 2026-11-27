@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** A menu as a phone shows it: rows a thumb can hit, a switch row that toggles as a whole, a red delete. */
+/** A menu as a phone shows it: rows a thumb can hit, a switch row that toggles as a whole, its hint behind an ⓘ, a red delete. */
 
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -27,7 +27,7 @@ describe("a sheet menu's rows", () => {
     expect(out).toContain("rounded-lg");
   });
 
-  it("make a setting a label that toggles its switch, with its hint under it", () => {
+  it("make a setting a label that toggles its switch, its hint behind an ⓘ beside the label", () => {
     const out = renderToStaticMarkup(
       <SheetMenuSwitchRow
         id="s1"
@@ -35,11 +35,27 @@ describe("a sheet menu's rows", () => {
         hint="Off: no package is created."
         checked
         onCheckedChange={() => {}}
+        testId="creation"
       />,
     );
     expect(out).toContain('<label for="s1"');
     expect(out).toContain('role="switch"');
     expect(out).toContain('aria-checked="true"');
-    expect(out).toContain("Off: no package is created.");
+    // Named by the label's text alone, not the ⓘ button's; described by the hint.
+    expect(out).toContain('aria-labelledby="s1-label"');
+    expect(out).toContain('aria-describedby="s1-hint"');
+    expect(out).toContain('<span id="s1-hint" hidden="">Off: no package is created.</span>');
+    expect(out).toContain('data-testid="creation-info"');
+    expect(out).toContain('aria-label="More information"');
+    // The bubble is not drawn until it is opened: the hint is in the hidden copy only.
+    expect(out.split("Off: no package is created.")).toHaveLength(2);
+  });
+
+  it("draw no ⓘ and no description without a hint", () => {
+    const out = renderToStaticMarkup(
+      <SheetMenuSwitchRow id="s2" label="Limit" checked={false} onCheckedChange={() => {}} />,
+    );
+    expect(out).not.toContain("aria-describedby");
+    expect(out).not.toContain("More information");
   });
 });

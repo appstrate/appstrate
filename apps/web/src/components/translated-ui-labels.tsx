@@ -18,6 +18,7 @@ export function TranslatedUiLabels({ children }: { children: ReactNode }) {
       copy: t("btn.copy"),
       copied: t("btn.copied"),
       copyFailed: t("error.copyFailed"),
+      moreInfo: t("btn.moreInfo"),
     }),
     [t],
   );

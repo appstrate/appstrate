@@ -155,7 +155,7 @@ connexion utilisable, pour un appelant qui détient `integrations:connect` ; une
 l'espace bloque les connexions des membres n'y figure que sous `integrations:configure`
 (plafonné).
 
-### Niveau 3 — tous les espaces (préférence de l'utilisateur, désactivée par défaut)
+### Niveau 3 — tous les espaces (préférence de l'utilisateur, activée par défaut depuis #2434)
 
 - Interrupteur « Contexte de tous les espaces » du panneau du composeur : préférence par
   utilisateur dans le navigateur (`createUserFlag`, comme le modèle des runs inline), envoyée

@@ -10,8 +10,8 @@ export interface Translate<Values> {
 }
 
 /**
- * The few strings the primitives of this package render themselves (the copy button, a dialog's close button, the
- * sidebar's screen-reader chrome). The package carries no
+ * The few strings the primitives of this package render themselves (the copy button, a dialog's close button, an
+ * explanation's ⓘ button, the sidebar's screen-reader chrome). The package carries no
  * i18n runtime: the host application provides its translations once, at its
  * root, and every primitive reads them from there. English is the default.
  */
@@ -25,6 +25,7 @@ interface UiLabels {
   copy: string;
   copied: string;
   copyFailed: string;
+  moreInfo: string;
 }
 
 export const UiLabelsContext = createContext<UiLabels>({
@@ -37,6 +38,7 @@ export const UiLabelsContext = createContext<UiLabels>({
   copy: "Copy",
   copied: "Copied",
   copyFailed: "Could not copy: the browser refused access to the clipboard.",
+  moreInfo: "More information",
 });
 
 export function useUiLabels(): UiLabels {
