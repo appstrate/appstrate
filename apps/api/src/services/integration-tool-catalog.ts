@@ -202,6 +202,10 @@ export function syntheticToolNames(manifest: IntegrationManifest): Set<string> {
   );
 }
 
+/** A remote server whose undeclared tools need a space approval. */
+export const isClosedRemoteCatalog = (manifest: IntegrationManifest): boolean =>
+  manifest.source?.kind === "remote" && !allowsUndeclaredTools(manifest);
+
 /**
  * The tool names an agent's selection names on `manifest`. A wildcard on a closed remote catalog
  * is not "every tool the server lists": it is what the manifest declares plus what the space
@@ -214,7 +218,7 @@ export function namedToolSelection(
   policy: ToolSpacePolicy,
 ): readonly string[] {
   if (!isToolsWildcard(selection)) return selection ?? [];
-  if (manifest.source?.kind !== "remote" || allowsUndeclaredTools(manifest)) return [];
+  if (!isClosedRemoteCatalog(manifest)) return [];
   const platformTools = syntheticToolNames(manifest);
   return [
     ...resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
@@ -351,15 +355,6 @@ function listedDescription(listed: readonly ToolSnapshotView["tools"][number][] 
   return {};
 }
 
-/** The effective catalog of `manifest` judged against a policy and the snapshots read. */
-export function effectiveCatalogOf(
-  manifest: IntegrationManifest,
-  policy: ToolSpacePolicy | null,
-  snapshots: readonly ToolSnapshot[],
-): EffectiveToolEntry[] {
-  return resolveEffectiveToolCatalog({ integration: manifest, policy, snapshots });
-}
-
 /** The effective catalog, with the snapshots it was judged against. */
 export async function loadEffectiveToolCatalog(input: {
   orgId: string;
@@ -379,6 +374,6 @@ export async function loadEffectiveToolCatalog(input: {
         ),
     readToolSnapshots(input),
   ]);
-  const catalog = effectiveCatalogOf(input.manifest, policy, snapshots);
+  const catalog = resolveEffectiveToolCatalog({ integration: input.manifest, policy, snapshots });
   return { catalog, snapshots };
 }

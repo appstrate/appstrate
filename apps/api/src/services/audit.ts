@@ -99,8 +99,7 @@ export function auditDiff(
 }
 
 /**
- * In-flight audit inserts, and the other work a response does not wait for (the tool-review
- * notifications a snapshot schedules): the names stay, audit was the registry's first user.
+ * In-flight audit inserts and other work a response does not wait for (tool-review notifications).
  * A caller that must not wait for the insert on its response path (the MCP router, through which
  * every chat tool call goes) hands the promise to `trackAudit` instead of awaiting it; graceful
  * shutdown then `drainAudits` so a process recycle still flushes the trail. Same shape as

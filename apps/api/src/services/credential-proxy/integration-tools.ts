@@ -364,11 +364,8 @@ type RemoteListing =
  * Whether `name` may be one of a remote integration's tools, its server unread: any name of its
  * namespace when it allows undeclared tools, else one of its declared tools' names.
  */
-function mayNameRemoteTool(
-  entry: ListedIntegration,
-  policy: ToolSpacePolicy,
-  name: string,
-): boolean {
+function mayNameRemoteTool(entry: ListedIntegration, name: string): boolean {
+  const { policy } = entry;
   if (!name.startsWith(`${entry.namespace}__`)) return false;
   if (allowsUndeclaredTools(entry.manifest)) return true;
   // An approved tool is named like a declared one; its listing says whether it is offered.
@@ -395,7 +392,7 @@ async function remoteTools(
     isUnauthenticatedIntegration(manifest)
   ) {
     // A call naming a connection of an integration that binds none: refused before any exchange.
-    if (!mayNameRemoteTool(entry, policy, query.name)) return { tools: [], truncatedAt: null };
+    if (!mayNameRemoteTool(entry, query.name)) return { tools: [], truncatedAt: null };
     return {
       unlisted: {
         integration_package_id: integrationId,
@@ -410,7 +407,7 @@ async function remoteTools(
     catalog = await readRemoteCatalog(caller, entry, query.connectionId, query.cachedOnly === true);
   } catch (err) {
     if (!(err instanceof ApiError)) throw err;
-    if (query.name !== undefined && !mayNameRemoteTool(entry, policy, query.name)) {
+    if (query.name !== undefined && !mayNameRemoteTool(entry, query.name)) {
       return { tools: [], truncatedAt: null };
     }
     return {

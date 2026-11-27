@@ -212,14 +212,15 @@ function manifestErrorsToFieldErrors(result: {
  */
 async function assertAgentIntegrationScopesValid(
   manifest: Record<string, unknown>,
-  orgId: string,
-  spaceId: string,
+  c: Context<AppEnv>,
+  homeSpaceId: string | null | undefined,
   requireCallableTools = false,
 ): Promise<void> {
   const scopeErrors = await validateAgentIntegrationSelections({
     manifest,
-    orgId,
-    toolPolicySpaceId: spaceId,
+    orgId: c.get("orgId"),
+    // The package's home space, else the request's.
+    toolPolicySpaceId: homeSpaceId ?? c.get("spaceId"),
     requireCallableTools,
   });
   if (scopeErrors.length > 0) {
@@ -298,8 +299,8 @@ async function validateManifestForRoute(
   }
   await assertAgentIntegrationScopesValid(
     validated,
-    c.get("orgId"),
-    opts.homeSpaceId ?? c.get("spaceId"),
+    c,
+    opts.homeSpaceId,
     opts.requireCallableTools,
   );
   return validated;
@@ -2452,8 +2453,8 @@ export function createPackagesRouter() {
     );
     await assertAgentIntegrationScopesValid(
       manifest as Record<string, unknown>,
-      orgId,
-      existing?.homeSpaceId ?? c.get("spaceId"),
+      c,
+      existing?.homeSpaceId,
       true,
     );
     if (existing) {

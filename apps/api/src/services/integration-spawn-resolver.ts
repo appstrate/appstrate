@@ -33,7 +33,6 @@ import {
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
 import {
-  allowsUndeclaredTools,
   displayAccountId,
   getAppstrateConnectMeta,
   getIntegrationSourceKind,
@@ -66,6 +65,7 @@ import { logger } from "../lib/logger.ts";
 import {
   apiCallBlocks,
   approvedFingerprintsByTool,
+  isClosedRemoteCatalog,
   namedToolSelection,
   syntheticToolNames,
   loadToolSpacePolicy,
@@ -401,12 +401,10 @@ async function resolveOne(
     ...apiCallBlocks(cfg, policy.blocks),
   }));
   // Selected and blocked: removed below, so the run says why the tool is missing.
-  const unavailableTools = judgedConfigs
-    .flatMap(({ cfg, callBlocked, uploadBlocked }) => {
-      if (callBlocked) return [cfg.toolName];
-      return uploadBlocked ? [cfg.uploadToolName!] : [];
-    })
-    .map((name) => ({ name, reason: "blocked_in_space" as const }));
+  const unavailableTools = judgedConfigs.flatMap(({ cfg, callBlocked, uploadBlocked }) => {
+    const name = callBlocked ? cfg.toolName : uploadBlocked ? cfg.uploadToolName! : undefined;
+    return name ? [{ name, reason: "blocked_in_space" as const }] : [];
+  });
   const selectedApiCalls: ApiCallSpec[] = judgedConfigs
     // An `api_upload` dispatches through its `api_call`: blocking the call removes both.
     .filter(({ callBlocked }) => !callBlocked)
@@ -547,7 +545,7 @@ async function resolveOne(
   const declaredNames = new Set(
     resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
   );
-  const closedRemote = sourceKind === "remote" && !allowsUndeclaredTools(manifest);
+  const closedRemote = isClosedRemoteCatalog(manifest);
   // A wildcard on a closed remote catalog is not "every tool the server lists": it is what the
   // manifest declares plus what the space approved, named like an explicit selection.
   const closedWildcard = wildcardSelection && closedRemote;
