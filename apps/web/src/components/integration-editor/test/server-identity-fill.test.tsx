@@ -24,6 +24,7 @@ describe("ServerIdentityFill", () => {
     expect(html).toContain("Reprendre l’identité du serveur");
     expect(html).toContain("integration-editor-identity-from-server-button");
     expect(html).not.toContain("disabled=");
+    expect(html).not.toContain('role="status"');
   });
 
   it.each([
@@ -34,9 +35,5 @@ describe("ServerIdentityFill", () => {
     const html = renderFill(block);
     expect(html).toContain("disabled=");
     expect(html).toContain(reason);
-  });
-
-  it("shows no status before a read", () => {
-    expect(renderFill(null)).not.toContain('role="status"');
   });
 });

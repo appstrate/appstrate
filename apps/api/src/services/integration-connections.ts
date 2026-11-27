@@ -3529,11 +3529,8 @@ export interface ToolSnapshotSummary {
   connection_id: string | null;
   listed_at: string;
   truncated: boolean;
-  /** Tools the server lists that the manifest does not declare. */
   added: number;
-  /** Tools the manifest or an approval names that no listing returns. */
   missing: number;
-  /** Tools whose definition changed since first seen. */
   modified: number;
 }
 

@@ -26,6 +26,7 @@ beforeAll(() => {
   restoreEgress = allowLoopbackOAuthEgress();
   server = startFakeMcpServer({
     tools: [{ name: "search", annotations: { readOnlyHint: true } }, "update"],
+    serverInfo: { name: "acme-docs-mcp", title: "Acme Docs", version: "2.0.0" },
     bearer: TOKEN,
   });
 });
@@ -113,8 +114,10 @@ describe("POST /api/packages/integrations — publish: false", () => {
       body: "{}",
     });
     expect(sync.status).toBe(200);
-    const proposal = (await sync.json()) as { tools: { name: string }[] };
-    expect(proposal.tools.map((tool) => tool.name)).toEqual(["search", "update"]);
+    // The sync reads the server's identity through the connection; it lists no tool.
+    const proposal = (await sync.json()) as { manifest: { display_name: string } };
+    expect(proposal.manifest.display_name).toBe("Acme Docs");
+    expect(proposal).not.toHaveProperty("tools");
     // Synchronizing published nothing either.
     expect(await versionCount()).toBe(0);
   });

@@ -13,7 +13,6 @@ import {
   hiddenToolNames,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
-  type IntegrationManifest,
 } from "@appstrate/core/integration";
 import {
   MAX_APPROVED_FINGERPRINTS_PER_TOOL,
@@ -55,13 +54,19 @@ export interface ListedTool {
   definition: ToolDefinition | null;
 }
 
-/** The tool names the manifest declares, and those the platform withholds from every surface. */
-function declaredAndHidden(manifest: IntegrationManifest) {
-  return {
-    declared: new Set(resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name)),
-    hidden: hiddenToolNames(manifest),
-  };
-}
+/** The rows of a space's approvals / blocks for one integration. */
+const approvalsOf = (scope: SpaceScope, packageId: string) =>
+  and(
+    eq(spaceIntegrationToolApprovals.orgId, scope.orgId),
+    eq(spaceIntegrationToolApprovals.spaceId, scope.spaceId),
+    eq(spaceIntegrationToolApprovals.packageId, packageId),
+  );
+const blocksOf = (scope: SpaceScope, packageId: string) =>
+  and(
+    eq(spaceIntegrationToolBlocks.orgId, scope.orgId),
+    eq(spaceIntegrationToolBlocks.spaceId, scope.spaceId),
+    eq(spaceIntegrationToolBlocks.packageId, packageId),
+  );
 
 /** Every distinct (name, fingerprint) the caller's usable connections last listed. */
 async function loadListedTools(target: ToolPolicyTarget) {
@@ -86,7 +91,13 @@ async function loadListedTools(target: ToolPolicyTarget) {
       else known.definition ??= definition;
     }
   }
-  return { manifest, listed, ...declaredAndHidden(manifest) };
+  return {
+    manifest,
+    listed,
+    // The tool names the manifest declares, and those the platform withholds from every surface.
+    declared: new Set(resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name)),
+    hidden: hiddenToolNames(manifest),
+  };
 }
 
 /** What the space can review: the tools listed, its approvals and its blocks. */
@@ -182,9 +193,7 @@ export async function approveTools(
       .from(spaceIntegrationToolApprovals)
       .where(
         and(
-          eq(spaceIntegrationToolApprovals.orgId, target.scope.orgId),
-          eq(spaceIntegrationToolApprovals.spaceId, target.scope.spaceId),
-          eq(spaceIntegrationToolApprovals.packageId, target.packageId),
+          approvalsOf(target.scope, target.packageId),
           inArray(
             spaceIntegrationToolApprovals.toolName,
             distinct.map((t) => t.name),
@@ -237,14 +246,7 @@ export async function revokeToolApproval(
 ): Promise<{ toolName: string; fingerprint: string }[]> {
   return db
     .delete(spaceIntegrationToolApprovals)
-    .where(
-      and(
-        eq(spaceIntegrationToolApprovals.orgId, scope.orgId),
-        eq(spaceIntegrationToolApprovals.spaceId, scope.spaceId),
-        eq(spaceIntegrationToolApprovals.packageId, packageId),
-        eq(spaceIntegrationToolApprovals.toolName, toolName),
-      ),
-    )
+    .where(and(approvalsOf(scope, packageId), eq(spaceIntegrationToolApprovals.toolName, toolName)))
     .returning({
       toolName: spaceIntegrationToolApprovals.toolName,
       fingerprint: spaceIntegrationToolApprovals.fingerprint,
@@ -268,13 +270,7 @@ export async function blockTools(
     const held = await tx
       .select({ toolName: spaceIntegrationToolBlocks.toolName })
       .from(spaceIntegrationToolBlocks)
-      .where(
-        and(
-          eq(spaceIntegrationToolBlocks.orgId, scope.orgId),
-          eq(spaceIntegrationToolBlocks.spaceId, scope.spaceId),
-          eq(spaceIntegrationToolBlocks.packageId, packageId),
-        ),
-      );
+      .where(blocksOf(scope, packageId));
     const heldNames = new Set(held.map((r) => r.toolName));
     const fresh = wanted.filter((name) => !heldNames.has(name));
     if (heldNames.size + fresh.length > OBSERVED_TOOLS_MAX_COUNT) {
@@ -310,14 +306,7 @@ export async function unblockTool(
 ): Promise<boolean> {
   const deleted = await db
     .delete(spaceIntegrationToolBlocks)
-    .where(
-      and(
-        eq(spaceIntegrationToolBlocks.orgId, scope.orgId),
-        eq(spaceIntegrationToolBlocks.spaceId, scope.spaceId),
-        eq(spaceIntegrationToolBlocks.packageId, packageId),
-        eq(spaceIntegrationToolBlocks.toolName, toolName),
-      ),
-    )
+    .where(and(blocksOf(scope, packageId), eq(spaceIntegrationToolBlocks.toolName, toolName)))
     .returning({ id: spaceIntegrationToolBlocks.id });
   return deleted.length > 0;
 }

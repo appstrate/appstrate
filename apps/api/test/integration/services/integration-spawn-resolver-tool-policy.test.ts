@@ -15,27 +15,37 @@ import { insertToolApprovals, insertToolBlocks } from "../../helpers/tool-policy
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import { seedProxyConnection } from "../../helpers/credential-proxy-fixtures.ts";
-import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import {
+  apiIntegrationManifest,
+  remoteIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 
 const INTEG = "@orga/remote-mcp";
 const FINGERPRINT = "a".repeat(64);
 
-function manifest(open: boolean) {
-  return {
-    type: "integration",
-    schema_version: "0.3",
+const manifest = (open: boolean) => ({
+  ...remoteIntegrationManifest({
     name: INTEG,
     version: "0.1.0",
-    display_name: "Remote",
-    source: {
-      kind: "remote",
-      remote: { url: "https://mcp.example.com/mcp", transport: "streamable-http" },
-    },
+    displayName: "Remote",
+    url: "https://mcp.example.com/mcp",
     tools_policy: { search: {} },
-    ...(open ? { allow_undeclared_tools: true } : {}),
-  } as never;
-}
+  }),
+  ...(open ? { allow_undeclared_tools: true } : {}),
+});
+
+/** An agent selecting `tools` of one integration, at `range`. */
+const agentSelecting = (id: string, range: string, tools: string[] | "*") =>
+  ({
+    schema_version: "0.2",
+    type: "agent",
+    name: "@orga/agent",
+    version: "0.1.0",
+    display_name: "Agent",
+    dependencies: { integrations: { [id]: range } },
+    integrations_configuration: { [id]: { tools } },
+  }) as never;
 
 describe("resolveIntegrationSpawns — space tool policy", () => {
   let ctx: TestContext;
@@ -51,19 +61,11 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
   }
 
-  async function spawn(tools: string[]) {
+  async function spawn(tools: string[] | "*") {
     const { specs } = await resolveIntegrationSpawns({
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
-      agentManifest: {
-        schema_version: "0.2",
-        type: "agent",
-        name: "@orga/agent",
-        version: "0.1.0",
-        display_name: "Agent",
-        dependencies: { integrations: { [INTEG]: "^0.1.0" } },
-        integrations_configuration: { [INTEG]: { tools } },
-      },
+      agentManifest: agentSelecting(INTEG, "^0.1.0", tools),
       resolvedConnections: {},
     });
     expect(specs).toHaveLength(1);
@@ -88,12 +90,11 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
     expect(spec.hiddenTools).toBeUndefined();
   });
 
-  const WILDCARD = "*" as unknown as string[];
   const cases: {
     title: string;
     open: boolean;
     approved: string[];
-    tools: string[];
+    tools: string[] | "*";
     fingerprints: Record<string, string[]> | undefined;
     allowlist?: string[] | undefined;
   }[] = [
@@ -122,7 +123,7 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
       title: "expands a wildcard on a closed catalog to the declared and approved tools",
       open: false,
       approved: ["write"],
-      tools: WILDCARD,
+      tools: "*",
       fingerprints: { write: [FINGERPRINT] },
       allowlist: ["search", "write"],
     },
@@ -130,7 +131,7 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
       title: "leaves a wildcard on an open catalog unrestricted",
       open: true,
       approved: ["write"],
-      tools: WILDCARD,
+      tools: "*",
       fingerprints: undefined,
       allowlist: undefined,
     },
@@ -194,15 +195,7 @@ describe("resolveIntegrationSpawns — a blocked api_call", () => {
     const result = await resolveIntegrationSpawns({
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
-      agentManifest: {
-        schema_version: "0.2",
-        type: "agent",
-        name: "@orga/agent",
-        version: "0.1.0",
-        display_name: "Agent",
-        dependencies: { integrations: { [API]: "^1.0.0" } },
-        integrations_configuration: { [API]: { tools: ["api_call"] } },
-      },
+      agentManifest: agentSelecting(API, "^1.0.0", ["api_call"]),
       resolvedConnections: await bindAllConnections(API),
     });
     unavailable = result.unavailable;
@@ -217,7 +210,6 @@ describe("resolveIntegrationSpawns — a blocked api_call", () => {
   it("is not granted to the run, upload companion included", async () => {
     const spec = await spawnApi(["api_call"]);
     expect(spec.apiCalls).toBeUndefined();
-    // Removed here: the sidecar is told of no `api_call` block, so the resolver reports it.
     expect(spec.blockedTools).toBeUndefined();
     expect(unavailable).toEqual([
       { integrationId: API, name: "api_call", reason: "blocked_in_space" },

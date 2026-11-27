@@ -1193,16 +1193,17 @@ export function createIntegrationsRouter() {
 
   // ─── Space tool policy ─────────────────────
 
-  const toolPolicyTarget = (c: Context<AppEnv>): ToolPolicyTarget => {
+  const toolPolicyTarget = async (c: Context<AppEnv>): Promise<ToolPolicyTarget> => {
     const scope = getSpaceScope(c);
-    return {
-      scope,
-      packageId: c.req.param("packageId")!,
-      caller: connectionCaller(c, scope.spaceId),
-    };
+    const packageId = c.req.param("packageId")!;
+    await assertIsIntegration(scope, packageId);
+    return { scope, packageId, caller: connectionCaller(c, scope.spaceId) };
   };
-  // A decision on what the space lets agents run is a person's, made on the dashboard.
-  const configureToolPolicy = requirePermission("integrations", "configure");
+  const toolPolicyWrite = [
+    rateLimit(30),
+    requirePermission("integrations", "configure"),
+    requireDashboardSession,
+  ] as const;
   const toolPolicyAudit = (
     c: Context<AppEnv>,
     action: string,
@@ -1228,35 +1229,24 @@ export function createIntegrationsRouter() {
     "/:packageId{@[^/]+/[^/]+}/tool-policy",
     requirePermission("integrations", "read"),
     async (c) => {
-      const target = toolPolicyTarget(c);
-      await assertIsIntegration(target.scope, target.packageId);
+      const target = await toolPolicyTarget(c);
       return c.json(await getToolPolicy(target));
     },
   );
 
-  router.post(
-    "/:packageId{@[^/]+/[^/]+}/tool-policy/approvals",
-    rateLimit(30),
-    configureToolPolicy,
-    requireDashboardSession,
-    async (c) => {
-      const target = toolPolicyTarget(c);
-      await assertIsIntegration(target.scope, target.packageId);
-      const body = await readJsonBody(c, approveToolsSchema);
-      const approved = await approveTools(target, body.tools, c.get("user")!.id);
-      await toolPolicyAudit(c, "integration.tool.approved", approved);
-      return c.body(null, 204);
-    },
-  );
+  router.post("/:packageId{@[^/]+/[^/]+}/tool-policy/approvals", ...toolPolicyWrite, async (c) => {
+    const target = await toolPolicyTarget(c);
+    const body = await readJsonBody(c, approveToolsSchema);
+    const approved = await approveTools(target, body.tools, c.get("user")!.id);
+    await toolPolicyAudit(c, "integration.tool.approved", approved);
+    return c.body(null, 204);
+  });
 
   router.delete(
     "/:packageId{@[^/]+/[^/]+}/tool-policy/approvals/:toolName",
-    rateLimit(30),
-    configureToolPolicy,
-    requireDashboardSession,
+    ...toolPolicyWrite,
     async (c) => {
-      const { scope, packageId } = toolPolicyTarget(c);
-      await assertIsIntegration(scope, packageId);
+      const { scope, packageId } = await toolPolicyTarget(c);
       const toolName = toolNameParam(c);
       const revoked = await revokeToolApproval(scope, packageId, toolName);
       await toolPolicyAudit(c, "integration.tool.approval_revoked", revoked);
@@ -1264,33 +1254,23 @@ export function createIntegrationsRouter() {
     },
   );
 
-  router.post(
-    "/:packageId{@[^/]+/[^/]+}/tool-policy/blocks",
-    rateLimit(30),
-    configureToolPolicy,
-    requireDashboardSession,
-    async (c) => {
-      const { scope, packageId } = toolPolicyTarget(c);
-      await assertIsIntegration(scope, packageId);
-      const body = await readJsonBody(c, blockToolsSchema);
-      const blocked = await blockTools(scope, packageId, body.tools, c.get("user")!.id);
-      await toolPolicyAudit(
-        c,
-        "integration.tool.blocked",
-        blocked.map((toolName) => ({ toolName })),
-      );
-      return c.body(null, 204);
-    },
-  );
+  router.post("/:packageId{@[^/]+/[^/]+}/tool-policy/blocks", ...toolPolicyWrite, async (c) => {
+    const { scope, packageId } = await toolPolicyTarget(c);
+    const body = await readJsonBody(c, blockToolsSchema);
+    const blocked = await blockTools(scope, packageId, body.tools, c.get("user")!.id);
+    await toolPolicyAudit(
+      c,
+      "integration.tool.blocked",
+      blocked.map((toolName) => ({ toolName })),
+    );
+    return c.body(null, 204);
+  });
 
   router.delete(
     "/:packageId{@[^/]+/[^/]+}/tool-policy/blocks/:toolName",
-    rateLimit(30),
-    configureToolPolicy,
-    requireDashboardSession,
+    ...toolPolicyWrite,
     async (c) => {
-      const { scope, packageId } = toolPolicyTarget(c);
-      await assertIsIntegration(scope, packageId);
+      const { scope, packageId } = await toolPolicyTarget(c);
       const toolName = toolNameParam(c);
       if (await unblockTool(scope, packageId, toolName)) {
         await toolPolicyAudit(c, "integration.tool.unblocked", [{ toolName }]);

@@ -15,8 +15,8 @@ import { listSpacePermissionHolders } from "../lib/space-role.ts";
 import { usersReachingConnection } from "./integration-connections.ts";
 import { readIntegrationManifestForConnect } from "./integration-service.ts";
 import {
-  effectiveCatalogOf,
   judgeToolSpacePolicy,
+  resolveEffectiveToolCatalog,
   readToolSpaceRowsForSpaces,
 } from "./integration-tool-catalog.ts";
 import { readToolSnapshots } from "./integration-tool-snapshot-reads.ts";
@@ -65,11 +65,11 @@ export async function scheduleToolReviewNotifications(params: {
       readToolSpaceRowsForSpaces(orgId, [...active], packageId),
     ]);
     for (const spaceId of active) {
-      const catalog = effectiveCatalogOf(
-        read.manifest,
-        judgeToolSpacePolicy(rowsBySpace.get(spaceId)!, read.manifest),
+      const catalog = resolveEffectiveToolCatalog({
+        integration: read.manifest,
+        policy: judgeToolSpacePolicy(rowsBySpace.get(spaceId)!, read.manifest),
         snapshots,
-      );
+      });
       if (!catalog.some((entry) => entry.status === "pending" && names.includes(entry.name))) {
         continue;
       }

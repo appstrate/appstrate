@@ -2,13 +2,8 @@
 
 /**
  * What a remote MCP server says about itself, for the editor's « Remplir depuis le serveur »: its
- * `serverInfo` and `instructions`, as a manifest proposal of identity fields. Tools are not read
- * here: the tool snapshot (`remote-tools.ts`) is the one path that lists them, caches, fingerprints
- * and records them for the published version. The session is that path's too (`withMcpSession`):
- * through the credential proxy (`proxyCall`) once a connection exists, so connection selection,
- * `authorized_uris`, the egress guard and the 401 refresh are the proxy's; for an unauthenticated
- * integration (AFPS §7.2), directly, egress-guarded on every hop. Either is journaled like a call
- * outside a run. Persists nothing: it reads the DRAFT, which no snapshot ever records.
+ * `serverInfo` and `instructions`, as a manifest proposal of identity fields. The session is
+ * `withMcpSession`'s; persists nothing (it reads the draft).
  */
 
 import type { Implementation } from "@modelcontextprotocol/sdk/types.js";

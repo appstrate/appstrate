@@ -765,8 +765,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
         run.runOrigin === "platform" &&
         !listRuntimeBoundSystemIntegrationIds().includes(packageId)
       ) {
-        const listed = body.tools;
-        const tools = listed.flatMap((tool) => {
+        const tools = body.tools.flatMap((tool) => {
           const parsed = observedToolSchema.safeParse(tool);
           return parsed.success ? [parsed.data] : [];
         });
@@ -775,7 +774,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
           packageId,
           connectionId,
           tools,
-          truncated: body.truncated || tools.length < listed.length,
+          truncated: body.truncated || tools.length < body.tools.length,
         }).catch((err: unknown) =>
           logger.warn("tools-observed: tool snapshot not recorded", {
             runId,

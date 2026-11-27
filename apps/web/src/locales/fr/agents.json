@@ -1047,6 +1047,8 @@
   "integrationWizard.tools.title": "Accès aux outils",
   "integrationWizard.tools.description": "Aucun outil n’est déclaré à la création : ils sont lus sur le serveur, et c’est ce choix qui décide de leur accès. Rien n’est enregistré avant votre validation.",
   "integrationWizard.tools.notWritable": "Seul un membre autorisé à modifier cette intégration dans son espace d’origine peut la publier.",
+  "integrationWizard.tools.docs": "Ajouter les instructions du serveur comme documentation (INTEGRATION.md)",
+  "integrationWizard.tools.docsPreview": "Aperçu des instructions",
   "integrationWizard.tools.publishFailed": "Votre choix est enregistré, mais la version {{version}} n’a pas été publiée.",
   "integrationWizard.tools.draftMoved": "Le brouillon a été modifié entre-temps : la version {{version}} n’a pas été publiée. Le prochain envoi enregistre à nouveau votre choix sur le brouillon actuel, puis publie.",
   "integrationWizard.tools.retryPublish": "Publier la version {{version}}",
@@ -1087,7 +1089,5 @@
   "integrationWizard.tools.mode.trust.label": "Faire confiance à tous les outils de ce serveur",
   "integrationWizard.tools.mode.trust.description": "Tous les outils que le serveur liste, ceux qu’il ajoutera ou modifiera plus tard compris, sont disponibles sans examen. À réserver à un serveur que vous maîtrisez.",
   "integrationWizard.ready.reviewed": "Chaque outil du serveur est examiné dans chaque espace avant qu’un agent puisse l’appeler : approuvez-les depuis l’onglet Outils de l’intégration.",
-  "integrationWizard.ready.trusted": "Tous les outils du serveur sont disponibles sans examen.",
-  "integrationWizard.tools.docs": "Ajouter les instructions du serveur comme documentation (INTEGRATION.md)",
-  "integrationWizard.tools.docsPreview": "Aperçu des instructions"
+  "integrationWizard.ready.trusted": "Tous les outils du serveur sont disponibles sans examen."
 }

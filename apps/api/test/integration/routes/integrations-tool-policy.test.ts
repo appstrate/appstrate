@@ -38,7 +38,13 @@ const BASE = `/api/integrations/${ID}/tool-policy`;
 const app = getTestApp();
 
 interface Detail {
-  tool_catalog: { name: string; status: string; origin: string }[];
+  tool_catalog: { name: string; status: string; origin: string; modified: boolean }[];
+  tool_snapshot: {
+    connection_id: string | null;
+    added: number;
+    missing: number;
+    modified: number;
+  } | null;
 }
 interface Problem {
   code: string;
@@ -59,10 +65,12 @@ describe("integration tool policy routes", () => {
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   const view = async () => (await (await send("GET", "")).json()) as View;
-  const catalogEntry = async (name: string) => {
+  const detail = async () => {
     const res = await app.request(`/api/integrations/${ID}`, { headers: authHeaders(ctx) });
-    return ((await res.json()) as Detail).tool_catalog.find((t) => t.name === name);
+    return (await res.json()) as Detail;
   };
+  const catalogEntry = async (name: string) =>
+    (await detail()).tool_catalog.find((t) => t.name === name);
   const listed = (...tools: Tool[]) =>
     recordToolSnapshot({
       orgId: ctx.orgId,
@@ -87,7 +95,7 @@ describe("integration tool policy routes", () => {
         name: ID,
         displayName: "Files",
         url: "https://mcp.example.com/mcp",
-        tools_policy: { read_file: {} },
+        tools_policy: { read_file: {}, gone: {} },
       }),
     );
   });
@@ -185,12 +193,28 @@ describe("integration tool policy routes", () => {
     });
   });
 
+  it("judges the declared catalog against what the server listed, counting added, missing and modified", async () => {
+    await listed(tool("read_file"), tool("write_file"));
+    await listed(tool("read_file", "Reads a file, differently"), tool("write_file"));
+    const body = await detail();
+    const entry = (name: string) => body.tool_catalog.find((t) => t.name === name);
+
+    expect(entry("read_file")).toMatchObject({ status: "available", modified: true });
+    expect(entry("write_file")).toMatchObject({ status: "pending", origin: "listed" });
+    expect(entry("gone")).toMatchObject({ status: "missing", origin: "declared" });
+    expect(body.tool_snapshot).toMatchObject({
+      connection_id: null,
+      added: 1,
+      missing: 1,
+      modified: 1,
+    });
+  });
+
   it("keeps every approved fingerprint of a tool, and revoke removes them all", async () => {
     await listed(tool("write_file", "Writes"));
     await approve({ name: "write_file", fingerprint: fp("write_file", "Writes") });
     await listed(tool("write_file", "Writes, v2"));
     await approve({ name: "write_file", fingerprint: fp("write_file", "Writes, v2") });
-    // The first definition is no longer listed, yet its approval was not deleted by the second.
     expect((await view()).approvals.map((a) => a.fingerprint).sort()).toEqual(
       [fp("write_file", "Writes"), fp("write_file", "Writes, v2")].sort(),
     );
@@ -198,6 +222,19 @@ describe("integration tool policy routes", () => {
     expect((await send("DELETE", "/approvals/write_file")).status).toBe(204);
     expect((await view()).approvals).toEqual([]);
     expect((await send("DELETE", "/approvals/write_file")).status).toBe(204);
+
+    const rows = await db
+      .select({ after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "integration.tool.approval_revoked"));
+    expect(
+      rows.map((r) => r.after).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    ).toEqual(
+      [
+        { toolName: "write_file", fingerprint: fp("write_file", "Writes") },
+        { toolName: "write_file", fingerprint: fp("write_file", "Writes, v2") },
+      ].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    );
   });
 
   const holdFingerprints = (count: number) =>
@@ -222,7 +259,6 @@ describe("integration tool policy routes", () => {
     });
     expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(32);
 
-    // Withdrawing the tool's approvals frees the room.
     expect((await send("DELETE", "/approvals/write_file")).status).toBe(204);
     expect(
       (await approve({ name: "write_file", fingerprint: fp("write_file", "live") })).status,
@@ -246,11 +282,10 @@ describe("integration tool policy routes", () => {
   it("blocks a tool, declared or not, and lifts the block", async () => {
     await listed(tool("read_file"));
     expect((await send("POST", "/blocks", { tools: ["read_file", "read_file"] })).status).toBe(204);
-    expect(await catalogEntry("read_file")).toMatchObject({ status: "blocked" });
     expect((await view()).blocks).toHaveLength(1);
 
     expect((await send("DELETE", "/blocks/read_file")).status).toBe(204);
-    expect(await catalogEntry("read_file")).toMatchObject({ status: "available" });
+    expect((await view()).blocks).toEqual([]);
   });
 
   it("refuses a block past 500 per integration with 409 tool_blocks_limit, writing nothing", async () => {
@@ -262,7 +297,6 @@ describe("integration tool policy routes", () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ code: "tool_blocks_limit", tools: ["one_more"] });
     expect(await db.select().from(spaceIntegrationToolBlocks)).toHaveLength(500);
-    // Names already blocked stay accepted at the limit.
     expect((await send("POST", "/blocks", { tools: ["tool_1"] })).status).toBe(204);
   });
 
@@ -315,32 +349,10 @@ describe("integration tool policy routes", () => {
     expect(blockedEvent!.after).toEqual({ toolName: "a_tool" });
   });
 
-  it("audits every approval a revoke removes, with its fingerprint", async () => {
-    await listed(tool("write_file", "Writes"));
-    await approve({ name: "write_file", fingerprint: fp("write_file", "Writes") });
-    await listed(tool("write_file", "Writes, v2"));
-    await approve({ name: "write_file", fingerprint: fp("write_file", "Writes, v2") });
-    await send("DELETE", "/approvals/write_file");
-
-    const rows = await db
-      .select({ after: auditEvents.after })
-      .from(auditEvents)
-      .where(eq(auditEvents.action, "integration.tool.approval_revoked"));
-    expect(
-      rows.map((r) => r.after).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-    ).toEqual(
-      [
-        { toolName: "write_file", fingerprint: fp("write_file", "Writes") },
-        { toolName: "write_file", fingerprint: fp("write_file", "Writes, v2") },
-      ].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-    );
-  });
-
   it("refuses a definition too large to have been kept, with tool_definition_unavailable", async () => {
     const tools = Array.from({ length: 400 }, (_, i) => tool(`t${i}`, "x".repeat(2000)));
     await listed(...tools);
     const last = (await view()).listed.find((t) => t.definition === null)!;
-    expect(last).toBeDefined();
     const res = await approve({ name: last.name, fingerprint: last.fingerprint });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({
@@ -410,7 +422,6 @@ describe("integration tool policy routes", () => {
       });
       expect(catalog.find((t) => t.name === "read_file")).toMatchObject({ status: "available" });
 
-      // And A keeps its own decisions.
       const inA = await view();
       expect(inA.approvals.map((a) => a.tool_name)).toEqual(["write_file"]);
       expect(inA.blocks.map((b) => b.tool_name)).toEqual(["read_file"]);

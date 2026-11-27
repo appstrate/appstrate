@@ -101,28 +101,51 @@ describe("tool review notifications", () => {
     expect(await notices()).toHaveLength(2);
   });
 
-  it("stays silent when only declared tools appear or change", async () => {
-    await seed();
-    await list([tool("read_file")]);
-    await list([tool("read_file", "changed")]);
-    expect(await notices()).toEqual([]);
-  });
+  const silentCases: { title: string; run: () => Promise<void> }[] = [
+    {
+      title: "stays silent when only declared tools appear or change",
+      run: async () => {
+        await seed();
+        await list([tool("read_file")]);
+        await list([tool("read_file", "changed")]);
+      },
+    },
+    {
+      title: "stays silent on an open catalog",
+      run: async () => {
+        await seed({ allow_undeclared_tools: true });
+        await list([tool("read_file"), tool("write_file")]);
+      },
+    },
+    {
+      title: "stays silent about a tool the space already approved at its current definition",
+      run: async () => {
+        await seed();
+        await insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID }, [
+          { toolName: "write_file", fingerprint: toolFingerprint("write_file") },
+        ]);
+        await list([tool("write_file")]);
+      },
+    },
+  ];
+  for (const c of silentCases) {
+    it(c.title, async () => {
+      await c.run();
+      expect(await notices()).toEqual([]);
+    });
+  }
 
-  it("stays silent on an open catalog", async () => {
-    await seed({ allow_undeclared_tools: true });
-    await list([tool("read_file"), tool("write_file")]);
-    expect(await notices()).toEqual([]);
-  });
-
-  it("reaches only the spaces its connection serves", async () => {
+  it("reaches only the spaces its connection serves, and asks only the holders whose own usable connections include the snapshot's", async () => {
     await seed();
     const other = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
     await seedSpacePackage(other.id, ID);
+    const holder = await memberHolding(ctx, ["integrations:configure"]);
     const connectionId = await seedProxyConnection(ctx, ID, "default", {});
 
     await list([tool("write_file")], connectionId);
 
     expect(await notices()).toEqual([`${ctx.defaultSpaceId}:${ctx.user.id}`]);
+    expect(await notices()).not.toContain(`${ctx.defaultSpaceId}:${holder.user.id}`);
   });
 
   it("asks a personal space's owner, unless the operator cap took configure from them", async () => {
@@ -147,27 +170,5 @@ describe("tool review notifications", () => {
     await list([tool("write_file", "changed")]);
     // `operator` holds no integrations:configure: the cap leaves nothing to review.
     expect(await notices()).not.toContain(`${personal.id}:${owner.id}`);
-  });
-
-  it("asks only the holders whose own usable connections include the snapshot's", async () => {
-    await seed();
-    const holder = await memberHolding(ctx, ["integrations:configure"]);
-    const connectionId = await seedProxyConnection(ctx, ID, "default", {});
-
-    await list([tool("write_file")], connectionId);
-
-    const asked = await notices();
-    expect(asked).toContain(`${ctx.defaultSpaceId}:${ctx.user.id}`);
-    expect(asked).not.toContain(`${ctx.defaultSpaceId}:${holder.user.id}`);
-  });
-
-  it("stays silent about a tool the space already approved at its current definition", async () => {
-    await seed();
-    const write = tool("write_file");
-    await insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID }, [
-      { toolName: "write_file", fingerprint: toolFingerprint("write_file") },
-    ]);
-    await list([write]);
-    expect(await notices()).toEqual([]);
   });
 });

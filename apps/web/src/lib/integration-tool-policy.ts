@@ -2,7 +2,7 @@
 
 /**
  * What a space reviews of a remote integration's tools: the undeclared tools the server lists
- * whose definition no approval covers, and the bodies of the writes that settle them.
+ * whose definition no approval covers.
  */
 
 import { asRecord } from "@appstrate/core/safe-json";
@@ -125,12 +125,6 @@ export function canonicalDefinitionJson(definition: unknown): string {
         : value;
   return JSON.stringify(sorted(definition), null, 2);
 }
-
-export const approvalBody = (items: readonly { name: string; fingerprint: string }[]) => ({
-  tools: items.map(({ name, fingerprint }) => ({ name, fingerprint })),
-});
-
-export const blockBody = (name: string) => ({ tools: [name] });
 
 /**
  * The catalog's tools the integration does not declare yet (listed or approved only), minus those

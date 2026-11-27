@@ -247,10 +247,6 @@ export function ToolsChoice({
   detailPath: string;
 }) {
   const { t } = useTranslation("agents");
-  const options = [
-    { value: "review", trustAll: false },
-    { value: "trust", trustAll: true },
-  ] as const;
   return (
     <div className="flex flex-col gap-4">
       <FieldSet className="gap-3" disabled={pending}>
@@ -263,22 +259,19 @@ export function ToolsChoice({
           aria-label={t("integrationWizard.tools.modeLabel")}
           onValueChange={(next) => onTrustAllChange(next === "trust")}
         >
-          {options.map((option) => (
-            <Field key={option.value} orientation="horizontal" className="items-start">
+          {(["review", "trust"] as const).map((mode) => (
+            <Field key={mode} orientation="horizontal" className="items-start">
               <RadioGroupItem
-                value={option.value}
-                id={`integration-wizard-mode-${option.value}`}
+                value={mode}
+                id={`integration-wizard-mode-${mode}`}
                 className="mt-1 shrink-0"
               />
               <FieldContent>
-                <FieldLabel
-                  htmlFor={`integration-wizard-mode-${option.value}`}
-                  className="text-foreground"
-                >
-                  {t(`integrationWizard.tools.mode.${option.value}.label`)}
+                <FieldLabel htmlFor={`integration-wizard-mode-${mode}`} className="text-foreground">
+                  {t(`integrationWizard.tools.mode.${mode}.label`)}
                 </FieldLabel>
                 <FieldDescription>
-                  {t(`integrationWizard.tools.mode.${option.value}.description`)}
+                  {t(`integrationWizard.tools.mode.${mode}.description`)}
                 </FieldDescription>
               </FieldContent>
             </Field>

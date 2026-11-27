@@ -23,7 +23,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "../../api/client";
 import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
 import { formatDateField } from "../../lib/format-date";
-import { countToolsWithoutScopes } from "../../lib/integration-tool-scopes";
+import { isToolWithoutPermission } from "../../lib/integration-tool-scopes";
 import type { ToolCatalogEntry } from "../../lib/integration-tool-policy";
 import type { ToolSnapshot } from "../../lib/integration-tool-snapshot";
 import { connectionChoiceBody } from "../../lib/integration-server-sync";
@@ -233,7 +233,7 @@ function ToolSnapshotSummary({
       params: { path: { packageId } },
       body: connectionChoiceBody(connectionId),
     });
-  const withoutScopes = snapshot.oauth ? countToolsWithoutScopes(tools) : 0;
+  const withoutScopes = snapshot.oauth ? tools.filter(isToolWithoutPermission).length : 0;
   const { summary, refreshBlock } = snapshot;
   return (
     <div className="flex flex-col gap-2" data-testid="integration-tool-snapshot">

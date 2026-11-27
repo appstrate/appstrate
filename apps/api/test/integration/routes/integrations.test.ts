@@ -338,7 +338,8 @@ describe("GET /api/integrations/:packageId", () => {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { tool_catalog: unknown[] };
+    const body = (await res.json()) as { tool_catalog: unknown[]; tool_snapshot: unknown };
+    expect(body.tool_snapshot).toBeNull();
     expect(body.tool_catalog).toEqual([
       {
         name: "search",

@@ -26,8 +26,6 @@ import {
   type ToolPolicyAction,
 } from "../../hooks/use-integrations";
 import {
-  approvalBody,
-  blockBody,
   canonicalDefinitionJson,
   declarableTools,
   latestApprovals,
@@ -48,8 +46,6 @@ import { SettingsHeading } from "../settings/settings-heading";
 /** What the draft editor lends: the declared names and the way to declare more. */
 export interface ToolDeclaration {
   declared: ReadonlySet<string>;
-  /** The draft holds no unsaved edit: what it declares is saved. */
-  saved: boolean;
   declare: (names: string[]) => void;
 }
 
@@ -101,26 +97,10 @@ export function IntegrationToolPolicySection({
   tools: readonly CatalogRow[];
   children: (controls: ToolPolicyControls) => ReactNode;
 }) {
-  if (!access) return children(NO_CONTROLS);
-  return (
-    <WithPolicy access={access} tools={tools}>
-      {children}
-    </WithPolicy>
-  );
-}
-
-function WithPolicy({
-  access,
-  tools,
-  children,
-}: {
-  access: ToolPolicyAccess;
-  tools: readonly CatalogRow[];
-  children: (controls: ToolPolicyControls) => ReactNode;
-}) {
   // Only the space's decisions read the policy: declaring works from the catalog alone.
-  const query = useIntegrationToolPolicy(access.packageId, access.review);
-  const actions = useIntegrationToolPolicyActions(access.packageId);
+  const query = useIntegrationToolPolicy(access?.packageId, access?.review ?? false);
+  const actions = useIntegrationToolPolicyActions(access?.packageId ?? "");
+  if (!access) return children(NO_CONTROLS);
   return (
     <ToolPolicyView
       policy={query.data ?? null}
@@ -130,8 +110,8 @@ function WithPolicy({
       declaration={access.declaration}
       banner={access.banner}
       pending={actions.isPending}
-      onApprove={(items, onDone) => actions.approve(approvalBody(items), onDone)}
-      onBlock={(name, onDone) => actions.block(blockBody(name), onDone)}
+      onApprove={actions.approve}
+      onBlock={actions.block}
       onRevoke={actions.revoke}
       onUnblock={actions.unblock}
     >
@@ -192,7 +172,6 @@ export function ToolPolicyView({
   const approvable = items.flatMap((item) =>
     item.fingerprint === null ? [] : [{ name: item.name, fingerprint: item.fingerprint }],
   );
-  const itemsOf = (name: string) => items.filter((item) => item.name === name);
   const approved = new Set(decided ? latestApprovals(decided.approvals).keys() : []);
   const blocked = new Set(decided?.blocks.map((block) => block.tool_name));
   const inCatalog = new Set(tools.map((tool) => tool.name));
@@ -213,7 +192,7 @@ export function ToolPolicyView({
       });
     }
     if (!decided) return out;
-    const waiting = itemsOf(name);
+    const waiting = items.filter((item) => item.name === name);
     if (waiting.length === 1 && waiting[0]!.fingerprint !== null) {
       const fingerprint = waiting[0]!.fingerprint;
       out.push({
@@ -434,7 +413,7 @@ export function ToolPolicyView({
 }
 
 /** The listed definition: as a diff against the approved one when this replaces it, as is otherwise. */
-export function DefinitionCompare({
+function DefinitionCompare({
   item,
   defaultOpen = true,
 }: {

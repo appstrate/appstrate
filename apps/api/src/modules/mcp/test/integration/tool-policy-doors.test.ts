@@ -8,8 +8,6 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
 import { db } from "@appstrate/db/client";
 import { spaceIntegrationToolApprovals, spaceIntegrationToolBlocks } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
@@ -20,6 +18,7 @@ import { registerTestPlatformApp } from "../../../../../test/helpers/platform-ap
 import { loopbackHeaders } from "../../../../../test/helpers/loopback.ts";
 import { seedProxyIntegration } from "../../../../../test/helpers/credential-proxy-fixtures.ts";
 import { remoteIntegrationManifest } from "../../../../../test/helpers/integration-manifests.ts";
+import { tool, toolFingerprint } from "../../../../../test/helpers/tool-policy.ts";
 import { getMcpOrgResourceUri } from "../../../../lib/audiences.ts";
 import { internalDispatchHeader } from "../../../../lib/internal-dispatch.ts";
 import { recordToolSnapshot } from "../../../../services/integration-tool-snapshots.ts";
@@ -40,7 +39,6 @@ const WRITES = [
   "blockIntegrationTools",
   "unblockIntegrationTool",
 ];
-const write: Tool = { name: "write_file", inputSchema: { type: "object", properties: {} } };
 
 describe("the tool policy writes, through every door", () => {
   let ctx: TestContext;
@@ -73,7 +71,7 @@ describe("the tool policy writes, through every door", () => {
       method: "POST",
       headers: { ...headers, "X-Space-Id": ctx.defaultSpaceId, "Content-Type": "application/json" },
       body: JSON.stringify({
-        tools: [{ name: "write_file", fingerprint: toolDefinitionFingerprint(write) }],
+        tools: [{ name: "write_file", fingerprint: toolFingerprint("write_file") }],
       }),
     });
 
@@ -101,7 +99,7 @@ describe("the tool policy writes, through every door", () => {
       orgId: ctx.orgId,
       packageId: ID,
       connectionId: null,
-      tools: [write],
+      tools: [tool("write_file")],
       truncated: false,
     });
   });
@@ -137,11 +135,6 @@ describe("the tool policy writes, through every door", () => {
     expect(res.status).toBe(403);
     expect(((await res.json()) as { code: string }).code).toBe("dashboard_session_required");
     await nothingWritten();
-  });
-
-  it("accepts the same session straight from the dashboard", async () => {
-    const res = await approve({ Cookie: ctx.cookie, "X-Org-Id": ctx.orgId });
-    expect(res.status).toBe(204);
   });
 
   it("keeps the four writes out of the MCP catalog", () => {

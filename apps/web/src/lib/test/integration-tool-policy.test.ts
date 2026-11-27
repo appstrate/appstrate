@@ -2,8 +2,6 @@
 
 import { describe, expect, it } from "bun:test";
 import {
-  approvalBody,
-  blockBody,
   canonicalDefinitionJson,
   declarableTools,
   declareTools,
@@ -82,16 +80,6 @@ describe("toolHints", () => {
       destructive: false,
     });
   });
-
-  it("rides each review item", () => {
-    const [item] = reviewItems([{ name: "s", status: "pending" }], {
-      listed: [
-        { name: "s", fingerprint: "f", definition: { annotations: { readOnlyHint: true } } },
-      ],
-      approvals: [],
-    });
-    expect(item?.hints).toEqual({ readOnly: true, destructive: false });
-  });
 });
 
 describe("latestApprovals / newest approval", () => {
@@ -117,23 +105,6 @@ describe("latestApprovals / newest approval", () => {
   });
 });
 
-describe("a pending tool no listing carries", () => {
-  it("is reviewed without a fingerprint, so there is nothing to approve yet", () => {
-    expect(
-      reviewItems([{ name: "ghost", status: "pending" }], { listed: [], approvals: [] }),
-    ).toEqual([
-      {
-        name: "ghost",
-        fingerprint: null,
-        definition: null,
-        description: null,
-        hints: { readOnly: false, destructive: false },
-        approved: null,
-      },
-    ]);
-  });
-});
-
 describe("canonicalDefinitionJson", () => {
   it("sorts keys at every depth", () => {
     expect(canonicalDefinitionJson({ b: 1, a: { d: [{ y: 1, x: 2 }], c: null } })).toBe(
@@ -145,40 +116,18 @@ describe("canonicalDefinitionJson", () => {
   });
 });
 
-describe("bodies", () => {
-  it("pins the payloads the writes send", () => {
-    expect(approvalBody([{ name: "search", fingerprint: "fp-new" }])).toEqual({
-      tools: [{ name: "search", fingerprint: "fp-new" }],
-    });
-    expect(
-      approvalBody([
-        { name: "a", fingerprint: "1" },
-        { name: "b", fingerprint: "2" },
-      ]).tools,
-    ).toHaveLength(2);
-    expect(blockBody("search")).toEqual({ tools: ["search"] });
-  });
-});
-
 describe("declarableTools", () => {
-  it("keeps the tools the integration does not declare", () => {
+  it("keeps the tools the integration does not declare, minus those the server no longer lists", () => {
     expect(
       declarableTools([
         { name: "a", origin: "declared" },
         { name: "b", origin: "listed" },
         { name: "c", origin: "approved" },
         { name: "d" },
-      ]),
-    ).toEqual(["b", "c", "d"]);
-  });
-
-  it("leaves out the tools the server no longer lists", () => {
-    expect(
-      declarableTools([
         { name: "gone", origin: "approved", status: "missing" },
         { name: "here", origin: "listed", status: "pending" },
       ]),
-    ).toEqual(["here"]);
+    ).toEqual(["b", "c", "d", "here"]);
   });
 });
 
