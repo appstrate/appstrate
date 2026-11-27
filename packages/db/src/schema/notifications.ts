@@ -57,6 +57,7 @@ export const notificationTypeValues = [
   "agent_message",
   "credential_needs_reconnection",
   "integration_tools_review",
+  "connection_scopes_requested",
 ] as const;
 export type NotificationType = (typeof notificationTypeValues)[number];
 
@@ -96,6 +97,14 @@ export interface NotificationPayloads {
   };
   /** A remote integration's catalog changed in a way the space has not reviewed yet. */
   integration_tools_review: { packageId: string; display_name: string };
+  /** A server asked one of the recipient's connections for scopes it does not hold (step-up). */
+  connection_scopes_requested: {
+    packageId: string;
+    /** The integration's display name stamped at write time. */
+    integration_name: string;
+    connection_id: string;
+    label: string;
+  };
 }
 
 export const notifications = pgTable(
@@ -217,6 +226,11 @@ export const notifications = pgTable(
         sql`(${table.payload}->>'packageId')`,
       )
       .where(sql`${table.type} = 'integration_tools_review' AND ${table.readAt} IS NULL`),
+    // One unread step-up notice per (recipient, connection): a server that keeps asking does not
+    // stack rows; the connection's row lists what it asked for.
+    uniqueIndex("uq_notifications_scopes_requested_unread")
+      .on(table.recipientType, table.recipientId, sql`(${table.payload}->>'connection_id')`)
+      .where(sql`${table.type} = 'connection_scopes_requested' AND ${table.readAt} IS NULL`),
     // DB-level guard mirroring the `$type` union above and the
     // `pkp_actor_type_valid` CHECK on `package_persistence`. A raw insert with
     // an unknown recipient kind is rejected (the TS union only guards the ORM

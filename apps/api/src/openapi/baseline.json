@@ -21975,6 +21975,73 @@
                               },
                               "type": {
                                 "type": "string",
+                                "const": "connection_scopes_requested"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": [
+                                  "packageId",
+                                  "integration_name",
+                                  "connection_id",
+                                  "label"
+                                ],
+                                "properties": {
+                                  "packageId": {
+                                    "type": "string"
+                                  },
+                                  "integration_name": {
+                                    "type": "string",
+                                    "description": "The integration's display name when the notice was written."
+                                  },
+                                  "connection_id": {
+                                    "type": "string",
+                                    "description": "The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection."
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                              },
+                              "type": {
+                                "type": "string",
                                 "const": "agent_message"
                               },
                               "runId": {
@@ -22360,6 +22427,73 @@
                                     "description": "The remote integration whose tools to review."
                                   },
                                   "display_name": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "connection_scopes_requested"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": [
+                                  "packageId",
+                                  "integration_name",
+                                  "connection_id",
+                                  "label"
+                                ],
+                                "properties": {
+                                  "packageId": {
+                                    "type": "string"
+                                  },
+                                  "integration_name": {
+                                    "type": "string",
+                                    "description": "The integration's display name when the notice was written."
+                                  },
+                                  "connection_id": {
+                                    "type": "string",
+                                    "description": "The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection."
+                                  },
+                                  "label": {
                                     "type": "string"
                                   }
                                 }
@@ -22901,6 +23035,68 @@
                         },
                         "type": {
                           "type": "string",
+                          "const": "connection_scopes_requested"
+                        },
+                        "runId": {
+                          "type": ["string", "null"],
+                          "description": "Originating run id, when the notification references one"
+                        },
+                        "payload": {
+                          "type": ["object", "null"],
+                          "additionalProperties": false,
+                          "description": "Render-without-join data.",
+                          "required": ["packageId", "integration_name", "connection_id", "label"],
+                          "properties": {
+                            "packageId": {
+                              "type": "string"
+                            },
+                            "integration_name": {
+                              "type": "string",
+                              "description": "The integration's display name when the notice was written."
+                            },
+                            "connection_id": {
+                              "type": "string",
+                              "description": "The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection."
+                            },
+                            "label": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "read_at": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "When the recipient marked it read; null if unread"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                        },
+                        "type": {
+                          "type": "string",
                           "const": "agent_message"
                         },
                         "runId": {
@@ -23244,6 +23440,68 @@
                               "description": "The remote integration whose tools to review."
                             },
                             "display_name": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "read_at": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "When the recipient marked it read; null if unread"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "connection_scopes_requested"
+                        },
+                        "runId": {
+                          "type": ["string", "null"],
+                          "description": "Originating run id, when the notification references one"
+                        },
+                        "payload": {
+                          "type": ["object", "null"],
+                          "additionalProperties": false,
+                          "description": "Render-without-join data.",
+                          "required": ["packageId", "integration_name", "connection_id", "label"],
+                          "properties": {
+                            "packageId": {
+                              "type": "string"
+                            },
+                            "integration_name": {
+                              "type": "string",
+                              "description": "The integration's display name when the notice was written."
+                            },
+                            "connection_id": {
+                              "type": "string",
+                              "description": "The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection."
+                            },
+                            "label": {
                               "type": "string"
                             }
                           }

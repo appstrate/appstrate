@@ -20354,6 +20354,34 @@ export interface operations {
                             /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
                             spaceId: string;
                             /** @constant */
+                            type: "connection_scopes_requested";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                packageId: string;
+                                /** @description The integration's display name when the notice was written. */
+                                integration_name: string;
+                                /** @description The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection. */
+                                connection_id: string;
+                                label: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
                             type: "agent_message";
                             /** @description Originating run id, when the notification references one */
                             runId: string | null;
@@ -20604,6 +20632,34 @@ export interface operations {
                             /** @description The remote integration whose tools to review. */
                             packageId: string;
                             display_name: string;
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    } | {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
+                        /** @constant */
+                        type: "connection_scopes_requested";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            packageId: string;
+                            /** @description The integration's display name when the notice was written. */
+                            integration_name: string;
+                            /** @description The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection. */
+                            connection_id: string;
+                            label: string;
                         } | null;
                         /**
                          * Format: date-time
@@ -23167,6 +23223,34 @@ export interface operations {
                             /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
                             spaceId: string;
                             /** @constant */
+                            type: "connection_scopes_requested";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                packageId: string;
+                                /** @description The integration's display name when the notice was written. */
+                                integration_name: string;
+                                /** @description The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection. */
+                                connection_id: string;
+                                label: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
                             type: "agent_message";
                             /** @description Originating run id, when the notification references one */
                             runId: string | null;
@@ -23377,6 +23461,34 @@ export interface operations {
                             /** @description The remote integration whose tools to review. */
                             packageId: string;
                             display_name: string;
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    } | {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
+                        /** @constant */
+                        type: "connection_scopes_requested";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            packageId: string;
+                            /** @description The integration's display name when the notice was written. */
+                            integration_name: string;
+                            /** @description The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection. */
+                            connection_id: string;
+                            label: string;
                         } | null;
                         /**
                          * Format: date-time

@@ -213,6 +213,29 @@ export async function createCredentialNeedsReconnectionNotification(params: {
   });
 }
 
+/**
+ * Tell a connection's owner that a server asked it for scopes it does not hold. The partial unique
+ * index keeps one unread notice per (recipient, connection): the rest is absorbed.
+ */
+export async function createScopesRequestedNotification(params: {
+  orgId: string;
+  spaceId: string;
+  recipient: Actor;
+  payload: NotificationPayloads["connection_scopes_requested"];
+}): Promise<void> {
+  await db
+    .insert(notifications)
+    .values({
+      orgId: params.orgId,
+      spaceId: params.spaceId,
+      recipientType: params.recipient.type,
+      recipientId: params.recipient.id,
+      type: "connection_scopes_requested",
+      payload: toPgSafe(params.payload),
+    })
+    .onConflictDoNothing();
+}
+
 // --- The feed ---
 //
 // The bell: every notification of the caller, newest first. What reaches it was

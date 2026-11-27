@@ -7,11 +7,12 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, notifications } from "@appstrate/db/schema";
 import type { Actor } from "@appstrate/connect";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
+import { settle, until } from "../../helpers/credential-death-spy.ts";
 import {
   recordRequestedScopes,
   saveIntegrationConnection,
@@ -121,5 +122,53 @@ describe("connection requested scopes", () => {
     expect(await requested()).toEqual(["admin"]);
     await grant(["read", "write", "admin"]);
     expect(await requested()).toEqual([]);
+  });
+
+  describe("the owner's notice", () => {
+    const notices = () =>
+      db
+        .select({
+          recipientId: notifications.recipientId,
+          spaceId: notifications.spaceId,
+          payload: notifications.payload,
+          readAt: notifications.readAt,
+        })
+        .from(notifications)
+        .where(eq(notifications.type, "connection_scopes_requested"));
+
+    it("tells the owner once a demand gains a scope, one unread notice per connection", async () => {
+      await recordRequestedScopes(connectionId, INTEGRATION, reach, ["write"]);
+      await until(async () => (await notices()).length === 1);
+      expect(await notices()).toEqual([
+        {
+          recipientId: ctx.user.id,
+          spaceId: ctx.defaultSpaceId,
+          payload: {
+            packageId: INTEGRATION,
+            integration_name: INTEGRATION,
+            connection_id: connectionId,
+            label: expect.any(String),
+          },
+          readAt: null,
+        },
+      ]);
+      // A wider demand while the notice is unread stacks nothing.
+      await recordRequestedScopes(connectionId, INTEGRATION, reach, ["admin"]);
+      await settle();
+      expect(await notices()).toHaveLength(1);
+      // Read, then asked again for a new scope: a new notice.
+      await db.update(notifications).set({ readAt: new Date() });
+      await recordRequestedScopes(connectionId, INTEGRATION, reach, ["delete"]);
+      await until(async () => (await notices()).length === 2);
+    });
+
+    it("says nothing when the demand gains no scope", async () => {
+      await recordRequestedScopes(connectionId, INTEGRATION, reach, ["write"]);
+      await until(async () => (await notices()).length === 1);
+      await db.update(notifications).set({ readAt: new Date() });
+      await recordRequestedScopes(connectionId, INTEGRATION, reach, ["write", "read", "bad scope"]);
+      await settle();
+      expect(await notices()).toHaveLength(1);
+    });
   });
 });

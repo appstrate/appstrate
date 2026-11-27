@@ -5438,6 +5438,34 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "uq_notifications_scopes_requested_unread": {
+          "name": "uq_notifications_scopes_requested_unread",
+          "columns": [
+            {
+              "expression": "recipient_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recipient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "(\"payload\"->>'connection_id')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"notifications\".\"type\" = 'connection_scopes_requested' AND \"notifications\".\"read_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -5479,7 +5507,7 @@
         },
         "notifications_type_valid": {
           "name": "notifications_type_valid",
-          "value": "type IN ('run_failed', 'package_shared', 'agent_message', 'credential_needs_reconnection', 'integration_tools_review')"
+          "value": "type IN ('run_failed', 'package_shared', 'agent_message', 'credential_needs_reconnection', 'integration_tools_review', 'connection_scopes_requested')"
         }
       },
       "isRLSEnabled": false

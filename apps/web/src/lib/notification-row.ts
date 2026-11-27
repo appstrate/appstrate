@@ -70,6 +70,21 @@ export function notificationRow(
       targetLabel: "notifications.reconnect",
     };
   }
+  if (notification.type === "connection_scopes_requested") {
+    // The owner's own connections: the row offers to reconnect it with what was asked for.
+    const asked = notification.payload;
+    return {
+      title: t("notifications.connectionScopesRequested", {
+        label: asked?.label ?? "",
+        integration: asked?.integration_name ?? "",
+      }),
+      status: null,
+      message: t("notifications.connectionScopesRequestedHint"),
+      meta: date,
+      target: canReach(RECONNECT_PATH) ? RECONNECT_PATH : null,
+      targetLabel: "notifications.grantScopes",
+    };
+  }
   if (notification.type === "integration_tools_review") {
     // The tools wait in the integration's Outils section, where they are settled.
     const review = notification.payload;

@@ -43,7 +43,10 @@ import {
   decryptCredentialsToStringMap,
 } from "@appstrate/connect";
 import type { CredentialDeathCause } from "@appstrate/core/sidecar-types";
-import { announceCredentialNeedsReconnection } from "./credential-reconnection.ts";
+import {
+  announceCredentialNeedsReconnection,
+  announceRequestedScopes,
+} from "./credential-reconnection.ts";
 import { issuerOfClientMetadataDocumentRef } from "../lib/integration-client-metadata.ts";
 import {
   resolveSystemClientForAuth,
@@ -2529,8 +2532,8 @@ export async function getIntegrationConnectionCredentialFields(
   return fields === KEY_UNAVAILABLE ? null : fields;
 }
 
-/** The columns an announcement of a connection's death reads, off the row that flipped. */
-const deathColumns = {
+/** The columns an announcement to a connection's owner reads, off the row it is about. */
+const ownerColumns = {
   orgId: integrationConnections.orgId,
   spaceId: integrationConnections.spaceId,
   integrationId: integrationConnections.integrationId,
@@ -2542,7 +2545,7 @@ const deathColumns = {
 /** Announce the death of the connection `connectionId` to its owner (the CHECK: user XOR end user). */
 function announceConnectionDeath(
   connectionId: string,
-  row: Pick<typeof integrationConnections.$inferSelect, keyof typeof deathColumns>,
+  row: Pick<typeof integrationConnections.$inferSelect, keyof typeof ownerColumns>,
   cause: CredentialDeathCause,
 ): void {
   announceCredentialNeedsReconnection({
@@ -2571,7 +2574,7 @@ export async function markIntegrationConnectionNeedsReconnection(
         eq(integrationConnections.needsReconnection, false),
       ),
     )
-    .returning(deathColumns);
+    .returning(ownerColumns);
   if (flipped) announceConnectionDeath(connectionId, flipped, cause);
 }
 
@@ -2628,7 +2631,7 @@ export async function recordIntegrationRefreshFailure(
       failures: integrationConnections.refreshFailureCount,
       needsReconnection: integrationConnections.needsReconnection,
       wasFlagged: prev.wasFlagged,
-      ...deathColumns,
+      ...ownerColumns,
     });
   if (!row) return null;
   if (row.needsReconnection && !row.wasFlagged) {
@@ -2712,7 +2715,7 @@ const MAX_REQUESTED_SCOPES = 20;
  * credential proxy outside a run, a run's report); {@link persistCredentialBundle} is the one
  * that clears it. Only valid scope tokens are kept, at most {@link MAX_REQUESTED_SCOPES}. Only an
  * OAuth2 connection (one with a minting client) takes a demand: a consent is what grants scopes,
- * and only its grant ever clears them.
+ * and only its grant ever clears them. A demand that gains a scope is announced to the owner.
  */
 export async function recordRequestedScopes(
   connectionId: string,
@@ -2724,6 +2727,7 @@ export async function recordRequestedScopes(
     .select({
       granted: integrationConnections.scopesGranted,
       requested: integrationConnections.requestedScopes,
+      ...ownerColumns,
     })
     .from(integrationConnections)
     .where(
@@ -2746,6 +2750,14 @@ export async function recordRequestedScopes(
     .update(integrationConnections)
     .set({ requestedScopes: next })
     .where(reachableConnection(connectionId, integrationId, reach));
+  if (next.some((s) => !row.requested.includes(s))) {
+    announceRequestedScopes({
+      orgId: row.orgId,
+      spaceId: row.spaceId,
+      connectionId,
+      owner: actorFromIds(row.userId, row.endUserId)!,
+    });
+  }
   return next;
 }
 

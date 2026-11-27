@@ -869,7 +869,7 @@ constraint notifications notifications_pkey PRIMARY KEY (id)
 constraint notifications notifications_recipient_type_valid CHECK ((recipient_type = ANY (ARRAY['user'::text, 'end_user'::text])))
 constraint notifications notifications_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 constraint notifications notifications_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
-constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'package_shared'::text, 'agent_message'::text, 'credential_needs_reconnection'::text, 'integration_tools_review'::text])))
+constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'package_shared'::text, 'agent_message'::text, 'credential_needs_reconnection'::text, 'integration_tools_review'::text, 'connection_scopes_requested'::text])))
 constraint oauth_access_tokens oauth_access_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_access_tokens oauth_access_tokens_pkey PRIMARY KEY (id)
 constraint oauth_access_tokens oauth_access_tokens_refresh_id_oauth_refresh_tokens_id_fk FOREIGN KEY (refresh_id) REFERENCES oauth_refresh_tokens(id) ON DELETE CASCADE
@@ -1318,6 +1318,7 @@ index CREATE UNIQUE INDEX uq_llm_usage_proxy_request_id ON public.llm_usage USIN
 index CREATE UNIQUE INDEX uq_llm_usage_runner_run_id ON public.llm_usage USING btree (run_id) WHERE ((source = 'runner'::llm_usage_source) AND (run_id IS NOT NULL))
 index CREATE UNIQUE INDEX uq_model_provider_credentials_id_provider_id ON public.model_provider_credentials USING btree (id, provider_id)
 index CREATE UNIQUE INDEX uq_notifications_run_recipient_type ON public.notifications USING btree (run_id, recipient_type, recipient_id, type) WHERE (run_id IS NOT NULL)
+index CREATE UNIQUE INDEX uq_notifications_scopes_requested_unread ON public.notifications USING btree (recipient_type, recipient_id, ((payload ->> 'connection_id'::text))) WHERE ((type = 'connection_scopes_requested'::text) AND (read_at IS NULL))
 index CREATE UNIQUE INDEX uq_notifications_tools_review_unread ON public.notifications USING btree (space_id, recipient_type, recipient_id, ((payload ->> 'packageId'::text))) WHERE ((type = 'integration_tools_review'::text) AND (read_at IS NULL))
 index CREATE UNIQUE INDEX uq_oauth_client_resources_pair ON public.oauth_client_resources USING btree (client_id, resource_id)
 index CREATE UNIQUE INDEX uq_org_invitations_pending ON public.org_invitations USING btree (org_id, email) WHERE (status = 'pending'::invitation_status)

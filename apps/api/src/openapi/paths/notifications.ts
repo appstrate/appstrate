@@ -78,6 +78,22 @@ const notificationObject = {
         display_name: { type: "string" },
       },
     }),
+    notificationOf("connection_scopes_requested", {
+      required: ["packageId", "integration_name", "connection_id", "label"],
+      properties: {
+        packageId: { type: "string" },
+        integration_name: {
+          type: "string",
+          description: "The integration's display name when the notice was written.",
+        },
+        connection_id: {
+          type: "string",
+          description:
+            "The recipient's connection a server asked for scopes it does not hold (`insufficient_scope`); the scopes are its `requested_scopes`. One unread notice per connection.",
+        },
+        label: { type: "string" },
+      },
+    }),
     notificationOf("agent_message", {
       required: ["packageId", "agent_name", "title", "message"],
       properties: {
