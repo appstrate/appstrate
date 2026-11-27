@@ -144,7 +144,9 @@ import { MAX_PRESENTED_ITEMS, type PresentationSubject } from "@appstrate/core/m
 import {
   ACTIVE_SPACES_META_KEY,
   OPERATION_SPACES_META_KEY,
+  SPACE_LIST_INLINE_MAX,
   describeSpace,
+  describeSpaceList,
   projectActiveInSpaces,
 } from "@appstrate/core/mcp-spaces";
 import {
@@ -2717,6 +2719,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     (orgSpaces ? tools.map((tool) => withSpaceArgument(tool, orgSpaces)) : tools).map((tool) =>
       refuseUndeclaredArguments(tool, pinned),
     ),
+    ctx.requestId,
   );
 }
 
@@ -2730,7 +2733,7 @@ function spaceIdProperty(
   kind: (typeof TOOL_SPACE_RULES)[McpToolName]["kind"],
   perOperation: boolean,
 ): Record<string, unknown> {
-  const reached = spaces.reachable.map(describeSpace).join("; ");
+  const reached = describeSpaceList(spaces.reachable);
   let description: string;
   if (kind === "search")
     description =
@@ -2747,7 +2750,15 @@ function spaceIdProperty(
       `The space this call acts in, by id: ${reached}. Choose it in the order given in the ` +
       "server instructions." +
       (perOperation ? ORGANIZATION_LEVEL_SPACE_ID : "");
-  return { type: "string", enum: spaces.reachable.map((s) => s.id), description };
+  // Above the cap the ids are not repeated in the schema: a space the call names is checked
+  // server-side, and the refusal lists the ids it accepts.
+  return {
+    type: "string",
+    ...(spaces.reachable.length <= SPACE_LIST_INLINE_MAX
+      ? { enum: spaces.reachable.map((s) => s.id) }
+      : {}),
+    description,
+  };
 }
 
 /**
@@ -2802,7 +2813,7 @@ function withSpaceArgument(
     ...tool.descriptor,
     // Leading: clients cap long descriptions, and this is the part that varies.
     description: granted
-      ? `Available in: ${granted.map(describeSpace).join("; ")}. ${tool.descriptor.description}`
+      ? `Available in: ${describeSpaceList(granted)}. ${tool.descriptor.description}`
       : tool.descriptor.description,
     inputSchema: {
       ...schema,

@@ -246,6 +246,9 @@ const MAX_INTEGRATION_CALL_TEXT = 2048;
 
 const integrationCallRecordSchema = z
   .object({
+    // Minted by the sidecar: with the run, the key a retried batch is deduplicated on.
+    call_id: z.uuid(),
+    started_at: z.iso.datetime({ offset: true }),
     integration_id: z.string().min(1).max(214),
     connection_id: z.uuid().nullable(),
     // An HTTP method token (RFC 9110 §9.1).
@@ -615,7 +618,6 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
       });
       return c.body(null, 204);
     }
-    const requestId = c.get("requestId");
     // Off the response path, in one statement that keeps the batch's order.
     void trackAudit(
       recordConnectionCalls(
@@ -633,7 +635,10 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
           host: call.host,
           outcome: call.outcome,
           durationMs: call.duration_ms,
-          requestId,
+          // The batch's `Request-Id` is not the call's: a sidecar row has none.
+          requestId: null,
+          calledAt: new Date(call.started_at),
+          callId: call.call_id,
         })),
       ),
     );

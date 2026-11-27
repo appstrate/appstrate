@@ -25,6 +25,7 @@ import { invalidRequest, conflict, forbidden } from "@appstrate/core/api-errors"
 import { readJsonBody } from "@appstrate/core/request-body";
 import { parseFileUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
+import { orderDetailSpaces } from "./space-details.ts";
 import { chatThreadMessagesSchema } from "@appstrate/core/chat-message";
 import { resolveAgentPrompt, withStoredAgentPromptTexts } from "./agent-launch.ts";
 import { notifySessionUpdate } from "./realtime.ts";
@@ -465,8 +466,11 @@ export async function handleChatStream(
     const engaged = new Set(
       [conv.spaceId, personalSpaceId, ...conv.touched].filter((id) => id !== null),
     );
-    const detailSpaces =
-      body.context_all_spaces === true ? spaces : spaces.filter((space) => engaged.has(space.id));
+    // Priority order, which the read is capped on: origin, personal, touched, then the rest.
+    const detailSpaces = orderDetailSpaces(
+      body.context_all_spaces === true ? spaces : spaces.filter((space) => engaged.has(space.id)),
+      [conv.spaceId, personalSpaceId, ...conv.touched],
+    );
     return {
       skills: conv.selection,
       detailSpaces,

@@ -17,6 +17,30 @@ import { logger } from "./logger.ts";
 /** About 2k tokens. */
 export const CHAT_CONTEXT_DETAILS_BUDGET_CHARS = 8_000;
 
+const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** At most this many spaces are read per turn, in the order the caller gives them; the rest are counted. */
+export const MAX_DETAIL_SPACES = 20;
+
+/**
+ * The spaces a turn reads, in priority order: the origin space, the caller's personal space, the
+ * spaces the conversation touched, then the others by name and id.
+ */
+export function orderDetailSpaces<T extends { id: string; name: string }>(
+  spaces: readonly T[],
+  priority: readonly (string | null | undefined)[],
+): T[] {
+  const rank = new Map<string, number>();
+  for (const id of priority) if (id != null && !rank.has(id)) rank.set(id, rank.size);
+  const rest = rank.size;
+  const rankOf = (id: string) => rank.get(id) ?? rest;
+  return [...spaces].sort(
+    (a, b) =>
+      rankOf(a.id) - rankOf(b.id) ||
+      (rankOf(a.id) < rest ? 0 : compare(a.name, b.name) || compare(a.id, b.id)),
+  );
+}
+
 /** How many `get_me` run at once: a huge organization must not flood the connection the skills share. */
 const READ_CONCURRENCY = 4;
 
@@ -182,7 +206,6 @@ const head = (id: string, name: string): string => {
 const names = (spaces: readonly DetailSpace[]): string =>
   spaces.map((space) => label(space.name)).join(", ");
 const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
-const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** How much of each entry is rendered, the same for every space: the most that fits the budget. */
 const LEVELS = ["full", "names", "counts"] as const;
@@ -395,8 +418,15 @@ function showsEntries(detail: SpaceDetail): boolean {
 export function formatSpaceDetails(
   details: readonly SpaceDetail[],
   budget = CHAT_CONTEXT_DETAILS_BUDGET_CHARS,
+  unread = 0,
 ): { text: string; shown: string[] } {
-  if (details.length === 0) return { text: "", shown: [] };
+  if (details.length === 0 && unread === 0) return { text: "", shown: [] };
+  const unreadLine =
+    unread > 0
+      ? [
+          `${unread} ${unread === 1 ? "space" : "spaces"} not read; call \`get_me\` with \`space_id\` for ${unread === 1 ? "it" : "one of them"}.`,
+        ]
+      : [];
   const spaces = [...details].sort(
     (a, b) => compare(a.space.name, b.space.name) || compare(a.space.id, b.space.id),
   );
@@ -404,10 +434,19 @@ export function formatSpaceDetails(
   for (const level of LEVELS) {
     const text = [
       SPACE_DETAILS_HEADING,
-      ...(level === "counts" ? renderCounts(spaces) : renderLists(spaces, level)),
+      ...(spaces.length === 0
+        ? []
+        : level === "counts"
+          ? renderCounts(spaces)
+          : renderLists(spaces, level)),
+      ...unreadLine,
     ].join("\n");
     if (text.length <= budget) return { text, shown };
   }
-  const text = `${SPACE_DETAILS_HEADING}\nNot detailed here, for room: \`get_me\` with a space's \`space_id\` lists what it holds.`;
+  const text = [
+    SPACE_DETAILS_HEADING,
+    "Not detailed here, for room: `get_me` with a space's `space_id` lists what it holds.",
+    ...unreadLine,
+  ].join("\n");
   return { text: text.length <= budget ? text : "", shown: [] };
 }

@@ -13,6 +13,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { logger } from "../../lib/logger.ts";
 import { getCatalog } from "./catalog.ts";
+import { jsonResult } from "./tool-results.ts";
 import { toolIcons } from "./tool-icons.ts";
 import type { McpToolName } from "./tools.ts";
 
@@ -88,11 +89,17 @@ function withIcons(descriptor: Tool): Tool {
   return icons ? { ...descriptor, icons } : descriptor;
 }
 
-function thrownResult(err: unknown): CallToolResult {
-  return {
-    content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-    isError: true,
-  };
+/** A handler's throw as a tool refusal: a generic sentence and the request id, the detail in the log only. */
+function thrownResult(requestId: string): CallToolResult {
+  return jsonResult(
+    {
+      code: "internal_error",
+      error:
+        "The tool failed unexpectedly. Retrying may work; if it persists, report the request_id.",
+      request_id: requestId,
+    },
+    true,
+  );
 }
 
 type Presenter = (
@@ -111,9 +118,12 @@ const presenterOf = (name: string): Presenter | undefined =>
 /**
  * Every tool given its icons, and its results their presentation unless the handler stamped one
  * (`search`, `call_integration_tool`). A handler's throw, its call not cancelled, answers a failed
- * result (`isError`, the message) presented the same way rather than a JSON-RPC error.
+ * result (`internal_error`, the request id; the detail goes to the log) presented the same way rather than a JSON-RPC error.
  */
-export function presentTools(tools: AppstrateToolDefinition[]): AppstrateToolDefinition[] {
+export function presentTools(
+  tools: AppstrateToolDefinition[],
+  requestId: string,
+): AppstrateToolDefinition[] {
   return tools.map((tool) => ({
     ...tool,
     descriptor: withIcons(tool.descriptor),
@@ -125,9 +135,10 @@ export function presentTools(tools: AppstrateToolDefinition[]): AppstrateToolDef
         if (extra.signal?.aborted) throw err;
         logger.error("mcp: tool handler threw", {
           tool: tool.descriptor.name,
+          requestId,
           error: err instanceof Error ? (err.stack ?? err.message) : String(err),
         });
-        result = thrownResult(err);
+        result = thrownResult(requestId);
       }
       if (result._meta?.[TOOL_PRESENTATION_META_KEY] !== undefined) return result;
       const presentation = presenterOf(tool.descriptor.name)?.(args, result);

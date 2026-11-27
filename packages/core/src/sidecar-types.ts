@@ -39,6 +39,19 @@ export type ManifestDeliveryHttp = NonNullable<
 export const SIDECAR_AUTH_HEADER = "x-appstrate-sidecar-auth";
 
 /**
+ * The call-journal shutdown budget, one margin at each step so every wait outlasts the one inside
+ * it: the sidecar's drain gives up first, the agent's `POST /calls/flush` wait ends after it, and
+ * the orchestrators' SIGTERM grace ends after both.
+ */
+export const CALL_JOURNAL_DRAIN_DEADLINE_MS = 4_000;
+/** How long the agent waits for `POST /calls/flush`: the drain deadline plus a margin. */
+export const CALL_JOURNAL_FLUSH_TIMEOUT_MS = CALL_JOURNAL_DRAIN_DEADLINE_MS + 500;
+/** SIGTERM→SIGKILL grace (seconds): the flush timeout plus a margin, rounded up. */
+export const SIDECAR_SIGTERM_GRACE_SECONDS = Math.ceil(
+  (CALL_JOURNAL_FLUSH_TIMEOUT_MS + 500) / 1000,
+);
+
+/**
  * Sidecar runtime configuration. The sidecar process reads this from its
  * own environment at boot and uses it for the lifetime of the run. The
  * platform sends every field as an env var when spawning the container.

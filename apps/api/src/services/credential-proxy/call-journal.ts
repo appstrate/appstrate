@@ -42,14 +42,19 @@ export interface ConnectionCall {
   /** The upstream's HTTP status as a string, or the proxy's own problem code. */
   outcome: string;
   durationMs: number;
-  requestId: string;
+  /** The platform request that made the call; NULL for a call a run's sidecar reported. */
+  requestId: string | null;
+  /** When the call started. */
+  calledAt: Date;
+  /** The call's identity: minted by the sidecar for a run's call, else by the writer. */
+  callId?: string;
 }
 
 /** Who called, as the journal records it: read from the request by {@link proxyCaller} alone. */
-export type ProxyCaller = Pick<
-  ConnectionCall,
-  "apiKeyId" | "authMethod" | "requestId" | "chatSessionId"
->;
+/** A platform request always has its Request-Id: only a sidecar-reported row has none. */
+export type ProxyCaller = Pick<ConnectionCall, "apiKeyId" | "authMethod" | "chatSessionId"> & {
+  requestId: string;
+};
 
 /**
  * The caller of a proxied call or MCP operation, from its request. A call naming a run records
@@ -96,36 +101,42 @@ async function connectionOwners(rows: readonly ConnectionCall[]): Promise<Map<st
 export async function recordConnectionCalls(rows: readonly ConnectionCall[]): Promise<void> {
   try {
     const owners = await connectionOwners(rows);
-    await db.insert(connectionCalls).values(
-      rows.map((row) => {
-        const owner = row.connectionId ? owners.get(row.connectionId) : null;
-        return {
-          orgId: row.orgId,
-          spaceId: row.spaceId,
-          connectionId: row.connectionId,
-          integrationId: row.integrationId,
-          ownerType: owner?.type ?? null,
-          ownerId: owner?.id ?? null,
-          actorType: row.actor.type,
-          actorId: row.actor.id,
-          apiKeyId: row.apiKeyId,
-          authMethod: row.authMethod,
-          runId: row.runId,
-          chatSessionId: row.chatSessionId,
-          method: row.method.slice(0, MAX_METHOD_LENGTH),
-          host: row.host?.slice(0, MAX_HOST_LENGTH) ?? null,
-          outcome: row.outcome,
-          // A wall-clock difference: a clock stepped back mid-call reads negative.
-          durationMs: Math.max(row.durationMs, 0),
-          requestId: row.requestId,
-        };
-      }),
-    );
+    await db
+      .insert(connectionCalls)
+      .values(
+        rows.map((row) => {
+          const owner = row.connectionId ? owners.get(row.connectionId) : null;
+          return {
+            orgId: row.orgId,
+            spaceId: row.spaceId,
+            connectionId: row.connectionId,
+            integrationId: row.integrationId,
+            ownerType: owner?.type ?? null,
+            ownerId: owner?.id ?? null,
+            actorType: row.actor.type,
+            actorId: row.actor.id,
+            apiKeyId: row.apiKeyId,
+            authMethod: row.authMethod,
+            runId: row.runId,
+            chatSessionId: row.chatSessionId,
+            method: row.method.slice(0, MAX_METHOD_LENGTH),
+            host: row.host?.slice(0, MAX_HOST_LENGTH) ?? null,
+            outcome: row.outcome,
+            // A wall-clock difference: a clock stepped back mid-call reads negative.
+            durationMs: Math.max(row.durationMs, 0),
+            requestId: row.requestId,
+            calledAt: row.calledAt,
+            callId: row.callId ?? Bun.randomUUIDv7(),
+          };
+        }),
+      )
+      // A sidecar batch sent twice (its retry) is stored once: `(run_id, call_id)` is unique.
+      .onConflictDoNothing({ target: [connectionCalls.runId, connectionCalls.callId] });
   } catch (err) {
     logger.error("recordConnectionCalls failed (the calls are unaffected)", {
       records: rows.length,
       integrationIds: [...new Set(rows.map((row) => row.integrationId))],
-      requestIds: [...new Set(rows.map((row) => row.requestId))],
+      requestIds: [...new Set(rows.map((row) => row.requestId).filter((id) => id !== null))],
       error: getErrorMessage(err),
     });
   }

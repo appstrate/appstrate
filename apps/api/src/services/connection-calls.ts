@@ -7,7 +7,7 @@
  * whatever the connection. Newest first, keyset-paginated on the row id.
  */
 
-import { and, desc, eq, gte, lt, lte, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, lt, lte, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   connectionCalls,
@@ -41,14 +41,19 @@ export interface ConnectionCallView {
   host: string | null;
   outcome: string;
   duration_ms: number;
-  request_id: string;
+  /** The platform request that made the call; NULL for a call a run's sidecar reported. */
+  request_id: string | null;
+  /** When the call started; NULL on a row recorded before migration 0119. */
+  called_at: string | null;
+  /** The call's identity; NULL on a row recorded before migration 0119. */
+  call_id: string | null;
 }
 
 export interface ConnectionCallFilters {
   connectionId?: string;
   actorId?: string;
   runId?: string;
-  /** Inclusive bounds on `created_at`. */
+  /** Inclusive bounds on when the call started (`called_at`, else `created_at`). */
   startDate?: Date;
   endDate?: Date;
 }
@@ -79,8 +84,13 @@ function toView(row: ConnectionCallRow): ConnectionCallView {
     outcome: row.outcome,
     duration_ms: row.durationMs,
     request_id: row.requestId,
+    called_at: row.calledAt?.toISOString() ?? null,
+    call_id: row.callId,
   };
 }
+
+/** When the call happened: its start, else the write time of a row recorded before 0119. */
+const callTime = sql`coalesce(${connectionCalls.calledAt}, ${connectionCalls.createdAt})`;
 
 async function listCalls(
   reach: SQL | undefined,
@@ -96,8 +106,8 @@ async function listCalls(
         filters.connectionId ? eq(connectionCalls.connectionId, filters.connectionId) : undefined,
         filters.actorId ? eq(connectionCalls.actorId, filters.actorId) : undefined,
         filters.runId ? eq(connectionCalls.runId, filters.runId) : undefined,
-        filters.startDate ? gte(connectionCalls.createdAt, filters.startDate) : undefined,
-        filters.endDate ? lte(connectionCalls.createdAt, filters.endDate) : undefined,
+        filters.startDate ? gte(callTime, filters.startDate.toISOString()) : undefined,
+        filters.endDate ? lte(callTime, filters.endDate.toISOString()) : undefined,
         page.startingAfter !== undefined ? lt(connectionCalls.id, page.startingAfter) : undefined,
       ),
     )

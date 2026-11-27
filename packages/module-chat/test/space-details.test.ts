@@ -9,8 +9,10 @@ import { fullAgent, meBody } from "./me-context-body.ts";
 import { describe, expect, it } from "bun:test";
 import {
   CHAT_CONTEXT_DETAILS_BUDGET_CHARS,
+  MAX_DETAIL_SPACES,
   SPACE_DETAILS_HEADING,
   formatSpaceDetails,
+  orderDetailSpaces,
   readSpaceDetails,
   type DetailSpace,
   type SpaceDetail,
@@ -369,5 +371,40 @@ describe("readSpaceDetails", () => {
   it("keeps a field the server adds", async () => {
     const fake = client({ spc_p: ok({ space: { id: "spc_p", added: 1 }, added_list: [] }) });
     expect(await readSpaceDetails(fake, AbortSignal.timeout(1000), [PERSO])).toHaveLength(1);
+  });
+});
+
+describe("the cap on the spaces read", () => {
+  const space = (id: string, name: string) => ({ id, name });
+
+  it("orders origin, personal, touched, then the rest by name and id", () => {
+    const ordered = orderDetailSpaces(
+      [
+        space("spc_z", "Zeta"),
+        space("spc_a", "Alpha"),
+        space("spc_t", "Touched"),
+        space("spc_p", "Perso"),
+        space("spc_o", "Origin"),
+        space("spc_b", "Alpha"),
+      ],
+      ["spc_o", "spc_p", null, "spc_t", "spc_o"],
+    );
+    expect(ordered.map((s) => s.id)).toEqual([
+      "spc_o",
+      "spc_p",
+      "spc_t",
+      "spc_a",
+      "spc_b",
+      "spc_z",
+    ]);
+  });
+
+  it("states how many spaces were not read, whatever the level", () => {
+    const { text } = formatSpaceDetails([detail(PERSO, { agents: [agent("@a/x")] })], undefined, 3);
+    expect(text).toContain("3 spaces not read; call `get_me` with `space_id` for one of them.");
+    expect(formatSpaceDetails([detail(PERSO)], undefined, 1).text).toContain("1 space not read");
+    expect(formatSpaceDetails([detail(PERSO)]).text).not.toContain("not read");
+    expect(formatSpaceDetails([], undefined, 2).text).toContain("2 spaces not read");
+    expect(MAX_DETAIL_SPACES).toBeGreaterThan(0);
   });
 });

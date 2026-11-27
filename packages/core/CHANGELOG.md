@@ -49,6 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`flattenName`** (`@appstrate/core/mcp-spaces`): a name made one bounded line (control and
   format characters removed, whitespace runs collapsed). `describeSpace` flattens the space name
   with it, so a name holding a line break cannot forge a heading in a prompt.
+- **`SPACE_LIST_INLINE_MAX`, `describeSpaceList`** (`@appstrate/core/mcp-spaces`): above
+  `SPACE_LIST_INLINE_MAX` (12) reachable spaces, an MCP `space_id` description and a refusal's text
+  give the count and point to `get_me` instead of describing each space, and the `space_id` `enum`
+  is dropped; a refusal's `accepted` still lists every space.
+- **`CALL_JOURNAL_DRAIN_DEADLINE_MS`, `CALL_JOURNAL_FLUSH_TIMEOUT_MS`,
+  `SIDECAR_SIGTERM_GRACE_SECONDS`** (`@appstrate/core/sidecar-types`): the three bounds of a run's
+  call-journal drain, derived one from another (drain deadline < flush timeout < SIGTERM grace).
+  `IntegrationCallRecord` gains the required `call_id` (UUIDv7) and `started_at` (RFC 3339).
 
 ### Removed
 

@@ -348,6 +348,7 @@ export function createCredentialProxyRouter() {
               host: templateHost(target),
               outcome,
               durationMs: Date.now() - started,
+              calledAt: new Date(started),
             },
           ]),
         );

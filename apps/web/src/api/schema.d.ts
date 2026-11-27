@@ -1439,7 +1439,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made in the current space
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`), and every direct MCP operation toward an unauthenticated integration's server, made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call or MCP operation dispatched to an upstream (and so may have reached it), with or without a credential (`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`), and every direct MCP operation toward an unauthenticated integration's server, made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call or MCP operation dispatched to an upstream (and so may have reached it), with or without a credential (`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first by `id`, the order rows were recorded in (a run's sidecar reports its calls in batches, so it can differ slightly from `called_at`), keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listConnectionCalls"];
         put?: never;
@@ -2141,7 +2141,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made with one of the caller's connections
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call or MCP operation dispatched to the upstream, and so may have sent the credential, successful or not; `connection_id` is never null here. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call or MCP operation dispatched to the upstream, and so may have sent the credential, successful or not; `connection_id` is never null here. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first by `id`, the order rows were recorded in (a run's sidecar reports its calls in batches, so it can differ slightly from `called_at`), keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listMyConnectionCalls"];
         put?: never;
@@ -5657,7 +5657,7 @@ export interface paths {
         put?: never;
         /**
          * Journal the upstream calls a run's sidecar dispatched
-         * @description Sidecar-only. Auth via Bearer run token. A batch of the upstream calls the run's sidecar dispatched for its integrations (the `api_call` tool, the MITM listener, a remote MCP server's operations, a local MCP server's `tools/call` when no MITM listener sees its upstream requests), one record per call that may have reached the upstream, taken from its final attempt. Each is written to the connection-call journal (`connection_calls`) with the run's organization, space, actor and API key, `auth_method` `run_token`, `run_id` set and the batch's request id; the sidecar sends none of those. Every record is checked before any is written, against the run's frozen kickoff snapshot alone — never the live agent or the space's activation, so a call that left stays journaled when its integration is switched off or the agent edited or deleted mid-run: a non-null `connection_id` is one the run bound to that integration (else `400 connection_not_in_run`), and a record with a null `connection_id` names an integration the run resolved (else `400 invalid_request`); one record that fails refuses the whole batch. The text of a record is bounded at 2048 characters and stored truncated to the journal's own caps. A run with no actor writes nothing and answers `204`. A record carrying `credential_revision` (a 2xx answered with that credential) also ends the connection's rejection streak: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0, unless the connection no longer holds that credential, the run's actor can no longer reach it (deleted, unshared, moved to another space), or it is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. A token whose run is no longer `running` is refused (`403`).
+         * @description Sidecar-only. Auth via Bearer run token. A batch of the upstream calls the run's sidecar dispatched for its integrations (the `api_call` tool, the MITM listener, a remote MCP server's operations, a local MCP server's `tools/call` when no MITM listener sees its upstream requests), one record per call that may have reached the upstream, taken from its final attempt. Each is written to the connection-call journal (`connection_calls`) with the run's organization, space, actor and API key, `auth_method` `run_token`, `run_id` set and a null `request_id` (the batch's request is not the call's); the sidecar sends none of those. A record carries its `call_id` and `started_at`, stored as the row's `call_id` and `called_at`: `(run_id, call_id)` is unique, so a batch sent twice is stored once and the second answers `204` as well. Every record is checked before any is written, against the run's frozen kickoff snapshot alone — never the live agent or the space's activation, so a call that left stays journaled when its integration is switched off or the agent edited or deleted mid-run: a non-null `connection_id` is one the run bound to that integration (else `400 connection_not_in_run`), and a record with a null `connection_id` names an integration the run resolved (else `400 invalid_request`); one record that fails refuses the whole batch. The text of a record is bounded at 2048 characters and stored truncated to the journal's own caps. A run with no actor writes nothing and answers `204`. A record carrying `credential_revision` (a 2xx answered with that credential) also ends the connection's rejection streak: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0, unless the connection no longer holds that credential, the run's actor can no longer reach it (deleted, unshared, moved to another space), or it is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. A token whose run is no longer `running` is refused (`403`).
          */
         post: operations["reportIntegrationCalls"];
         delete?: never;
@@ -13925,9 +13925,9 @@ export interface operations {
                 actor_id?: string;
                 /** @description Only the calls that declared this run. */
                 runId?: string;
-                /** @description Only the calls made at or after this instant (ISO 8601 with an offset). */
+                /** @description Only the calls that started at or after this instant (`called_at`, else `created_at` for a call recorded before 0119; ISO 8601 with an offset). */
                 start_date?: string;
-                /** @description Only the calls made at or before this instant (ISO 8601 with an offset). */
+                /** @description Only the calls that started at or before this instant (`called_at`, else `created_at` for a call recorded before 0119; ISO 8601 with an offset). */
                 end_date?: string;
                 limit?: number;
                 /** @description Cursor: the `id` of the last call of the previous page. Follow the RFC 5988 `Link: <…>; rel="next"` response header instead of building it by hand. */
@@ -13959,7 +13959,10 @@ export interface operations {
                         data: {
                             /** @description Monotonic row id; the pagination cursor. */
                             id: number;
-                            /** Format: date-time */
+                            /**
+                             * Format: date-time
+                             * @description When the row was written. For a call a run's sidecar reported this is later than the call: read `called_at`.
+                             */
                             createdAt: string;
                             /** @description The space the call was made in. */
                             spaceId: string;
@@ -13984,7 +13987,7 @@ export interface operations {
                             actor_id: string;
                             /** @description The API key the actor acted through, if any. */
                             apiKeyId: string | null;
-                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …); `run_token` for a call a platform run's sidecar made. */
+                            /** @description How the caller authenticated, as the platform's authentication strategies name it: `api_key`, `session`, an OAuth token kind (`oauth2-instance`, `oauth2-dashboard`, `oauth2-end-user`), `chat-loopback` for the chat's own calls; `run_token` for a call a platform run's sidecar made. An open set: a module may add strategies, so a client treats an unknown value as opaque. */
                             auth_method: string;
                             /** @description The run whose sidecar made the call, or the run the call declared (`X-Run-Id`), if any. */
                             runId: string | null;
@@ -13997,8 +14000,18 @@ export interface operations {
                             /** @description The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …). */
                             outcome: string;
                             duration_ms: number;
-                            /** @description The call's `Request-Id`. */
-                            request_id: string;
+                            /** @description The `Request-Id` of the platform request that made the call; null for a call reported by a run's sidecar. */
+                            request_id: string | null;
+                            /**
+                             * Format: date-time
+                             * @description When the call started. Null on a call recorded before this field existed (migration 0119), never backfilled.
+                             */
+                            called_at: string | null;
+                            /**
+                             * Format: uuid
+                             * @description The call's identity (UUIDv7). Null on a call recorded before this field existed (migration 0119).
+                             */
+                            call_id: string | null;
                         }[];
                         hasMore: boolean;
                     };
@@ -17620,9 +17633,9 @@ export interface operations {
                 actor_id?: string;
                 /** @description Only the calls that declared this run. */
                 runId?: string;
-                /** @description Only the calls made at or after this instant (ISO 8601 with an offset). */
+                /** @description Only the calls that started at or after this instant (`called_at`, else `created_at` for a call recorded before 0119; ISO 8601 with an offset). */
                 start_date?: string;
-                /** @description Only the calls made at or before this instant (ISO 8601 with an offset). */
+                /** @description Only the calls that started at or before this instant (`called_at`, else `created_at` for a call recorded before 0119; ISO 8601 with an offset). */
                 end_date?: string;
                 limit?: number;
                 /** @description Cursor: the `id` of the last call of the previous page. Follow the RFC 5988 `Link: <…>; rel="next"` response header instead of building it by hand. */
@@ -17651,7 +17664,10 @@ export interface operations {
                         data: ({
                             /** @description Monotonic row id; the pagination cursor. */
                             id: number;
-                            /** Format: date-time */
+                            /**
+                             * Format: date-time
+                             * @description When the row was written. For a call a run's sidecar reported this is later than the call: read `called_at`.
+                             */
                             createdAt: string;
                             /** @description The space the call was made in. */
                             spaceId: string;
@@ -17676,7 +17692,7 @@ export interface operations {
                             actor_id: string;
                             /** @description The API key the actor acted through, if any. */
                             apiKeyId: string | null;
-                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …); `run_token` for a call a platform run's sidecar made. */
+                            /** @description How the caller authenticated, as the platform's authentication strategies name it: `api_key`, `session`, an OAuth token kind (`oauth2-instance`, `oauth2-dashboard`, `oauth2-end-user`), `chat-loopback` for the chat's own calls; `run_token` for a call a platform run's sidecar made. An open set: a module may add strategies, so a client treats an unknown value as opaque. */
                             auth_method: string;
                             /** @description The run whose sidecar made the call, or the run the call declared (`X-Run-Id`), if any. */
                             runId: string | null;
@@ -17689,8 +17705,18 @@ export interface operations {
                             /** @description The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …). */
                             outcome: string;
                             duration_ms: number;
-                            /** @description The call's `Request-Id`. */
-                            request_id: string;
+                            /** @description The `Request-Id` of the platform request that made the call; null for a call reported by a run's sidecar. */
+                            request_id: string | null;
+                            /**
+                             * Format: date-time
+                             * @description When the call started. Null on a call recorded before this field existed (migration 0119), never backfilled.
+                             */
+                            called_at: string | null;
+                            /**
+                             * Format: uuid
+                             * @description The call's identity (UUIDv7). Null on a call recorded before this field existed (migration 0119).
+                             */
+                            call_id: string | null;
                         } & {
                             /**
                              * Format: uuid
@@ -30591,6 +30617,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     reportIntegrationCalls: {
@@ -30604,6 +30631,16 @@ export interface operations {
             content: {
                 "application/json": {
                     calls: {
+                        /**
+                         * Format: uuid
+                         * @description The call's identity (a UUIDv7 the sidecar mints); with the run, the key a retried batch is deduplicated on.
+                         */
+                        call_id: string;
+                        /**
+                         * Format: date-time
+                         * @description When the upstream call started (RFC 3339, with an offset).
+                         */
+                        started_at: string;
                         /** @description The integration's package id (`@scope/name`). */
                         integration_id: string;
                         /**
@@ -30644,6 +30681,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -30709,6 +30747,7 @@ export interface operations {
                     };
                 };
             };
+            429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
             /** @description A proactive OAuth refresh failed; the credential is not refreshed now and may still be valid. The sidecar's listener cooldown backs off and retries on the next 401. */
             502: {
@@ -30794,6 +30833,7 @@ export interface operations {
                     };
                 };
             };
+            429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
             /** @description Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (journaled with its `credential_revision` on `POST /internal/integration-calls`) or a reconnect resets the count of its rejections. */
             502: {
@@ -31491,6 +31531,7 @@ export interface operations {
                     };
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description Not refreshed now; the credential stays usable. */
             502: {
                 headers: {
@@ -31547,6 +31588,7 @@ export interface operations {
                     };
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description Not refreshed now; the credential stays usable. */
             502: {
                 headers: {

@@ -82,6 +82,19 @@ export function describeSpace(space: NamedSpace): string {
   return `${flattenName(space.name)} (\`${space.id}\`, role ${space.role}${personal})`;
 }
 
+/**
+ * Above this many reachable spaces, tool schemas and refusals stop describing each space one by
+ * one: a count and `get_me` stand in, so the tools block does not grow with the organization.
+ */
+export const SPACE_LIST_INLINE_MAX = 12;
+
+/** The spaces as prose for a refusal or a description: each one, or only their count above the cap. */
+export function describeSpaceList(spaces: readonly NamedSpace[]): string {
+  return spaces.length <= SPACE_LIST_INLINE_MAX
+    ? spaces.map(describeSpace).join("; ")
+    : `${spaces.length} spaces, too many to list here: \`get_me\` lists them with their ids and your role`;
+}
+
 /** What a caller may do in one space, in reading order: `get_me`'s `spaces[].can` and the chat's. */
 export const SPACE_ACTS = [
   "invoke_operations",
@@ -116,7 +129,7 @@ export function spaceIdRefusal(
   spaceId: unknown,
 ): SpaceIdRefusal | undefined {
   const accepted = spaces.map((space) => space.id);
-  const list = spaces.map(describeSpace).join("; ");
+  const list = describeSpaceList(spaces);
   if (spaceId === undefined || spaceId === null) {
     return {
       code: "missing_argument",

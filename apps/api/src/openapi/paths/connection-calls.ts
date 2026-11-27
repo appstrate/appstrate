@@ -33,10 +33,17 @@ const connectionCallSchema = {
     "outcome",
     "duration_ms",
     "request_id",
+    "called_at",
+    "call_id",
   ],
   properties: {
     id: { type: "integer", description: "Monotonic row id; the pagination cursor." },
-    createdAt: { type: "string", format: "date-time" },
+    createdAt: {
+      type: "string",
+      format: "date-time",
+      description:
+        "When the row was written. For a call a run's sidecar reported this is later than the call: read `called_at`.",
+    },
     spaceId: { type: "string", description: "The space the call was made in." },
     connection_id: {
       type: ["string", "null"],
@@ -67,7 +74,10 @@ const connectionCallSchema = {
     auth_method: {
       type: "string",
       description:
-        "How the caller authenticated (`api_key`, an OAuth token kind, …); `run_token` for a call a platform run's sidecar made.",
+        "How the caller authenticated, as the platform's authentication strategies name it: `api_key`, " +
+        "`session`, an OAuth token kind (`oauth2-instance`, `oauth2-dashboard`, `oauth2-end-user`), " +
+        "`chat-loopback` for the chat's own calls; `run_token` for a call a platform run's sidecar made. " +
+        "An open set: a module may add strategies, so a client treats an unknown value as opaque.",
     },
     runId: {
       type: ["string", "null"],
@@ -98,7 +108,23 @@ const connectionCallSchema = {
         "proxy answered itself (`unauthorized_target`, `upstream_timeout`, …).",
     },
     duration_ms: { type: "integer", minimum: 0 },
-    request_id: { type: "string", description: "The call's `Request-Id`." },
+    request_id: {
+      type: ["string", "null"],
+      description:
+        "The `Request-Id` of the platform request that made the call; null for a call reported by a run's sidecar.",
+    },
+    called_at: {
+      type: ["string", "null"],
+      format: "date-time",
+      description:
+        "When the call started. Null on a call recorded before this field existed (migration 0119), never backfilled.",
+    },
+    call_id: {
+      type: ["string", "null"],
+      format: "uuid",
+      description:
+        "The call's identity (UUIDv7). Null on a call recorded before this field existed (migration 0119).",
+    },
   },
 } as const;
 
@@ -122,14 +148,16 @@ const filterParameters = [
     in: "query",
     required: false,
     schema: { type: "string", format: "date-time" },
-    description: "Only the calls made at or after this instant (ISO 8601 with an offset).",
+    description:
+      "Only the calls that started at or after this instant (`called_at`, else `created_at` for a call recorded before 0119; ISO 8601 with an offset).",
   },
   {
     name: "end_date",
     in: "query",
     required: false,
     schema: { type: "string", format: "date-time" },
-    description: "Only the calls made at or before this instant (ISO 8601 with an offset).",
+    description:
+      "Only the calls that started at or before this instant (`called_at`, else `created_at` for a call recorded before 0119; ISO 8601 with an offset).",
   },
   {
     name: "limit",
@@ -149,7 +177,8 @@ const filterParameters = [
 ] as const;
 
 const PAGINATION =
-  "Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown " +
+  "Newest first by `id`, the order rows were recorded in (a run's sidecar reports its calls in batches, so " +
+  "it can differ slightly from `called_at`), keyset-paginated on `id`: the `Link` header names the next page. An unknown " +
   "query parameter is a 400, never an ignored filter. Rate-limited to 60/min.";
 
 /** A call of one connection: the owner door lists no call without a connection. */

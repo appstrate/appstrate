@@ -6,6 +6,7 @@
  * caller's identity; `buildCallerContextBlock` reads the skills over a platform connection.
  */
 
+import { MAX_DETAIL_SPACES } from "../src/space-details.ts";
 import { fullAgent, meBody } from "./me-context-body.ts";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "bun:test";
@@ -806,7 +807,11 @@ describe("buildCallerContextBlock", () => {
     expect(Object.keys(injected.skills)).toEqual(["@acme/a"]);
     expect(text).toContain("a body");
     expect(peak).toBeLessThanOrEqual(4);
-    expect(caller.calls.filter((call) => call.startsWith("get_me"))).toHaveLength(24);
+    // The reads stop at the cap; the spaces left are counted in the block.
+    expect(caller.calls.filter((call) => call.startsWith("get_me"))).toHaveLength(
+      MAX_DETAIL_SPACES,
+    );
+    expect(text).toContain(`${24 - MAX_DETAIL_SPACES} spaces not read; call \`get_me\``);
   });
 
   it("opens no connection when there are neither skills nor details to read", async () => {

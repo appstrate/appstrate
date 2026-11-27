@@ -116,7 +116,8 @@ What happens under the hood:
 > archive unavailable there, is named in its section's `unsearched`. When the
 > request names a space or its context designates one, `search` takes its `space_id` too. The argument's schema lists your
 > spaces (name, `spc_…` id, your role there), since clients may truncate the
-> server instructions. Space names are not unique, so every machine field names
+> server instructions; above 12 reachable spaces it gives their count instead and
+> points to `get_me`, a refusal's `accepted` still holding every id. Space names are not unique, so every machine field names
 > a space by its id: `granted_in` in results, and the bracketed ids in the
 > operation index (`createAgent [spc_…]`). Names appear in prose only, such as
 > `Available in: …` on a tool. A `resources/read` of an `appfile://` link needs

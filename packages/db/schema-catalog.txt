@@ -81,6 +81,8 @@ column connection_calls.actor_id text not null
 column connection_calls.actor_type text not null
 column connection_calls.api_key_id text
 column connection_calls.auth_method text not null
+column connection_calls.call_id uuid
+column connection_calls.called_at timestamp with time zone
 column connection_calls.chat_session_id text
 column connection_calls.connection_id uuid
 column connection_calls.created_at timestamp with time zone not null default now()
@@ -93,7 +95,7 @@ column connection_calls.org_id uuid not null
 column connection_calls.outcome text not null
 column connection_calls.owner_id text
 column connection_calls.owner_type text
-column connection_calls.request_id text not null
+column connection_calls.request_id text
 column connection_calls.run_id text
 column connection_calls.space_id text not null
 column device_codes.attempts integer not null default 0
@@ -750,7 +752,7 @@ constraint cli_refresh_tokens cli_refresh_tokens_token_hash_unique UNIQUE (token
 constraint cli_refresh_tokens cli_refresh_tokens_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint connection_calls connection_calls_actor_type_valid CHECK ((actor_type = ANY (ARRAY['user'::text, 'end_user'::text])))
 constraint connection_calls connection_calls_no_connection_no_owner CHECK (((connection_id IS NOT NULL) OR ((owner_type IS NULL) AND (owner_id IS NULL))))
-constraint connection_calls connection_calls_one_context CHECK (((run_id IS NULL) OR (chat_session_id IS NULL)))
+constraint connection_calls connection_calls_one_context CHECK (((run_id IS NULL) OR (chat_session_id IS NULL))) NOT VALID
 constraint connection_calls connection_calls_owner_type_valid CHECK (((owner_type IS NULL) OR (owner_type = ANY (ARRAY['user'::text, 'end_user'::text]))))
 constraint connection_calls connection_calls_pkey PRIMARY KEY (id)
 constraint device_codes device_codes_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
@@ -1275,6 +1277,7 @@ index CREATE UNIQUE INDEX storage_deletion_jobs_pkey ON public.storage_deletion_
 index CREATE UNIQUE INDEX uploads_pkey ON public.uploads USING btree (id)
 index CREATE UNIQUE INDEX uq_chat_messages_session_message ON public.chat_messages USING btree (session_id, message_id)
 index CREATE UNIQUE INDEX uq_chat_sessions_id_org_id ON public.chat_sessions USING btree (id, org_id)
+index CREATE UNIQUE INDEX uq_connection_calls_run_call ON public.connection_calls USING btree (run_id, call_id) WHERE (call_id IS NOT NULL)
 index CREATE UNIQUE INDEX uq_files_id_org_id ON public.files USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_files_run_output_dedup ON public.files USING btree (run_id, sha256, name) WHERE (purpose = 'agent_output'::file_purpose)
 index CREATE UNIQUE INDEX uq_integration_conn_id_org_id ON public.integration_connections USING btree (id, org_id)

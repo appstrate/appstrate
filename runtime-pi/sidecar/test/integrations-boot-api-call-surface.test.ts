@@ -468,7 +468,9 @@ describe("bootIntegrations — synthetic api_call surface", () => {
           {} as never,
         );
       }
-      expect(records.map(({ duration_ms: _, ...record }) => record)).toEqual([
+      expect(
+        records.map(({ duration_ms: _, call_id: __, started_at: ___, ...record }) => record),
+      ).toEqual([
         {
           integration_id: INTEGRATION_ID,
           connection_id: "conn-b",

@@ -614,7 +614,10 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
   }
 
   /** A call record as the sidecar sends it; the defaults are a 2xx through no connection. */
+  const STARTED_AT = "2026-03-01T10:00:00.000Z";
   const callRecord = (overrides: Record<string, unknown> = {}) => ({
+    call_id: Bun.randomUUIDv7(),
+    started_at: STARTED_AT,
     integration_id: INTEGRATION,
     connection_id: null,
     method: "GET",
@@ -1122,7 +1125,6 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         callRecord({ host: "{{tenant}}.example.com", outcome: "upstream_timeout" }),
       ]);
       expect(res.status).toBe(204);
-      const requestId = res.headers.get("Request-Id");
 
       const rows = await journaledCalls(ctx, INTEGRATION);
       expect(rows.map(({ id: _, createdAt: __, ...row }) => row)).toEqual([
@@ -1143,7 +1145,9 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
           host: "api.example.com",
           outcome: "201",
           durationMs: 42,
-          requestId: requestId!,
+          requestId: null,
+          calledAt: new Date(STARTED_AT),
+          callId: expect.stringMatching(/^[0-9a-f-]{36}$/),
         },
         {
           orgId: ctx.orgId,
@@ -1162,9 +1166,39 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
           host: "{{tenant}}.example.com",
           outcome: "upstream_timeout",
           durationMs: 7,
-          requestId: requestId!,
+          requestId: null,
+          calledAt: new Date(STARTED_AT),
+          callId: expect.stringMatching(/^[0-9a-f-]{36}$/),
         },
       ]);
+    });
+
+    it("stores a batch sent twice once: (run, call_id) is the key", async () => {
+      await seedIntegration(INTEGRATION, true);
+      const batch = [callRecord(), callRecord({ outcome: "404" })];
+
+      expect((await reportCalls(batch)).status).toBe(204);
+      await drainJournal();
+      expect((await reportCalls(batch)).status).toBe(204);
+
+      const rows = await journaledCalls(ctx, INTEGRATION);
+      expect(rows.map((row) => row.outcome)).toEqual(["200", "404"]);
+    });
+
+    it("DENY: a record without its call_id or start, or with a malformed one, refuses the batch", async () => {
+      await seedIntegration(INTEGRATION, true);
+      const { call_id: _id, ...noId } = callRecord();
+      const { started_at: _at, ...noStart } = callRecord();
+
+      for (const bad of [
+        noId,
+        noStart,
+        callRecord({ call_id: "not-a-uuid" }),
+        callRecord({ started_at: "yesterday" }),
+      ]) {
+        expect((await reportCalls([bad])).status).toBe(400);
+      }
+      expect(await journaledCalls(ctx, INTEGRATION)).toEqual([]);
     });
 
     it("DENY: an integration the run did not freeze refuses the whole batch", async () => {

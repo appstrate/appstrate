@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from "@appstrate/core/errors";
-import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
+import { CALL_JOURNAL_FLUSH_TIMEOUT_MS, SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
-
-/** Above the sidecar's journal POST timeout (3 s), so a flush that is landing is not cut short. */
-const FLUSH_TIMEOUT_MS = 5_000;
 
 /**
  * Ask the sidecar to send its queued call journal (`POST /calls/flush`) and wait until it has.
@@ -22,7 +19,7 @@ export async function flushSidecarCallJournal(
     const res = await fetchFn(`${sidecarUrl.replace(/\/$/, "")}/calls/flush`, {
       method: "POST",
       headers: { [SIDECAR_AUTH_HEADER]: authToken },
-      signal: AbortSignal.timeout(FLUSH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(CALL_JOURNAL_FLUSH_TIMEOUT_MS),
     });
     if (!res.ok) log(`[call-journal] flush answered HTTP ${res.status}\n`);
   } catch (err) {

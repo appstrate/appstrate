@@ -27,6 +27,7 @@ import { withCallerClient } from "./platform-mcp.ts";
 import {
   SPACE_DETAILS_HEADING,
   formatSpaceDetails,
+  MAX_DETAIL_SPACES,
   readSpaceDetails,
   type DetailSpace,
   type SpaceDetail,
@@ -718,7 +719,7 @@ export async function buildCallerContextBlock(
     cited: readonly string[];
     /** See `turnUsesDrafts`. */
     drafts: boolean;
-    /** The spaces of `spaces` whose details are read (`handleChatStream`). */
+    /** The spaces of `spaces` whose details are read, in priority order (`orderDetailSpaces`); the first `MAX_DETAIL_SPACES` readable ones are read. */
     detailSpaces: readonly ReachableSpaceGrant[];
     /** Opened only when the turn has skills or details to read, under `signal`; closed once read. */
     openCaller: (signal: AbortSignal) => Promise<ChatCallerClient>;
@@ -746,7 +747,7 @@ export async function buildCallerContextBlock(
   // What the turn may read in a space: granted there, and within the turn's ceiling.
   const holdsIn = (space: ReachableSpaceGrant, permission: string) =>
     turnHolds.has(permission) && space.permissions.includes(permission);
-  const detailSpaces = args.detailSpaces
+  const readable = args.detailSpaces
     .map((space) => ({
       id: space.id,
       name: space.name,
@@ -754,6 +755,7 @@ export async function buildCallerContextBlock(
       agents: holdsIn(space, "agents:run"),
     }))
     .filter((space) => space.integrations || space.agents);
+  const detailSpaces = readable.slice(0, MAX_DETAIL_SPACES);
   const turnSkills = await readPreamble(
     args.openCaller,
     args.spaces.map((space) => space.id),
@@ -764,7 +766,11 @@ export async function buildCallerContextBlock(
     },
     detailSpaces,
   );
-  const details = formatSpaceDetails(turnSkills.details);
+  const details = formatSpaceDetails(
+    turnSkills.details,
+    undefined,
+    readable.length - detailSpaces.length,
+  );
   const { injected, ...rendered } = formatCallerContext(identity, {
     locale,
     capabilities,

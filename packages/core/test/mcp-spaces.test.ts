@@ -3,7 +3,9 @@
 import { describe, it, expect } from "bun:test";
 import {
   ACTIVE_IN_SPACES_HINT,
+  SPACE_LIST_INLINE_MAX,
   describeSpace,
+  describeSpaceList,
   projectActiveInSpaces,
   spaceActs,
   spaceIdRefusal,
@@ -84,6 +86,27 @@ describe("spaceIdRefusal", () => {
 
   it("accepts a reachable space", () => {
     expect(spaceIdRefusal(spaces, "spc_b")).toBeUndefined();
+  });
+});
+
+describe("spaces above the inline cap", () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `spc_${i}`, name: `S${i}`, role: "admin" }));
+
+  it("describes each space up to the cap and only counts them above it", () => {
+    expect(describeSpaceList(many(SPACE_LIST_INLINE_MAX))).toContain("`spc_0`");
+    const text = describeSpaceList(many(SPACE_LIST_INLINE_MAX + 1));
+    expect(text).toContain(`${SPACE_LIST_INLINE_MAX + 1} spaces`);
+    expect(text).toContain("get_me");
+    expect(text).not.toContain("`spc_0`");
+  });
+
+  it("keeps every id in `accepted` of a refusal while its text only counts", () => {
+    const spaces = many(SPACE_LIST_INLINE_MAX + 2);
+    const refusal = spaceIdRefusal(spaces, "spc_nope");
+    expect(refusal?.accepted).toHaveLength(spaces.length);
+    expect(refusal?.error).not.toContain("`spc_0`");
+    expect(refusal?.error).toContain(`${spaces.length} spaces`);
   });
 });
 

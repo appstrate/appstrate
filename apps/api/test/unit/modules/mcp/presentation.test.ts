@@ -34,7 +34,7 @@ const subjectOf = (presentation: ToolPresentation | undefined) =>
   presentation && "subject" in presentation ? presentation.subject : undefined;
 
 async function call(definition: AppstrateToolDefinition, args: Record<string, unknown> = {}) {
-  const [presented] = presentTools([definition]);
+  const [presented] = presentTools([definition], "req_1");
   const result = await presented!.handler(args, {} as never);
   return { result, presentation: readToolPresentation(result._meta) };
 }
@@ -121,8 +121,10 @@ describe("presentTools", () => {
     });
     expect(invoked.result).toMatchObject({
       isError: true,
-      content: [{ type: "text", text: "database unreachable" }],
+      structuredContent: { code: "internal_error", request_id: "req_1", kind: "tool_refusal" },
     });
+    // The detail stays in the log: the model sees a generic sentence.
+    expect(JSON.stringify(invoked.result)).not.toContain("database unreachable");
     // What the call aimed at, although it failed.
     expect(subjectOf(invoked.presentation)).toEqual({ kind: "agent", id: "@acme/triage" });
   });
@@ -137,7 +139,7 @@ describe("presentTools", () => {
 });
 
 describe("tool icons", () => {
-  const [presented] = presentTools([tool({ name: "search" }, text({}))]);
+  const [presented] = presentTools([tool({ name: "search" }, text({}))], "req_1");
   const icons = presented!.descriptor.icons ?? [];
 
   it("gives a platform tool one inline SVG per theme", () => {
@@ -150,7 +152,7 @@ describe("tool icons", () => {
   });
 
   it("leaves a tool it draws no icon for as it is", () => {
-    const [unknown] = presentTools([tool({ name: "x" }, text({}))]);
+    const [unknown] = presentTools([tool({ name: "x" }, text({}))], "req_1");
     expect(unknown!.descriptor.icons).toBeUndefined();
   });
 });
