@@ -106,8 +106,10 @@ they start with `packages/` or `e2e/`.
   Then the trail (the last segment alone on a phone), the page's controls and, from `md` up, the
   notification bell. Below `md` the bell leaves the header for the drawer so the page's title keeps
   the room; the header never writes the organization's or the space's name either, the drawer
-  does. Controls are 44 px on touch. In the chat the trail is the conversation's name and the
-  controls are its spaces, the pencil that renames it and the context panel.
+  does. Controls are 44 px on touch. In the chat the trail is the conversation's name on every
+  format: the chat page publishes it, not the list, whose phone drawer is unmounted while closed.
+  The controls are the conversation's « … », the same menu as its row (its spaces for everyone,
+  Renommer and Supprimer for a writer), then the context panel toggle.
 - **The sidebar is the whole screen on a phone**: its first row is the organization switcher, as
   wide as its names with its chevrons right after them (the sidebar's width from `md` up), then at
   the row's end the notification bell (its list rises from the bottom, as every phone menu does)
@@ -119,7 +121,8 @@ they start with `packages/` or `e2e/`.
   tile, like the conversations below) with the search as a magnifier at the end of that row, which unfolds a filled field (no border)
   under it, closed by its X or by a tap elsewhere while empty, then the recent conversations (one
   line each: the title, then the tiles of its spaces, two at most then « +N », named for a screen
-  reader; the names are in the "…" panel). Then the footer every drawer has: Catalogue, Settings
+  reader; the names are in the "…" panel). A row keeps its « … » on touch: a phone user can act on
+  a conversation without opening it. Then the footer every drawer has: Catalogue, Settings
   and the account.
 - **Getting-started cards** (`components/sidebar-tips.tsx`, rules in `lib/sidebar-tips.ts`): on a
   desktop at least 760 px tall, a stack of small cards above Catalogue, one first step each (title,
@@ -900,7 +903,13 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 The chat is `@appstrate/module-chat` (UI in `packages/module-chat/src/ui/`, built
 on assistant-ui). Its lightweight `@appstrate/module-chat/conversation-skeleton`
 is shared by the route fallback and the history wait. The chat sits inside the
-shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
+shared shell (its list: `modules/chat/chat-sidebar.tsx`). On desktop the chat sidebar
+resizes from 224 to 480 px, starts at 16rem (256 px) and keeps its width per browser
+(`appstrate-chat-sidebar-width`); a phone and a collapsed sidebar have no handle. Studio's
+sidebar keeps a fixed width. The list's date groups fold from their heading, a button with
+`aria-expanded` whose chevron turns when folded and which fills on hover under a fine pointer;
+folded groups are remembered per browser (`appstrate-chat-collapsed-groups`). Search results are
+never grouped, so never folded. The chat
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
 import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`); a failed one is softened, never hidden: no red border or lead icon, its message stays visible under the header in muted text, and a small red cross (`FailedGlyph`, named « Échec · HTTP 404 » for assistive tech) ends the row, the same cross, decorative, preceding the muted failed count of a folded lookups group, running or settled; only what ends the turn stays red. The HTTP status is no badge: it is in the call's detail. Reasoning is
 a collapsible group (`reasoning.tsx`), the working indicator
@@ -928,7 +937,10 @@ calls as the open chat holds them, the turn in flight included, else as stored
 name them (`tool-presentation.ts`), lookups behind a switch the panel keeps; a call's
 detail is the card's (`tool-call-detail`). A file or a call opened from the Summary leads
 back to it. Its width follows what it shows (a list, the details or a call, a file), each
-remembered per browser.
+remembered per browser. `PanelResizeHandle` (`components/panel-resize.tsx`) is the one resize
+handle for a panel's edge: `edge="left"` for a panel that grows leftward (this context panel),
+`edge="right"` for one that grows rightward (the chat sidebar). The arrow pointing past the edge
+widens the panel, Home and End go to the bounds, a double-click restores the default.
 
 ## 14. Modules and feature gating
 
@@ -982,8 +994,10 @@ Keep actions visible or reachable from a visible menu on touchscreens in either 
 The `desktop-pointer` variant allows denser controls on a wide screen with a fine pointer and
 hover. Actions revealed on hover must also appear on keyboard focus.
 
-- Keep the chat composer and conversation search at 1rem in both orientations. A landscape
-  phone can cross `md`, and iOS can zoom when focusing a smaller field. Message bodies use
+- Editable fields stay at 1rem on touch: iOS can zoom when focusing a smaller field. The chat
+  composer and the user's sent bubble share `text-base desktop-pointer:text-sm` (16 px on touch,
+  14 px under a fine pointer), so a message keeps its size when sent: the pointer decides, never
+  the width. Conversation search stays 1rem everywhere. The assistant's body uses
   `text-base md:text-sm`. Fenced code inherits its block's size (14 px below `md`, 12 px above).
 - Use `dvh` when a surface should follow the browser toolbars, or `svh` for a stable height.
   The chat shell and sidebar share `KEYBOARD_VIEWPORT_CLASS`, including the portalled search
