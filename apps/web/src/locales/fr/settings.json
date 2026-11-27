@@ -1408,6 +1408,7 @@
   "catalogue.sheet.activeIn": "Actif dans : {{spaces}}",
   "catalogue.sheet.sharedBy": "Partagé par {{name}}",
   "catalogue.sheet.absent": "Non partagé",
+  "catalogue.sheet.notOffered": "Non offert à l'organisation",
   "catalogue.sheet.atHome": "{{state}} · origine",
   "catalogue.sheet.viaOrganization": "Actif · offert à l'organisation",
   "catalogue.orgOffer.label": "Offert à l'organisation",

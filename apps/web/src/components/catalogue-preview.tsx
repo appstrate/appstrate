@@ -246,7 +246,9 @@ export function CataloguePreview({
               ]
                 .filter(Boolean)
                 .join(" · ")
-            : t("catalogue.sheet.absent");
+            : row.refusal === "notOffered"
+              ? t("catalogue.sheet.notOffered")
+              : t("catalogue.sheet.absent");
     return row.home ? t("catalogue.sheet.atHome", { state: base }) : base;
   };
   const switchFor = (row: SheetSpaceRow) => (

@@ -1407,6 +1407,7 @@
   "catalogue.sheet.activeIn": "Active in: {{spaces}}",
   "catalogue.sheet.sharedBy": "Shared by {{name}}",
   "catalogue.sheet.absent": "Not shared",
+  "catalogue.sheet.notOffered": "Not offered to the organization",
   "catalogue.sheet.atHome": "{{state}} · home",
   "catalogue.sheet.viaOrganization": "Active · offered to the organization",
   "catalogue.orgOffer.label": "Offered to the organization",
