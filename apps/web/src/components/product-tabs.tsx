@@ -67,7 +67,7 @@ export function ProductTabs() {
       id: "studio",
       label: t("products.studio"),
       icon: <Blocks className="size-4" />,
-      to: "/",
+      to: "/dashboard",
       active: !inChat,
       enabled: studio,
     },

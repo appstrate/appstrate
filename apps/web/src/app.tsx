@@ -3,7 +3,7 @@
 import { useEffect, Suspense, type ReactNode } from "react";
 import { Routes, Route, Outlet, useLocation, useSearchParams, Navigate } from "react-router-dom";
 import { PackageIndexPage } from "./pages/package-index";
-import { HomePage } from "./pages/home-page";
+import { DashboardRoute, HomePage, HomeSkeleton } from "./pages/home-page";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
@@ -272,6 +272,7 @@ const authCallbackRoute = (
  */
 const PAGES: Record<RoutePath, ReactNode> = {
   "/": <HomePage />,
+  "/dashboard": <DashboardRoute />,
   "/agents": <PackageIndexPage type="agent" />,
   "/agents/:scope/:name": <UnifiedPackageDetailPage type="agent" />,
   "/agents/:scope/:name/:version": <UnifiedPackageDetailPage type="agent" />,
@@ -386,7 +387,8 @@ const SETTINGS_TABLES: Partial<
 function skeletonOf(path: RoutePath): ReactNode {
   const table = SETTINGS_TABLES[path];
   if (table !== undefined) return <SettingsTableSkeleton {...table} />;
-  if (path === "/") return <DashboardSkeleton />;
+  if (path === "/") return <HomeSkeleton />;
+  if (path === "/dashboard") return <DashboardSkeleton />;
   if (inLayout(path)) return <SettingsSkeleton />;
   if (isOverlayPath(path)) return <OverlayPanelSkeleton list />;
   if (path === "/chat/:conversationId") return <ChatConversationSkeleton />;

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Routed modals: overlays with a real URL. A path under `OVERLAY_PREFIXES` floats over
-// the page it was opened from (kept in history state), or the dashboard when none.
+// the page it was opened from (kept in history state), or the reader's home (`/`) when none.
 import { createContext, useContext, useEffect, useState } from "react";
 import { matchPath, useLocation, useNavigate, type Location } from "react-router-dom";
 import { isOverlayPath, isUnder, ROUTE_ACCESS } from "./route-access";
 
-const DASHBOARD: Location = { pathname: "/", search: "", hash: "", state: null, key: "default" };
+const HOME: Location = { pathname: "/", search: "", hash: "", state: null, key: "default" };
 
 const PAGE_PATHS = Object.keys(ROUTE_ACCESS).filter((path) => !isOverlayPath(path));
 
@@ -17,7 +17,7 @@ export function isPage(pathname: string): boolean {
 
 export function pageLocation(current: Location, background: Location | null): Location {
   if (!isOverlayPath(current.pathname)) return current;
-  return background ?? DASHBOARD;
+  return background ?? HOME;
 }
 
 /**
@@ -138,7 +138,7 @@ export function useOverlayState(): {
           { pathname: location.pathname, search, hash },
           {
             replace: true,
-            state: withBackground(state, { location: { ...DASHBOARD, pathname }, index: null }),
+            state: withBackground(state, { location: { ...HOME, pathname }, index: null }),
           },
         );
       },
@@ -159,7 +159,7 @@ export function modalReturnTarget(background: Location | null): {
   to: { pathname: string; search: string; hash: string };
   state: unknown;
 } {
-  const { pathname, search, hash, state } = background ?? DASHBOARD;
+  const { pathname, search, hash, state } = background ?? HOME;
   return { to: { pathname, search, hash }, state };
 }
 
@@ -203,8 +203,8 @@ export function useReplacePage(): (pathname: string, search: string) => void {
   };
 }
 
-export function orgSwitchLanding(pagePath: string): "/" | "/chat" {
-  return isUnder(pagePath, "/chat") ? "/chat" : "/";
+export function orgSwitchLanding(pagePath: string): "/dashboard" | "/chat" {
+  return isUnder(pagePath, "/chat") ? "/chat" : "/dashboard";
 }
 
 /**
@@ -222,7 +222,7 @@ export function useLandAfterOrgSwitch(): () => void {
 /** The history state of an overlay opened right after an organization switch: it floats over the landing of the page it was opened from, which has no entry of its own. */
 export function overlayStateAfterOrgSwitch(pagePath: string): unknown {
   return withBackground(null, {
-    location: { ...DASHBOARD, pathname: orgSwitchLanding(pagePath) },
+    location: { ...HOME, pathname: orgSwitchLanding(pagePath) },
     index: null,
   });
 }

@@ -5,7 +5,15 @@
 import { describe, expect, it } from "bun:test";
 import { navEntryActive, navLocation } from "../nav-active.ts";
 
-const ENTRIES = ["/", "/files", "/runs", "/agents", "/skills", "/integrations", "/schedules"];
+const ENTRIES = [
+  "/dashboard",
+  "/files",
+  "/runs",
+  "/agents",
+  "/skills",
+  "/integrations",
+  "/schedules",
+];
 const active = (input: Parameters<typeof navLocation>[0]) =>
   ENTRIES.filter((path) => navEntryActive(path, navLocation(input)));
 
@@ -24,11 +32,13 @@ describe("the sidebar's active entry", () => {
     ).toEqual(["/agents"]);
   });
 
-  it("falls back to the address on a page rooting its own trail (a list), the dashboard exactly", () => {
+  it("falls back to the address on a page rooting its own trail (a list)", () => {
     expect(active({ overlayPath: null, trailRootHref: undefined, pathname: "/runs" })).toEqual([
       "/runs",
     ]);
-    expect(active({ overlayPath: null, trailRootHref: undefined, pathname: "/" })).toEqual(["/"]);
+    expect(active({ overlayPath: null, trailRootHref: undefined, pathname: "/dashboard" })).toEqual(
+      ["/dashboard"],
+    );
     // Segment by segment: `/runsX` is not under `/runs`.
     expect(active({ overlayPath: null, trailRootHref: undefined, pathname: "/runsX" })).toEqual([]);
   });

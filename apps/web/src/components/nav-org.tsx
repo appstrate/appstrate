@@ -82,7 +82,7 @@ export function NavOrg() {
   const reachable = (items: NavItem[]) => items.filter((i) => canReach(i.path));
 
   const activityItems = reachable([
-    { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
+    { path: "/dashboard", label: t("nav.dashboard"), icon: LayoutDashboard },
     { path: "/files", label: t("nav.files"), icon: FileText },
   ]);
 

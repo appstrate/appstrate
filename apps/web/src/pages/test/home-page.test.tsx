@@ -42,7 +42,7 @@ describe("HomePage", () => {
 describe("NotFoundPage", () => {
   it("leads back to the dashboard where the Studio opens", () => {
     const html = inSpace(<NotFoundPage />, ["chat:read"], true);
-    expect(html).toContain('href="/"');
+    expect(html).toContain('href="/dashboard"');
     expect(html).toContain("Dashboard");
   });
 

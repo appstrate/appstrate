@@ -83,7 +83,9 @@ export function NotFoundPage() {
   return (
     <UnavailableState>
       <Button asChild variant="outline" size="sm">
-        <Link to={chat ? "/chat" : "/"}>{t(chat ? "products.chat" : "nav.dashboard")}</Link>
+        <Link to={chat ? "/chat" : "/dashboard"}>
+          {t(chat ? "products.chat" : "nav.dashboard")}
+        </Link>
       </Button>
     </UnavailableState>
   );

@@ -45,7 +45,10 @@ const WEBHOOKS_READ = ["webhooks:read", "org-webhooks:read"] as const;
 const AGENT_SIGHT = packageSightPermissions("agent");
 
 export const ROUTE_ACCESS = {
-  "/": { open: "the fallback route: renders for any principal, its sections gate themselves" },
+  "/": { open: "the reader's home: sends to the chat, the Studio's dashboard or a refusal" },
+  "/dashboard": {
+    open: "the Studio's dashboard: renders where the Studio opens, its sections gate themselves",
+  },
 
   "/agents": { anyOf: AGENT_SIGHT, operations: ["listAgents"] },
   "/agents/:scope/:name": { anyOf: AGENT_SIGHT, operations: ["getAgentPackage"] },
