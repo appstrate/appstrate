@@ -322,11 +322,12 @@ export function ConnectionActionsCell({
         {(isOwn ? pinningAgents : [])
           .filter((agent) => canReach(packageDetailPath("agent", agent.id)))
           .map((agent) => (
-            <DropdownMenuItem key={agent.id} asChild>
-              <Link to={packageDetailPath("agent", agent.id)}>
-                <Bot />
-                {agent.name}
-              </Link>
+            <DropdownMenuItem
+              key={agent.id}
+              render={<Link to={packageDetailPath("agent", agent.id)} />}
+            >
+              <Bot />
+              {agent.name}
             </DropdownMenuItem>
           ))}
       </TableRowActions>

@@ -201,17 +201,19 @@ function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={TOOLBAR_UTILITY}
-          title={label}
-          aria-label={label}
-        >
-          <SlidersHorizontal />
-          <span className="hidden @xl/bar:inline">{label}</span>
-        </Button>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="outline"
+            size="sm"
+            className={TOOLBAR_UTILITY}
+            title={label}
+            aria-label={label}
+          />
+        }
+      >
+        <SlidersHorizontal />
+        <span className="hidden @xl/bar:inline">{label}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuLabel>{t("toolbar.columnsLabel")}</DropdownMenuLabel>
@@ -223,9 +225,8 @@ function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
               key={option.id}
               checked={isVisible}
               disabled={option.required || (isVisible && visibleCount === 1)}
+              // Stays open (a checkbox item's default): several columns are usually toggled in a row.
               onCheckedChange={() => columns.onToggle(option.id)}
-              // Stay open: several columns are usually toggled in a row.
-              onSelect={(event) => event.preventDefault()}
             >
               {option.label}
             </DropdownMenuCheckboxItem>

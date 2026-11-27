@@ -39,7 +39,7 @@ const ALIAS = model({
 });
 const ALIAS_OFF = model({ ...ALIAS, id: "mdl_alias_off", enabled: false });
 
-type MenuItem = { disabled?: boolean; onSelect?: () => void };
+type MenuItem = { disabled?: boolean; onClick?: () => void };
 
 function menuItems(node: ReactNode, items = new Map<string, MenuItem>()): Map<string, MenuItem> {
   if (Array.isArray(node)) node.forEach((child: ReactNode) => menuItems(child, items));
@@ -86,7 +86,7 @@ describe("the instance's row menu", () => {
     const items = instanceMenu([BUILT_IN, ALIAS], { onDeleteModel: (m) => deleted.push(m.id) });
     expect(items.has("delete-model-mdl_alias")).toBe(true);
     expect(items.has("delete-model-mdl_builtin")).toBe(false);
-    items.get("delete-model-mdl_alias")!.onSelect!();
+    items.get("delete-model-mdl_alias")!.onClick!();
     expect(deleted).toEqual(["mdl_alias"]);
   });
 

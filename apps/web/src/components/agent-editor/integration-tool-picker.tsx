@@ -317,6 +317,12 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
             <Select
               value={entry.auth_key ?? DEFAULT_AUTH_KEY}
               onValueChange={(key) => onAuthKeyChange(key === DEFAULT_AUTH_KEY ? "" : key)}
+              items={{
+                [DEFAULT_AUTH_KEY]: t("agentEditor.integrations.authKey.default"),
+                ...Object.fromEntries(
+                  authEntries.map(([key, auth]) => [key, authMethodLabel(key, auth)]),
+                ),
+              }}
             >
               <SelectTrigger className="h-8 text-xs" data-testid={`integ-auth-key-${packageId}`}>
                 <SelectValue />

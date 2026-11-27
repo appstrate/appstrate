@@ -7,7 +7,7 @@
  * as a menu of checkboxes: each entry says whether the deed is done there, and a click undoes it
  * where it may be undone. One click on a space acts; nothing else is asked.
  */
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -44,7 +44,7 @@ function SpaceChoiceItems({ choice, states }: { choice: SpaceChoiceMenu; states?
       {choice.spaces.map((space) => {
         if (!states) {
           return (
-            <DropdownMenuItem key={space.id} onSelect={() => choice.onPick(space.id)}>
+            <DropdownMenuItem key={space.id} onClick={() => choice.onPick(space.id)}>
               <SpaceName space={space} size="md" className="flex-1" />
             </DropdownMenuItem>
           );
@@ -55,7 +55,8 @@ function SpaceChoiceItems({ choice, states }: { choice: SpaceChoiceMenu; states?
             key={space.id}
             checked={state.checked}
             disabled={state.disabled}
-            onSelect={() => choice.onPick(space.id)}
+            closeOnClick
+            onClick={() => choice.onPick(space.id)}
           >
             <SpaceName space={space} size="md" className="flex-1" />
             {state.note && (
@@ -79,12 +80,12 @@ export function SpaceChoiceDropdown({
 }: {
   choice: SpaceChoiceMenu | undefined;
   states?: EntryStates;
-  children: ReactNode;
+  children: ReactElement;
 }) {
-  if (!choice) return <>{children}</>;
+  if (!choice) return children;
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <DropdownMenuTrigger render={children} />
       {/* A portal still bubbles through the React tree: a pick must not reach a row's own click. */}
       <DropdownMenuContent
         align="end"

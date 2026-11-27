@@ -20,11 +20,9 @@ export function ThemeToggle() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm">
-          <CurrentIcon />
-          <span className="sr-only">{t("userMenu.theme")}</span>
-        </Button>
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}>
+        <CurrentIcon />
+        <span className="sr-only">{t("userMenu.theme")}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {themeOptions.map(({ value, labelKey, icon: Icon }) => (

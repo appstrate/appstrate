@@ -490,7 +490,10 @@ function AddSpaceMemberModal({
               <Skeleton className="h-10 w-full" />
             ) : (
               <Select
-                value={userId}
+                value={userId || null}
+                items={Object.fromEntries(
+                  candidates.map((member) => [member.userId, memberLabel(member)]),
+                )}
                 onValueChange={(value) => {
                   setUserId(value);
                   setFormError(null);

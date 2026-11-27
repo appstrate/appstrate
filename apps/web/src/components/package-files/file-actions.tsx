@@ -42,44 +42,40 @@ export function FileActionsMenu({
   const download = usePackageFileDownload(packageId, version);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm">
-          {t("detail.files.actions")}
-          <ChevronDown />
-        </Button>
+      <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
+        {t("detail.files.actions")}
+        <ChevronDown />
       </DropdownMenuTrigger>
       {/* Closing must not hand focus back to the trigger: these items open a
           modal whose editor takes the focus, and Monaco loses its keyboard
           input when it is focused on mount and blurred right after. */}
-      <DropdownMenuContent align="end" onCloseAutoFocus={(event) => event.preventDefault()}>
+      <DropdownMenuContent align="end" finalFocus={false}>
         {gestures?.onEdit ? (
-          <DropdownMenuItem disabled={gestures.busy} onSelect={gestures.onEdit}>
+          <DropdownMenuItem disabled={gestures.busy} onClick={gestures.onEdit}>
             <Pencil />
             {t("btn.edit", { ns: "common" })}
           </DropdownMenuItem>
         ) : (
           editHref && (
-            <DropdownMenuItem asChild>
-              <Link to={editHref}>
-                <Pencil />
-                {t("btn.edit", { ns: "common" })}
-              </Link>
+            <DropdownMenuItem render={<Link to={editHref} />}>
+              <Pencil />
+              {t("btn.edit", { ns: "common" })}
             </DropdownMenuItem>
           )
         )}
         {gestures?.onReplace && (
-          <DropdownMenuItem disabled={gestures.busy} onSelect={gestures.onReplace}>
+          <DropdownMenuItem disabled={gestures.busy} onClick={gestures.onReplace}>
             <RefreshCw />
             {t("files.replace")}
           </DropdownMenuItem>
         )}
         {gestures?.onRename && (
-          <DropdownMenuItem disabled={gestures.busy} onSelect={gestures.onRename}>
+          <DropdownMenuItem disabled={gestures.busy} onClick={gestures.onRename}>
             <TextCursorInput />
             {t("files.rename")}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem onSelect={() => void download(downloadPath)}>
+        <DropdownMenuItem onClick={() => void download(downloadPath)}>
           <Download />
           {t("files.downloadFile")}
         </DropdownMenuItem>
@@ -88,7 +84,7 @@ export function FileActionsMenu({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               disabled={gestures.busy}
-              onSelect={gestures.onDelete}
+              onClick={gestures.onDelete}
               variant="destructive"
             >
               <Trash2 />

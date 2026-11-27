@@ -28,26 +28,21 @@ export function MenuActionItem({
   if (action.inSpaces && !action.disabled) {
     return <SpaceChoiceSubmenu choice={action.inSpaces} trigger={body} marks={marks} />;
   }
-  const linked = action.to !== undefined || action.href !== undefined;
+  const link =
+    action.to !== undefined ? (
+      <Link to={action.to} onClick={replacingNavigation(action.onSelect)} />
+    ) : action.href !== undefined ? (
+      <a href={action.href} target="_blank" rel="noopener noreferrer" />
+    ) : undefined;
   return (
     <DropdownMenuItem
       variant={action.destructive ? "destructive" : "default"}
       disabled={action.disabled}
-      onSelect={action.to !== undefined ? undefined : action.onSelect}
-      asChild={linked}
-      {...(linked ? {} : marks)}
+      onClick={action.to !== undefined ? undefined : action.onSelect}
+      render={link}
+      {...marks}
     >
-      {action.to !== undefined ? (
-        <Link to={action.to} onClick={replacingNavigation(action.onSelect)} {...marks}>
-          {body}
-        </Link>
-      ) : action.href !== undefined ? (
-        <a href={action.href} target="_blank" rel="noopener noreferrer" {...marks}>
-          {body}
-        </a>
-      ) : (
-        body
-      )}
+      {body}
     </DropdownMenuItem>
   );
 }

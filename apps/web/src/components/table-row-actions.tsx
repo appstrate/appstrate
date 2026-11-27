@@ -79,30 +79,32 @@ export function TableRowActions({
       )}
       {!disabledReason && hasItems && menuLabel && (
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              ref={triggerRef}
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="size-7 p-0"
-              title={menuLabel}
-              aria-label={menuLabel}
-              disabled={isPending}
-            >
-              <MoreHorizontal />
-            </Button>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                ref={triggerRef}
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="size-7 p-0"
+                title={menuLabel}
+                aria-label={menuLabel}
+                disabled={isPending}
+              />
+            }
+          >
+            <MoreHorizontal />
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            onCloseAutoFocus={(event) => {
-              if (!renaming) return;
-              event.preventDefault();
+            finalFocus={() => {
+              if (!renaming) return true;
               const field = triggerRef.current
                 ?.closest("tr, [data-row]")
                 ?.querySelector<HTMLInputElement>(inlineEditingSelector);
               field?.focus();
               field?.select();
+              return false;
             }}
           >
             {plain.map((action) => (

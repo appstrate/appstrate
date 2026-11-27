@@ -6,7 +6,6 @@ import { Globe, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
-import { SelectItem } from "@appstrate/ui/components/select";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import { useUploadClient } from "../../hooks/use-upload";
@@ -336,16 +335,15 @@ function ProxySection({ packageId }: { packageId: string }) {
           value={agentProxyId ?? "__inherit__"}
           onValueChange={(v) => setAgentProxy.mutate(v === "__inherit__" ? null : v)}
           disabled={setAgentProxy.isPending}
-          leading={
-            <>
-              <SelectItem value="__inherit__">
-                {orgDefaultProxy
-                  ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
-                  : t("models.default", { ns: "settings" })}
-              </SelectItem>
-              <SelectItem value="none">{t("proxies.agent.none", { ns: "settings" })}</SelectItem>
-            </>
-          }
+          leading={[
+            {
+              value: "__inherit__",
+              label: orgDefaultProxy
+                ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
+                : t("models.default", { ns: "settings" }),
+            },
+            { value: "none", label: t("proxies.agent.none", { ns: "settings" }) },
+          ]}
           options={orgProxies.map((p) => ({ value: p.id, label: p.label }))}
         />
       </SettingRow>

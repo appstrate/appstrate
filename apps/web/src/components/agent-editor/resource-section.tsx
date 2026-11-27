@@ -305,15 +305,17 @@ export function ResourceSection({
                           },
                         ]}
                       >
-                        <DropdownMenuItem asChild>
-                          <Link
-                            to={linkInSpace(packageDetailPath(type, entry.id), readSpace(item))}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            <ArrowUpRight />
-                            {t("editor.resourceOpen", { name })}
-                          </Link>
+                        <DropdownMenuItem
+                          render={
+                            <Link
+                              to={linkInSpace(packageDetailPath(type, entry.id), readSpace(item))}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            />
+                          }
+                        >
+                          <ArrowUpRight />
+                          {t("editor.resourceOpen", { name })}
                         </DropdownMenuItem>
                       </TableRowActions>
                     </TableCell>

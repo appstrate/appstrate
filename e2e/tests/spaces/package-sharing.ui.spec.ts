@@ -25,7 +25,7 @@ import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
 import { createAgent, createSpace, registerUser, type AuthResult } from "../../helpers/seed.ts";
 import { createApiClient } from "../../helpers/api-client.ts";
-import { selectOption } from "../../helpers/radix.ts";
+import { selectOption } from "../../helpers/select.ts";
 import { E2E_BASE_URL } from "../../helpers/base-url.ts";
 
 /** The caller's own personal space id, from the listing that also repairs it. */

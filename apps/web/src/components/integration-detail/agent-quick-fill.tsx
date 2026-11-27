@@ -100,26 +100,25 @@ export function AgentQuickFillMenu({
         </p>
       ) : (
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="self-start"
-              disabled={state === "picking"}
-              aria-describedby={`${id}-heading`}
-              data-testid={id}
-            >
-              {t("integration.auth.scopeChoice.forAgentPlaceholder")}
-              <ChevronDown className="ml-1" />
-            </Button>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="self-start"
+                disabled={state === "picking"}
+                aria-describedby={`${id}-heading`}
+                data-testid={id}
+              />
+            }
+          >
+            {t("integration.auth.scopeChoice.forAgentPlaceholder")}
+            <ChevronDown className="ml-1" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             {agents.map((a) => (
-              <DropdownMenuItem
-                key={a.agent_package_id}
-                onSelect={() => onPick(a.agent_package_id)}
-              >
+              <DropdownMenuItem key={a.agent_package_id} onClick={() => onPick(a.agent_package_id)}>
                 {a.display_name}
               </DropdownMenuItem>
             ))}

@@ -59,30 +59,32 @@ export function NavUser({ variant }: NavUserProps) {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        {row ? (
-          <button
-            type="button"
-            aria-label={t("userMenu.ariaLabel")}
-            className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex w-full items-center gap-2 rounded-md p-2 text-left transition-colors"
-          >
-            <UserAvatar viewer={viewer} className="size-7" />
-            <span className="grid min-w-0 flex-1 leading-tight">
-              <span className="truncate text-sm font-medium">{displayName}</span>
-              <span className="text-muted-foreground truncate text-xs">{user.email}</span>
-            </span>
-          </button>
-        ) : (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t("userMenu.ariaLabel")}
-            className="rounded-full"
-          >
-            <UserAvatar viewer={viewer} className="size-8" />
-          </Button>
-        )}
-      </DropdownMenuTrigger>
+      <DropdownMenuTrigger
+        render={
+          row ? (
+            <button
+              type="button"
+              aria-label={t("userMenu.ariaLabel")}
+              className="hover:bg-sidebar-accent data-popup-open:bg-sidebar-accent flex w-full items-center gap-2 rounded-md p-2 text-left transition-colors"
+            >
+              <UserAvatar viewer={viewer} className="size-7" />
+              <span className="grid min-w-0 flex-1 leading-tight">
+                <span className="truncate text-sm font-medium">{displayName}</span>
+                <span className="text-muted-foreground truncate text-xs">{user.email}</span>
+              </span>
+            </button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t("userMenu.ariaLabel")}
+              className="rounded-full"
+            >
+              <UserAvatar viewer={viewer} className="size-8" />
+            </Button>
+          )
+        }
+      />
       <DropdownMenuContent
         className="min-w-56 rounded-lg"
         side={row ? "right" : "bottom"}
@@ -100,11 +102,9 @@ export function NavUser({ variant }: NavUserProps) {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {!minimal && (
-          <DropdownMenuItem asChild>
-            <Link to="/preferences">
-              <Settings />
-              {t("userMenu.preferences")}
-            </Link>
+          <DropdownMenuItem render={<Link to="/preferences" />}>
+            <Settings />
+            {t("userMenu.preferences")}
           </DropdownMenuItem>
         )}
         <DropdownMenuSub>
@@ -114,7 +114,7 @@ export function NavUser({ variant }: NavUserProps) {
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
             {themeOptions.map(({ value, labelKey, icon: Icon }) => (
-              <DropdownMenuItem key={value} onSelect={() => setTheme(value)}>
+              <DropdownMenuItem key={value} onClick={() => setTheme(value)}>
                 <Icon />
                 {t(labelKey)}
                 {theme === value && (
@@ -125,15 +125,16 @@ export function NavUser({ variant }: NavUserProps) {
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         {links.map(({ href, icon: Icon, label }) => (
-          <DropdownMenuItem key={href} asChild>
-            <a href={href} target="_blank" rel="noopener noreferrer">
-              <Icon />
-              {label}
-            </a>
+          <DropdownMenuItem
+            key={href}
+            render={<a href={href} target="_blank" rel="noopener noreferrer" />}
+          >
+            <Icon />
+            {label}
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void logout()}>
+        <DropdownMenuItem onClick={() => void logout()}>
           <LogOut />
           {t("userMenu.logout")}
         </DropdownMenuItem>
