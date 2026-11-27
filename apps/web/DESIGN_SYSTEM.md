@@ -994,11 +994,11 @@ Keep actions visible or reachable from a visible menu on touchscreens in either 
 The `desktop-pointer` variant allows denser controls on a wide screen with a fine pointer and
 hover. Actions revealed on hover must also appear on keyboard focus.
 
-- Editable fields stay at 1rem on touch: iOS can zoom when focusing a smaller field. The chat
-  composer and the user's sent bubble share `text-base desktop-pointer:text-sm` (16 px on touch,
-  14 px under a fine pointer), so a message keeps its size when sent: the pointer decides, never
-  the width. Conversation search stays 1rem everywhere. The assistant's body uses
-  `text-base md:text-sm`. Fenced code inherits its block's size (14 px below `md`, 12 px above).
+- Conversation text (composer, user bubble, assistant body and its code) is 16 px on touch and
+  14 px under a fine pointer (`text-base desktop-pointer:text-sm`; code one step smaller: 14 px
+  then 12 px), so a message keeps its size when sent: the pointer decides, never the width.
+  Editable fields stay 1rem on touch (iOS can zoom when focusing a smaller field). Conversation
+  search stays 1rem everywhere.
 - Use `dvh` when a surface should follow the browser toolbars, or `svh` for a stable height.
   The chat shell and sidebar share `KEYBOARD_VIEWPORT_CLASS`, including the portalled search
   sheet. `interactive-widget=resizes-content` lets supporting browsers resize the layout.

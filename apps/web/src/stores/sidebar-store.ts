@@ -14,12 +14,33 @@ export const useChatSidebarStore = createSidebarStore("appstrate-chat-sidebar");
 
 /**
  * The chat sidebar's desktop width bounds, in px. The default is shadcn's `SIDEBAR_WIDTH` (16rem),
- * so nothing moves for someone who never drags.
+ * so nothing moves for someone who never drags. `viewportPercent` caps it on a narrow window, so the
+ * thread keeps its room next to the context panel; never below the default, which never shrinks.
  */
-export const CHAT_SIDEBAR_WIDTH = { min: 224, default: 256, max: 480 } as const;
+export const CHAT_SIDEBAR_WIDTH = {
+  min: 224,
+  default: 256,
+  max: 480,
+  viewportPercent: 30,
+} as const;
 
-export function clampChatSidebarWidth(width: number): number {
-  return Math.min(Math.max(width, CHAT_SIDEBAR_WIDTH.min), CHAT_SIDEBAR_WIDTH.max);
+/** The widest the sidebar may be in a window this wide: `min(max, max(default, 30% of it))`. */
+export function chatSidebarMaxWidth(viewportWidth: number): number {
+  const { default: base, max, viewportPercent } = CHAT_SIDEBAR_WIDTH;
+  return Math.min(max, Math.max(base, (viewportWidth * viewportPercent) / 100));
+}
+
+export function clampChatSidebarWidth(width: number, max: number = CHAT_SIDEBAR_WIDTH.max): number {
+  return Math.min(Math.max(width, CHAT_SIDEBAR_WIDTH.min), max);
+}
+
+/**
+ * The CSS width for a chosen one: the same cap as `chatSidebarMaxWidth`, in CSS, so a width stored
+ * in a wider window follows the window's resizes without a listener.
+ */
+export function chatSidebarWidthCss(width: number | null): string {
+  const { default: base, viewportPercent } = CHAT_SIDEBAR_WIDTH;
+  return `min(${width ?? base}px, max(${base}px, ${viewportPercent}vw))`;
 }
 
 /** A stored width, clamped; anything else (absent, unreadable, not positive) is null = the default. */

@@ -119,8 +119,10 @@ const GROUP_LABEL_KEY: Record<SessionGroupKey, string> = {
 /** The folded date groups: read once on mount, written through on each toggle. */
 function useCollapsedGroups() {
   const [collapsed, setCollapsed] = useState(readCollapsedGroups);
-  const setFolded = (key: string, folded: boolean) =>
-    setCollapsed((current) => setGroupFolded(current, key, folded));
+  const setFolded = (key: SessionGroupKey, folded: boolean) => {
+    const next = setGroupFolded(collapsed, key, folded);
+    setCollapsed(next);
+  };
   return [collapsed, setFolded] as const;
 }
 
@@ -339,13 +341,13 @@ export function ChatConversationList({
                   <li className="flex flex-col gap-1">
                     <SidebarGroupLabel
                       asChild
-                      className="group/label desktop-pointer:hover:bg-sidebar-accent desktop-pointer:hover:text-sidebar-accent-foreground mt-1 h-6 gap-1 px-2 text-sm md:text-[11px]"
+                      className="group/label desktop-pointer:hover:bg-sidebar-accent desktop-pointer:hover:text-sidebar-accent-foreground desktop-pointer:h-6 mt-1 h-10 gap-1 px-2 text-sm md:text-[11px] [&>svg]:size-3"
                     >
                       <CollapsibleTrigger>
                         {t(GROUP_LABEL_KEY[group.key])}
                         <ChevronDownIcon
                           aria-hidden
-                          className="size-3 transition-transform group-data-[state=closed]/label:-rotate-90"
+                          className="transition-transform group-data-[state=closed]/label:-rotate-90"
                         />
                       </CollapsibleTrigger>
                     </SidebarGroupLabel>

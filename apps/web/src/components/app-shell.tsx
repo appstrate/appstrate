@@ -31,6 +31,7 @@ import { cn } from "@appstrate/ui/cn";
 import { PanelResizeHandle } from "@/components/panel-resize";
 import {
   CHAT_SIDEBAR_WIDTH,
+  chatSidebarMaxWidth,
   clampChatSidebarWidth,
   useChatSidebarWidthStore,
 } from "@/stores/sidebar-store";
@@ -124,79 +125,83 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   );
 
   return (
-    <Sidebar id={APP_SIDEBAR_ID} className={`overflow-y-auto ${KEYBOARD_VIEWPORT_CLASS}`}>
+    <Sidebar id={APP_SIDEBAR_ID} className={KEYBOARD_VIEWPORT_CLASS}>
+      {/* The frame never scrolls: it is the resize handle's containing block, so the handle spans
+          its whole height whatever the column below it scrolls to. */}
       {product === "chat" && <ChatSidebarResizeHandle />}
-      {/* The brand cell sits at the header's height so the two rules meet across the shell. The
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {/* The brand cell sits at the header's height so the two rules meet across the shell. The
           collapse shows while the pointer is on the sidebar or on focus (`group` is its root).
           On a phone the switcher takes its own width, its chevrons right after the names, and
           the bell and the close button stand at the row's end. */}
-      <SidebarHeader className="border-sidebar-border h-header flex-row items-center gap-1 border-b px-2 py-0">
-        <div className="min-w-0 flex-1">
-          <OrgSwitcher />
-        </div>
-        {/* Below `md` the header has no room left for it: the bell is the drawer's. */}
-        <NotificationBell className="md:hidden" />
-        <SidebarTrigger className="text-muted-foreground hidden size-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 md:inline-flex">
-          <PanelLeft className="size-4" />
-        </SidebarTrigger>
-        {/* The drawer is the whole screen on a phone: it closes from its own corner. */}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="shrink-0 md:hidden"
-          aria-label={t("btn.close")}
-          data-testid="sidebar-close"
-          onClick={() => setOpenMobile(false)}
-        >
-          <X className="size-5" aria-hidden="true" />
-        </Button>
-      </SidebarHeader>
-      <ProductTabs />
-      {/* Leave room for a search field and its results. In a short viewport the whole sidebar
+        <SidebarHeader className="border-sidebar-border h-header flex-row items-center gap-1 border-b px-2 py-0">
+          <div className="min-w-0 flex-1">
+            <OrgSwitcher />
+          </div>
+          {/* Below `md` the header has no room left for it: the bell is the drawer's. */}
+          <NotificationBell className="md:hidden" />
+          <SidebarTrigger className="text-muted-foreground hidden size-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 md:inline-flex">
+            <PanelLeft className="size-4" />
+          </SidebarTrigger>
+          {/* The drawer is the whole screen on a phone: it closes from its own corner. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="shrink-0 md:hidden"
+            aria-label={t("btn.close")}
+            data-testid="sidebar-close"
+            onClick={() => setOpenMobile(false)}
+          >
+            <X className="size-5" aria-hidden="true" />
+          </Button>
+        </SidebarHeader>
+        <ProductTabs />
+        {/* Leave room for a search field and its results. In a short viewport the whole sidebar
           can scroll to the navigation below the list. */}
-      <SidebarContent className={cn("gap-0", product === "chat" && "min-h-64 overflow-hidden")}>
-        {product === "chat" ? (
-          // A refused chat route says so in the page; the list would only fetch what the caller cannot read.
-          !ready ? (
-            <ChatSidebarSkeleton />
-          ) : (
-            canReach("/chat") && (
-              <Suspense fallback={<ChatSidebarSkeleton />}>
-                <ChatSidebar />
-              </Suspense>
+        <SidebarContent className={cn("gap-0", product === "chat" && "min-h-64 overflow-hidden")}>
+          {product === "chat" ? (
+            // A refused chat route says so in the page; the list would only fetch what the caller cannot read.
+            !ready ? (
+              <ChatSidebarSkeleton />
+            ) : (
+              canReach("/chat") && (
+                <Suspense fallback={<ChatSidebarSkeleton />}>
+                  <ChatSidebar />
+                </Suspense>
+              )
             )
-          )
-        ) : (
-          <>
-            <NavOrg />
-            <SidebarCredits />
-          </>
-        )}
-      </SidebarContent>
-      <SidebarFooter className="gap-0 p-0">
-        {/* Desktop only: a phone's drawer keeps its whole height for the navigation. */}
-        {!isMobile && <SidebarTips />}
-        <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
-          <OverlayEntry
-            to={catalogueHref("agent")}
-            active={catalogueActive}
-            icon={LibraryBig}
-            label={t("nav.catalogue")}
-          />
-        </SidebarMenu>
-        <SidebarMenu className="px-2 pb-2">
-          <OverlayEntry
-            to={SETTINGS_ENTRY}
-            active={settingsActive}
-            icon={Settings}
-            label={t("nav.settings")}
-          />
-        </SidebarMenu>
-        <div className="border-sidebar-border border-t p-2">
-          <NavUser variant="row" />
-        </div>
-      </SidebarFooter>
+          ) : (
+            <>
+              <NavOrg />
+              <SidebarCredits />
+            </>
+          )}
+        </SidebarContent>
+        <SidebarFooter className="gap-0 p-0">
+          {/* Desktop only: a phone's drawer keeps its whole height for the navigation. */}
+          {!isMobile && <SidebarTips />}
+          <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
+            <OverlayEntry
+              to={catalogueHref("agent")}
+              active={catalogueActive}
+              icon={LibraryBig}
+              label={t("nav.catalogue")}
+            />
+          </SidebarMenu>
+          <SidebarMenu className="px-2 pb-2">
+            <OverlayEntry
+              to={SETTINGS_ENTRY}
+              active={settingsActive}
+              icon={Settings}
+              label={t("nav.settings")}
+            />
+          </SidebarMenu>
+          <div className="border-sidebar-border border-t p-2">
+            <NavUser variant="row" />
+          </div>
+        </SidebarFooter>
+      </div>
     </Sidebar>
   );
 }
@@ -209,17 +214,22 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
 function ChatSidebarResizeHandle() {
   const { t } = useTranslation();
   const { isMobile, state } = useSidebar();
-  const { width, setLive, commit, setDragging } = useChatSidebarWidthStore();
+  const width = useChatSidebarWidthStore((store) => store.width);
+  const setLive = useChatSidebarWidthStore((store) => store.setLive);
+  const commit = useChatSidebarWidthStore((store) => store.commit);
+  const setDragging = useChatSidebarWidthStore((store) => store.setDragging);
   if (isMobile || state === "collapsed") return null;
+  // The window's width is read when used, not followed: the CSS width does that (`app.tsx`).
+  const max = chatSidebarMaxWidth(window.innerWidth);
   return (
     <PanelResizeHandle
       edge="right"
       controls={APP_SIDEBAR_ID}
       label={t("nav.resizeSidebar")}
-      width={width ?? CHAT_SIDEBAR_WIDTH.default}
+      width={Math.min(width ?? CHAT_SIDEBAR_WIDTH.default, max)}
       min={CHAT_SIDEBAR_WIDTH.min}
-      max={CHAT_SIDEBAR_WIDTH.max}
-      clamp={clampChatSidebarWidth}
+      max={max}
+      clamp={(next) => clampChatSidebarWidth(next, chatSidebarMaxWidth(window.innerWidth))}
       onLive={setLive}
       onCommit={commit}
       onDraggingChange={setDragging}

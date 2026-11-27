@@ -58,7 +58,7 @@ import { useOverviewRules } from "./hooks/use-overview-mode";
 import { useHome, useStudioReach } from "./hooks/use-can-reach";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
 import {
-  CHAT_SIDEBAR_WIDTH,
+  chatSidebarWidthCss,
   useChatSidebarStore,
   useChatSidebarWidthStore,
   useSidebarStore,
@@ -498,7 +498,7 @@ function MainLayout({ search }: { search: string }) {
         style={
           navProduct === "chat"
             ? ({
-                "--sidebar-width": `${chatWidth ?? CHAT_SIDEBAR_WIDTH.default}px`,
+                "--sidebar-width": chatSidebarWidthCss(chatWidth),
               } as CSSProperties)
             : undefined
         }

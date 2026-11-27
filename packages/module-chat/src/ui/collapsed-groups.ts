@@ -5,25 +5,21 @@
  * storage (private mode, quota) never breaks folding: the fold then holds in memory until reload.
  */
 
-import type { SessionGroupKey } from "./session-groups.ts";
+import { SESSION_GROUP_KEYS, type SessionGroupKey } from "./session-groups.ts";
 
 export const COLLAPSED_GROUPS_KEY = "appstrate-chat-collapsed-groups";
 
-const GROUP_KEYS: ReadonlySet<string> = new Set<SessionGroupKey>([
-  "today",
-  "yesterday",
-  "week",
-  "month",
-  "older",
-]);
+const GROUP_KEYS: ReadonlySet<string> = new Set(SESSION_GROUP_KEYS);
 
 /** The stored folded keys; garbage, unknown keys and an unreadable storage read as « none folded ». */
-export function readCollapsedGroups(): ReadonlySet<string> {
+export function readCollapsedGroups(): ReadonlySet<SessionGroupKey> {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) ?? "[]");
     return new Set(
       Array.isArray(stored)
-        ? stored.filter((key): key is string => typeof key === "string" && GROUP_KEYS.has(key))
+        ? stored.filter(
+            (key): key is SessionGroupKey => typeof key === "string" && GROUP_KEYS.has(key),
+          )
         : [],
     );
   } catch {
@@ -33,10 +29,10 @@ export function readCollapsedGroups(): ReadonlySet<string> {
 
 /** `current` with `key` folded or unfolded, written through to the storage when it accepts it. */
 export function setGroupFolded(
-  current: ReadonlySet<string>,
-  key: string,
+  current: ReadonlySet<SessionGroupKey>,
+  key: SessionGroupKey,
   folded: boolean,
-): ReadonlySet<string> {
+): ReadonlySet<SessionGroupKey> {
   const next = new Set(current);
   if (folded) next.add(key);
   else next.delete(key);

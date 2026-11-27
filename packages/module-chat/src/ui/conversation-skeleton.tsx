@@ -154,8 +154,9 @@ export function ConversationGroupSkeleton({
   if (!dated) return rows;
   return (
     <li aria-hidden className="flex flex-col gap-1">
-      <SidebarGroupLabel className="mt-1 h-6 px-2">
+      <SidebarGroupLabel className="desktop-pointer:h-6 mt-1 h-10 gap-1 px-2">
         <Skeleton className="h-3 w-16" />
+        <Skeleton className="size-3 rounded-sm" />
       </SidebarGroupLabel>
       <ul className="flex flex-col gap-1">{rows}</ul>
     </li>

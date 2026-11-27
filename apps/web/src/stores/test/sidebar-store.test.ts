@@ -15,6 +15,8 @@ storage.setItem(KEY, "9999");
 
 const {
   CHAT_SIDEBAR_WIDTH,
+  chatSidebarMaxWidth,
+  chatSidebarWidthCss,
   clampChatSidebarWidth,
   parseChatSidebarWidth,
   useChatSidebarWidthStore,
@@ -27,6 +29,19 @@ describe("the chat sidebar's width", () => {
     expect(clampChatSidebarWidth(100)).toBe(CHAT_SIDEBAR_WIDTH.min);
     expect(clampChatSidebarWidth(320)).toBe(320);
     expect(clampChatSidebarWidth(2000)).toBe(CHAT_SIDEBAR_WIDTH.max);
+  });
+
+  it("caps its ceiling at 30% of a narrow window, never below the default", () => {
+    expect(chatSidebarMaxWidth(1920)).toBe(CHAT_SIDEBAR_WIDTH.max);
+    expect(chatSidebarMaxWidth(1200)).toBe(360);
+    expect(chatSidebarMaxWidth(800)).toBe(CHAT_SIDEBAR_WIDTH.default);
+    expect(clampChatSidebarWidth(400, chatSidebarMaxWidth(1200))).toBe(360);
+    expect(clampChatSidebarWidth(100, chatSidebarMaxWidth(800))).toBe(CHAT_SIDEBAR_WIDTH.min);
+  });
+
+  it("applies the same cap in CSS, so a stored width follows the window", () => {
+    expect(chatSidebarWidthCss(400)).toBe("min(400px, max(256px, 30vw))");
+    expect(chatSidebarWidthCss(null)).toBe("min(256px, max(256px, 30vw))");
   });
 
   it("defaults to shadcn's 16rem sidebar", () => {

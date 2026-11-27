@@ -60,12 +60,13 @@ export const SEARCH_INPUT_CLASS =
 export const USER_MESSAGE_CLASS =
   "bg-card text-foreground max-w-[80%] rounded-2xl border px-4 py-2 text-base desktop-pointer:text-sm whitespace-pre-wrap shadow-sm";
 
-/** The assistant's turn (the markdown renderer sizes its own prose: `MARKDOWN_PROSE_CLASS`). */
-export const ASSISTANT_MESSAGE_CLASS = "text-foreground text-base leading-relaxed md:text-sm";
+/** The assistant's turn, sized like the user's bubble: by pointer (the markdown sizes its own prose: `MARKDOWN_PROSE_CLASS`). */
+export const ASSISTANT_MESSAGE_CLASS =
+  "text-foreground text-base desktop-pointer:text-sm leading-relaxed";
 
-/** Rendered markdown: the body, inline code and code blocks follow the message size. */
+/** Rendered markdown: the body, inline code and code blocks follow the message size, by pointer. */
 export const MARKDOWN_PROSE_CLASS =
-  "prose prose-base md:prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre>code]:text-[1em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-sm md:[&_pre]:text-xs";
+  "prose prose-base desktop-pointer:prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre>code]:text-[1em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-sm desktop-pointer:[&_pre]:text-xs";
 
 /**
  * The conversation's side padding. The host's context panel floats over the thread's right side and

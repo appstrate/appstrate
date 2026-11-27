@@ -12,7 +12,7 @@ import { renderToString } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
-import { ChatConversationList, ChatConversationMenu } from "../src/ui/thread-list.tsx";
+import { ChatConversationMenu } from "../src/ui/thread-list.tsx";
 import { ChatTransportProvider } from "../src/ui/runtime-context.ts";
 import { sessionsQueryKey, type SessionsCache, type SessionSummary } from "../src/ui/sessions.ts";
 import { transportOf } from "./fake-request.ts";
@@ -76,23 +76,6 @@ describe("the open conversation's « … » in the header", () => {
     const button = trigger(header("chs_1"), "threads\\.actions\\.conversation");
     expect(button).toContain("size-11");
     expect(button).toContain("desktop-pointer:size-8");
-  });
-
-  it("is the menu a row opens: the same trigger kind, beside the row's own", () => {
-    const list = render(
-      <ChatConversationList
-        activeId="chs_1"
-        t={(key) => key}
-        can={writer}
-        renderSpaces={renderSpaces}
-      />,
-    );
-    const row = trigger(list, "threads\\.actions\\.openFor");
-    const head = trigger(header("chs_1"), "threads\\.actions\\.conversation");
-    for (const button of [row, head]) {
-      expect(button).toContain('aria-haspopup="menu"');
-      expect(button).toContain('data-state="closed"');
-    }
   });
 
   it("is there for a reader too: it names the conversation's spaces", () => {

@@ -30,8 +30,13 @@ it("keeps the composer and search at 1rem on touch in both orientations", () => 
   expect(SEARCH_INPUT_CLASS.split(" ")).toContain("md:text-base");
 });
 
-it("sizes the composer and the user's bubble alike, by pointer and never by width", () => {
-  for (const classes of [COMPOSER_INPUT_CLASS, COMPOSER_PLACEHOLDER_CLASS, USER_MESSAGE_CLASS]) {
+it("sizes the conversation's text alike, by pointer and never by width", () => {
+  for (const classes of [
+    COMPOSER_INPUT_CLASS,
+    COMPOSER_PLACEHOLDER_CLASS,
+    USER_MESSAGE_CLASS,
+    ASSISTANT_MESSAGE_CLASS,
+  ]) {
     const tokens = classes.split(/\s+/);
     expect(tokens).toContain("text-base");
     expect(tokens).toContain("desktop-pointer:text-sm");
@@ -39,24 +44,23 @@ it("sizes the composer and the user's bubble alike, by pointer and never by widt
   }
 });
 
-it("uses denser message bodies from md", () => {
-  for (const classes of [ASSISTANT_MESSAGE_CLASS, READING_TEXT_CLASS]) {
-    expect(classes.split(" ")).toContain("text-base");
-    expect(classes.split(" ")).toContain("md:text-sm");
-  }
+it("keeps running text outside the conversation turns on the width axis", () => {
+  expect(READING_TEXT_CLASS.split(" ")).toEqual(["text-base", "md:text-sm"]);
 });
 
 describe("markdown prose", () => {
-  it("is the base prose size on a phone and the small one from md", () => {
+  it("is the base prose size on touch and the small one under a fine pointer", () => {
     const tokens = MARKDOWN_PROSE_CLASS.split(/\s+/);
     expect(tokens).toContain("prose-base");
-    expect(tokens).toContain("md:prose-sm");
+    expect(tokens).toContain("desktop-pointer:prose-sm");
+    expect(tokens).not.toContain("md:prose-sm");
     expect(tokens).not.toContain("prose-sm");
   });
 
-  it("keeps code blocks at 14 px on a phone and 12 px from md", () => {
+  it("keeps code blocks at 14 px on touch and 12 px under a fine pointer", () => {
     expect(MARKDOWN_PROSE_CLASS).toContain("[&_pre]:text-sm");
-    expect(MARKDOWN_PROSE_CLASS).toContain("md:[&_pre]:text-xs");
+    expect(MARKDOWN_PROSE_CLASS).toContain("desktop-pointer:[&_pre]:text-xs");
+    expect(MARKDOWN_PROSE_CLASS).not.toContain("md:[&_pre]:text-xs");
   });
 });
 

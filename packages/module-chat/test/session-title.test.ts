@@ -49,6 +49,11 @@ describe("the title derived from a first message", () => {
     expect(titleFromText("ibrahim")).toBe("Ibrahim");
   });
 
+  it("keeps a brand-style lowercase start (second letter a capital)", () => {
+    expect(titleFromText("iPhone ne marche plus")).toBe("iPhone ne marche plus");
+    expect(titleFromText("eBay")).toBe("eBay");
+  });
+
   it("leaves a capital or a non-letter start unchanged", () => {
     for (const text of ["Bonjour", "42 raisons", "😀 salut", '"citation"', "¿qué?"]) {
       expect(titleFromText(text)).toBe(text);

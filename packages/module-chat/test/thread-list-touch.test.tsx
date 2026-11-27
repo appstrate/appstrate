@@ -208,7 +208,7 @@ describe("the list while it loads", () => {
       const html = loading([...granted]);
       expect(html).toContain('type="search"');
       expect(html).not.toContain("threads.title");
-      expect(html).toMatch(/data-sidebar="group-label"[^>]*class="[^"]*mt-1 h-6/);
+      expect(html).toMatch(/data-sidebar="group-label"[^>]*class="[^"]*mt-1 h-10/);
       const skeleton = html.match(/<div data-sidebar="menu-skeleton"[^>]*>/)?.[0];
       const row = render([...granted]).match(
         /<button[^>]*data-sidebar="menu-button"[^>]*data-size="lg"[^>]*>/,
