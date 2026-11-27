@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as React from "react";
-import { Link, useNavigate, type To } from "react-router-dom";
+import { Link, type To } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
@@ -54,7 +54,7 @@ export function UnderlineTabList<T extends string>({
             <TabsTrigger
               key={value}
               value={value}
-              className="hover:text-foreground h-full gap-2 rounded-none border-b-2 border-transparent px-2.5 py-0 max-sm:px-2 md:px-3"
+              className="h-full gap-2 px-2.5 py-0 max-sm:px-2 md:px-3"
             >
               {Icon && <Icon className="size-4 shrink-0" aria-hidden />}
               {label}
@@ -138,22 +138,17 @@ export function CollectionTabs<T extends string>({
   /** Draws each part as a link to its own address, for a split the router owns beyond one param. */
   hrefOf?: (value: T) => To;
 }) {
-  const navigate = useNavigate();
   return (
-    <Tabs
-      value={value}
-      // A link tab is activated by arrow keys as well: follow it like a click.
-      onValueChange={(next) => (hrefOf ? void navigate(hrefOf(next as T)) : onChange?.(next as T))}
-    >
-      <TabsList aria-label={label} className="h-8 shrink-0 p-0.5">
+    <Tabs value={value} onValueChange={onChange && ((next) => onChange(next as T))}>
+      {/* A link tab is its link: arrow keys only move the focus and Enter or Space follows it
+          (manual activation), so the router is the one thing that navigates. */}
+      <TabsList aria-label={label} activateOnFocus={!hrefOf} className="h-8 shrink-0 p-0.5">
         {options.map((option) => (
           <TabsTrigger
             key={option.value}
             value={option.value}
-            {...(hrefOf && {
-              render: <Link to={hrefOf(option.value)} />,
-              nativeButton: false,
-            })}
+            render={hrefOf ? <Link to={hrefOf(option.value)} /> : undefined}
+            nativeButton={!hrefOf}
             className="h-7 px-2.5 text-sm"
           >
             {option.label}

@@ -36,7 +36,7 @@ function TabsList({
       data-variant={variant}
       activateOnFocus={activateOnFocus}
       className={cn(
-        "text-muted-foreground relative isolate inline-flex items-center justify-center",
+        "group/tabs-list text-muted-foreground relative isolate inline-flex items-center justify-center",
         variant === "default" && "bg-muted h-10 rounded-md p-1",
         className,
       )}
@@ -46,10 +46,10 @@ function TabsList({
       <TabsPrimitive.Indicator
         data-slot="tabs-indicator"
         className={cn(
-          "absolute top-0 left-0 -z-10 w-(--active-tab-width) translate-x-(--active-tab-left) transition-[translate,width,height] duration-200 ease-out motion-reduce:transition-none",
+          "absolute left-0 -z-10 w-(--active-tab-width) translate-x-(--active-tab-left) transition-[translate,width,height] duration-200 ease-out motion-reduce:transition-none",
           variant === "default" &&
-            "bg-background h-(--active-tab-height) translate-y-(--active-tab-top) rounded-sm shadow-sm",
-          variant === "line" && "bg-primary top-auto bottom-0 h-0.5",
+            "bg-background top-0 h-(--active-tab-height) translate-y-(--active-tab-top) rounded-sm shadow-sm",
+          variant === "line" && "bg-primary bottom-0 h-0.5",
         )}
       />
     </TabsPrimitive.List>
@@ -64,7 +64,7 @@ function TabsTrigger({
     <TabsPrimitive.Tab
       data-slot="tabs-trigger"
       className={cn(
-        "ring-offset-background focus-visible:ring-ring data-active:text-foreground inline-flex items-center justify-center rounded-sm px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 data-disabled:pointer-events-none data-disabled:opacity-50",
+        "ring-offset-background focus-visible:ring-ring hover:text-foreground data-active:text-foreground inline-flex items-center justify-center rounded-sm px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors group-data-[variant=line]/tabs-list:rounded-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none data-disabled:pointer-events-none data-disabled:opacity-50",
         className,
       )}
       {...props}

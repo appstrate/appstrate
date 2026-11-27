@@ -102,15 +102,15 @@ export function ProductTabs() {
         className="bg-sidebar-accent/40 relative isolate flex gap-0.5 rounded-lg p-0.5"
       >
         {/* The tabs share the row equally, so one pill marks the active one and slides
-            between them, like the indicator of `TabsList`: a slot is (row − padding − gaps) / n
-            wide, and the pill moves by whole slots plus a gap. */}
+            between them, like the indicator of `TabsList`. A slot is the row less its padding
+            (`p-0.5`, twice) and gaps (`gap-0.5`, n − 1), over n; the pill moves by a slot and a gap. */}
         {activeProduct >= 0 ? (
           <span
             aria-hidden="true"
             className="bg-card absolute inset-y-0.5 left-0.5 -z-10 rounded-md shadow-sm transition-[translate] duration-200 ease-out motion-reduce:transition-none"
             style={{
-              width: `calc((100% - 4px - ${slots - 1} * 2px) / ${slots})`,
-              translate: `calc(${activeIndex} * (100% + 2px))`,
+              width: `calc((100% - var(--spacing) * ${(slots + 1) * 0.5}) / ${slots})`,
+              translate: `calc(${activeIndex} * (100% + var(--spacing) * 0.5))`,
             }}
           />
         ) : null}
