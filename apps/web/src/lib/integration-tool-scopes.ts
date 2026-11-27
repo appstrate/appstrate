@@ -27,8 +27,3 @@ export function isToolWithoutPermission(tool: ScopedTool): boolean {
     Object.values(tool.permissions ?? {}).every((scopes) => scopes.length === 0)
   );
 }
-
-/** How many usable tools of an OAuth integration ask for no scope. */
-export function countToolsWithoutScopes(catalog: readonly ScopedTool[]): number {
-  return catalog.filter(isToolWithoutPermission).length;
-}

@@ -1045,6 +1045,8 @@
   "integrationWizard.tools.title": "Tool access",
   "integrationWizard.tools.description": "No tool is declared at creation: they are read from the server, and this choice decides their access. Nothing is saved until you confirm.",
   "integrationWizard.tools.notWritable": "Only a member allowed to edit this integration in its home space can publish it.",
+  "integrationWizard.tools.docs": "Add the server's instructions as documentation (INTEGRATION.md)",
+  "integrationWizard.tools.docsPreview": "Preview the instructions",
   "integrationWizard.tools.publishFailed": "Your choice is saved, but version {{version}} was not published.",
   "integrationWizard.tools.draftMoved": "The draft changed in the meantime: version {{version}} was not published. The next submit saves your choice again on the current draft, then publishes.",
   "integrationWizard.tools.retryPublish": "Publish version {{version}}",
@@ -1085,7 +1087,5 @@
   "integrationWizard.tools.mode.trust.label": "Trust every tool of this server",
   "integrationWizard.tools.mode.trust.description": "Every tool the server lists, those it adds or changes later included, is available without review. Keep this for a server you control.",
   "integrationWizard.ready.reviewed": "Each tool of the server is reviewed in each space before an agent can call it: approve them from the integration's Tools tab.",
-  "integrationWizard.ready.trusted": "Every tool of the server is available without review.",
-  "integrationWizard.tools.docs": "Add the server's instructions as documentation (INTEGRATION.md)",
-  "integrationWizard.tools.docsPreview": "Preview the instructions"
+  "integrationWizard.ready.trusted": "Every tool of the server is available without review."
 }

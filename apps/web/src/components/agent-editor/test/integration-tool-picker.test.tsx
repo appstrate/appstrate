@@ -260,9 +260,6 @@ describe("IntegrationToolPicker — unknown permissions", () => {
     const flag = i18n.t("agents:packageTools.scopesUnknown");
     expect(renderWith("oauth2")).toContain(flag);
     expect(renderWith("api_key")).not.toContain(flag);
-  });
-
-  it("flags a declared tool without scope like the counter counts it", () => {
-    expect(renderWith("oauth2", "declared")).toContain(i18n.t("agents:packageTools.scopesUnknown"));
+    expect(renderWith("oauth2", "declared")).toContain(flag);
   });
 });

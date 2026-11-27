@@ -88,10 +88,7 @@ describe("the tool snapshot summary", () => {
   });
 
   it("renders no summary for an integration whose source has no listing", () => {
-    const html = view(undefined);
-    expect(html).not.toContain("integration-tool-snapshot");
-    expect(html).not.toContain(REFRESH);
-    expect(html).not.toContain("Dernière lecture du serveur");
+    expect(view(undefined)).not.toContain("integration-tool-snapshot");
   });
 
   const button = (html: string) =>

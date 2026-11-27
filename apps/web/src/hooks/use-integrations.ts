@@ -306,13 +306,12 @@ export function useIntegrationToolPolicyActions(packageId: string) {
   );
   return {
     /** `onDone` runs once the write succeeded (a confirmation closes then). */
-    approve: (body: Parameters<typeof approve.mutate>[0]["body"], onDone?: () => void) =>
-      approve.mutate({ params: { path }, body }, { onSuccess: onDone }),
-    /** `onDone` runs once the write succeeded (a confirmation closes then). */
+    approve: (items: Parameters<typeof approve.mutate>[0]["body"]["tools"], onDone?: () => void) =>
+      approve.mutate({ params: { path }, body: { tools: items } }, { onSuccess: onDone }),
     revoke: (toolName: string, onDone?: () => void) =>
       revoke.mutate({ params: { path: { ...path, toolName } } }, { onSuccess: onDone }),
-    block: (body: Parameters<typeof block.mutate>[0]["body"], onDone?: () => void) =>
-      block.mutate({ params: { path }, body }, { onSuccess: onDone }),
+    block: (name: string, onDone?: () => void) =>
+      block.mutate({ params: { path }, body: { tools: [name] } }, { onSuccess: onDone }),
     unblock: (toolName: string) => unblock.mutate({ params: { path: { ...path, toolName } } }),
     /** Whether `action` is in flight for the tool `name`: a row waits on its own write only. */
     isPending: (action: ToolPolicyAction, name: string): boolean => {

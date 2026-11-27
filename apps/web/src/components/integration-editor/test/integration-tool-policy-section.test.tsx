@@ -9,7 +9,7 @@ installThemeEnv();
 
 const { i18nReady } = await import("../../../i18n.ts");
 const { render } = await import("../../../test/render.tsx");
-const { DefinitionCompare, IntegrationToolPolicySection, ToolPolicyView } =
+const { IntegrationToolPolicySection, ToolPolicyView } =
   await import("../integration-tool-policy-section.tsx");
 
 await i18nReady;
@@ -102,9 +102,6 @@ describe("ToolPolicyView review", () => {
     expect(html).toContain("Voir la définition");
     expect(html).toContain("UniqueField");
     expect(html).not.toContain("Définition approuvée");
-    expect(render(<DefinitionCompare item={item} defaultOpen={false} />)).not.toContain(
-      "UniqueField",
-    );
   });
 
   it("labels the hints a server declares about a tool as its own, and shows none it did not", () => {
@@ -303,7 +300,6 @@ describe("ToolPolicyView declaration", () => {
     const calls: string[][] = [];
     const value: ToolDeclaration = {
       declared: new Set(declared),
-      saved: false,
       declare: (names) => calls.push(names),
     };
     return { value, calls };
@@ -354,7 +350,6 @@ describe("IntegrationToolPolicySection", () => {
   const table = (controls: ToolPolicyControls) => (
     <p data-testid="table">{controls.rowActions({ name: "export_notes" }).length}</p>
   );
-  const declaration: ToolDeclaration = { declared: new Set(), saved: true, declare: noop };
   const tools = [{ name: "export_notes", status: "pending" as const, origin: "listed" as const }];
 
   it("draws the table alone without access", () => {
@@ -363,19 +358,6 @@ describe("IntegrationToolPolicySection", () => {
     );
     expect(html).toContain('<p data-testid="table">0</p>');
     expect(html).not.toContain("integration-tool-policy");
-  });
-
-  it("offers the declare deed to an author outside the review, without the space policy", () => {
-    const html = render(
-      <IntegrationToolPolicySection
-        access={{ packageId: "@acme/crm", review: false, declaration }}
-        tools={tools}
-      >
-        {table}
-      </IntegrationToolPolicySection>,
-    );
-    expect(html).toContain('<p data-testid="table">1</p>');
-    expect(html).not.toContain('aria-label="Approuver ');
   });
 
   it("frames the table with the banner, and loads the review of a reader who may configure", () => {

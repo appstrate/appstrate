@@ -41,9 +41,8 @@ import {
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
-import { declareTools } from "../lib/integration-tool-policy";
+import { declareTools, type ToolCatalogEntry } from "../lib/integration-tool-policy";
 import type { ToolSnapshot } from "../lib/integration-tool-snapshot";
-import type { ToolCatalogEntry } from "../lib/integration-tool-policy";
 
 const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
 
@@ -354,7 +353,6 @@ function IntegrationEditorInner({
   // Declaring a listed tool edits the draft; saving and publishing stay the author's.
   const declaration: ToolDeclaration = {
     declared: new Set(Object.keys(asRecord(state.manifest.tools_policy))),
-    saved: !editor.isDirty,
     declare: (names) =>
       editor.setState((s) => ({ ...s, manifest: declareTools(s.manifest, names) })),
   };

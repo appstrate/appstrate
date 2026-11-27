@@ -220,7 +220,7 @@ export function IntegrationOverview({
             />
             {pending > 0 && (
               <OperationalStat
-                label={t("integration.summary.toolsToReview")}
+                label={t("integrationTools.policy.review.title", { ns: "agents" })}
                 value={pending}
                 target={{ to: toolsTo }}
               />
