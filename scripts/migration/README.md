@@ -1282,6 +1282,40 @@ Rollback: `0100` is one-way at boot — an older build inserts `space_packages` 
 `enabled`. Restore the `pg_dump`. `0048` is re-runnable (a second run writes nothing); the emptied
 `package_shares` is not rebuilt from the rows, so reverting it is restoring the dump.
 
+## Detail — Personal spaces take the org offer only (script `0059`, drizzle `0117`/`0118`)
+
+**Not a runbook.** A personal space runs what its owner creates, what the organization offers
+(`org_package_offers`, either mode) and what the deployment runs by default; a share no longer
+places anything there, and the notification kind `package_shared` is gone. Drizzle `0118`
+re-states the kind CHECK `notifications_type_valid` `NOT VALID`, so existing `package_shared` rows
+survive the migration. Databases still hold rows written under the previous rule, so the release
+refuses to boot until `0059` has run (the `0059` entry of `PENDING_DATA_SCRIPTS`,
+`apps/api/src/lib/boot-guards/pending-data-scripts.ts`). `pg_dump` BEFORE the deploy, the platform
+stopped, drizzle `0118` applied:
+
+1. `0059` dry run, then `--apply`. The rows it looks at are an ORGANIZATION package's
+   `space_packages` rows in a personal space, outside the package's home, with no offer to the
+   organization (system packages are left alone). (a) An ENABLED integration among them is kept by
+   an `available` offer (`offered_by` NULL, audited `package.offered_to_org` by the `system` actor,
+   `reason: personal_space_audience`): its owner switched on something only the old waiver allowed.
+   (b) Every other such row (a team package shared into the space, a switched-off integration) is
+   deleted as `withdrawPlacement` deletes: its enabled schedules in that space disabled
+   `package_removed`, the row removed, `package.unshared` audited (`reason: personal_space`). Each
+   is printed. The queue is not touched (the platform is stopped): at boot only enabled schedules
+   are synced, and a leftover job removes itself at its next fire. (c) `package_shared`
+   notifications are deleted and `ALTER TABLE notifications VALIDATE CONSTRAINT
+notifications_type_valid` runs. One transaction, rolled back on a dry run; a second `--apply`
+   writes nothing. An integration named by `SYSTEM_INTEGRATIONS` is active by the deployment's
+   default, which a script reading only the database cannot see: its row with no offer is treated
+   as any other.
+2. Start the app.
+
+`set -a && . ./.env && set +a && bun scripts/migration/0059-personal-space-audience.ts` is the dry
+run; `--apply` commits. It refuses to run with neither `DATABASE_URL` nor `PGLITE_DATA_DIR` set.
+
+Rollback: restore the `pg_dump`. The deleted rows and the deleted notifications are not rebuilt by
+any script.
+
 ## Detail — Organization icons pointing at an image in object storage (script `0049`, drizzle `0101`)
 
 **Not a runbook.** Drizzle `0097` stored an uploaded organization logo as `image:<version>`, its
@@ -1630,3 +1664,4 @@ Rollback: restore the backup, or set the column back to `false` on the listed id
 | 0056 | not yet             | refresh tokens marked by an administrative revocation (`revoked IS NOT NULL AND rotated_at IS NULL`: member exit, password change, `0019`, `/oauth2/revoke`, sign-out of non-`offline_access` tokens) deleted, access tokens through the `refresh_id` cascade, rotated-out rows kept (#2325) — **run once after the release that deletes instead of marking; the app may keep running**                                                                                                                                                                                                                                                                                                      | prints marked_to_delete / rotated_kept / live_kept, deleted, and left (must be 0); a second run deletes 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 0057 | not yet             | Repair a run notification’s space where its organization, run and recipient agree, before copying recipient read state.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | On an isolated beta.68 restore with one deliberately incorrect space, the preflight went from 1 to 0 and the recipient read marker survived 0113 and 0052 on PostgreSQL 16.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 0058 | not yet             | `model_provider_credentials.needs_reconnection` set to `true` on the credentials whose blob is flagged and whose column (added by drizzle `0114`, defaulting to `false`) is not, so the refresh sweep stops re-reading them daily (#2411) — **recommended in the release window after `0114` has applied; the app may keep running**; `.ts`, dry run by default, `--apply` to write                                                                                                                                                                                                                                                                                                          | dry run lists the rows and the three counts; `--apply` flags them in one transaction, exits 1 unless none is left; an unreadable blob is listed and left; a second run finds nothing. Counts unmeasured: rehearse on a restored dump                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 0059 | not applied         | organization packages in a personal space with no offer to the organization: an enabled integration kept by an `available` offer (audited `package.offered_to_org`), every other row deleted with its enabled schedules disabled `package_removed` (audited `package.unshared`), then the `package_shared` notifications deleted and `notifications_type_valid` validated (#2428) — **run after drizzle `0118` and BEFORE the app starts**: the release refuses to boot while such a row or notification remains; `.ts`, dry run by default, `--apply` to commit                                                                                                                             | offers created, rows deleted and schedules disabled (each printed), notifications deleted, in one transaction rolled back on a dry run; a second `--apply` writes nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |

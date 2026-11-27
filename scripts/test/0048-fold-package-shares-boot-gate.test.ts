@@ -133,7 +133,6 @@ describe("0048 entry — live database", () => {
         packageId: AGENT,
         spaceId: team,
         orgId: ctx.orgId,
-        personalOwnerId: null,
         authorityFor: () => "home",
       }),
     ).toEqual({ authority: "home", disabledScheduleIds: [] });
