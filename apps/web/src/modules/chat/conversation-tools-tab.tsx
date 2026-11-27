@@ -97,7 +97,7 @@ function ToolCallStep({
       }
       failure={
         call.status === "error" || call.status === "denied"
-          ? { label: t(TOOL_STATUS_LABEL[call.status]), visible: true }
+          ? { label: t(TOOL_STATUS_LABEL[call.status]) }
           : undefined
       }
       errorText={call.error}

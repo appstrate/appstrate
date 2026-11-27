@@ -186,13 +186,14 @@ type InvokeOperationArgs = { operation_id?: string; path_params?: { packageId?: 
 /**
  * A tool call as a step of its activity group: named as the context panel names it (`showCall`),
  * with what a search found beside it. Its label shimmers while it runs; its detail opens under
- * it, already open when it is its group's one step.
+ * it. The group's one step has no line of its own (`bare`): the group's header names it, and
+ * opening the group opens on what follows the label and the detail.
  */
 export function ToolStep(props: ToolCardProps) {
   const { t, lang } = useChatHost();
   const anchor = useRevealAnchor(props.toolCallId);
   const solo = useActivityMode()?.solo ?? false;
-  const [readerOpen, setReaderOpen] = React.useState<boolean | null>(null);
+  const [readerOpen, setReaderOpen] = React.useState(false);
   const presentation = props.stored?.presentation;
   const phase = deriveToolPhase(props);
   const { Icon, subject, label, idText } = showCall({ ...props, presentation }, t);
@@ -202,11 +203,13 @@ export function ToolStep(props: ToolCardProps) {
   const status = httpStatusOf(unwrapped);
   const durationMs = readDurationMs(props.timing);
   const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
+  const spaceId = cardSpaceOf(props);
 
   return (
     <CallStep
       {...anchor}
-      open={readerOpen ?? solo}
+      bare={solo}
+      open={readerOpen}
       onOpenChange={setReaderOpen}
       className={`rounded-sm ${REVEAL_RING_CLASS}`}
       lead={subject ? <SubjectGlyph subject={subject} /> : <Icon aria-hidden />}
@@ -214,20 +217,22 @@ export function ToolStep(props: ToolCardProps) {
       idText={idText}
       running={phase === "running"}
       trailing={
-        <>
-          {presentation?.count !== undefined ? (
-            <span className="flex shrink-0 items-center gap-1.5 text-xs">
-              <SubjectStack subjects={presentation.items ?? []} />
-              {t("tool.search.count", { count: presentation.count })}
-            </span>
-          ) : null}
-          <CallSpace spaceId={cardSpaceOf(props)} />
-          {durationMs !== undefined ? (
-            <span className="shrink-0 text-xs tabular-nums">
-              {formatDuration(durationMs, lang)}
-            </span>
-          ) : null}
-        </>
+        presentation?.count !== undefined || spaceId || durationMs !== undefined ? (
+          <>
+            {presentation?.count !== undefined ? (
+              <span className="flex shrink-0 items-center gap-1.5 text-xs">
+                <SubjectStack subjects={presentation.items ?? []} />
+                {t("tool.search.count", { count: presentation.count })}
+              </span>
+            ) : null}
+            <CallSpace spaceId={spaceId} />
+            {durationMs !== undefined ? (
+              <span className="shrink-0 text-xs tabular-nums">
+                {formatDuration(durationMs, lang)}
+              </span>
+            ) : null}
+          </>
+        ) : undefined
       }
       failure={
         phase === "error"

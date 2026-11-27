@@ -512,12 +512,16 @@ describe("the Tools tab, open", () => {
     expect(html.split(i18n.t("chat:context.tools.notInThread")).length - 1).toBe(1);
   });
 
-  it("says a failed call the thread's way: a cross and a muted word, its message under the line", () => {
+  it("says a failed call the thread's way: a cross named by its outcome, its message under the line", () => {
     const turns = [[toolPart("call_x", { state: "output-error" })]];
     const folded = tools(turns);
     expect(folded).toContain("lucide-x");
-    expect(folded).toContain(i18n.t("chat:context.tools.status.error"));
-    expect(folded).toContain("boom");
+    // No word beside the cross: it is named for assistive tech, the message says the rest.
+    expect(folded).toContain(
+      `role="img" aria-label="${i18n.t("chat:context.tools.status.error")}"`,
+    );
+    expect(folded).not.toContain(`>${i18n.t("chat:context.tools.status.error")}<`);
+    expect(folded).toMatch(/<p class="text-muted-foreground[^"]*"[^>]*>boom</);
     // The cross alone is red: the call's own icon keeps the line's muted tone.
     expect(folded.split("text-destructive").length - 1).toBe(1);
     const open = tools(turns, { openToolCallId: "call_x" });

@@ -8,7 +8,9 @@
  * A run of consecutive reasoning parts is one step of its activity group
  * (`ReasoningStep`): a line reading the reasoning's first line, its text one
  * click away. It is open while it streams, so a reader who opened the group
- * follows it; their first click hands the open state to them for good.
+ * follows it; their first click hands the open state to them for good. The
+ * group's one step has no line of its own: the group's header reads its first
+ * line, and opening the group opens on its text.
  *
  * A running turn has ONE status region (`ThinkingStatus`). assistant-ui emits the `indicator` part
  * only while the message runs and its last part is neither text nor reasoning
@@ -135,8 +137,9 @@ export function ReasoningStep({
   );
   const [readerOpen, setReaderOpen] = React.useState<boolean | null>(null);
 
+  if (solo) return <div className={ACTIVITY_DETAIL_CLASS}>{children}</div>;
   return (
-    <Collapsible open={readerOpen ?? (streaming || solo)} onOpenChange={setReaderOpen}>
+    <Collapsible open={readerOpen ?? streaming} onOpenChange={setReaderOpen}>
       <ActivityLine lead={<BrainIcon aria-hidden />}>
         <CollapsibleTrigger asChild>
           <ActivityTrigger>

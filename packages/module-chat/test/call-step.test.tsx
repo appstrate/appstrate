@@ -43,14 +43,40 @@ describe("CallStep", () => {
     expect(html.indexOf("1,2 s")).toBeGreaterThan(html.indexOf("Lire"));
   });
 
-  it("says a failure by its cross, named or beside its word, its message under the line", () => {
-    const named = step({ failure: { label: "Échec" }, errorText: "boom" });
-    expect(named).toContain('role="img" aria-label="Échec"');
-    expect(named).toContain("boom");
+  it("says a failure by its cross, named by its label, its message under the line", () => {
+    const html = step({ failure: { label: "Échec" }, errorText: "boom" });
+    expect(html).toContain('role="img" aria-label="Échec"');
+    expect(html).not.toContain(">Échec<");
+    expect(html).toContain("boom");
+  });
 
-    const visible = step({ failure: { label: "Échoué", visible: true } });
-    expect(visible).not.toContain('role="img"');
-    expect(visible).toContain(">Échoué</span>");
+  it("drawn bare, has no line of its own: what follows the label, the failure, the detail", () => {
+    const html = step({
+      bare: true,
+      idText: "getAgent",
+      trailing: <span>1,2 s</span>,
+      failure: { label: "Échec" },
+      errorText: "boom",
+      className: "rounded-sm",
+      "data-tool-call-id": "call_1",
+    } as never);
+    expect(html).not.toContain("aria-expanded");
+    expect(html).not.toContain("Lire");
+    expect(html).not.toContain("getAgent");
+    expect(html).toContain("1,2 s");
+    expect(html).toContain('role="img" aria-label="Échec"');
+    expect(html).toContain("boom");
+    expect(html).toContain("detail");
+    // The anchor stays on its root, so the context panel still finds and rings it.
+    expect(html).toContain('data-tool-call-id="call_1"');
+    expect(html).toContain("rounded-sm");
+  });
+
+  it("drawn bare with nothing after its label, draws no meta line", () => {
+    const html = step({ bare: true });
+    expect(html).toBe(
+      '<div class="pb-2 pl-6"><div class="bg-card rounded-lg border p-3"><p>detail</p></div></div>',
+    );
   });
 
   it("passes what the root is given to it (an anchor, a class)", () => {

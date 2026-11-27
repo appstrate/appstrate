@@ -18,12 +18,14 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, ThreadPrimitive } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { testHost } from "./test-host.ts";
 import { Thread } from "../src/ui/thread.tsx";
+import { ReasoningStep } from "../src/ui/reasoning.tsx";
+import { ActivityModeContext } from "../src/ui/activity-mode.ts";
 import { createMessageQueue } from "../src/ui/message-queue.ts";
 import { forgetRevealedToolCalls, revealToolCall } from "../src/ui/reveal-tool-call.ts";
 
@@ -69,6 +71,37 @@ function Turn({ helpers }: { helpers: ChatHelpers }) {
     <AssistantRuntimeProvider runtime={runtime}>
       <Thread messageQueue={createMessageQueue()} />
     </AssistantRuntimeProvider>
+  );
+}
+
+/**
+ * A group's one reasoning step, opened: a click this harness cannot drive opens a group of
+ * reasoning alone, so the step renders in the mode the group gives its one step.
+ */
+function renderSoloReasoning() {
+  function SoloReasoning() {
+    return (
+      <ActivityModeContext value={{ mode: "step", solo: true }}>
+        <ReasoningStep startIndex={0} endIndex={0}>
+          <p>{REASONING_BODY}</p>
+        </ReasoningStep>
+      </ActivityModeContext>
+    );
+  }
+  function SoloTurn() {
+    const runtime = useAISDKRuntime(chat([reasoning(REASONING, "done")], "ready"));
+    return (
+      <AssistantRuntimeProvider runtime={runtime}>
+        <ThreadPrimitive.Messages
+          components={{ UserMessage: () => null, AssistantMessage: SoloReasoning }}
+        />
+      </AssistantRuntimeProvider>
+    );
+  }
+  return renderToString(
+    <ChatHostProvider value={host}>
+      <SoloTurn />
+    </ChatHostProvider>,
   );
 }
 
@@ -273,19 +306,48 @@ describe("the reasoning of an assistant turn", () => {
     expect(html).not.toContain("animate-bounce");
   });
 
+  it("settles a reasoning that says nothing past its title to a plain line, nothing to open", () => {
+    const html = render([reasoning(`**${REASONING_TITLE}**`, "done"), answer], "ready");
+    expect(count(html, REASONING_TITLE)).toBe(1);
+    expect(disclosures(html)).toBe(0);
+    expect(html).toContain("lucide-brain");
+  });
+
+  it("keeps a reasoning that says more than its title a disclosure", () => {
+    const html = render([reasoning(REASONING, "done"), answer], "ready");
+    expect(disclosures(html)).toBe(1);
+    expect(count(html, REASONING_TITLE)).toBe(1);
+  });
+
   it("titles a settled line without words in its text with the generic label", () => {
     const html = render([reasoning("**", "done"), answer], "ready");
     expect(html).toContain("reasoning.done");
   });
 
-  it("opens with its group when it is the group's one step", () => {
-    // Nothing but a click opens a group of reasoning alone; the step's own state is `solo`.
+  it("opens straight on its content when it is the group's one call: named once, by the line", () => {
     reveal("s1");
-    const html = render([lookup("s1", "issues"), answer], "ready");
-    // The group's line and its one step, both open: the step's detail is mounted.
-    expect(disclosures(html)).toBe(2);
-    expect(openDisclosures(html)).toBe(2);
+    const counted = {
+      ...lookup("s1", "issues"),
+      resultProviderMetadata: { appstrate: { presentation: { count: 3, items: [] } } },
+    };
+    const html = render([counted, answer], "ready");
+    // The group's line alone is a disclosure: the step draws no line of its own.
+    expect(disclosures(html)).toBe(1);
+    expect(openDisclosures(html)).toBe(1);
+    expect(count(html, "tool.name.search")).toBe(1);
+    expect(count(html, ">issues<")).toBe(1);
+    // What followed the step's label stays: the result count, then the detail.
+    expect(html).toContain("tool.search.count");
     expect(html).toContain("tool.detail.input");
+    // The anchor the context panel reveals by is still drawn.
+    expect(html).toContain('data-tool-call-id="s1"');
+  });
+
+  it("draws a group's one reasoning as its text alone, the line naming it", () => {
+    const html = renderSoloReasoning();
+    expect(html).not.toContain("aria-expanded");
+    expect(html).not.toContain(REASONING_TITLE);
+    expect(html).toBe(`<div class="pb-2 pl-6"><p>${REASONING_BODY}</p></div>`);
   });
 });
 
@@ -396,6 +458,8 @@ describe("a failed tool call, softened and never hidden", () => {
     expect(html).toMatch(/<p class="text-muted-foreground[^"]*"[^>]*>Agent introuvable</);
     expect(html).toContain('aria-label="tool.failedHttp:404"');
     expect(html).not.toContain('title="tool.failed');
+    // The group's one call: its name said once, by the group's line.
+    expect(count(html, "tool.name.list_agents")).toBe(1);
   });
 
   it("shows no HTTP badge, failed or not", () => {

@@ -4,13 +4,14 @@
  * What the assistant did between two texts, on one line: its reasoning and its tool calls, one
  * step or twenty. The line is the same from the first step on, so nothing changes shape when a
  * second one joins (`activityGroupOf`). Opened, it is a rail of steps, each one click from its
- * own detail. A call the context panel reveals (`reveal-tool-call.ts`) opens its group: a folded
- * one does not mount its steps.
+ * own detail; a group of one step opens straight on that step's content, the line naming it. A
+ * call the context panel reveals (`reveal-tool-call.ts`) opens its group: a folded one does not
+ * mount its steps.
  *
  * Ending the running message, the line is the turn's status: the spark (the status region, beside
  * the trigger), the step in progress, the turn's clock. Settled, it names its one call, or counts
  * them (« 3 consultations · 1 action »), failures apart; a group of reasoning alone reads its
- * first line.
+ * first line, and is a plain line, nothing to open, when its text says nothing more.
  *
  * `children` is drawn twice: as steps under the rail, and as what must stay in view whatever the
  * fold (`activity-mode.ts`, "breakout": a connect card, a launched run, a created package's link).
@@ -35,7 +36,7 @@ import {
 } from "./conversation-tools.ts";
 import { ThinkingStatus } from "./reasoning.tsx";
 import { useTurnClock } from "./use-turn-clock.ts";
-import { reasoningTitle, showStep } from "./turn-status.ts";
+import { reasoningSaysMore, reasoningTitle, showStep } from "./turn-status.ts";
 import { showCall } from "./tool-presentation.ts";
 import { deriveToolPhase } from "./tool-result.ts";
 import type { StoredResults } from "./use-call-presentation.ts";
@@ -75,6 +76,13 @@ function reasoningRunsAt(parts: readonly GroupablePart[], indices: readonly numb
     inRun = reasoning;
   }
   return runs;
+}
+
+/** The group's reasoning text, its parts joined. */
+function reasoningTextAt(parts: readonly StepPart[], indices: readonly number[]): string {
+  return indices
+    .map((i) => (parts[i]?.type === "reasoning" ? (parts[i]?.text ?? "") : ""))
+    .join("\n");
 }
 
 /** The first line of the group's reasoning, its title when it holds no call. */
@@ -139,6 +147,13 @@ export function ActivityGroup({
       ? reasoningTitleAt(s.message.parts as readonly StepPart[], indices)
       : "",
   );
+  // A settled group of reasoning alone that says nothing past its title has nothing to open.
+  const plain = useAuiState(
+    (s) =>
+      calls === 0 &&
+      !running &&
+      !reasoningSaysMore(reasoningTextAt(s.message.parts as readonly StepPart[], indices)),
+  );
   const subjects = React.useMemo(
     () =>
       callIds.flatMap((id): PresentationSubject[] => {
@@ -189,6 +204,19 @@ export function ActivityGroup({
     <ListTreeIcon aria-hidden />
   );
 
+  if (plain) {
+    // The disclosure's line without its trigger: the trigger adds no padding, the label stays put.
+    return (
+      <div className={ACTIVITY_BLOCK_CLASS}>
+        <ActivityLine lead={lead}>
+          <ActivityLabel>{title || t("reasoning.done")}</ActivityLabel>
+        </ActivityLine>
+      </div>
+    );
+  }
+
+  const steps = <ActivityModeContext value={stepMode}>{children}</ActivityModeContext>;
+
   return (
     <Collapsible
       open={readerOpen || revealed}
@@ -227,9 +255,8 @@ export function ActivityGroup({
         </CollapsibleTrigger>
       </ActivityLine>
       <CollapsibleContent className={ACTIVITY_CONTENT_CLASS}>
-        <ActivityRail>
-          <ActivityModeContext value={stepMode}>{children}</ActivityModeContext>
-        </ActivityRail>
+        {/* One step: the header names it, so its content opens straight under the header. */}
+        {solo ? steps : <ActivityRail>{steps}</ActivityRail>}
       </CollapsibleContent>
       <ActivityModeContext value={BREAKOUT_MODE}>{children}</ActivityModeContext>
     </Collapsible>
