@@ -534,3 +534,34 @@
     animation: none;
   }
 }
+
+/* A chat activity label while what it names is in progress (`ActivityLabel`): a band of the
+   foreground colour sweeps the muted text. Under reduced motion the text is plain. */
+.shimmer-text {
+  background: linear-gradient(
+      90deg,
+      var(--muted-foreground) 35%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 65%
+    )
+    0 0 / 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-text 1.6s linear infinite;
+}
+@keyframes shimmer-text {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+  }
+}

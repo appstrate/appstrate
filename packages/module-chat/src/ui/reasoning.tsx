@@ -35,22 +35,23 @@ import { DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
 import { endsFolded, type GroupablePart } from "./conversation-tools.ts";
 import { reasoningTitle } from "./turn-status.ts";
 import { useTurnClock } from "./use-turn-clock.ts";
+import { ACTIVITY_BLOCK_CLASS, ActivityLabel, ActivityLine } from "./activity-line.tsx";
 
 /** One full loop of the spark (each diagonal swaps twice), in ms (`.spark` in styles.css). */
 const SPARK_LOOP_MS = 2400;
 
 /**
  * The turn's one status region (the e2e/bench hook reads its test id): the
- * spark loader. h-6 = one prose-sm line: whatever replaces it shifts 0px.
+ * spark loader, in an activity line's lead slot.
  */
 export function ThinkingStatus() {
   const { t } = useChatHost();
   // Every mount joins one clock, so the loader moving between the loading line
-  // and a reasoning header mid-turn does not restart.
+  // and a group's header mid-turn does not restart.
   const [phase] = React.useState(() => `${-(performance.now() % SPARK_LOOP_MS)}ms`);
   return (
-    <div
-      className="flex h-6 items-center"
+    <span
+      className="flex size-4 items-center justify-center"
       role="status"
       aria-label={t("thinking.status")}
       data-testid="chat-thinking-status"
@@ -61,7 +62,7 @@ export function ThinkingStatus() {
         <i />
         <i />
       </span>
-    </div>
+    </span>
   );
 }
 
@@ -72,11 +73,10 @@ export function LoadingLine() {
   const clock = useTurnClock(!deferred);
   if (deferred) return null;
   return (
-    <div className="text-muted-foreground flex h-6 min-w-0 items-center gap-2 text-sm">
-      <ThinkingStatus />
-      <span className="min-w-0 truncate">{t("reasoning.running")}</span>
+    <ActivityLine lead={<ThinkingStatus />} className={ACTIVITY_BLOCK_CLASS}>
+      <ActivityLabel active>{t("reasoning.running")}</ActivityLabel>
       {clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
-    </div>
+    </ActivityLine>
   );
 }
 
