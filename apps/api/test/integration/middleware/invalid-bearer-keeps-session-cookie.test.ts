@@ -7,8 +7,8 @@
  * and substitutes it for the request's session cookie, so any string —
  * `Bearer undefined` from a script that read an unset variable — resolves to
  * no session. A request presenting a bearer is judged by it alone: 401, and
- * neither the auth pipeline nor Better Auth's own routes write a delete of
- * the cookie the browser holds, which was never the credential judged.
+ * the auth pipeline writes no delete of the cookie the browser holds, which
+ * was never the credential judged.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -74,41 +74,5 @@ describe("auth pipeline — invalid bearer beside a valid session cookie", () =>
     });
     expect(res.status).toBe(401);
     expect(deletesSessionCookie(res)).toBe(true);
-  });
-
-  it("leaves the cookie alone on Better Auth's own routes (get-session with Bearer undefined)", async () => {
-    const res = await app.request("/api/auth/get-session", {
-      headers: authHeaders(ctx, { Authorization: "Bearer undefined" }),
-    });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toBeNull();
-    expect(res.headers.getSetCookie()).toEqual([]);
-
-    const after = await app.request("/api/auth/get-session", { headers: authHeaders(ctx) });
-    expect(((await after.json()) as { user?: { id: string } } | null)?.user?.id).toBe(ctx.user.id);
-  });
-
-  it("serves Better Auth's own routes to a valid session token presented as a bearer", async () => {
-    const token = decodeURIComponent(ctx.cookie.slice(ctx.cookie.indexOf("=") + 1));
-    const res = await app.request("/api/auth/get-session", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { user?: { id: string } } | null)?.user?.id).toBe(ctx.user.id);
-  });
-
-  it("forwards the body of a bearer request to Better Auth's own routes", async () => {
-    const token = decodeURIComponent(ctx.cookie.slice(ctx.cookie.indexOf("=") + 1));
-    const res = await app.request("/api/auth/update-user", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Renamed by bearer" }),
-    });
-    expect(res.status).toBe(200);
-
-    const session = await app.request("/api/auth/get-session", { headers: authHeaders(ctx) });
-    expect(((await session.json()) as { user?: { name: string } } | null)?.user?.name).toBe(
-      "Renamed by bearer",
-    );
   });
 });

@@ -21,6 +21,7 @@ import type { AuthStrategy } from "@appstrate/core/module";
 import { PRINCIPAL_KINDS } from "@appstrate/core/module";
 import { parseBearer } from "@appstrate/core/bearer";
 import { eq } from "drizzle-orm";
+import { getAuth } from "@appstrate/db/auth";
 import { db } from "@appstrate/db/client";
 import { organizations } from "@appstrate/db/schema";
 import { API_KEY_PREFIX, validateApiKey } from "../services/api-keys.ts";
@@ -31,7 +32,6 @@ import { ApiError, unauthorized } from "./errors.ts";
 import {
   appendSetCookies,
   clearStaleAuthCookies,
-  handleAuthRequest,
   readSessionWithCookies,
   sessionRealmOf,
 } from "./auth-cookies.ts";
@@ -137,10 +137,10 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   // https://github.com/appstrate/appstrate/issues/166.
   app.on(["POST", "GET"], "/api/auth/*", async (c) => {
     // `CLIENT_IP_HEADER` is already on `c.req.raw` (the edge `clientIp()`
-    // middleware), and every rewrite below copies the inbound headers, so the
+    // middleware), and both rewrites below copy the inbound headers, so the
     // address Better Auth reads survives them.
     const req = withPublicAppOrigin(await maybeTransformDeviceFlowFormBody(c.req.raw));
-    return oauthRateLimitResponse(c.req.path, await handleAuthRequest(req));
+    return oauthRateLimitResponse(c.req.path, await getAuth().handler(req));
   });
 
   // Auth middleware: module strategies → Bearer API key → session cookie.
