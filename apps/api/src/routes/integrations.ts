@@ -363,7 +363,7 @@ export const blockToolsSchema = z
   .object({ tools: z.array(observedToolNameSchema).min(1).max(100) })
   .strict();
 
-export const syncFromServerSchema = z.object({ connection_id: z.uuid().optional() }).strict();
+export const connectionIdBodySchema = z.object({ connection_id: z.uuid().optional() }).strict();
 
 export const updateConnectionSchema = z
   .object({
@@ -1127,7 +1127,7 @@ export function createIntegrationsRouter() {
     await assertPackageMutationAccess(c, packageId, "write");
     const scope = getSpaceScope(c);
     await assertIsIntegration(scope, packageId);
-    const body = await readJsonBody(c, syncFromServerSchema, { allowEmpty: true });
+    const body = await readJsonBody(c, connectionIdBodySchema, { allowEmpty: true });
     const proposal = await syncIntegrationFromServer({
       scope,
       actor: getActor(c),
@@ -1160,7 +1160,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
       await assertIsIntegration(scope, packageId);
-      const body = await readJsonBody(c, syncFromServerSchema, { allowEmpty: true });
+      const body = await readJsonBody(c, connectionIdBodySchema, { allowEmpty: true });
       const manifest = await loadStreamableRemote(scope, packageId);
       const catalog = await listRemoteTools({
         ...remoteToolsCaller(c),
@@ -1197,7 +1197,7 @@ export function createIntegrationsRouter() {
     const scope = getSpaceScope(c);
     const packageId = c.req.param("packageId")!;
     await assertIsIntegration(scope, packageId);
-    return { scope, packageId, caller: connectionCaller(c, scope.spaceId) };
+    return { scope, packageId, actor: connectionPrincipal(c).actor };
   };
   const toolPolicyWrite = [
     rateLimit(30),

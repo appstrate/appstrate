@@ -96,8 +96,8 @@ const toolNameParam = {
   in: "path",
   required: true,
   description:
-    "The tool's name as the server lists it, 1 to 256 characters (percent-encode a `/`).",
-  schema: { type: "string", minLength: 1, maxLength: 256 },
+    "The tool's name as the server lists it, 1 to 128 characters (percent-encode a `/`).",
+  schema: { type: "string", minLength: 1, maxLength: 128 },
 } as const;
 
 export const authKeyParam = {
@@ -726,7 +726,8 @@ const integrationDetailSchema = {
             truncated: { type: "boolean" },
             added: {
               type: "integer",
-              description: "Tools the server lists that the manifest does not declare.",
+              description:
+                "Tools the server lists that the manifest does not declare and the space has neither approved nor blocked.",
             },
             missing: {
               type: "integer",
@@ -1643,7 +1644,7 @@ export const integrationsPaths = {
                     type: "object",
                     required: ["name", "fingerprint"],
                     properties: {
-                      name: { type: "string", minLength: 1, maxLength: 256 },
+                      name: { type: "string", minLength: 1, maxLength: 128 },
                       fingerprint: {
                         type: "string",
                         pattern: "^[0-9a-f]{64}$",
@@ -1725,7 +1726,7 @@ export const integrationsPaths = {
                   type: "array",
                   minItems: 1,
                   maxItems: 100,
-                  items: { type: "string", minLength: 1, maxLength: 256 },
+                  items: { type: "string", minLength: 1, maxLength: 128 },
                 },
               },
               additionalProperties: false,

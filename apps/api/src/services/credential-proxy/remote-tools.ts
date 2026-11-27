@@ -38,18 +38,17 @@ import {
   selectAccessibleConnection,
   type ProxyReach,
 } from "../integration-connections.ts";
-import { renderRemoteSource } from "../integration-manifest-helpers.ts";
+import { renderRemoteSource, syntheticToolNames } from "../integration-manifest-helpers.ts";
 import {
   readIntegrationManifestForProxy,
   type ResolvedIntegrationVersion,
 } from "../integration-service.ts";
 import {
   approvedFingerprintsByTool,
-  approvedToolNames,
   loadToolSpacePolicy,
-  syntheticToolNames,
   type ToolSpacePolicy,
   toolBlockedInSpace,
+  unblockedApprovedToolNames,
 } from "../integration-tool-catalog.ts";
 import { recordToolSnapshot } from "../integration-tool-snapshots.ts";
 import { ProxyCallError } from "./core.ts";
@@ -584,8 +583,8 @@ export async function callRemoteTool(
     policy,
   );
   // On a closed catalog, an undeclared tool the space approved is judged on the listing below
-  // (an open catalog has no approvals: the policy is judged).
-  const approvedUndeclared = !offered.has(input.name) && approvedToolNames(policy).has(input.name);
+  // (the policy is judged: an open catalog or a declared tool has no approvals).
+  const approvedUndeclared = unblockedApprovedToolNames(policy).has(input.name);
   if (!offered.has(input.name) && !approvedUndeclared) {
     throw notFound(`Integration '${input.integrationId}' offers no tool named '${input.name}'`);
   }

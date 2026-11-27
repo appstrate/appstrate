@@ -176,6 +176,15 @@ export function isSafeDeliveryFilePath(path: string): boolean {
   return true;
 }
 
+/** The names of the platform's own `api_call` / `api_upload` tools: granted by their own selection, never named to a server. */
+export function syntheticToolNames(manifest: IntegrationManifest): Set<string> {
+  return new Set(
+    getApiCallConfigs(manifest).flatMap((config) =>
+      config.uploadToolName ? [config.toolName, config.uploadToolName] : [config.toolName],
+    ),
+  );
+}
+
 /**
  * Auths whose connection exposes a tool of `selection` — a server's own tools via any auth, an
  * `api_call` only via its own. `null` when every auth does, or none does (not a connection
@@ -189,11 +198,7 @@ export function authKeysServingSelection(
   const kind = getIntegrationSourceKind(manifest);
   if (kind === "local" || kind === "remote") {
     if (isToolsWildcard(selection)) return null;
-    const apiCallNames = new Set(
-      getApiCallConfigs(manifest).flatMap((cfg) =>
-        cfg.uploadToolName ? [cfg.toolName, cfg.uploadToolName] : [cfg.toolName],
-      ),
-    );
+    const apiCallNames = syntheticToolNames(manifest);
     if (selection.some((name) => !apiCallNames.has(name))) return null;
   }
   const serving = new Set(selectedApiCallConfigs(manifest, selection).map((cfg) => cfg.authKey));

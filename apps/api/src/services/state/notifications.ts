@@ -187,7 +187,7 @@ export async function insertToolReviewNotifications(params: {
         recipientType: "user" as const,
         recipientId: userId,
         type: "integration_tools_review" as const,
-        payload: params.payload,
+        payload: toPgSafe(params.payload),
       })),
     )
     .onConflictDoNothing();

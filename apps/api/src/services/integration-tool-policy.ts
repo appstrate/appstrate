@@ -12,7 +12,6 @@ import {
   allowsUndeclaredTools,
   hiddenToolNames,
   resolveEffectiveToolSelection,
-  resolveIntegrationToolCatalog,
 } from "@appstrate/core/integration";
 import {
   MAX_APPROVED_FINGERPRINTS_PER_TOOL,
@@ -27,7 +26,7 @@ import {
 import type { Tx } from "../lib/db-helpers.ts";
 import { conflict } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import type { ConnectionCaller } from "./connection-reach.ts";
+import type { Actor } from "../lib/actor.ts";
 import {
   listReachableConnections,
   loadManifestOrThrow,
@@ -35,7 +34,8 @@ import {
 } from "./integration-connections.ts";
 import { readIntegrationManifestForConnect } from "./integration-service.ts";
 import {
-  approvedNames,
+  allApprovedToolNames,
+  declaredToolNames,
   loadToolSpacePolicy,
   namedToolSelection,
   readToolSpaceRows,
@@ -45,7 +45,8 @@ import { readToolSnapshots } from "./integration-tool-snapshot-reads.ts";
 export interface ToolPolicyTarget {
   scope: SpaceScope;
   packageId: string;
-  caller: ConnectionCaller;
+  /** Whose usable connections the listing is read through. */
+  actor: Actor;
 }
 
 export interface ListedTool {
@@ -73,7 +74,7 @@ async function loadListedTools(target: ToolPolicyTarget) {
   const { scope, packageId } = target;
   const manifest = await loadManifestOrThrow(scope, packageId);
   const connections = await listReachableConnections(
-    { spaceId: scope.spaceId, actor: target.caller.principal.actor },
+    { spaceId: scope.spaceId, actor: target.actor },
     "usable",
     [packageId],
   );
@@ -95,7 +96,7 @@ async function loadListedTools(target: ToolPolicyTarget) {
     manifest,
     listed,
     // The tool names the manifest declares, and those the platform withholds from every surface.
-    declared: new Set(resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name)),
+    declared: new Set(declaredToolNames(manifest)),
     hidden: hiddenToolNames(manifest),
   };
 }
@@ -327,7 +328,7 @@ export async function selectedApprovedTools(
       if (!read.ok) return [];
       // Judged: an open catalog, a declared or a hidden tool stands on no approval.
       const policy = await loadToolSpacePolicy(scope, entry.id, read.manifest);
-      const approved = approvedNames(policy);
+      const approved = allApprovedToolNames(policy);
       const selection = resolveEffectiveToolSelection(entry.tools, read.manifest);
       return namedToolSelection(read.manifest, selection, policy)
         .filter((tool) => approved.has(tool))

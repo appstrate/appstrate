@@ -141,7 +141,7 @@ import {
   connectSubmitSchema,
   setDefaultClientSchema,
   discoverIntegrationSchema,
-  syncFromServerSchema,
+  connectionIdBodySchema,
 } from "../routes/integrations.ts";
 
 // ---------------------------------------------------------------------------
@@ -607,13 +607,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "POST",
     path: "/api/integrations/{packageId}/discover",
-    jsonSchema: toJsonSchema(syncFromServerSchema),
+    jsonSchema: toJsonSchema(connectionIdBodySchema),
     description: "Propose manifest fields from the integration's connected MCP server",
   },
   {
     method: "POST",
     path: "/api/integrations/{packageId}/tool-snapshot/refresh",
-    jsonSchema: toJsonSchema(syncFromServerSchema),
+    jsonSchema: toJsonSchema(connectionIdBodySchema),
     description: "List the remote server's tools again into the integration's snapshot",
   },
   {

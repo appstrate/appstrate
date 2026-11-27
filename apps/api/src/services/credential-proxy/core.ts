@@ -517,14 +517,19 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
 
   // A 403 `insufficient_scope` naming scopes: the connection's demand, offered to its owner.
   if (res.status === 403 && credentialInjection.kind === "inject" && credentialForwarded) {
-    const asked = requiredScopesFromChallenge(403, res.headers.get("www-authenticate"));
+    const asked = requiredScopesFromChallenge(res.status, res.headers.get("www-authenticate"));
     if (asked) {
-      recordRequestedScopes(connectionId, input.integrationId, selection, asked).catch(
-        (err: unknown) =>
-          logger.warn("credential-proxy: could not record the scopes the server asked for", {
-            connectionId,
-            error: getErrorMessage(err),
-          }),
+      recordRequestedScopes(
+        connectionId,
+        input.integrationId,
+        selection,
+        asked,
+        input.run ? { orgId: input.orgId, id: input.run.id } : undefined,
+      ).catch((err: unknown) =>
+        logger.warn("credential-proxy: could not record the scopes the server asked for", {
+          connectionId,
+          error: getErrorMessage(err),
+        }),
       );
     }
   }

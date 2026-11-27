@@ -33,11 +33,8 @@ import { trackAudit } from "../services/audit.ts";
 import { recordConnectionCalls } from "../services/credential-proxy/call-journal.ts";
 import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { RUN_ROUTE_RATE_PER_MIN, rateLimitByBearer } from "../middleware/rate-limit.ts";
-import {
-  recordRunDegradedIntegration,
-  recordRunScopeRequest,
-  recordRunUnavailableTools,
-} from "../services/state/runs.ts";
+import { recordRunDegradedIntegration, recordRunUnavailableTools } from "../services/state/runs.ts";
+import { MAX_REQUIRED_SCOPES } from "@appstrate/core/www-authenticate";
 import { recordToolSnapshot } from "../services/integration-tool-snapshots.ts";
 import {
   OBSERVED_TOOLS_MAX_BYTES,
@@ -81,7 +78,6 @@ import {
 } from "../services/integration-service.ts";
 import {
   clearReachableUpstreamRejections,
-  MAX_REQUESTED_SCOPES,
   recordRequestedScopes,
   isIntegrationActive,
 } from "../services/integration-connections.ts";
@@ -311,7 +307,7 @@ const integrationCallRecordSchema = z
     outcome: z.union([z.string().regex(/^[0-9]{3}$/), z.enum(DISPATCHED_FAILURE_CODES)]),
     duration_ms: z.int().min(0).max(2_147_483_647),
     credential_revision: credentialRevisionSchema.optional(),
-    required_scopes: z.array(scopeTokenSchema).min(1).max(MAX_REQUESTED_SCOPES).optional(),
+    required_scopes: z.array(scopeTokenSchema).min(1).max(MAX_REQUIRED_SCOPES).optional(),
   })
   .strict()
   .refine(
@@ -709,19 +705,13 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
     for (const [i, call] of calls.entries()) {
       const connectionId = connectionIds[i];
       if (call.required_scopes === undefined || !connectionId) continue;
-      const standing = await recordRequestedScopes(
+      await recordRequestedScopes(
         connectionId,
         call.integration_id,
         { spaceId: run.spaceId, actor },
         call.required_scopes,
+        { orgId: run.orgId, id: runId },
       );
-      if (standing?.length) {
-        await recordRunScopeRequest(run.orgId, runId, {
-          integrationId: call.integration_id,
-          connectionId,
-          scopes: standing,
-        });
-      }
     }
     return c.body(null, 204);
   });

@@ -15,9 +15,8 @@ import { listSpacePermissionHolders } from "../lib/space-role.ts";
 import { usersReachingConnection } from "./integration-connections.ts";
 import { readIntegrationManifestForConnect } from "./integration-service.ts";
 import {
-  judgeToolSpacePolicy,
   resolveEffectiveToolCatalog,
-  readToolSpaceRowsForSpaces,
+  loadToolSpacePoliciesForSpaces,
 } from "./integration-tool-catalog.ts";
 import { readToolSnapshots } from "./integration-tool-snapshot-reads.ts";
 import { insertToolReviewNotifications } from "./state/notifications.ts";
@@ -60,14 +59,14 @@ export async function scheduleToolReviewNotifications(params: {
       display_name: read.manifest.display_name ?? packageId,
     };
     // Read once for every space: the snapshot, then the approvals and blocks of all of them.
-    const [snapshots, rowsBySpace] = await Promise.all([
+    const [snapshots, policyBySpace] = await Promise.all([
       readToolSnapshots({ orgId, packageId, connectionIds: [connectionId] }),
-      readToolSpaceRowsForSpaces(orgId, [...active], packageId),
+      loadToolSpacePoliciesForSpaces(orgId, [...active], packageId, read.manifest),
     ]);
     for (const spaceId of active) {
       const catalog = resolveEffectiveToolCatalog({
         integration: read.manifest,
-        policy: judgeToolSpacePolicy(rowsBySpace.get(spaceId)!, read.manifest),
+        policy: policyBySpace.get(spaceId)!,
         snapshots,
       });
       if (!catalog.some((entry) => entry.status === "pending" && names.includes(entry.name))) {

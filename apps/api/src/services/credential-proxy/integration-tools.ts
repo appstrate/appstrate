@@ -20,7 +20,6 @@ import {
   getRemoteSource,
   isUnauthenticatedIntegration,
   missingScopesForConnection,
-  resolveIntegrationToolCatalog,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
@@ -38,8 +37,10 @@ import { ApiError, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ProxyConnectionStatus } from "../integration-connections.ts";
 import {
-  approvedToolNames,
+  apiCallBlocks,
+  declaredToolNames,
   loadToolSpacePolicy,
+  unblockedApprovedToolNames,
   type ToolSpacePolicy,
 } from "../integration-tool-catalog.ts";
 import {
@@ -258,9 +259,7 @@ function apiCallToolNames(
   namespace: string,
   manifest: IntegrationManifest,
 ): Map<string, string> {
-  const catalog = new Set(
-    resolveIntegrationToolCatalog({ integration: manifest }).map((entry) => entry.name),
-  );
+  const catalog = new Set(declaredToolNames(manifest));
   const holders = new Map<string, string[]>();
   for (const config of getApiCallConfigs(manifest)) {
     if (!catalog.has(config.toolName)) continue;
@@ -299,7 +298,7 @@ function apiCallTools(entry: ListedIntegration): ApiCallTool[] {
     described ? ` ${/[.!?…]$/.test(described) ? described : `${described}.`}` : ""
   }`;
   return configs.flatMap((config): ApiCallTool[] => {
-    if (policy.blocks.includes(config.toolName)) return [];
+    if (apiCallBlocks(config, policy.blocks).callBlocked) return [];
     const name = apiCallToolName(namespace, config.toolName);
     const reached = connections.filter((c) => c.auth_key === config.authKey);
     if (entry.apiCallNames.get(name) !== config.toolName || reached.length === 0) return [];
@@ -371,7 +370,7 @@ function mayNameRemoteTool(entry: ListedIntegration, name: string): boolean {
   // An approved tool is named like a declared one; its listing says whether it is offered.
   const nameable = new Set([
     ...offeredRemoteToolNames(entry.manifest, undefined, policy),
-    ...approvedToolNames(policy),
+    ...unblockedApprovedToolNames(policy),
   ]);
   return exposeRemoteTools(entry.id, entry.namespace, nameable).has(name);
 }

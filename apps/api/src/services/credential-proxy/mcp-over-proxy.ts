@@ -18,6 +18,7 @@ import {
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
+import { OBSERVED_TOOLS_MAX_COUNT } from "@appstrate/core/sidecar-types";
 import { requiredScopesFromChallenge } from "@appstrate/core/www-authenticate";
 import { templateHost } from "@appstrate/afps-runtime/resolvers";
 import type { Actor } from "../../lib/actor.ts";
@@ -90,7 +91,6 @@ class McpCredentialRejectedError extends Error {
   }
 }
 
-const MAX_LISTED_TOOLS = 500;
 /** Bounds a server answering `nextCursor` forever with empty pages. */
 const MAX_LISTED_PAGES = 20;
 /** The longest tool name read (MCP's own bound); a longer one is dropped. */
@@ -113,11 +113,11 @@ export async function listToolPages(
         });
     }
     cursor = res.nextCursor;
-    if (!cursor || tools.length >= MAX_LISTED_TOOLS) break;
+    if (!cursor || tools.length >= OBSERVED_TOOLS_MAX_COUNT) break;
   }
   return {
-    tools: tools.slice(0, MAX_LISTED_TOOLS),
-    truncated: tools.length > MAX_LISTED_TOOLS || !!cursor,
+    tools: tools.slice(0, OBSERVED_TOOLS_MAX_COUNT),
+    truncated: tools.length > OBSERVED_TOOLS_MAX_COUNT || !!cursor,
   };
 }
 
@@ -626,10 +626,10 @@ export function mcpServerFailure(
         upstreamProxyStatus({ error: "http_protocol_error", receivedStatus: status }),
       );
     }
-    const credential = err instanceof McpCredentialRejectedError ? err.credential : undefined;
-    const requiredScopes =
-      err instanceof McpCredentialRejectedError ? err.requiredScopes : undefined;
-    const connectionId = err instanceof McpCredentialRejectedError ? err.connectionId : undefined;
+    const rejected = err instanceof McpCredentialRejectedError ? err : undefined;
+    const credential = rejected?.credential;
+    const requiredScopes = rejected?.requiredScopes;
+    const connectionId = rejected?.connectionId;
     return new ApiError({
       status: 502,
       code: "upstream_credential_rejected",

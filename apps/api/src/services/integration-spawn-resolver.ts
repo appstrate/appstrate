@@ -42,7 +42,6 @@ import {
   getLocalServerEnv,
   isUnauthenticatedIntegration,
   resolveEffectiveToolSelection,
-  resolveIntegrationToolCatalog,
   selectedApiCallConfigs,
 } from "@appstrate/core/integration";
 import type {
@@ -67,7 +66,7 @@ import {
   approvedFingerprintsByTool,
   isClosedRemoteCatalog,
   namedToolSelection,
-  syntheticToolNames,
+  declaredToolNames,
   loadToolSpacePolicy,
 } from "./integration-tool-catalog.ts";
 import {
@@ -84,6 +83,7 @@ import {
 } from "./integration-service.ts";
 import {
   renderRemoteSource,
+  syntheticToolNames,
   renderCredentialTemplate,
   renderAuthAuthorizedUris,
   runnerEgressFor,
@@ -542,9 +542,7 @@ async function resolveOne(
     ...workspaceMount,
   });
   const approvedByTool = approvedFingerprintsByTool(policy);
-  const declaredNames = new Set(
-    resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
-  );
+  const declaredNames = new Set(declaredToolNames(manifest));
   const closedRemote = isClosedRemoteCatalog(manifest);
   // A wildcard on a closed remote catalog is not "every tool the server lists": it is what the
   // manifest declares plus what the space approved, named like an explicit selection.

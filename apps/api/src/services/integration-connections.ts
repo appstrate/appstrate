@@ -24,7 +24,8 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { sanitiseRequiredScopes } from "@appstrate/core/www-authenticate";
+import { MAX_REQUIRED_SCOPES, sanitiseRequiredScopes } from "@appstrate/core/www-authenticate";
+import { recordRunScopeRequest } from "./state/runs.ts";
 import {
   spacePackages,
   integrationConnections,
@@ -2706,57 +2707,66 @@ export function clearReachableUpstreamRejections(
   );
 }
 
-/** The most scopes kept as a connection's demand: a server controls what it asks for. */
-export const MAX_REQUESTED_SCOPES = 20;
-
 /**
  * Record the scopes a server asked for (`insufficient_scope`) that a connection does not hold, for
  * a caller whose `reach` reaches it. The ONE writer of `requested_scopes`, whatever the door (the
  * credential proxy outside a run, a run's report); {@link persistCredentialBundle} is the one
- * that clears it. Only valid scope tokens are kept, at most {@link MAX_REQUESTED_SCOPES}. Only an
+ * that clears it. Only valid scope tokens are kept, at most `MAX_REQUIRED_SCOPES`. Only an
  * OAuth2 connection (one with a minting client) takes a demand: a consent is what grants scopes,
- * and only its grant ever clears them. A demand that gains a scope is announced to the owner.
+ * and only its grant ever clears them. A demand that gains a scope is announced to the owner; a
+ * call made by a `run` also stamps the standing demand on that run (`scope_requests`).
  */
 export async function recordRequestedScopes(
   connectionId: string,
   integrationId: string,
   reach: { spaceId: string; actor: Actor },
   scopes: readonly string[],
+  run?: { orgId: string; id: string },
 ): Promise<string[] | null> {
-  const [row] = await db
-    .select({
-      granted: integrationConnections.scopesGranted,
-      requested: integrationConnections.requestedScopes,
-      ...ownerColumns,
-    })
-    .from(integrationConnections)
-    .where(
-      and(
-        reachableConnection(connectionId, integrationId, reach),
-        isNotNull(integrationConnections.clientRef),
+  // Read and written under the row's lock: two concurrent demands merge, never overwrite each other.
+  const outcome = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({
+        granted: integrationConnections.scopesGranted,
+        requested: integrationConnections.requestedScopes,
+        ...ownerColumns,
+      })
+      .from(integrationConnections)
+      .where(
+        and(
+          reachableConnection(connectionId, integrationId, reach),
+          isNotNull(integrationConnections.clientRef),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    if (!row) return null;
+    const granted = new Set(row.granted);
+    const next = [
+      ...new Set(
+        [...row.requested, ...sanitiseRequiredScopes(scopes)].filter((s) => !granted.has(s)),
       ),
-    )
-    .limit(1);
-  if (!row) return null;
-  const granted = new Set(row.granted);
-  const next = [
-    ...new Set(
-      [...row.requested, ...sanitiseRequiredScopes(scopes)].filter((s) => !granted.has(s)),
-    ),
-  ].slice(0, MAX_REQUESTED_SCOPES);
-  if (next.length === row.requested.length && next.every((s, i) => s === row.requested[i]))
-    return next;
-  await db
-    .update(integrationConnections)
-    .set({ requestedScopes: next })
-    .where(reachableConnection(connectionId, integrationId, reach));
-  if (next.some((s) => !row.requested.includes(s))) {
+    ].slice(0, MAX_REQUIRED_SCOPES);
+    if (next.length === row.requested.length && next.every((s, i) => s === row.requested[i]))
+      return { next, announce: null };
+    await tx
+      .update(integrationConnections)
+      .set({ requestedScopes: next })
+      .where(reachableConnection(connectionId, integrationId, reach));
+    return { next, announce: next.some((s) => !row.requested.includes(s)) ? row : null };
+  });
+  if (!outcome) return null;
+  const { next, announce } = outcome;
+  if (announce) {
     announceRequestedScopes({
-      orgId: row.orgId,
-      spaceId: row.spaceId,
+      orgId: announce.orgId,
+      spaceId: announce.spaceId,
       connectionId,
-      owner: actorFromIds(row.userId, row.endUserId)!,
+      owner: actorFromIds(announce.userId, announce.endUserId)!,
     });
+  }
+  if (run && next.length > 0) {
+    await recordRunScopeRequest(run.orgId, run.id, { integrationId, connectionId, scopes: next });
   }
   return next;
 }

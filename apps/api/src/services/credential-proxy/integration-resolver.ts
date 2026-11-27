@@ -197,6 +197,27 @@ export async function resolveIntegrationProxyCredentials(
   let connection = await resolveConnection(input, manifest);
   if (!connection) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
 
+  // The space's policy refuses before anything is refreshed: a refused call must not touch the credential.
+  const policy = input.mcpTransport
+    ? null
+    : await loadToolSpacePolicy(
+        { orgId: input.orgId, spaceId: input.spaceId },
+        input.integrationId,
+        manifest,
+      );
+  const assertNotBlocked = (authKey: string): void => {
+    if (!policy) return;
+    for (const config of getApiCallConfigs(manifest)) {
+      if (config.authKey !== authKey) continue;
+      const { callBlocked, uploadBlocked } = apiCallBlocks(config, policy.blocks);
+      if (callBlocked) throw toolBlockedInSpace(input.integrationId, config.toolName);
+      if (input.upload && uploadBlocked) {
+        throw toolBlockedInSpace(input.integrationId, config.uploadToolName!);
+      }
+    }
+  };
+  assertNotBlocked(connection.authKey);
+
   // A credential about to expire is refreshed before it is sent, not after its first 401.
   let payload: ProxyCredentialsPayload | null = null;
   let credentialRevision = connection.credentialRevision;
@@ -230,6 +251,7 @@ export async function resolveIntegrationProxyCredentials(
       // Flagged just now: the selection answers as it does for a connection flagged before the call.
       const reselected = await resolveConnection(input, manifest);
       if (!reselected) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
+      if (reselected.authKey !== connection.authKey) assertNotBlocked(reselected.authKey);
       connection = reselected;
       credentialRevision = connection.credentialRevision;
       break;
@@ -237,23 +259,9 @@ export async function resolveIntegrationProxyCredentials(
     // `kept`: nothing to do. `retry`: the stored credential is served, the upstream decides.
   }
 
-  let remoteMcp: McpEndpoint | null = null;
-  if (!input.mcpTransport) {
-    const policy = await loadToolSpacePolicy(
-      { orgId: input.orgId, spaceId: input.spaceId },
-      input.integrationId,
-      manifest,
-    );
-    for (const config of getApiCallConfigs(manifest)) {
-      if (config.authKey !== connection.authKey) continue;
-      const { callBlocked, uploadBlocked } = apiCallBlocks(config, policy.blocks);
-      if (callBlocked) throw toolBlockedInSpace(input.integrationId, config.toolName);
-      if (input.upload && uploadBlocked) {
-        throw toolBlockedInSpace(input.integrationId, config.uploadToolName!);
-      }
-    }
-    remoteMcp = renderRemoteSource(manifest, connection.variables);
-  }
+  const remoteMcp: McpEndpoint | null = input.mcpTransport
+    ? null
+    : renderRemoteSource(manifest, connection.variables);
 
   return {
     payload: payload ?? buildPayload(input.integrationId, manifest, connection),
