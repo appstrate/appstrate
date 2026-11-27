@@ -825,14 +825,7 @@
       "idx": 117,
       "version": "7",
       "when": 1795727818644,
-      "tag": "0117_integration_tool_policy",
-      "breakpoints": true
-    },
-    {
-      "idx": 118,
-      "version": "7",
-      "when": 1795729131922,
-      "tag": "0118_connection_requested_scopes",
+      "tag": "0117_integration_tools_and_scopes",
       "breakpoints": true
     }
   ]

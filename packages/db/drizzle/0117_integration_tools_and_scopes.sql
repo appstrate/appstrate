@@ -1,5 +1,7 @@
--- Tool snapshots, per-space tool approvals and blocks, and the `integration_tools_review` notification
--- kind (its CHECK re-stated, plus one unread notice per space, recipient and integration).
+-- Tool snapshots, per-space tool approvals and blocks, a connection's step-up demand
+-- (`requested_scopes`: the scopes a server asked for that it does not hold; empty = none, no
+-- backfill), and two notification kinds, `integration_tools_review` and
+-- `connection_scopes_requested` (the CHECK re-stated, plus one unread notice each).
 CREATE TABLE "integration_tool_snapshots" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"org_id" uuid NOT NULL,
@@ -33,6 +35,7 @@ CREATE TABLE "space_integration_tool_blocks" (
 	"blocked_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+ALTER TABLE "integration_connections" ADD COLUMN "requested_scopes" text[] DEFAULT '{}'::text[] NOT NULL;--> statement-breakpoint
 ALTER TABLE "notifications" DROP CONSTRAINT "notifications_type_valid";--> statement-breakpoint
 ALTER TABLE "integration_tool_snapshots" ADD CONSTRAINT "integration_tool_snapshots_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "integration_tool_snapshots" ADD CONSTRAINT "integration_tool_snapshots_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -52,4 +55,5 @@ CREATE UNIQUE INDEX "uq_space_integration_tool_blocks" ON "space_integration_too
 CREATE INDEX "idx_space_integration_tool_blocks_package" ON "space_integration_tool_blocks" USING btree ("package_id");--> statement-breakpoint
 CREATE INDEX "idx_space_integration_tool_blocks_blocked_by" ON "space_integration_tool_blocks" USING btree ("blocked_by") WHERE "space_integration_tool_blocks"."blocked_by" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_notifications_tools_review_unread" ON "notifications" USING btree ("space_id","recipient_type","recipient_id",("payload"->>'packageId')) WHERE "notifications"."type" = 'integration_tools_review' AND "notifications"."read_at" IS NULL;--> statement-breakpoint
-ALTER TABLE "notifications" ADD CONSTRAINT "notifications_type_valid" CHECK (type IN ('run_failed', 'package_shared', 'agent_message', 'credential_needs_reconnection', 'integration_tools_review'));
+CREATE UNIQUE INDEX "uq_notifications_scopes_requested_unread" ON "notifications" USING btree ("recipient_type","recipient_id",("payload"->>'connection_id')) WHERE "notifications"."type" = 'connection_scopes_requested' AND "notifications"."read_at" IS NULL;--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_type_valid" CHECK (type IN ('run_failed', 'package_shared', 'agent_message', 'credential_needs_reconnection', 'integration_tools_review', 'connection_scopes_requested'));
