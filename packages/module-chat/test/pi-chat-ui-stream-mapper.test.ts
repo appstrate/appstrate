@@ -538,7 +538,7 @@ describe("a call's presentation", () => {
     isError,
   });
 
-  it("keeps a failure's acted spaces beside its presentation, a success's in its output", () => {
+  it("stamps the acted spaces beside the presentation, on a success as on a failure", () => {
     const acted = (isError: boolean): AgentSessionEvent => {
       const event = end(isError) as Extract<AgentSessionEvent, { type: "tool_execution_end" }>;
       return { ...event, result: { ...(event.result as object), actedSpaceIds: ["spc_target"] } };
@@ -558,9 +558,8 @@ describe("a call's presentation", () => {
         output: {
           content: [{ type: "text", text: "403 Resource not accessible" }],
           relayed: true,
-          actedSpaceIds: ["spc_target"],
         },
-        providerMetadata: { appstrate: { presentation } },
+        providerMetadata: { appstrate: { presentation, actedSpaceIds: ["spc_target"] } },
       },
     ]);
   });

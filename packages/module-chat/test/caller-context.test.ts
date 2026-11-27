@@ -725,9 +725,12 @@ describe("buildCallerContextBlock", () => {
         spc_p: {
           space: { id: "spc_p" },
           connections: [],
-          connectable_integrations: ["@appstrate/slack"],
-          agents: [{ packageId: "@acme/digest", display_name: "Digest", published: true }],
-          agents_total: 1,
+          connectable_integrations: { data: ["@appstrate/slack"], truncated: false, total: 1 },
+          agents: {
+            data: [{ packageId: "@acme/digest", display_name: "Digest", published: true }],
+            truncated: false,
+            total: 1,
+          },
         },
         // `spc_v` is absent: its get_me fails and it is left out.
       },
@@ -776,7 +779,12 @@ describe("buildCallerContextBlock", () => {
       getMe: Object.fromEntries(
         many.map((space) => [
           space.id,
-          { space: { id: space.id }, connections: [], connectable_integrations: [], agents: [] },
+          {
+            space: { id: space.id },
+            connections: [],
+            connectable_integrations: { data: [], truncated: false, total: 0 },
+            agents: { data: [], truncated: false, total: 0 },
+          },
         ]),
       ),
     });

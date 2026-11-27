@@ -13,7 +13,7 @@ import {
   spaceRoleAssignmentShape,
   toAssignment,
 } from "../lib/space-role-assignment.ts";
-import { defaultPersonalSpaceRole, toSpaceRoleWire } from "../lib/space-role.ts";
+import { defaultPersonalSpaceRole, toSpaceRoleReference } from "../lib/space-role.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { listCallerOrganizations } from "../lib/principal-permissions.ts";
 import { callerReachableSpaces } from "../lib/reachable-spaces.ts";
@@ -68,12 +68,8 @@ import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { recordSharesRemoved } from "../services/connection-shares.ts";
-import {
-  ASSIGNABLE_ORG_ROLES,
-  type OrganizationMemberSpace,
-  type SpaceRoleAssignment,
-} from "@appstrate/shared-types";
-import { ORG_ROLES, personalSpaceRoleSettingSchema } from "@appstrate/core/permissions";
+import { ASSIGNABLE_ORG_ROLES, type OrganizationMemberSpace } from "@appstrate/shared-types";
+import { ORG_ROLES } from "@appstrate/core/permissions";
 import { appearanceColorSchema, appearanceIconSchema } from "@appstrate/core/appearance";
 
 export const createOrgSchema = z
@@ -255,18 +251,23 @@ async function memberSpacesForCaller(
   return listSpacesOfMembers(orgId, readable);
 }
 
-/** A member's personal-space override and default role, both `null` unless `mayChange`. */
+/**
+ * A member's personal-space override and default role. Both fields are omitted without
+ * `mayChange`; an owner or admin has no override (`null`) and holds `admin` by default.
+ */
 async function personalSpaceView(orgId: string, mayChange: boolean, userIds?: readonly string[]) {
-  const [overrides, orgDefault] = mayChange
-    ? await Promise.all([
-        listPersonalSpaceRoleOverrides(orgId, userIds),
-        getOrgPersonalSpaceDefault(orgId),
-      ])
-    : [new Map<string, SpaceRoleAssignment>(), null];
+  if (!mayChange) return (_userId: string, _orgRole: OrgRole) => ({});
+  const [overrides, orgDefault] = await Promise.all([
+    listPersonalSpaceRoleOverrides(orgId, userIds),
+    getOrgPersonalSpaceDefault(orgId),
+  ]);
   return (userId: string, orgRole: OrgRole) => ({
     personal_space_role: overrides.get(userId) ?? null,
-    personal_space_default_role:
-      orgDefault && toSpaceRoleWire(defaultPersonalSpaceRole(orgRole, orgDefault)),
+    ...(orgDefault && {
+      personal_space_default_role: toSpaceRoleReference(
+        defaultPersonalSpaceRole(orgRole, orgDefault),
+      ),
+    }),
   });
 }
 
@@ -734,16 +735,19 @@ router.post("/:orgId/leave", async (c) => {
   return c.body(null, 204);
 });
 
-const personalSpaceRoleImpactQuerySchema = z.object({ role: personalSpaceRoleSettingSchema });
+// Exactly one of `preset_role` / `custom_role_id`, the same reference every role write takes.
+const personalSpaceRoleImpactQuerySchema = exactlyOneRole(
+  z.object({ ...spaceRoleAssignmentShape }),
+);
 
-// GET /api/orgs/:orgId/personal-space-role/impact?role=… — what the candidate default would stop
+// GET /api/orgs/:orgId/personal-space-role/impact?preset_role=… | ?custom_role_id=… — what the candidate default would stop
 router.get(
   "/:orgId/personal-space-role/impact",
   requirePermission("org", "settings"),
   async (c) => {
     const orgId = c.req.param("orgId")!;
-    const { role } = parseBody(personalSpaceRoleImpactQuerySchema, c.req.query());
-    return c.json(await personalSpaceRoleImpact(orgId, role));
+    const query = parseBody(personalSpaceRoleImpactQuerySchema, c.req.query());
+    return c.json(await personalSpaceRoleImpact(orgId, toAssignment(query)));
   },
 );
 
@@ -806,7 +810,7 @@ router.patch("/:orgId/settings", requirePermission("org", "settings"), async (c)
       dashboardSsoEnabled: data.dashboard_sso_enabled,
       restrictPackageCopy: data.restrict_package_copy,
       personalModelCredentials: data.personal_model_credentials,
-      personalSpaceRole: data.personal_space_role,
+      personalSpaceRole: data.personal_space_role && auditSpaceRole(data.personal_space_role),
     },
     orgIdOverride: orgId,
   });

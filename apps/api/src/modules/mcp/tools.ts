@@ -2469,7 +2469,7 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
   const descriptor: Tool = {
     name: "get_me",
     description:
-      "Return the caller's working context in the space of the call: `user`, `org` (with the " +
+      "Return the caller's working context in the space of the call (each of `connectable_integrations`, `agents` and `skills` is an envelope `{ data, truncated, total }`): `user`, `org` (with the " +
       "organization `role`), `space`, `connections`, `connectable_integrations`, `agents`, `skills` " +
       "and `recent_runs`" +
       (ctx.orgSpaces
@@ -2505,11 +2505,10 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "`connectable_integrations` names the integrations active in " +
       "THIS space that the caller has not connected and for which a connect flow can start: " +
       "connecting one makes it usable here. It is whole or withheld: more than 15 and it is " +
-      "empty with `connectable_integrations_truncated` true and the count in " +
-      "`connectable_integrations_total`; `search` finds them by keyword. " +
+      "empty with `connectable_integrations.truncated` true and the count in " +
+      "`connectable_integrations.total`; `search` finds them by keyword. " +
       "`agents` and `skills` are listed whole, by id, or not at all: past 15 entries a list is " +
-      "empty, with `agents_truncated` / `skills_truncated` true and `agents_total` / " +
-      "`skills_total` counting it, and `search` finds its entries by keyword.",
+      "empty, with `truncated` true and `total` counting it, and `search` finds its entries by keyword.",
     annotations: {
       title: "Get caller context",
       readOnlyHint: true,

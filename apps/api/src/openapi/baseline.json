@@ -15861,8 +15861,7 @@
                       ],
                       "personal_space_role": null,
                       "personal_space_default_role": {
-                        "kind": "preset",
-                        "key": "admin",
+                        "preset_role": "admin",
                         "name": "admin"
                       }
                     },
@@ -15888,8 +15887,7 @@
                         "preset_role": "builder"
                       },
                       "personal_space_default_role": {
-                        "kind": "preset",
-                        "key": "admin",
+                        "preset_role": "admin",
                         "name": "admin"
                       }
                     }
@@ -16252,8 +16250,7 @@
                   ],
                   "personal_space_role": null,
                   "personal_space_default_role": {
-                    "kind": "preset",
-                    "key": "admin",
+                    "preset_role": "admin",
                     "name": "admin"
                   }
                 }
@@ -16486,7 +16483,7 @@
         },
         "tags": ["Organizations"],
         "summary": "Preview what a personal-space default would stop",
-        "description": "What setting the organization's `personal_space_role` to `role` would stop, without writing anything. `schedules` counts the ENABLED schedules in live personal spaces whose actor is the space's owner, a member or guest who follows the default (no override of their own, see `setMemberPersonalSpaceRole`) and would hold, under `role`, a resolved role without `agents:run` (guest cap and delete floor applied, as the resolver applies them). Each such schedule disables itself at its next fire (`disabled_reason: actor_invalid`), and restoring the role does not re-enable it. `members` counts the distinct owners of those schedules. Owners and admins always hold `admin` in their own personal space and are never counted; a `role` that grants `agents:run` answers `{ schedules: 0, members: 0 }`. A snapshot, which a later change can make stale. It discloses only counts, to a caller who may already rewrite the setting: same guard as `updateOrgSettings` (`org:settings`).",
+        "description": "What setting the organization's `personal_space_role` to the candidate role would stop, without writing anything (the candidate is the `preset_role` or `custom_role_id` query parameter, exactly one). `schedules` counts the ENABLED schedules in live personal spaces whose actor is the space's owner, a member or guest who follows the default (no override of their own, see `setMemberPersonalSpaceRole`) and would hold, under the candidate, a resolved role without `agents:run` (guest cap and delete floor applied, as the resolver applies them). Each such schedule disables itself at its next fire (`disabled_reason: actor_invalid`), and restoring the role does not re-enable it. `members` counts the distinct owners of those schedules. Owners and admins always hold `admin` in their own personal space and are never counted; a candidate that grants `agents:run` answers `{ schedules: 0, members: 0 }`. A snapshot, which a later change can make stale. It discloses only counts, to a caller who may already rewrite the setting: same guard as `updateOrgSettings` (`org:settings`).",
         "parameters": [
           {
             "name": "orgId",
@@ -16497,21 +16494,23 @@
             }
           },
           {
-            "name": "role",
+            "name": "preset_role",
             "in": "query",
-            "required": true,
-            "description": "The candidate default, as `updateOrgSettings` takes `personal_space_role`: a preset key or the id of one of this organization's custom space roles.",
+            "required": false,
+            "description": "The candidate default as a preset key, the `preset_role` of `updateOrgSettings`' `personal_space_role`. Exactly one of `preset_role` / `custom_role_id`, else `400`.",
             "schema": {
-              "oneOf": [
-                {
-                  "type": "string",
-                  "enum": ["admin", "builder", "operator", "runner", "viewer"]
-                },
-                {
-                  "type": "string",
-                  "pattern": "^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-                }
-              ]
+              "type": "string",
+              "enum": ["admin", "builder", "operator", "runner", "viewer"]
+            }
+          },
+          {
+            "name": "custom_role_id",
+            "in": "query",
+            "required": false,
+            "description": "The candidate default as the id of one of this organization's custom space roles. Exactly one of `preset_role` / `custom_role_id`, else `400`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
             }
           }
         ],
@@ -16562,7 +16561,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "404": {
-            "description": "`role` names a custom role id that is not a role of this organization",
+            "description": "`custom_role_id` names a custom role id that is not a role of this organization",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16968,7 +16967,9 @@
                 "example": {
                   "api_version": "2026-03-21",
                   "personal_model_credentials": true,
-                  "personal_space_role": "admin"
+                  "personal_space_role": {
+                    "preset_role": "admin"
+                  }
                 }
               }
             }
@@ -17023,18 +17024,31 @@
                     "description": "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH."
                   },
                   "personal_space_role": {
-                    "type": "string",
                     "oneOf": [
                       {
-                        "type": "string",
-                        "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                        "type": "object",
+                        "required": ["preset_role"],
+                        "properties": {
+                          "preset_role": {
+                            "type": "string",
+                            "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                          }
+                        },
+                        "additionalProperties": false
                       },
                       {
-                        "type": "string",
-                        "pattern": "^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        "type": "object",
+                        "required": ["custom_role_id"],
+                        "properties": {
+                          "custom_role_id": {
+                            "type": "string",
+                            "pattern": "^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     ],
-                    "description": "The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH."
+                    "description": "The role an organization member or guest holds by default in their own personal space, as a role reference: `{ preset_role }` (`admin`, `builder`, `operator`, `runner`, `viewer`) or `{ custom_role_id }` (the id of one of this organization's custom space roles, `srl_…`). Defaults to `{ preset_role: \"admin\" }`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH."
                   }
                 },
                 "additionalProperties": false
@@ -18758,15 +18772,9 @@
                     "space": [
                       "connections",
                       "connectable_integrations",
-                      "connectable_integrations_truncated",
-                      "connectable_integrations_total",
                       "recent_runs",
                       "agents",
-                      "agents_truncated",
-                      "agents_total",
-                      "skills",
-                      "skills_truncated",
-                      "skills_total"
+                      "skills"
                     ]
                   },
                   "properties": {
@@ -18825,19 +18833,26 @@
                       }
                     },
                     "connectable_integrations": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Ids of the integrations active in the current space that the caller has not connected and for which a connect flow can start (an `oauth2` auth needs a usable client), sorted by id. One whose only connection needs reconnection is not listed: it stays in `connections`, flagged `needs_reconnection`. Whole or withheld: more than 15 and the list is empty (`connectable_integrations_truncated` true), never a prefix. Empty unless the caller holds `integrations:read` and `integrations:connect`; one whose member connections the space blocks is listed only under `integrations:configure`."
-                    },
-                    "connectable_integrations_truncated": {
-                      "type": "boolean",
-                      "description": "True when `connectable_integrations` was withheld for exceeding 15."
-                    },
-                    "connectable_integrations_total": {
-                      "type": "integer",
-                      "description": "How many connectable integrations there are, listed or withheld."
+                      "type": "object",
+                      "description": "Ids of the integrations active in the current space that the caller has not connected and for which a connect flow can start (an `oauth2` auth needs a usable client), sorted by id. One whose only connection needs reconnection is not listed: it stays in `connections`, flagged `needs_reconnection`. Empty unless the caller holds `integrations:read` and `integrations:connect`; one whose member connections the space blocks is listed only under `integrations:configure`.",
+                      "required": ["data", "truncated", "total"],
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "description": "The entries, whole; empty when `truncated` is true.",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "truncated": {
+                          "type": "boolean",
+                          "description": "True when more than 15 entries exist and `data` was withheld."
+                        },
+                        "total": {
+                          "type": "integer",
+                          "description": "How many entries there are, listed or withheld."
+                        }
+                      }
                     },
                     "recent_runs": {
                       "type": "array",
@@ -18960,116 +18975,130 @@
                       }
                     },
                     "agents": {
-                      "type": "array",
-                      "description": "Agents ACTIVE in the current space, ordered by id, each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. Listed whole or not at all: past 15 agents the list is empty, `agents_truncated` is true, and the agents are reachable via the `listAgents` operation (the MCP `search` tool finds them by keyword).",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "packageId",
-                          "display_name",
-                          "description",
-                          "takes_input",
-                          "inactive_required_integrations",
-                          "published",
-                          "home_writable",
-                          "source"
-                        ],
-                        "properties": {
-                          "packageId": {
-                            "type": "string",
-                            "description": "Invokable identifier, e.g. \"@appstrate/triage\"."
-                          },
-                          "display_name": {
-                            "type": "string"
-                          },
-                          "description": {
-                            "type": "string"
-                          },
-                          "takes_input": {
-                            "type": "boolean",
-                            "description": "Whether the agent declares an input schema with properties."
-                          },
-                          "inactive_required_integrations": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "description": "Ids of the integrations the agent declares `required` that are not active in this space; `[]` when none. Non-empty: a launch here is refused (`409`, `errors[].code: integration_not_active`) until each is activated in this space (`POST /api/spaces/{id}/packages`). Empty does not mean the launch will succeed: connections are judged at launch and by `GET /api/agents/{scope}/{name}/connection-readiness`. Judged on the definition a launch with `version` omitted runs: the latest published version (the rest of the entry describes the draft), or, for an agent with no published version, the draft (`version=draft` is then its only launch), or a system agent's own definition. A launch naming another version may differ."
-                          },
-                          "published": {
-                            "type": "boolean",
-                            "description": "True when the agent has a published version (or is a system agent) — run it via `runAgent` with `version` omitted. False means draft-only: omitting `version` answers 404 `no_published_version`."
-                          },
-                          "home_writable": {
-                            "type": "boolean",
-                            "description": "Whether THIS caller may write the agent, i.e. whether its draft is theirs to run with `version=draft` (403 `draft_not_writable` otherwise). Read with `published`: false/false is an agent this caller cannot execute at all until its author publishes one."
-                          },
-                          "source": {
-                            "type": "string",
-                            "enum": ["local", "system"]
+                      "type": "object",
+                      "description": "Agents ACTIVE in the current space, ordered by id, each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. The full list is the `listAgents` operation (the MCP `search` tool finds them by keyword).",
+                      "required": ["data", "truncated", "total"],
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "description": "The entries, whole; empty when `truncated` is true.",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "packageId",
+                              "display_name",
+                              "description",
+                              "takes_input",
+                              "inactive_required_integrations",
+                              "published",
+                              "home_writable",
+                              "source"
+                            ],
+                            "properties": {
+                              "packageId": {
+                                "type": "string",
+                                "description": "Invokable identifier, e.g. \"@appstrate/triage\"."
+                              },
+                              "display_name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "takes_input": {
+                                "type": "boolean",
+                                "description": "Whether the agent declares an input schema with properties."
+                              },
+                              "inactive_required_integrations": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "description": "Ids of the integrations the agent declares `required` that are not active in this space; `[]` when none. Non-empty: a launch here is refused (`409`, `errors[].code: integration_not_active`) until each is activated in this space (`POST /api/spaces/{id}/packages`). Empty does not mean the launch will succeed: connections are judged at launch and by `GET /api/agents/{scope}/{name}/connection-readiness`. Judged on the definition a launch with `version` omitted runs: the latest published version (the rest of the entry describes the draft), or, for an agent with no published version, the draft (`version=draft` is then its only launch), or a system agent's own definition. A launch naming another version may differ."
+                              },
+                              "published": {
+                                "type": "boolean",
+                                "description": "True when the agent has a published version (or is a system agent) — run it via `runAgent` with `version` omitted. False means draft-only: omitting `version` answers 404 `no_published_version`."
+                              },
+                              "home_writable": {
+                                "type": "boolean",
+                                "description": "Whether THIS caller may write the agent, i.e. whether its draft is theirs to run with `version=draft` (403 `draft_not_writable` otherwise). Read with `published`: false/false is an agent this caller cannot execute at all until its author publishes one."
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": ["local", "system"]
+                              }
+                            }
                           }
+                        },
+                        "truncated": {
+                          "type": "boolean",
+                          "description": "True when more than 15 entries exist and `data` was withheld."
+                        },
+                        "total": {
+                          "type": "integer",
+                          "description": "How many entries there are, listed or withheld."
                         }
                       }
-                    },
-                    "agents_truncated": {
-                      "type": "boolean",
-                      "description": "True when more agents are active than the cap; `agents` is then empty (full list via `listAgents`)."
-                    },
-                    "agents_total": {
-                      "type": "integer",
-                      "description": "Total active agents, listed or not."
                     },
                     "skills": {
-                      "type": "array",
-                      "description": "Skills the caller could attach to an agent in the current space, ordered by id. A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. Listed whole or not at all: past 15 skills the list is empty, `skills_truncated` is true, and the skills are reachable via the `listSkills` operation (the MCP `search` tool finds them by keyword).",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "packageId",
-                          "display_name",
-                          "description",
-                          "version",
-                          "published",
-                          "home_writable",
-                          "source"
-                        ],
-                        "properties": {
-                          "packageId": {
-                            "type": "string",
-                            "description": "Attachable identifier, e.g. \"@appstrate/web-research\". Declare under dependencies.skills."
-                          },
-                          "display_name": {
-                            "type": "string"
-                          },
-                          "description": {
-                            "type": "string"
-                          },
-                          "version": {
-                            "type": ["string", "null"],
-                            "description": "The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range."
-                          },
-                          "published": {
-                            "type": "boolean",
-                            "description": "True when the skill has a published version (or is a system skill). False means draft-only: a manifest range can select nothing, and only `dependency_overrides` with `draft` reaches its working copy."
-                          },
-                          "home_writable": {
-                            "type": "boolean",
-                            "description": "Whether THIS caller may write the skill, i.e. whether its draft is theirs to run — `dependency_overrides` with `draft` answers 403 `draft_not_writable` otherwise."
-                          },
-                          "source": {
-                            "type": "string",
-                            "enum": ["local", "system"]
+                      "type": "object",
+                      "description": "Skills the caller could attach to an agent in the current space, ordered by id. A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly: declare them under an agent manifest's `dependencies.skills`. The full list is the `listSkills` operation (the MCP `search` tool finds them by keyword).",
+                      "required": ["data", "truncated", "total"],
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "description": "The entries, whole; empty when `truncated` is true.",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "packageId",
+                              "display_name",
+                              "description",
+                              "version",
+                              "published",
+                              "home_writable",
+                              "source"
+                            ],
+                            "properties": {
+                              "packageId": {
+                                "type": "string",
+                                "description": "Attachable identifier, e.g. \"@appstrate/web-research\". Declare under dependencies.skills."
+                              },
+                              "display_name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "version": {
+                                "type": ["string", "null"],
+                                "description": "The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range."
+                              },
+                              "published": {
+                                "type": "boolean",
+                                "description": "True when the skill has a published version (or is a system skill). False means draft-only: a manifest range can select nothing, and only `dependency_overrides` with `draft` reaches its working copy."
+                              },
+                              "home_writable": {
+                                "type": "boolean",
+                                "description": "Whether THIS caller may write the skill, i.e. whether its draft is theirs to run — `dependency_overrides` with `draft` answers 403 `draft_not_writable` otherwise."
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": ["local", "system"]
+                              }
+                            }
                           }
+                        },
+                        "truncated": {
+                          "type": "boolean",
+                          "description": "True when more than 15 entries exist and `data` was withheld."
+                        },
+                        "total": {
+                          "type": "integer",
+                          "description": "How many entries there are, listed or withheld."
                         }
                       }
-                    },
-                    "skills_truncated": {
-                      "type": "boolean",
-                      "description": "True when more skills are active than the cap; `skills` is then empty (full list via `listSkills`)."
-                    },
-                    "skills_total": {
-                      "type": "integer",
-                      "description": "Total active skills, listed or not."
                     }
                   }
                 },
@@ -19124,9 +19153,11 @@
                       ]
                     }
                   ],
-                  "connectable_integrations": ["@appstrate/slack"],
-                  "connectable_integrations_truncated": false,
-                  "connectable_integrations_total": 1,
+                  "connectable_integrations": {
+                    "data": ["@appstrate/slack"],
+                    "truncated": false,
+                    "total": 1
+                  },
                   "recent_runs": [
                     {
                       "packageId": "@appstrate/triage",
@@ -19136,33 +19167,37 @@
                       "error": "Gmail token expired"
                     }
                   ],
-                  "agents": [
-                    {
-                      "packageId": "@appstrate/triage",
-                      "display_name": "Inbox Triage",
-                      "description": "Sorts and labels incoming email.",
-                      "takes_input": false,
-                      "inactive_required_integrations": [],
-                      "published": true,
-                      "home_writable": false,
-                      "source": "system"
-                    }
-                  ],
-                  "agents_truncated": false,
-                  "agents_total": 1,
-                  "skills": [
-                    {
-                      "packageId": "@appstrate/web-research",
-                      "display_name": "Web Research",
-                      "description": "Multi-source web search and synthesis.",
-                      "version": "1.2.0",
-                      "published": true,
-                      "home_writable": false,
-                      "source": "system"
-                    }
-                  ],
-                  "skills_truncated": false,
-                  "skills_total": 1
+                  "agents": {
+                    "data": [
+                      {
+                        "packageId": "@appstrate/triage",
+                        "display_name": "Inbox Triage",
+                        "description": "Sorts and labels incoming email.",
+                        "takes_input": false,
+                        "inactive_required_integrations": [],
+                        "published": true,
+                        "home_writable": false,
+                        "source": "system"
+                      }
+                    ],
+                    "truncated": false,
+                    "total": 1
+                  },
+                  "skills": {
+                    "data": [
+                      {
+                        "packageId": "@appstrate/web-research",
+                        "display_name": "Web Research",
+                        "description": "Multi-source web search and synthesis.",
+                        "version": "1.2.0",
+                        "published": true,
+                        "home_writable": false,
+                        "source": "system"
+                      }
+                    ],
+                    "truncated": false,
+                    "total": 1
+                  }
                 }
               }
             }
@@ -36264,7 +36299,7 @@
         "name": "X-View-As",
         "in": "header",
         "required": false,
-        "description": "Preview the API as a lesser role (\"view as\"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:\n\n- `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.\n- `space` (optional) — a `spc_` space id. Must be paired with `role`.\n- `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.\n\nExample: `org_role=member; space=spc_…; role=preset:viewer`.\n\nThe persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.viewAs`.\n\nRefusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.\n\nOn `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.\n\nThe Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.\n\nEvery response produced under a validated persona carries `X-View-As-Active: 1`.",
+        "description": "Preview the API as a lesser role (\"view as\"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:\n\n- `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.\n- `space` (optional) — a `spc_` space id. Must be paired with `role`.\n- `role` (optional) — the textual form of a space-role reference: `preset:<preset_role>` (`<admin|builder|operator|runner|viewer>`) or `custom:<custom_role_id>` (a `srl_` id). Must be paired with `space`.\n\nExample: `org_role=member; space=spc_…; role=preset:viewer`.\n\nThe persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.viewAs`.\n\nRefusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.\n\nOn `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.\n\nThe Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.\n\nEvery response produced under a validated persona carries `X-View-As-Active: 1`.",
         "schema": {
           "type": "string",
           "example": "org_role=member; space=spc_…; role=preset:viewer"
@@ -37198,18 +37233,31 @@
             "description": "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH."
           },
           "personal_space_role": {
-            "type": "string",
             "oneOf": [
               {
-                "type": "string",
-                "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                "type": "object",
+                "required": ["preset_role"],
+                "properties": {
+                  "preset_role": {
+                    "type": "string",
+                    "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                  }
+                },
+                "additionalProperties": false
               },
               {
-                "type": "string",
-                "pattern": "^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                "type": "object",
+                "required": ["custom_role_id"],
+                "properties": {
+                  "custom_role_id": {
+                    "type": "string",
+                    "pattern": "^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  }
+                },
+                "additionalProperties": false
               }
             ],
-            "description": "The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH."
+            "description": "The role an organization member or guest holds by default in their own personal space, as a role reference: `{ preset_role }` (`admin`, `builder`, `operator`, `runner`, `viewer`) or `{ custom_role_id }` (the id of one of this organization's custom space roles, `srl_…`). Defaults to `{ preset_role: \"admin\" }`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH."
           }
         }
       },
@@ -37309,14 +37357,7 @@
       },
       "OrgMember": {
         "type": "object",
-        "required": [
-          "userId",
-          "role",
-          "joinedAt",
-          "spaces",
-          "personal_space_role",
-          "personal_space_default_role"
-        ],
+        "required": ["userId", "role", "joinedAt", "spaces"],
         "properties": {
           "userId": {
             "type": "string"
@@ -37343,7 +37384,7 @@
             }
           },
           "personal_space_role": {
-            "description": "The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null`: they follow the organization default. Always `null` for an owner or admin, who hold `admin` there, and for every member when the caller lacks `members:change-role`: only a caller who may change it reads it.",
+            "description": "The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null` means only \"no override\": the member follows the organization default (`personal_space_default_role`). An owner or admin cannot have one (`null`): they hold `admin` there. Omitted when the caller lacks `members:change-role`: only a caller who may change it reads it.",
             "oneOf": [
               {
                 "type": "null"
@@ -37373,21 +37414,37 @@
             ]
           },
           "personal_space_default_role": {
-            "type": ["object", "null"],
-            "required": ["kind", "key", "name"],
-            "description": "The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it.",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": ["preset", "custom"]
+            "description": "The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. A role reference (`preset_role` or `custom_role_id`) plus its display `name`. Omitted when the caller lacks `members:change-role`, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it.",
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["preset_role", "name"],
+                "properties": {
+                  "preset_role": {
+                    "type": "string",
+                    "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
               },
-              "key": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
+              {
+                "type": "object",
+                "required": ["custom_role_id", "name"],
+                "properties": {
+                  "custom_role_id": {
+                    "type": "string",
+                    "pattern": "^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
               }
-            }
+            ]
           }
         }
       },

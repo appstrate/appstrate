@@ -2,6 +2,7 @@
 
 import { MODEL_ERROR_CATEGORIES, MODEL_ERROR_REASONS } from "@appstrate/core/model-error";
 import {
+  orgOfferModeValues,
   orgRoleEnum,
   packageSourceValues,
   packageTypeValues,
@@ -61,6 +62,22 @@ const ORG_ROLES = [...orgRoleEnum.enumValues];
 
 /** Custom space-role id pattern, the server's own `srl_`+UUID rule. */
 export const SPACE_ROLE_ID_PATTERN = SPACE_ROLE_ID_REGEX.source;
+
+/** The wire reference to one space role: exactly one of `preset_role` / `custom_role_id`, never a bare string. */
+export const SPACE_ROLE_REFERENCE_ONE_OF = [
+  {
+    type: "object",
+    required: ["preset_role"],
+    properties: { preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] } },
+    additionalProperties: false,
+  },
+  {
+    type: "object",
+    required: ["custom_role_id"],
+    properties: { custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN } },
+    additionalProperties: false,
+  },
+];
 
 const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
   TOKEN_USAGE_COUNTERS.map((counter) => [counter, { type: "integer", minimum: 0 }]),
@@ -208,13 +225,9 @@ export const ORG_SETTINGS_PROPERTIES = {
       "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH.",
   },
   personal_space_role: {
-    type: "string",
-    oneOf: [
-      { type: "string", enum: [...SPACE_ROLE_PRESETS] },
-      { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
-    ],
+    oneOf: SPACE_ROLE_REFERENCE_ONE_OF,
     description:
-      "The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH.",
+      "The role an organization member or guest holds by default in their own personal space, as a role reference: `{ preset_role }` (`admin`, `builder`, `operator`, `runner`, `viewer`) or `{ custom_role_id }` (the id of one of this organization's custom space roles, `srl_…`). Defaults to `{ preset_role: \"admin\" }`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH.",
   },
 };
 
@@ -1000,14 +1013,7 @@ export const schemas = {
     type: "object",
     // `email`/`displayName` are best-effort joins (getOrgMembers emits
     // `?? undefined` when the user/profile row is missing) — NOT required.
-    required: [
-      "userId",
-      "role",
-      "joinedAt",
-      "spaces",
-      "personal_space_role",
-      "personal_space_default_role",
-    ],
+    required: ["userId", "role", "joinedAt", "spaces"],
     properties: {
       userId: { type: "string" },
       displayName: { type: "string" },
@@ -1022,33 +1028,17 @@ export const schemas = {
       },
       personal_space_role: {
         description:
-          "The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null`: they follow the organization default. Always `null` for an owner or admin, who hold `admin` there, and for every member when the caller lacks `members:change-role`: only a caller who may change it reads it.",
-        oneOf: [
-          { type: "null" },
-          {
-            type: "object",
-            required: ["preset_role"],
-            properties: { preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] } },
-            additionalProperties: false,
-          },
-          {
-            type: "object",
-            required: ["custom_role_id"],
-            properties: { custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN } },
-            additionalProperties: false,
-          },
-        ],
+          "The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null` means only \"no override\": the member follows the organization default (`personal_space_default_role`). An owner or admin cannot have one (`null`): they hold `admin` there. Omitted when the caller lacks `members:change-role`: only a caller who may change it reads it.",
+        oneOf: [{ type: "null" }, ...SPACE_ROLE_REFERENCE_ONE_OF],
       },
       personal_space_default_role: {
-        type: ["object", "null"],
-        required: ["kind", "key", "name"],
         description:
-          "The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it.",
-        properties: {
-          kind: { type: "string", enum: ["preset", "custom"] },
-          key: { type: "string" },
-          name: { type: "string" },
-        },
+          "The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. A role reference (`preset_role` or `custom_role_id`) plus its display `name`. Omitted when the caller lacks `members:change-role`, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it.",
+        oneOf: SPACE_ROLE_REFERENCE_ONE_OF.map((ref) => ({
+          ...ref,
+          required: [...ref.required, "name"],
+          properties: { ...ref.properties, name: { type: "string" } },
+        })),
       },
     },
   },
@@ -3334,7 +3324,7 @@ export const schemas = {
         ...PACKAGE_HOME_PROPERTIES,
         org_offer: {
           type: ["string", "null"],
-          enum: ["available", "on_by_default", null],
+          enum: [...orgOfferModeValues, null],
           description:
             "The offer to the organization, or `null` when there is none. An offer in either mode PLACES the package in every space of it that holds no `space_packages` row of its own. `on_by_default`: it is also ACTIVE there (a row always wins; `enabled = false` keeps it off). `available`: it is placed and listed but off until the space switches it on (`POST /api/spaces/{id}/packages`).",
         },
@@ -3388,7 +3378,7 @@ export const schemas = {
       ...PACKAGE_PLACEMENT_STATE_PROPERTIES,
       org_offer: {
         type: ["string", "null"],
-        enum: ["available", "on_by_default", null],
+        enum: [...orgOfferModeValues, null],
         description: "The offer to the organization (`org_offer` of the library entry).",
       },
       org_offerable: {
@@ -3477,7 +3467,7 @@ export const schemas = {
       packageId: { type: "string", description: "Package id (`@scope/name`)." },
       org_offer: {
         type: "string",
-        enum: ["available", "on_by_default"],
+        enum: [...orgOfferModeValues],
         description: "The mode the offer now has.",
       },
     },

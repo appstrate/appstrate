@@ -543,12 +543,19 @@ export const VIEW_AS_REFUSAL_CODES: ReadonlySet<string> = new Set([
 export const SPACE_ROLE_ID_REGEX =
   /^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** `personal_space_role` on the settings API: a preset key, or the id of an org custom space role. */
-export const personalSpaceRoleSettingSchema = z.union([
-  z.enum(SPACE_ROLE_PRESETS),
-  z.string().regex(SPACE_ROLE_ID_REGEX, {
-    message: "Expected a preset key or a custom space role id (`srl_` + canonical UUID).",
-  }),
+/**
+ * A reference to one space role on the wire: exactly one of a preset key or the id of an org
+ * custom space role. The one shape every read and write of a role uses.
+ */
+export const spaceRoleReferenceSchema = z.union([
+  z.object({ preset_role: z.enum(SPACE_ROLE_PRESETS) }).strict(),
+  z
+    .object({
+      custom_role_id: z.string().regex(SPACE_ROLE_ID_REGEX, {
+        message: "Malformed space role id. Expected `srl_` followed by a canonical UUID.",
+      }),
+    })
+    .strict(),
 ]);
 
 /** Zod validator for the per-org `settings` JSONB shape, as stored. */
@@ -579,9 +586,9 @@ export const orgSettingsReadSchema = orgSettingsSchema
   })
   .loose();
 
-/** The org settings as served: `personal_space_role` may name the custom default. */
+/** The org settings as served: `personal_space_role` is a role reference, a custom default included. */
 export const orgSettingsWireSchema = orgSettingsReadSchema.extend({
-  personal_space_role: personalSpaceRoleSettingSchema.default("admin"),
+  personal_space_role: spaceRoleReferenceSchema.default({ preset_role: "admin" }),
 });
 
 // ---------------------------------------------------------------------------

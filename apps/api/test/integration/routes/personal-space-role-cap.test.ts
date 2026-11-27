@@ -59,7 +59,15 @@ async function setCap(owner: TestContext, value: string | null): Promise<void> {
     method: "PATCH",
     headers: { Cookie: owner.cookie, ...json },
     // `null` means "never set": the key is simply not sent, the test starts without it.
-    body: JSON.stringify(value === null ? {} : { personal_space_role: value }),
+    body: JSON.stringify(
+      value === null
+        ? {}
+        : {
+            personal_space_role: value.startsWith("srl_")
+              ? { custom_role_id: value }
+              : { preset_role: value },
+          },
+    ),
   });
   expect(res.status, await res.clone().text()).toBe(200);
 }

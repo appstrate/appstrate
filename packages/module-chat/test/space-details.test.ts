@@ -248,9 +248,12 @@ describe("readSpaceDetails", () => {
             connections: [{ id: "c1", label: "Pro", owned_by_actor: true }],
           },
         ],
-        connectable_integrations: ["@appstrate/slack"],
-        agents: [{ packageId: "@acme/a", display_name: "A", published: true }],
-        agents_total: 1,
+        connectable_integrations: { data: ["@appstrate/slack"], truncated: false, total: 1 },
+        agents: {
+          data: [{ packageId: "@acme/a", display_name: "A", published: true }],
+          truncated: false,
+          total: 1,
+        },
       }),
       spc_v: new Error("timeout"),
       spc_l: { isError: true, structuredContent: { status: 403, body: {} } },
@@ -320,8 +323,8 @@ describe("readSpaceDetails", () => {
         connections: [
           { integration_package_id: "@appstrate/gmail", active: true, connections: [] },
         ],
-        connectable_integrations: ["@appstrate/slack"],
-        agents: [{ packageId: "@acme/a" }],
+        connectable_integrations: { data: ["@appstrate/slack"], truncated: false, total: 1 },
+        agents: { data: [{ packageId: "@acme/a" }], truncated: false, total: 1 },
       }),
     });
     const [read] = await readSpaceDetails(fake, AbortSignal.timeout(1000), [

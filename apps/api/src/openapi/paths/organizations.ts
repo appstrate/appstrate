@@ -187,7 +187,7 @@ export const organizationsPaths = {
                       },
                     ],
                     personal_space_role: null,
-                    personal_space_default_role: { kind: "preset", key: "admin", name: "admin" },
+                    personal_space_default_role: { preset_role: "admin", name: "admin" },
                   },
                   {
                     userId: "usr_def456",
@@ -204,7 +204,7 @@ export const organizationsPaths = {
                       },
                     ],
                     personal_space_role: { preset_role: "builder" },
-                    personal_space_default_role: { kind: "preset", key: "admin", name: "admin" },
+                    personal_space_default_role: { preset_role: "admin", name: "admin" },
                   },
                 ],
                 invitations: [],
@@ -417,7 +417,7 @@ export const organizationsPaths = {
                   },
                 ],
                 personal_space_role: null,
-                personal_space_default_role: { kind: "preset", key: "admin", name: "admin" },
+                personal_space_default_role: { preset_role: "admin", name: "admin" },
               },
             },
           },
@@ -533,21 +533,24 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Preview what a personal-space default would stop",
       description:
-        "What setting the organization's `personal_space_role` to `role` would stop, without writing anything. `schedules` counts the ENABLED schedules in live personal spaces whose actor is the space's owner, a member or guest who follows the default (no override of their own, see `setMemberPersonalSpaceRole`) and would hold, under `role`, a resolved role without `agents:run` (guest cap and delete floor applied, as the resolver applies them). Each such schedule disables itself at its next fire (`disabled_reason: actor_invalid`), and restoring the role does not re-enable it. `members` counts the distinct owners of those schedules. Owners and admins always hold `admin` in their own personal space and are never counted; a `role` that grants `agents:run` answers `{ schedules: 0, members: 0 }`. A snapshot, which a later change can make stale. It discloses only counts, to a caller who may already rewrite the setting: same guard as `updateOrgSettings` (`org:settings`).",
+        "What setting the organization's `personal_space_role` to the candidate role would stop, without writing anything (the candidate is the `preset_role` or `custom_role_id` query parameter, exactly one). `schedules` counts the ENABLED schedules in live personal spaces whose actor is the space's owner, a member or guest who follows the default (no override of their own, see `setMemberPersonalSpaceRole`) and would hold, under the candidate, a resolved role without `agents:run` (guest cap and delete floor applied, as the resolver applies them). Each such schedule disables itself at its next fire (`disabled_reason: actor_invalid`), and restoring the role does not re-enable it. `members` counts the distinct owners of those schedules. Owners and admins always hold `admin` in their own personal space and are never counted; a candidate that grants `agents:run` answers `{ schedules: 0, members: 0 }`. A snapshot, which a later change can make stale. It discloses only counts, to a caller who may already rewrite the setting: same guard as `updateOrgSettings` (`org:settings`).",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         {
-          name: "role",
+          name: "preset_role",
           in: "query",
-          required: true,
+          required: false,
           description:
-            "The candidate default, as `updateOrgSettings` takes `personal_space_role`: a preset key or the id of one of this organization's custom space roles.",
-          schema: {
-            oneOf: [
-              { type: "string", enum: [...SPACE_ROLE_PRESETS] },
-              { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
-            ],
-          },
+            "The candidate default as a preset key, the `preset_role` of `updateOrgSettings`' `personal_space_role`. Exactly one of `preset_role` / `custom_role_id`, else `400`.",
+          schema: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
+        },
+        {
+          name: "custom_role_id",
+          in: "query",
+          required: false,
+          description:
+            "The candidate default as the id of one of this organization's custom space roles. Exactly one of `preset_role` / `custom_role_id`, else `400`.",
+          schema: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
         },
       ],
       responses: {
@@ -582,7 +585,8 @@ export const organizationsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
-          description: "`role` names a custom role id that is not a role of this organization",
+          description:
+            "`custom_role_id` names a custom role id that is not a role of this organization",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -813,7 +817,7 @@ export const organizationsPaths = {
               example: {
                 api_version: "2026-03-21",
                 personal_model_credentials: true,
-                personal_space_role: "admin",
+                personal_space_role: { preset_role: "admin" },
               },
             },
           },

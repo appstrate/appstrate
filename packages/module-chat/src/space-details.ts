@@ -79,12 +79,14 @@ function parseDetail(space: DetailSpace, result: unknown): SpaceDetail | undefin
   if (record(body.space).id !== space.id) return undefined;
   const total = (value: unknown, listed: unknown[] | null): number =>
     listed === null ? 0 : Math.max(typeof value === "number" ? value : 0, listed.length);
+  const connectableEnvelope = record(body.connectable_integrations);
+  const agentsEnvelope = record(body.agents);
   const connectable = space.integrations
-    ? list(body.connectable_integrations).map(text).filter(Boolean)
+    ? list(connectableEnvelope.data).map(text).filter(Boolean)
     : null;
   const agents = space.agents
     ? withId(
-        list(body.agents).map((item) => {
+        list(agentsEnvelope.data).map((item) => {
           const entry = record(item);
           return {
             id: text(entry.packageId),
@@ -120,9 +122,9 @@ function parseDetail(space: DetailSpace, result: unknown): SpaceDetail | undefin
         )
       : null,
     connectable: connectable ?? [],
-    connectableTotal: total(body.connectable_integrations_total, connectable),
+    connectableTotal: total(connectableEnvelope.total, connectable),
     agents,
-    agentsTotal: total(body.agents_total, agents),
+    agentsTotal: total(agentsEnvelope.total, agents),
   };
 }
 

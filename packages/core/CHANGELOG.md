@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`appstrateToolPartMetadataSchema`**, type `AppstrateToolPartMetadata` and
+  `readAppstrateToolPartMetadata` (`@appstrate/core/chat-turn-metadata`): the shape the chat stamps
+  on an AI SDK tool part under `providerMetadata.appstrate` (`lookup`, `spaceId`, `presentation`,
+  `durationMs`, `actedSpaceIds`). The reader returns `undefined` for a missing or non-object entry
+  and drops a malformed field instead of the whole stamp.
 - **`onCredentialNeedsReconnection`** (`@appstrate/core/module`, `ModuleEvents`) and its
   `CredentialNeedsReconnectionParams` payload, discriminated by `kind`
   (`integration_connection` | `model_provider_credential`). One best-effort announcement per
@@ -29,9 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `_meta["dev.appstrate/turn-budget"]` (audience `assistant`); readers recognise it by the marker,
   never by its text.
 - `SPACE_ROLE_ID_REGEX` and `isSpaceRolePreset` in `@appstrate/core/permissions`.
-- `personalSpaceRoleSettingSchema` (a preset key or a custom space role id: the wire value of
-  `personal_space_role`) and `orgSettingsWireSchema` (`orgSettingsReadSchema` with
-  `personal_space_role` read through it) in `@appstrate/core/permissions`.
+- `spaceRoleReferenceSchema` (`{ preset_role }` | `{ custom_role_id }`, the one wire shape of a
+  space-role reference, `personal_space_role` included) and `orgSettingsWireSchema`
+  (`orgSettingsReadSchema` with `personal_space_role` read through it) in
+  `@appstrate/core/permissions`.
 - **`spaceActs`, `SpaceAct`** (`@appstrate/core/mcp-spaces`).
   The acts a caller holds in one space (`invoke_operations`, `run_agents`, `inline_runs`,
   `call_integration_tools`, `create_packages`), in one vocabulary for the MCP `get_me` tool's
@@ -44,8 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `viewer`), and `orgSettingsSchema` accepts the same values on input. The stored key holds a
   preset only: a custom default lives in a column of the organization, outside the JSON. The read
   default stays `admin`; stored `admin` and `operator` remain valid. The org settings as served
-  (`OrgSettings` in `@appstrate/shared-types`) follow `orgSettingsWireSchema`, which also accepts a
-  custom space role id.
+  (`OrgSettings` in `@appstrate/shared-types`) follow `orgSettingsWireSchema`, where
+  `personal_space_role` is a role reference object (`{ preset_role }` | `{ custom_role_id }`),
+  never a bare string.
 
 ### Removed
 

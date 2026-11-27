@@ -21,10 +21,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
-  toolPresentationSchema,
-  type PresentationSubject,
-  type ToolPresentation,
-} from "@appstrate/core/mcp-presentation";
+  readAppstrateToolPartMetadata,
+  type AppstrateToolPartMetadata,
+} from "@appstrate/core/chat-turn-metadata";
+import { type PresentationSubject, type ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import type { ChatTranslate } from "./runtime-context.ts";
 
@@ -74,18 +74,15 @@ function ownTarget(toolName: string, input: unknown): { Icon: LucideIcon; target
 }
 
 /** The engine's stamp on a call's outcome, failed or not (`ui-stream-mapper.ts`); `null` while it runs. */
-export function callOutcome(part: object | undefined): Record<string, unknown> | null {
+export function callOutcome(part: object | undefined): AppstrateToolPartMetadata | undefined {
   const metadata =
     part && "resultProviderMetadata" in part ? part.resultProviderMetadata : undefined;
-  return asRecordOrNull(asRecordOrNull(metadata)?.appstrate);
+  return readAppstrateToolPartMetadata(metadata);
 }
 
 /** The presentation stamped on a call's outcome; `undefined` while it runs, or malformed. */
 export function callPresentation(part: object | undefined): ToolPresentation | undefined {
-  const raw = callOutcome(part)?.presentation;
-  if (raw === undefined) return undefined;
-  const parsed = toolPresentationSchema.safeParse(raw);
-  return parsed.success ? parsed.data : undefined;
+  return callOutcome(part)?.presentation;
 }
 
 /** POST draws an action, not a creation: it does not say what the request does. */

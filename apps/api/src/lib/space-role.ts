@@ -327,3 +327,12 @@ export function toSpaceRoleWire(
   if (ref.kind === "preset") return { kind: "preset", key: ref.preset, name: ref.preset };
   return { kind: "custom", key: ref.role.key, name: ref.role.name };
 }
+
+/** A role as a reference (`{ preset_role }` | `{ custom_role_id }`) plus its display `name`. */
+export function toSpaceRoleReference(
+  ref: SpaceRoleRef,
+): ({ preset_role: SpaceRolePreset } | { custom_role_id: string }) & { name: string } {
+  return ref.kind === "preset"
+    ? { preset_role: ref.preset, name: ref.preset }
+    : { custom_role_id: ref.role.id, name: ref.role.name };
+}

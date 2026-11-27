@@ -42,13 +42,17 @@ describe("select values", () => {
   });
 
   it("reads the stored org role", () => {
-    expect(storedRoleToSelectValue("runner")).toBe("preset:runner");
-    expect(storedRoleToSelectValue("srl_abc")).toBe("custom:srl_abc");
+    expect(storedRoleToSelectValue({ preset_role: "runner" })).toBe("preset:runner");
+    expect(storedRoleToSelectValue({ custom_role_id: "srl_abc" })).toBe("custom:srl_abc");
   });
 
-  it("writes the org role as a bare key or id", () => {
-    expect(orgPersonalSpaceRoleBody("preset:runner")).toEqual({ personal_space_role: "runner" });
-    expect(orgPersonalSpaceRoleBody("custom:srl_abc")).toEqual({ personal_space_role: "srl_abc" });
+  it("writes the org role as a role reference", () => {
+    expect(orgPersonalSpaceRoleBody("preset:runner")).toEqual({
+      personal_space_role: { preset_role: "runner" },
+    });
+    expect(orgPersonalSpaceRoleBody("custom:srl_abc")).toEqual({
+      personal_space_role: { custom_role_id: "srl_abc" },
+    });
   });
 });
 

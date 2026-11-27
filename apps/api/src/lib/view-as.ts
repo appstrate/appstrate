@@ -77,6 +77,7 @@ const viewAsSchema = z
     space: z.string().refine((v) => SPACE_ID_RE.test(v), {
       message: "space must be a `spc_` id followed by a canonical UUID",
     }),
+    // The textual form of a space-role reference: `preset:<preset_role>` | `custom:<custom_role_id>`.
     role: z
       .string()
       .refine(

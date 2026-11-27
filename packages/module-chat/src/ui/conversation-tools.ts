@@ -7,6 +7,7 @@
  */
 
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
+import { readAppstrateToolPartMetadata } from "@appstrate/core/chat-turn-metadata";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { deriveToolPhase, extractErrorMessage, unwrapToolResult } from "./tool-result.ts";
 import { callOutcome, callPresentation, presentationMethod } from "./tool-presentation.ts";
@@ -50,9 +51,7 @@ type ToolPart = Extract<UIMessage["parts"][number], { toolCallId: string }>;
 
 /** The engine stamped the call a lookup before it ran (`appstrate.lookup`, `ui-stream-mapper.ts`). */
 function stampedLookup(callMetadata: unknown): boolean {
-  return (
-    (callMetadata as { appstrate?: { lookup?: unknown } } | undefined)?.appstrate?.lookup === true
-  );
+  return readAppstrateToolPartMetadata(callMetadata)?.lookup === true;
 }
 
 export interface GroupablePart {
@@ -160,7 +159,6 @@ function messageCalls(message: UIMessage, turn: number, turnRuns: boolean): Conv
     const runId = "output" in part ? extractRunId(part.output) : undefined;
     const spaceId = callSpaceOf({
       providerMetadata: part.callProviderMetadata,
-      result: "output" in part ? part.output : undefined,
       resultProviderMetadata:
         "resultProviderMetadata" in part ? part.resultProviderMetadata : undefined,
     });

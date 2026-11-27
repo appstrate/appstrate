@@ -34,7 +34,10 @@ const i18nModule = await import("../../i18n.ts");
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
 
-function renderSetting(permissions: string[], role: string | null): string {
+function renderSetting(
+  permissions: string[],
+  role: { preset_role: string } | { custom_role_id: string } | null,
+): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   seedOrgAndRoles(queryClient, permissions);
   if (role) {
@@ -89,7 +92,7 @@ describe("the personal space role picker", () => {
   });
 
   it("draws the title, the explanation and the picker", () => {
-    const html = renderSetting(["org:settings"], CUSTOM_ROLE_ID);
+    const html = renderSetting(["org:settings"], { custom_role_id: CUSTOM_ROLE_ID });
     expect(html).toContain(settingsFr["orgSettings.personalSpaceRoleTitle"]);
     expect(pickerOf(html)).toBeDefined();
   });
@@ -99,7 +102,7 @@ describe("the personal space role picker", () => {
   });
 
   it("is disabled without org:settings", () => {
-    expect(pickerOf(renderSetting([], "admin"))).toContain("disabled");
+    expect(pickerOf(renderSetting([], { preset_role: "admin" }))).toContain("disabled");
   });
 
   it("keeps writing a boolean for the boolean settings", () => {
@@ -112,7 +115,7 @@ it("keeps the cached toggle after a refused PATCH and refreshes it after a succe
   const path = "/api/orgs/{orgId}/settings";
   const params = { path: { orgId: ORG_ID } };
   const key = $api.queryOptions("get", path, { params }).queryKey;
-  const saved = { personal_space_role: "admin" };
+  const saved = { personal_space_role: { preset_role: "admin" } };
   qc.setQueryData(key, saved);
   const updates: ReturnType<typeof useUpdateOrgSettings>[] = [];
   function Probe() {
@@ -122,7 +125,9 @@ it("keeps the cached toggle after a refused PATCH and refreshes it after a succe
   render(<Probe />, { queryClient: qc });
   const patch = spyOn(client, "PATCH")
     .mockRejectedValueOnce(new ApiError("forbidden", "Refused", 403))
-    .mockResolvedValueOnce({ data: { ...saved, personal_space_role: "operator" } });
+    .mockResolvedValueOnce({
+      data: { ...saved, personal_space_role: { preset_role: "operator" } },
+    });
   const input = { params, body: orgPersonalSpaceRoleBody("preset:operator") };
   try {
     await expect(updates[0]!.mutateAsync(input)).rejects.toMatchObject({ status: 403 });
@@ -173,7 +178,11 @@ describe("picking a default that would stop schedules", () => {
         }),
       );
     };
-    return { impactOf: (role: string) => impactOf(ORG_ID, role), write, writes };
+    return {
+      impactOf: (role: Parameters<typeof impactOf>[1]) => impactOf(ORG_ID, role),
+      write,
+      writes,
+    };
   }
 
   it("asks with the counts, and writes only on confirm", async () => {
@@ -181,7 +190,7 @@ describe("picking a default that would stop schedules", () => {
       impactResponse({ schedules: 3, members: 2 }),
     );
     const patch = spyOn(client, "PATCH").mockResolvedValue({
-      data: { personal_space_role: "viewer" },
+      data: { personal_space_role: { preset_role: "viewer" } },
     });
     try {
       const { impactOf, write, writes } = wiring();
@@ -192,7 +201,7 @@ describe("picking a default that would stop schedules", () => {
         askConfirmation: (pending) => asked.push(pending),
       });
       expect(get).toHaveBeenCalledWith(impactPath, {
-        params: { path: { orgId: ORG_ID }, query: { role: "viewer" } },
+        params: { path: { orgId: ORG_ID }, query: { preset_role: "viewer" } },
         signal: expect.anything(),
       });
       expect(asked).toEqual([
@@ -212,7 +221,7 @@ describe("picking a default that would stop schedules", () => {
       await Promise.all(writes);
       expect(patch).toHaveBeenCalledWith(settingsPath, {
         params: { path: { orgId: ORG_ID } },
-        body: { personal_space_role: "viewer" },
+        body: { personal_space_role: { preset_role: "viewer" } },
       });
     } finally {
       get.mockRestore();
@@ -234,7 +243,7 @@ describe("picking a default that would stop schedules", () => {
       impactResponse({ schedules: 0, members: 0 }),
     );
     const patch = spyOn(client, "PATCH").mockResolvedValue({
-      data: { personal_space_role: CUSTOM_ROLE_ID },
+      data: { personal_space_role: { custom_role_id: CUSTOM_ROLE_ID } },
     });
     try {
       const { impactOf, write, writes } = wiring();
@@ -246,10 +255,12 @@ describe("picking a default that would stop schedules", () => {
       });
       await Promise.all(writes);
       expect(asked).toBe(false);
-      expect(get.mock.calls[0]?.[1]).toMatchObject({ params: { query: { role: CUSTOM_ROLE_ID } } });
+      expect(get.mock.calls[0]?.[1]).toMatchObject({
+        params: { query: { custom_role_id: CUSTOM_ROLE_ID } },
+      });
       expect(patch).toHaveBeenCalledWith(settingsPath, {
         params: { path: { orgId: ORG_ID } },
-        body: { personal_space_role: CUSTOM_ROLE_ID },
+        body: { personal_space_role: { custom_role_id: CUSTOM_ROLE_ID } },
       });
     } finally {
       get.mockRestore();

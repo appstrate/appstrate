@@ -18,9 +18,11 @@ import { seedPackage, seedSchedule, seedSpaceMember, seedSpaceRole } from "../..
 
 const app = getTestApp();
 
+/** `role` is a preset key or a custom role id; each goes in its own query parameter. */
 function impact(actor: TestContext, role: string) {
+  const param = role.startsWith("srl_") ? "custom_role_id" : "preset_role";
   return app.request(
-    `/api/orgs/${actor.orgId}/personal-space-role/impact?role=${encodeURIComponent(role)}`,
+    `/api/orgs/${actor.orgId}/personal-space-role/impact?${param}=${encodeURIComponent(role)}`,
     { headers: { Cookie: actor.cookie } },
   );
 }
@@ -120,7 +122,7 @@ describe("GET /api/orgs/{orgId}/personal-space-role/impact", () => {
     const other = await createTestContext({ orgSlug: "elsewhere" });
     const foreign = await seedSpaceRole({ orgId: other.orgId, permissions: ["agents:read"] });
     const res = await impact(owner, foreign.id);
-    await expectProblem(res, 404, { code: "not_found", param: "role" });
+    await expectProblem(res, 404, { code: "not_found", param: "custom_role_id" });
   });
 
   it("403s a caller without org:settings", async () => {
@@ -135,5 +137,15 @@ describe("GET /api/orgs/{orgId}/personal-space-role/impact", () => {
       headers: { Cookie: owner.cookie },
     });
     expect(missing.status).toBe(400);
+  });
+
+  it("400s the retired bare `role` parameter and a query naming both references", async () => {
+    const get = (query: string) =>
+      app.request(`/api/orgs/${owner.orgId}/personal-space-role/impact?${query}`, {
+        headers: { Cookie: owner.cookie },
+      });
+    expect((await get("role=viewer")).status).toBe(400);
+    const own = await seedSpaceRole({ orgId: owner.orgId });
+    expect((await get(`preset_role=viewer&custom_role_id=${own.id}`)).status).toBe(400);
   });
 });

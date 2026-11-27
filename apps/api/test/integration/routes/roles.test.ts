@@ -502,13 +502,13 @@ describe("custom space roles", () => {
 
     it("409s while the org's personal_space_role names it, and deletes once it does not", async () => {
       const role = await createRole({ key: "personal-default" });
-      const patch = (value: string) =>
+      const patch = (value: { preset_role: string } | { custom_role_id: string }) =>
         app.request(`/api/orgs/${owner.orgId}/settings`, {
           method: "PATCH",
           headers: { Cookie: owner.cookie, "Content-Type": "application/json" },
           body: JSON.stringify({ personal_space_role: value }),
         });
-      expect((await patch(role.id)).status).toBe(200);
+      expect((await patch({ custom_role_id: role.id })).status).toBe(200);
 
       const problem = await expectProblem(await del(role.id), 409, { code: "role_in_use" });
       expect(problem.org_default).toBe(true);
@@ -516,7 +516,7 @@ describe("custom space roles", () => {
       expect(problem.pending_invitation_count).toBe(0);
       expect(problem.detail).toContain("default role in personal spaces");
 
-      expect((await patch("operator")).status).toBe(200);
+      expect((await patch({ preset_role: "operator" })).status).toBe(200);
       expect((await del(role.id)).status).toBe(204);
     });
 
@@ -604,7 +604,9 @@ describe("custom space roles", () => {
       async () => {
         const role = await createRole({ key: "wait-setting" });
         const res = await writeBehindDelete(role.id, () =>
-          req("PATCH", `/api/orgs/${owner.orgId}/settings`, { personal_space_role: role.id }),
+          req("PATCH", `/api/orgs/${owner.orgId}/settings`, {
+            personal_space_role: { custom_role_id: role.id },
+          }),
         );
         await expectProblem(res, 404);
         const [org] = await db

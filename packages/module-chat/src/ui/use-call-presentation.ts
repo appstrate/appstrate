@@ -20,10 +20,9 @@ export interface StoredResult {
 
 export type StoredResults = ReadonlyMap<string, StoredResult>;
 
-/** A failure keeps no result: its resolved space rides on the stored part. */
+/** The resolved space rides on the stored part's outcome stamp, success or failure. */
 export function cardSpaceOf(card: {
   providerMetadata?: unknown;
-  result?: unknown;
   stored?: StoredResult | undefined;
 }): string | undefined {
   return callSpaceOf({ ...card, ...card.stored });

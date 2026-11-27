@@ -26,8 +26,9 @@ const json = { "Content-Type": "application/json" };
 
 interface MemberDto {
   userId: string;
-  personal_space_role: { preset_role: string } | { custom_role_id: string } | null;
-  personal_space_default_role: { kind: string; key: string; name: string } | null;
+  personal_space_role?: { preset_role: string } | { custom_role_id: string } | null;
+  personal_space_default_role?:
+    { preset_role: string; name: string } | { custom_role_id: string; name: string };
 }
 
 const overrideUrl = (ctx: TestContext, userId: string) =>
@@ -119,7 +120,7 @@ describe("member personal-space role override", () => {
     await app.request(`/api/orgs/${owner.orgId}/settings`, {
       method: "PATCH",
       headers: { Cookie: owner.cookie, ...json },
-      body: JSON.stringify({ personal_space_role: "operator" }),
+      body: JSON.stringify({ personal_space_role: { preset_role: "operator" } }),
     });
     expect((await personalOf(member)).role).toMatchObject({ key: "operator" });
 
@@ -367,16 +368,12 @@ describe("member personal-space role override", () => {
           ).json()) as { members: MemberDto[] }
         ).members.map((m) => [m.userId, m.personal_space_default_role]),
       );
-    const admin_ = { kind: "preset", key: "admin", name: "admin" };
+    const admin_ = { preset_role: "admin", name: "admin" };
     const before = await byUser();
     expect(before.get(owner.user.id)).toEqual(admin_);
     expect(before.get(admin.user.id)).toEqual(admin_);
     expect(before.get(member.user.id)).toEqual(admin_);
-    expect(before.get(guest.user.id)).toEqual({
-      kind: "preset",
-      key: "operator",
-      name: "operator",
-    });
+    expect(before.get(guest.user.id)).toEqual({ preset_role: "operator", name: "operator" });
 
     // The override does not move it: it is what the DEFAULT gives, whatever they chose.
     expect((await putOverride(owner, member.user.id, { preset_role: "viewer" })).status).toBe(200);
@@ -386,28 +383,35 @@ describe("member personal-space role override", () => {
       app.request(`/api/orgs/${owner.orgId}/settings`, {
         method: "PATCH",
         headers: { Cookie: owner.cookie, ...json },
-        body: JSON.stringify({ personal_space_role: value }),
+        body: JSON.stringify({ personal_space_role: { preset_role: value } }),
       });
     expect((await patch("viewer")).status).toBe(200);
     const viewerDefault = await byUser();
-    expect(viewerDefault.get(member.user.id)).toEqual({
-      kind: "preset",
-      key: "viewer",
-      name: "viewer",
-    });
-    expect(viewerDefault.get(guest.user.id)).toEqual({
-      kind: "preset",
-      key: "viewer",
-      name: "viewer",
-    });
+    expect(viewerDefault.get(member.user.id)).toEqual({ preset_role: "viewer", name: "viewer" });
+    expect(viewerDefault.get(guest.user.id)).toEqual({ preset_role: "viewer", name: "viewer" });
     expect(viewerDefault.get(admin.user.id)).toEqual(admin_);
 
     // A write answers with the same field.
     const put = await putOverride(owner, guest.user.id, { preset_role: "runner" });
     expect(((await put.json()) as MemberDto).personal_space_default_role).toEqual({
-      kind: "preset",
-      key: "viewer",
+      preset_role: "viewer",
       name: "viewer",
+    });
+  });
+
+  it("names a custom org default by its id, never by its mutable key", async () => {
+    const role = await seedSpaceRole({ orgId: owner.orgId, key: "triage", name: "Triage" });
+    const res = await app.request(`/api/orgs/${owner.orgId}/settings`, {
+      method: "PATCH",
+      headers: { Cookie: owner.cookie, ...json },
+      body: JSON.stringify({ personal_space_role: { custom_role_id: role.id } }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const listed = await memberInList(owner, member.user.id);
+    expect(listed.personal_space_role).toBeNull();
+    expect(listed.personal_space_default_role).toEqual({
+      custom_role_id: role.id,
+      name: "Triage",
     });
   });
 
@@ -423,8 +427,8 @@ describe("member personal-space role override", () => {
     const members = ((await res.json()) as { members: MemberDto[] }).members;
     expect(members.length).toBeGreaterThan(0);
     for (const m of members) {
-      expect(m.personal_space_role).toBeNull();
-      expect(m.personal_space_default_role).toBeNull();
+      expect(m).not.toHaveProperty("personal_space_role");
+      expect(m).not.toHaveProperty("personal_space_default_role");
     }
   });
 

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { z } from "zod";
+import { toolPresentationSchema } from "./mcp-presentation.ts";
 import type { ModelErrorCategory, ModelErrorReason } from "./model-error.ts";
 
 /**
@@ -233,6 +235,39 @@ export interface ChatMessageMetadata {
     turn?: AppstrateTurnMetadata;
   };
   [key: string]: unknown;
+}
+
+/**
+ * What the chat stamps on an AI SDK tool part under `providerMetadata.appstrate`, persisted in
+ * `chat_messages.content` (`callProviderMetadata` on the call, `resultProviderMetadata` on the
+ * outcome, a failure's included). One shape, each side filling its own fields; camelCase like
+ * `appstrate.turn` (CASING_CONVENTIONS 4o), but `presentation` is the MCP wire object, carried as is.
+ */
+export const appstrateToolPartMetadataSchema = z.object({
+  /** Call side: the call is a lookup (a tool that only reads). */
+  lookup: z.literal(true).optional().catch(undefined),
+  /** Call side: the space the call's input named, when the turn can act in it. */
+  spaceId: z.string().min(1).optional().catch(undefined),
+  /** Result side: how a client shows the call. */
+  presentation: toolPresentationSchema.optional().catch(undefined),
+  /** Result side: how long the call ran. */
+  durationMs: z.number().optional().catch(undefined),
+  /**
+   * Result side: the spaces the platform says the call acted in, the last being the target (empty:
+   * organization-wide). The one copy: the stored output does not carry it.
+   */
+  actedSpaceIds: z.array(z.string()).optional().catch(undefined),
+});
+
+export type AppstrateToolPartMetadata = z.infer<typeof appstrateToolPartMetadataSchema>;
+
+/** The `appstrate` entry of a tool part's provider metadata; `undefined` when absent or not an object. */
+export function readAppstrateToolPartMetadata(
+  providerMetadata: unknown,
+): AppstrateToolPartMetadata | undefined {
+  if (!isRecord(providerMetadata)) return undefined;
+  const parsed = appstrateToolPartMetadataSchema.safeParse(providerMetadata.appstrate);
+  return parsed.success ? parsed.data : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

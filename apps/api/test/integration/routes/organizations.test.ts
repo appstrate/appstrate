@@ -897,7 +897,7 @@ describe("Organizations API", () => {
           dashboard_sso_enabled: true,
           restrict_package_copy: true,
           personal_model_credentials: false,
-          personal_space_role: "operator",
+          personal_space_role: { preset_role: "operator" },
         }),
       });
       expect(res.status).toBe(200);
@@ -913,7 +913,7 @@ describe("Organizations API", () => {
         dashboardSsoEnabled: true,
         restrictPackageCopy: true,
         personalModelCredentials: false,
-        personalSpaceRole: "operator",
+        personalSpaceRole: { presetRole: "operator", customRoleId: null },
       });
     });
 

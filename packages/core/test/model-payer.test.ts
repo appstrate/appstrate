@@ -5,7 +5,7 @@ import {
   orgSettingsReadSchema,
   orgSettingsSchema,
   orgSettingsWireSchema,
-  personalSpaceRoleSettingSchema,
+  spaceRoleReferenceSchema,
 } from "../src/permissions.ts";
 
 describe("orgSettingsReadSchema", () => {
@@ -58,28 +58,36 @@ describe("orgSettingsSchema", () => {
   });
 });
 
-describe("personalSpaceRoleSettingSchema (the wire value)", () => {
-  it("accepts a preset key or a custom role id, and nothing else", () => {
-    const ok = (value: unknown) => personalSpaceRoleSettingSchema.safeParse(value).success;
+describe("spaceRoleReferenceSchema (the wire value)", () => {
+  it("accepts one role reference, and nothing else", () => {
+    const ok = (value: unknown) => spaceRoleReferenceSchema.safeParse(value).success;
     for (const preset of ["admin", "builder", "operator", "runner", "viewer"]) {
-      expect(ok(preset), preset).toBe(true);
+      expect(ok({ preset_role: preset }), preset).toBe(true);
     }
-    expect(ok("srl_11111111-1111-4111-8111-111111111111")).toBe(true);
+    expect(ok({ custom_role_id: "srl_11111111-1111-4111-8111-111111111111" })).toBe(true);
     for (const value of [
-      "owner",
-      "srl_nope",
-      "SRL_11111111-1111-4111-8111-111111111111",
+      "admin",
+      "srl_11111111-1111-4111-8111-111111111111",
+      { preset_role: "owner" },
+      { custom_role_id: "srl_nope" },
+      { custom_role_id: "SRL_11111111-1111-4111-8111-111111111111" },
+      { preset_role: "viewer", custom_role_id: "srl_11111111-1111-4111-8111-111111111111" },
+      {},
       1,
       null,
     ]) {
-      expect(ok(value), String(value)).toBe(false);
+      expect(ok(value), JSON.stringify(value)).toBe(false);
     }
   });
 
-  it("orgSettingsWireSchema serves a custom id, orgSettingsReadSchema does not read one", () => {
+  it("orgSettingsWireSchema serves a role reference, orgSettingsReadSchema does not read a custom id", () => {
     const id = "srl_11111111-1111-4111-8111-111111111111";
-    expect(orgSettingsWireSchema.parse({ personal_space_role: id }).personal_space_role).toBe(id);
-    expect(orgSettingsWireSchema.parse({}).personal_space_role).toBe("admin");
+    expect(
+      orgSettingsWireSchema.parse({ personal_space_role: { custom_role_id: id } })
+        .personal_space_role,
+    ).toEqual({ custom_role_id: id });
+    expect(orgSettingsWireSchema.parse({}).personal_space_role).toEqual({ preset_role: "admin" });
+    expect(orgSettingsWireSchema.safeParse({ personal_space_role: id }).success).toBe(false);
     expect(orgSettingsReadSchema.safeParse({ personal_space_role: id }).success).toBe(false);
   });
 });

@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { TFunction } from "i18next";
-import { isSpaceRolePreset } from "@appstrate/core/permissions";
 import type { components } from "../api/client";
 import type { operations } from "../api/schema";
 import {
   spaceRoleAssignment,
-  spaceRoleLabel,
   spaceRoleValue,
   type RoleObject,
   type SpaceRolePreset,
@@ -17,11 +15,11 @@ type OrgMember = components["schemas"]["OrgMember"];
 /** The select value of « selon l'organisation »: no override of the member's own. */
 export const FOLLOW_ORG_DEFAULT = "org-default";
 
-/** A stored org setting is a preset key or a custom role id (`srl_…`); a select carries `preset:<key>` / `custom:<id>`. */
-export function storedRoleToSelectValue(stored: string): string {
-  return isSpaceRolePreset(stored)
-    ? spaceRoleValue({ preset_role: stored })
-    : spaceRoleValue({ custom_role_id: stored });
+/** The org setting is a role reference; a select carries `preset:<key>` / `custom:<id>`. */
+export function storedRoleToSelectValue(
+  stored: components["schemas"]["OrgSettings"]["personal_space_role"],
+): string {
+  return spaceRoleValue(stored);
 }
 
 /**
@@ -29,16 +27,23 @@ export function storedRoleToSelectValue(stored: string): string {
  * applied), named as the role selects name it, or said invalid when it names no role.
  */
 export function followLabel(member: OrgMember, t: (key: string) => string): string {
-  return (
-    spaceRoleLabel(member.personal_space_default_role, t) ??
-    t("settings:userDetail.personalSpaceRoleNoDefault")
-  );
+  const role = member.personal_space_default_role;
+  if (!role) return t("settings:userDetail.personalSpaceRoleNoDefault");
+  return "preset_role" in role ? t(`settings:roles.preset.${role.preset_role}`) : role.name;
 }
 
 /** The org setting's PATCH body for a picked select value. */
-export function orgPersonalSpaceRoleBody(selectValue: string): { personal_space_role: string } {
+export function orgPersonalSpaceRoleBody(selectValue: string): {
+  personal_space_role: { preset_role: SpaceRolePreset } | { custom_role_id: string };
+} {
+  return { personal_space_role: spaceRoleReference(selectValue) };
+}
+
+function spaceRoleReference(
+  selectValue: string,
+): { preset_role: SpaceRolePreset } | { custom_role_id: string } {
   const { preset_role, custom_role_id } = spaceRoleAssignment(selectValue);
-  return { personal_space_role: (preset_role ?? custom_role_id) as string };
+  return preset_role ? { preset_role } : { custom_role_id: custom_role_id as string };
 }
 
 /** What a member's own override reads as in the select. */
@@ -61,11 +66,7 @@ export function memberPersonalSpaceRoleRequest(
   selectValue: string,
 ): MemberPersonalSpaceRoleRequest {
   if (selectValue === FOLLOW_ORG_DEFAULT) return { method: "DELETE" };
-  const { preset_role, custom_role_id } = spaceRoleAssignment(selectValue);
-  return {
-    method: "PUT",
-    body: preset_role ? { preset_role } : { custom_role_id: custom_role_id as string },
-  };
+  return { method: "PUT", body: spaceRoleReference(selectValue) };
 }
 
 /**
@@ -90,6 +91,9 @@ export function guestRoleValues(
 type PersonalSpaceRoleImpact =
   operations["getPersonalSpaceRoleImpact"]["responses"][200]["content"]["application/json"];
 
+/** The impact read's candidate: exactly one of the two query parameters. */
+export type ImpactCandidate = { preset_role: SpaceRolePreset } | { custom_role_id: string };
+
 /** A pick of the org default held until the admin confirms it. */
 export interface PendingPersonalSpaceRole {
   selectValue: string;
@@ -103,7 +107,7 @@ export interface PendingPersonalSpaceRole {
 export async function pickPersonalSpaceRole(
   selectValue: string,
   steps: {
-    impactOf: (role: string) => Promise<PersonalSpaceRoleImpact>;
+    impactOf: (role: ImpactCandidate) => Promise<PersonalSpaceRoleImpact>;
     write: (selectValue: string) => void;
     askConfirmation: (pending: PendingPersonalSpaceRole) => void;
   },

@@ -356,9 +356,12 @@ Reason: SIEM queries (Datadog, Splunk) need stable field names.
 
 **Why**: developer-platform surfaces modelled on the Stripe headless API convention (camelCase for developer-platform CRUD). End-to-end coherent; flipping is a breaking change for external API consumers with zero user-visible benefit. For any new endpoint family, snake_case wire per the Zone 1 default.
 
-#### Carve-out 4o — Chat message metadata (`appstrate.turn`)
+#### Carve-out 4o — Chat message metadata (`appstrate.turn`, tool-part `appstrate`)
 
-**File**: `packages/core/src/chat-turn-metadata.ts` (`AppstrateTurnMetadata`). Its fields (`finishReason`, `errorCategory`, `stepCount`, `modelId`, `modelLabel`, …) are **camelCase**: they ride the AI SDK's `messageMetadata` on the UI message stream and are persisted inside the stored message (`chat_messages.content`, an AI SDK `UIMessage`), a TS contract shared by the engine and the chat UI rather than a REST body.
+**File**: `packages/core/src/chat-turn-metadata.ts` (`AppstrateTurnMetadata`, `AppstrateToolPartMetadata`). Two Appstrate-owned entries ride the AI SDK's metadata and are persisted inside the stored message (`chat_messages.content`, an AI SDK `UIMessage`), a TS contract shared by the engine and the chat UI rather than a REST body; both are **camelCase**:
+
+- `metadata.appstrate.turn` (`AppstrateTurnMetadata`): `finishReason`, `errorCategory`, `stepCount`, `modelId`, `modelLabel`, …
+- `providerMetadata.appstrate` on a tool part (`callProviderMetadata` / `resultProviderMetadata`, `AppstrateToolPartMetadata`): `lookup`, `spaceId`, `presentation`, `durationMs`, `actedSpaceIds`. The nested `presentation` is the MCP wire object (`toolPresentationSchema`, `@appstrate/core/mcp-presentation`), snake_case, carried as is.
 
 #### Carve-out 4p — Agent tool arguments (`api_call` / `api_upload`)
 

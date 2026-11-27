@@ -2220,9 +2220,12 @@ describe("handleChatStream", () => {
               return {
                 space: { id: spaceId },
                 connections: [],
-                connectable_integrations: [],
-                agents: agent ? [{ packageId: agent, display_name: agent, published: true }] : [],
-                agents_total: agent ? 1 : 0,
+                connectable_integrations: { data: [], truncated: false, total: 0 },
+                agents: {
+                  data: agent ? [{ packageId: agent, display_name: agent, published: true }] : [],
+                  truncated: false,
+                  total: agent ? 1 : 0,
+                },
               };
             },
           },

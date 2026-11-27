@@ -464,10 +464,10 @@ export interface OrganizationMember {
   email?: string;
   /** The spaces this member reaches, among those whose member list the caller may read. */
   spaces: OrganizationMemberSpace[];
-  /** Their own role in their personal space, overriding the org default; `null` = follows it. */
-  personal_space_role: SpaceRoleAssignment | null;
-  /** Their role there by the org default alone; both `null` without `members:change-role`. */
-  personal_space_default_role: SpaceMember["role"];
+  /** Their own override of the org default in their personal space; `null` = no override. Omitted without `members:change-role`. */
+  personal_space_role?: SpaceRoleAssignment | null;
+  /** Their role there by the org default alone. Omitted without `members:change-role`. */
+  personal_space_default_role?: SpaceRoleAssignment & { name: string };
 }
 
 /** A role given to someone: one preset, or one custom role. */

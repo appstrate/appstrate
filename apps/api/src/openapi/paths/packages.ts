@@ -5,6 +5,7 @@ import {
   STD_RESPONSE_HEADERS,
   REQUEST_ID_ONLY_HEADERS,
 } from "../headers.ts";
+import { orgOfferModeValues } from "@appstrate/db/schema";
 import { ORG_READ_REACH } from "../parameters.ts";
 
 /** Every door that creates an organization package under a caller-chosen id refuses the platform's scopes. */
@@ -2264,7 +2265,7 @@ export const packagesPaths = {
               properties: {
                 org_offer: {
                   type: "string",
-                  enum: ["available", "on_by_default"],
+                  enum: [...orgOfferModeValues],
                   description:
                     "`on_by_default`: placed and active in every space holding no row of its own. `available`: placed in every such space and off until the space switches it on.",
                 },

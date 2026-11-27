@@ -226,8 +226,7 @@ export async function updateOrganization(
 import {
   orgSettingsReadSchema,
   orgSettingsSchema as orgSettingsBaseSchema,
-  isSpaceRolePreset,
-  personalSpaceRoleSettingSchema,
+  spaceRoleReferenceSchema,
 } from "@appstrate/core/permissions";
 
 /**
@@ -250,18 +249,24 @@ import {
  * `personal_space_role` also takes a custom role id, stored apart ({@link updateOrgSettings}).
  */
 export const orgSettingsPatchSchema = orgSettingsBaseSchema
-  .extend({ personal_space_role: personalSpaceRoleSettingSchema })
+  .extend({ personal_space_role: spaceRoleReferenceSchema })
   .partial()
   .strict();
 import type { OrgSettings } from "@appstrate/shared-types";
 
-/** The settings as served: a custom default (`personal_space_role_id`) as `personal_space_role`. */
+/** The settings as served: the default role (document preset or `personal_space_role_id`) as a role reference. */
 function toOrgSettings(
   row: { orgSettings: unknown; personalSpaceRoleId: string | null } | undefined,
 ): OrgSettings {
   const stored = orgSettingsReadSchema.parse(row?.orgSettings ?? {});
   const customDefault = row?.personalSpaceRoleId ?? null;
-  return customDefault === null ? stored : { ...stored, personal_space_role: customDefault };
+  return {
+    ...stored,
+    personal_space_role:
+      customDefault === null
+        ? { preset_role: stored.personal_space_role }
+        : { custom_role_id: customDefault },
+  };
 }
 
 /**
@@ -335,13 +340,18 @@ export async function updateOrgSettings(
     // different keys don't clobber each other (read-modify-write would race).
     const merged = sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || ${JSON.stringify(documentUpdates)}::jsonb`;
     let defaultRole: { orgSettings: SQL; personalSpaceRoleId: string | null } | null = null;
-    if (personalSpaceRole !== undefined && isSpaceRolePreset(personalSpaceRole)) {
+    if (personalSpaceRole !== undefined && "preset_role" in personalSpaceRole) {
       defaultRole = {
-        orgSettings: sql`${merged} || ${JSON.stringify({ personal_space_role: personalSpaceRole })}::jsonb`,
+        orgSettings: sql`${merged} || ${JSON.stringify({ personal_space_role: personalSpaceRole.preset_role })}::jsonb`,
         personalSpaceRoleId: null,
       };
     } else if (personalSpaceRole !== undefined) {
-      const role = await lockOrgSpaceRole(tx, orgId, personalSpaceRole, "personal_space_role");
+      const role = await lockOrgSpaceRole(
+        tx,
+        orgId,
+        personalSpaceRole.custom_role_id,
+        "personal_space_role.custom_role_id",
+      );
       defaultRole = {
         orgSettings: sql`(${merged}) - 'personal_space_role'`,
         personalSpaceRoleId: role.id,
@@ -1033,11 +1043,15 @@ export async function listPersonalSpaceRoleOverrides(
  */
 export async function personalSpaceRoleImpact(
   orgId: string,
-  candidate: z.infer<typeof personalSpaceRoleSettingSchema>,
+  candidate: SpaceRoleAssignment,
 ): Promise<{ schedules: number; members: number }> {
-  const ref: SpaceRoleRef = isSpaceRolePreset(candidate)
-    ? { kind: "preset", preset: candidate }
-    : { kind: "custom", role: await lockOrgSpaceRole(db, orgId, candidate, "role") };
+  const ref: SpaceRoleRef =
+    "preset_role" in candidate
+      ? { kind: "preset", preset: candidate.preset_role }
+      : {
+          kind: "custom",
+          role: await lockOrgSpaceRole(db, orgId, candidate.custom_role_id, "custom_role_id"),
+        };
 
   const stoppedRoles = (["member", "guest"] as const).filter(
     (orgRole) => !spacePermissions(defaultPersonalSpaceRole(orgRole, ref)).has("agents:run"),

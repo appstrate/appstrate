@@ -568,16 +568,18 @@ router.get("/context", optionalSpaceContext(), async (c) => {
     // `personal` as the spaces routes derive it (`spaceWireForCaller`).
     space: { id: space.id, name: space.name, personal: space.ownerUserId !== null },
     connections,
-    connectable_integrations: connectable.integrations,
-    connectable_integrations_truncated: connectable.truncated,
-    connectable_integrations_total: connectable.total,
+    connectable_integrations: {
+      data: connectable.integrations,
+      truncated: connectable.truncated,
+      total: connectable.total,
+    },
     recent_runs: recentRuns,
-    agents: runnable.agents,
-    agents_truncated: runnable.truncated,
-    agents_total: runnable.total,
-    skills: activeSkills.skills,
-    skills_truncated: activeSkills.truncated,
-    skills_total: activeSkills.total,
+    agents: { data: runnable.agents, truncated: runnable.truncated, total: runnable.total },
+    skills: {
+      data: activeSkills.skills,
+      truncated: activeSkills.truncated,
+      total: activeSkills.total,
+    },
   });
 });
 

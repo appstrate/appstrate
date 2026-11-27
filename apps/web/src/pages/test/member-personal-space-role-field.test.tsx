@@ -28,8 +28,7 @@ function member(
   role: OrgMember["role"],
   override: OrgMember["personal_space_role"],
   defaultRole: OrgMember["personal_space_default_role"] = {
-    kind: "preset",
-    key: "admin",
+    preset_role: "admin",
     name: "admin",
   },
 ): OrgMember {
@@ -48,7 +47,7 @@ function renderField(m: OrgMember, permissions: string[]): string {
   seedOrgAndRoles(queryClient, permissions);
   queryClient.setQueryData(
     ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
-    { personal_model_credentials: true, personal_space_role: "operator" },
+    { personal_model_credentials: true, personal_space_role: { preset_role: "operator" } },
   );
   const snapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
     ...orgStore.getInitialState(),
@@ -77,8 +76,8 @@ describe("the personal space role field of the user sheet", () => {
 
   it("names the default the server reports, as the role selects name it", () => {
     const t = (key: string) => i18nModule.default.t(key);
-    const preset = { kind: "preset" as const, key: "operator", name: "operator" };
-    const custom = { kind: "custom" as const, key: "triage", name: "Triage" };
+    const preset = { preset_role: "operator" as const, name: "operator" };
+    const custom = { custom_role_id: "srl_00000000-0000-4000-8000-000000000001", name: "Triage" };
     expect(followLabel(member("member", null, preset), t)).toBe(
       settingsFr["roles.preset.operator"],
     );
@@ -87,9 +86,8 @@ describe("the personal space role field of the user sheet", () => {
 
   it("says so when the org default names no role", () => {
     const t = (key: string) => i18nModule.default.t(key);
-    expect(followLabel(member("member", null, null), t)).toBe(
-      settingsFr["userDetail.personalSpaceRoleNoDefault"],
-    );
+    const { personal_space_default_role: _omitted, ...bare } = member("member", null);
+    expect(followLabel(bare, t)).toBe(settingsFr["userDetail.personalSpaceRoleNoDefault"]);
   });
 
   it("renders nothing without members:change-role, whatever the target", () => {

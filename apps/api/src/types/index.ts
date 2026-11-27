@@ -121,7 +121,9 @@ export type AppEnv = {
      * non-session auth (API key, module strategies) or skipped entirely —
      * consumers must fall back to `getOrgSettings()` in that case.
      */
-    orgSettings?: import("@appstrate/shared-types").OrgSettings;
+    orgSettings?: import("zod").output<
+      typeof import("@appstrate/core/permissions").orgSettingsReadSchema
+    >;
     /** Set by auth strategies that defer org resolution to X-Org-Id middleware. */
     deferOrgResolution?: boolean;
     /**
