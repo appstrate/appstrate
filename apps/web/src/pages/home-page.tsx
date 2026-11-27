@@ -2,10 +2,12 @@
 
 import { useEffect, useEffectEvent } from "react";
 import { useLocation } from "react-router-dom";
-import { DashboardSkeleton } from "../components/loading-skeletons";
+import { ChatPanelSkeleton, DashboardSkeleton } from "../components/loading-skeletons";
 import { NoAccessState } from "../components/route-gate";
 import { useHome, useStudioReach } from "../hooks/use-can-reach";
+import { useAppConfig } from "../hooks/use-app-config";
 import { usePermissions } from "../hooks/use-permissions";
+import { homeProduct } from "../lib/home-route";
 import { useReplacePage } from "../lib/modal-route";
 import { DashboardPage } from "./dashboard";
 
@@ -23,9 +25,14 @@ export function HomePage() {
   }
 }
 
-/** What `/` draws while the reader's home is still undecided. */
+/** What `/` draws while the reader's home is still undecided: the product it most likely opens (`homeProduct`). */
 export function HomeSkeleton() {
-  return <DashboardSkeleton />;
+  const { features } = useAppConfig();
+  return homeProduct("pending", !!features.chat) === "chat" ? (
+    <ChatPanelSkeleton />
+  ) : (
+    <DashboardSkeleton />
+  );
 }
 
 /** `/dashboard`: the Studio's dashboard, refused to a role without the Studio. */

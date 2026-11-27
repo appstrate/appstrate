@@ -9,7 +9,7 @@ import { useSpaceLink } from "./use-current-space";
 import { routeVerdict, STUDIO_PERMISSION, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
 import { homeOf } from "../lib/home-route";
-import { spacesWhere, spanningRouteVerdict } from "../lib/space-lists";
+import { grantedInSomeActingSpace, spacesWhere, spanningRouteVerdict } from "../lib/space-lists";
 
 /**
  * The verdict on a declared route, read by `RouteGate` and every link: the working space's
@@ -104,10 +104,23 @@ export function useReachReady(): boolean {
   return usePermissions().ready;
 }
 
-/** What `/` shows the reader (`homeOf`): the dashboard, the chat, a refusal, or pending. */
+/**
+ * What `/` shows the reader (`homeOf`): the chat where it opens, for a role with the Studio only
+ * where it may also write there (a read-only chat only rereads past sessions); else the
+ * dashboard, a refusal, or pending. Write rights are judged across the acting spaces, so the
+ * answer waits for the space listing.
+ */
 export function useHome() {
   const { ready } = usePermissions();
+  const { features } = useAppConfig();
+  const { data: spaces, isError } = useSpaces();
   const studio = useStudioReach();
-  const chat = useCanReach()("/chat");
+  const reachable = useCanReach()("/chat");
+  const known = ready && (spaces !== undefined || isError);
+  const chat = !features.chat
+    ? false
+    : known
+      ? reachable && (!studio || grantedInSomeActingSpace(spaces, "chat:write"))
+      : undefined;
   return homeOf({ ready, studio, chat });
 }

@@ -54,7 +54,8 @@ import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
 import { useOverviewRules } from "./hooks/use-overview-mode";
-import { useHome } from "./hooks/use-can-reach";
+import { useHome, useStudioReach } from "./hooks/use-can-reach";
+import { homeProduct } from "./lib/home-route";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
 import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "@appstrate/ui/components/spinner";
@@ -462,11 +463,18 @@ function MainLayout({ search }: { search: string }) {
   const studioSidebar = useSidebarStore();
   const chatSidebar = useChatSidebarStore();
   const { pathname } = useLocation();
-  const product = isUnder(pathname, "/chat") ? "chat" : "studio";
+  const { features } = useAppConfig();
   const home = useHome();
+  const studio = useStudioReach();
+  // `/` only sends the reader home: it is framed as the product it opens, or most likely will.
+  const product =
+    isUnder(pathname, "/chat") ||
+    (pathname === "/" && homeProduct(home, !!features.chat) === "chat")
+      ? "chat"
+      : "studio";
   // Without the Studio, a page outside the chat (a file, a notification, a refusal) keeps the
   // chat's navigation, the only one the reader has.
-  const navProduct = product === "chat" || home === "chat" ? "chat" : "studio";
+  const navProduct = product === "chat" || (home === "chat" && !studio) ? "chat" : "studio";
   const sidebar = navProduct === "chat" ? chatSidebar : studioSidebar;
   useSpaceResolver(search);
   useOverviewRules();
