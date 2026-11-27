@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { MAX_APPROVED_FINGERPRINTS_PER_TOOL } from "@appstrate/core/sidecar-types";
 import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { insertToolApprovals, insertToolBlocks } from "../../helpers/tool-policy.ts";
+import { insertToolApprovals, insertToolBlocks, policyTarget } from "../../helpers/tool-policy.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import { seedProxyConnection } from "../../helpers/credential-proxy-fixtures.ts";
@@ -73,9 +73,7 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
   }
 
   const approve = (toolName: string) =>
-    insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG }, [
-      { toolName, fingerprint: FINGERPRINT },
-    ]);
+    insertToolApprovals(policyTarget(ctx, INTEG), [{ toolName, fingerprint: FINGERPRINT }]);
 
   beforeEach(async () => {
     await truncateAll();
@@ -84,7 +82,7 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
 
   it("names the tools the space blocked apart from the ones the manifest hides", async () => {
     await seed();
-    await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG }, ["search"]);
+    await insertToolBlocks(policyTarget(ctx, INTEG), ["search"]);
     const spec = await spawn(["search"]);
     expect(spec.blockedTools).toEqual(["search"]);
     expect(spec.hiddenTools).toBeUndefined();
@@ -150,7 +148,7 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
     await seed();
     const total = MAX_APPROVED_FINGERPRINTS_PER_TOOL + 3;
     await insertToolApprovals(
-      { ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG },
+      policyTarget(ctx, INTEG),
       Array.from({ length: total }, (_, i) => ({
         toolName: "write",
         fingerprint: i.toString(16).padStart(64, "0"),
@@ -191,7 +189,7 @@ describe("resolveIntegrationSpawns — a blocked api_call", () => {
     });
     await seedSpacePackage(ctx.defaultSpaceId, API);
     await seedProxyConnection(ctx, API, "primary", { api_key: "k-1" });
-    await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: API }, blocks);
+    await insertToolBlocks(policyTarget(ctx, API), blocks);
     const result = await resolveIntegrationSpawns({
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },

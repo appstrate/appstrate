@@ -7,11 +7,13 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { integrationConnections, notifications } from "@appstrate/db/schema";
+import { notifications } from "@appstrate/db/schema";
 import type { Actor } from "@appstrate/connect";
+import { MAX_REQUIRED_SCOPES } from "@appstrate/core/www-authenticate";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
+import { requestedScopesOf } from "../../helpers/connection-calls.ts";
 import { settle, until } from "../../helpers/credential-death-spy.ts";
 import {
   recordRequestedScopes,
@@ -28,13 +30,7 @@ describe("connection requested scopes", () => {
   let connectionId: string;
   let reach: { spaceId: string; actor: Actor };
 
-  const requested = async (id = connectionId) =>
-    (
-      await db
-        .select({ requested: integrationConnections.requestedScopes })
-        .from(integrationConnections)
-        .where(eq(integrationConnections.id, id))
-    )[0]!.requested;
+  const requested = (id = connectionId) => requestedScopesOf(id);
 
   const save = (scopesGranted: string[], id?: string) =>
     saveIntegrationConnection(scope, {
@@ -72,10 +68,10 @@ describe("connection requested scopes", () => {
         connectionId,
         INTEGRATION,
         reach,
-        Array.from({ length: 20 }, (_, j) => `s${i}_${j}`),
+        Array.from({ length: MAX_REQUIRED_SCOPES }, (_, j) => `s${i}_${j}`),
       );
     }
-    expect((await requested()).length).toBe(20);
+    expect((await requested()).length).toBe(MAX_REQUIRED_SCOPES);
   });
 
   it("records nothing for a caller that does not reach the connection", async () => {

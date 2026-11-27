@@ -27,7 +27,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { runLogs, runs } from "@appstrate/db/schema";
 import { seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
-import { insertToolBlocks } from "../../helpers/tool-policy.ts";
+import { insertToolBlocks, policyTarget } from "../../helpers/tool-policy.ts";
 import { apiIntegrationManifest, httpHeaderDelivery } from "../../helpers/integration-manifests.ts";
 import {
   createFakeOrchestrator,
@@ -191,7 +191,7 @@ describe("run launch — dropped-integration marker in run_logs", () => {
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, API);
     await seedIntegrationConnection(ctx, API);
     await seedDefaultOrgModel(ctx);
-    await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: API }, ["api_call"]);
+    await insertToolBlocks(policyTarget(ctx, API), ["api_call"]);
 
     const res = await launch({
       manifest: {

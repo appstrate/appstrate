@@ -11,7 +11,7 @@ import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
 import { integrationToolSnapshots } from "@appstrate/db/schema";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { tool } from "../../helpers/tool-policy.ts";
+import { oversizedListing, tool } from "../../helpers/tool-policy.ts";
 import { seedAgent } from "../../helpers/seed.ts";
 import { recordToolSnapshot } from "../../../src/services/integration-tool-snapshots.ts";
 import { readToolSnapshots } from "../../../src/services/integration-tool-snapshot-reads.ts";
@@ -81,10 +81,8 @@ describe("integration tool snapshots", () => {
   });
 
   it("keeps only the identity of the tools past 512 KiB of definitions", async () => {
-    const big = (name: string) => tool(name, "x".repeat(2000));
     // Descriptions are cut by the sanitiser: many tools are needed to pass the budget.
-    const tools = Array.from({ length: 400 }, (_, i) => big(`t${i}`));
-    await recordToolSnapshot({ ...target, tools, truncated: false });
+    await recordToolSnapshot({ ...target, tools: oversizedListing(), truncated: false });
 
     const stored = (await read())!.tools;
     expect(stored).toHaveLength(400);

@@ -14,16 +14,7 @@ import type { ResolvedIntegrationVersionMap } from "../../src/services/integrati
 
 type SpawnInput = Parameters<typeof resolveSpawns>[0];
 
-export function resolveIntegrationSpawns(
-  input: Omit<SpawnInput, "integrationVersions" | "orgId"> & {
-    integrationVersions?: ResolvedIntegrationVersionMap;
-    orgId?: string;
-  },
-): ReturnType<typeof resolveSpawns> {
-  return withOrg(input);
-}
-
-async function withOrg(
+export async function resolveIntegrationSpawns(
   input: Omit<SpawnInput, "integrationVersions" | "orgId"> & {
     integrationVersions?: ResolvedIntegrationVersionMap;
     orgId?: string;

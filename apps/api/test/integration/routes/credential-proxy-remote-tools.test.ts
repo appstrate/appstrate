@@ -48,6 +48,8 @@ import { seedApiKey } from "../../helpers/seed.ts";
 import { loopbackHeaders } from "../../helpers/loopback.ts";
 import { CHAT_LOOPBACK_AUTH_METHOD } from "@appstrate/core/chat-contract";
 import { seedShares } from "../../helpers/connection-shares.ts";
+import { requestedScopesOf } from "../../helpers/connection-calls.ts";
+import { until } from "../../helpers/credential-death-spy.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
@@ -460,6 +462,11 @@ describe("the typed tools of a remote MCP integration", () => {
       async (other) => {
         await seedProxyIntegration(ctx, on(other, { tools_policy: { search: {} } }));
         const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+        // A demand lands only on an OAuth2 connection: one with a minting client.
+        await db
+          .update(integrationConnections)
+          .set({ clientRef: "test-client" })
+          .where(eq(integrationConnections.id, connectionId));
 
         const res = await post("call", { integration_package_id: ID, name: "search" });
         expect(res.status).toBe(502);
@@ -474,15 +481,8 @@ describe("the typed tools of a remote MCP integration", () => {
         expect(problem.connection_id).toBe(connectionId);
         expect(problem.detail).toContain("a b");
         // The demand is recorded on the connection, minus what it holds: a fire-and-forget write.
-        const requested = async () =>
-          (
-            await db
-              .select({ requested: integrationConnections.requestedScopes })
-              .from(integrationConnections)
-              .where(eq(integrationConnections.id, connectionId))
-          )[0]!.requested;
-        for (let i = 0; i < 50 && (await requested()).length === 0; i++) await Bun.sleep(20);
-        expect(await requested()).toEqual(["a", "b"]);
+        await until(async () => (await requestedScopesOf(connectionId)).length > 0);
+        expect(await requestedScopesOf(connectionId)).toEqual(["a", "b"]);
       },
     );
   });

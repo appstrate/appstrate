@@ -21,7 +21,7 @@ import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
-import { insertToolBlocks } from "../../helpers/tool-policy.ts";
+import { insertToolBlocks, policyTarget } from "../../helpers/tool-policy.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
@@ -343,9 +343,7 @@ describe("GET /api/credential-proxy/tools", () => {
       await seedProxyIntegration(ctx, twoAuthApiIntegrationManifest(id));
       await seedProxyConnection(ctx, id, "primary", { api_key: "a" }, "p");
       await seedProxyConnection(ctx, id, "backup", { api_key: "b" }, "b1");
-      await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: id }, [
-        "api_call__primary",
-      ]);
+      await insertToolBlocks(policyTarget(ctx, id), ["api_call__primary"]);
 
       expect((await list()).body.tools.map((tool) => tool.name)).toEqual([
         "acme_items__api_call__backup",

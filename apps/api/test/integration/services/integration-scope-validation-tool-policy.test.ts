@@ -11,7 +11,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedProxyIntegration } from "../../helpers/credential-proxy-fixtures.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { insertToolApprovals } from "../../helpers/tool-policy.ts";
+import { insertToolApprovals, policyTarget } from "../../helpers/tool-policy.ts";
 import { validateAgentIntegrationSelections } from "../../../src/services/integration-scope-validation.ts";
 
 const ID = "@acme/files";
@@ -44,7 +44,7 @@ describe("validateAgentIntegrationSelections — approved tools", () => {
   });
 
   const approveWrite = () =>
-    insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID }, [
+    insertToolApprovals(policyTarget(ctx, ID), [
       { toolName: "write_file", fingerprint: "a".repeat(64) },
     ]);
 

@@ -3,10 +3,11 @@
 import { describe, it, expect } from "bun:test";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
-  approvedNames,
-  approvedToolNames,
+  allApprovedToolNames,
+  judgeToolSpacePolicy,
   namedToolSelection,
   resolveEffectiveToolCatalog,
+  unblockedApprovedToolNames,
   type ToolSnapshotView,
 } from "../../src/services/integration-tool-catalog.ts";
 
@@ -53,9 +54,11 @@ function one(
   p: ReturnType<typeof policy> | null,
   snapshots: ToolSnapshotView[],
 ) {
-  return resolveEffectiveToolCatalog({ integration: m, policy: p, snapshots }).find(
-    (e) => e.name === name,
-  )!;
+  return resolveEffectiveToolCatalog({
+    integration: m,
+    policy: p && judgeToolSpacePolicy(p, m),
+    snapshots,
+  }).find((e) => e.name === name)!;
 }
 
 describe("resolveEffectiveToolCatalog — declared tools", () => {
@@ -97,7 +100,7 @@ describe("resolveEffectiveToolCatalog — declared tools", () => {
   it("an approval of a declared tool is ignored", () => {
     const entries = resolveEffectiveToolCatalog({
       integration: m,
-      policy: policy([["t", FP_B]]),
+      policy: judgeToolSpacePolicy(policy([["t", FP_B]]), m),
       snapshots: [snap({ t: {} })],
     });
     expect(entries).toHaveLength(1);
@@ -177,9 +180,10 @@ describe("resolveEffectiveToolCatalog — hidden tools", () => {
     ({ ...manifest({ declared: ["d"], open }), hidden_tools: ["h"] }) as IntegrationManifest;
   it("never listed nor approved, closed or open catalog", () => {
     for (const open of [false, true]) {
+      const hidden = hiddenManifest(open);
       const names = resolveEffectiveToolCatalog({
-        integration: hiddenManifest(open),
-        policy: policy([["h", FP_A]]),
+        integration: hidden,
+        policy: judgeToolSpacePolicy(policy([["h", FP_A]]), hidden),
         snapshots: [snap({ d: {}, h: {}, u: {} })],
       }).map((e) => e.name);
       expect(names).toEqual(["d", "u"]);
@@ -202,9 +206,10 @@ describe("resolveEffectiveToolCatalog — open catalog and ordering", () => {
     );
   });
   it("declared first in catalog order, then the rest by name", () => {
+    const ordered = manifest({ declared: ["z", "a"] });
     const names = resolveEffectiveToolCatalog({
-      integration: manifest({ declared: ["z", "a"] }),
-      policy: policy([["m", FP_A]]),
+      integration: ordered,
+      policy: judgeToolSpacePolicy(policy([["m", FP_A]]), ordered),
       snapshots: [snap({ z: {}, a: {}, q: {}, b: {} })],
     }).map((e) => e.name);
     expect(names).toEqual(["z", "a", "b", "m", "q"]);
@@ -234,7 +239,7 @@ describe("namedToolSelection", () => {
   });
 });
 
-describe("approvedNames and approvedToolNames", () => {
+describe("allApprovedToolNames and unblockedApprovedToolNames", () => {
   const p = policy(
     [
       ["u", FP_A],
@@ -243,8 +248,8 @@ describe("approvedNames and approvedToolNames", () => {
     ],
     ["v"],
   );
-  it("approvedNames keeps blocked names, approvedToolNames drops them", () => {
-    expect([...approvedNames(p)]).toEqual(["u", "v"]);
-    expect([...approvedToolNames(p)]).toEqual(["u"]);
+  it("allApprovedToolNames keeps blocked names, unblockedApprovedToolNames drops them", () => {
+    expect([...allApprovedToolNames(p)]).toEqual(["u", "v"]);
+    expect([...unblockedApprovedToolNames(p)]).toEqual(["u"]);
   });
 });

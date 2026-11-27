@@ -665,14 +665,18 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
     const member = await memberHolding(ctx, ["integrations:read", "integrations:write"]);
     const res = await syncOpen(member);
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { manifest: { display_name?: string } }).manifest).toBeDefined();
+    expect(
+      ((await res.json()) as { manifest: { display_name: string } }).manifest.display_name,
+    ).toBe("fake-legacy");
   });
 
   it("reads the server with no connection and no credential", async () => {
     await seedProxyIntegration(ctx, unauthenticated(open.url));
     const res = await syncOpen();
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { manifest: { display_name?: string } }).manifest).toBeDefined();
+    expect(
+      ((await res.json()) as { manifest: { display_name: string } }).manifest.display_name,
+    ).toBe("fake-legacy");
     expect(open.authorizations.length).toBeGreaterThan(0);
     expect(open.authorizations.every((a) => a === null)).toBe(true);
     // Journaled like any operation outside a run: one row, without a connection.
@@ -704,7 +708,9 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
       await seedProxyIntegration(ctx, unauthenticated(`http://127.0.0.1:${redirecting.port}/mcp`));
       const res = await syncOpen();
       expect(res.status).toBe(200);
-      expect(((await res.json()) as { manifest: object }).manifest).toBeDefined();
+      expect(
+        ((await res.json()) as { manifest: { display_name: string } }).manifest.display_name,
+      ).toBe("fake-legacy");
     } finally {
       redirecting.stop(true);
     }
@@ -718,7 +724,9 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
       .where(eq(spaces.id, ctx.defaultSpaceId));
     const res = await syncOpen();
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { manifest: { display_name?: string } }).manifest).toBeDefined();
+    expect(
+      ((await res.json()) as { manifest: { display_name: string } }).manifest.display_name,
+    ).toBe("fake-legacy");
   });
 
   it("answers 502 when the server asks for a credential: never authorized ad hoc", async () => {

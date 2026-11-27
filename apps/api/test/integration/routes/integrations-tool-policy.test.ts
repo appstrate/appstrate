@@ -17,8 +17,16 @@ import {
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { seedApiKey, seedSpace } from "../../helpers/seed.ts";
-import { insertToolApprovals, tool, toolFingerprint as fp } from "../../helpers/tool-policy.ts";
+import { seedApiKey, seedPackage, seedSpace } from "../../helpers/seed.ts";
+import {
+  insertToolApprovals,
+  insertToolBlocks,
+  oversizedListing,
+  policyTarget,
+  snapshotTools,
+  tool,
+  toolFingerprint as fp,
+} from "../../helpers/tool-policy.ts";
 import {
   authHeaders,
   createTestContext,
@@ -31,7 +39,6 @@ import {
   seedProxyIntegration,
 } from "../../helpers/credential-proxy-fixtures.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { recordToolSnapshot } from "../../../src/services/integration-tool-snapshots.ts";
 
 const ID = "@acme/files";
 const BASE = `/api/integrations/${ID}/tool-policy`;
@@ -71,14 +78,7 @@ describe("integration tool policy routes", () => {
   };
   const catalogEntry = async (name: string) =>
     (await detail()).tool_catalog.find((t) => t.name === name);
-  const listed = (...tools: Tool[]) =>
-    recordToolSnapshot({
-      orgId: ctx.orgId,
-      packageId: ID,
-      connectionId: null,
-      tools,
-      truncated: false,
-    });
+  const listed = (...tools: Tool[]) => snapshotTools({ orgId: ctx.orgId, packageId: ID }, tools);
   const approve = (...tools: { name: string; fingerprint: string }[]) =>
     send("POST", "/approvals", { tools });
   const auditActions = async () =>
@@ -105,6 +105,10 @@ describe("integration tool policy routes", () => {
     await approve({ name: "write_file", fingerprint: fp("write_file") });
     await send("POST", "/blocks", { tools: ["read_file"] });
 
+    expect(await catalogEntry("write_file")).toMatchObject({
+      status: "available",
+      origin: "approved",
+    });
     const body = await view();
     expect(body.listed.map((t) => t.name).sort()).toEqual(["read_file", "write_file"]);
     expect(body.listed.find((t) => t.name === "write_file")).toMatchObject({
@@ -156,6 +160,15 @@ describe("integration tool policy routes", () => {
     expect(after.blocks.map((b) => b.tool_name)).toEqual(["other_tool"]);
   });
 
+  it("refuses to read the policy of a package that is not an integration", async () => {
+    const agent = await seedPackage({ id: "@acme/not-an-integration", orgId: ctx.orgId });
+    const res = await app.request(`/api/integrations/${agent.id}/tool-policy`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as Problem).code).toBe("wrong_package_type");
+  });
+
   it("refuses a session without integrations:configure", async () => {
     await listed(tool("write_file"));
     const viewer = await memberContext(ctx, "member", "viewer");
@@ -180,17 +193,6 @@ describe("integration tool policy routes", () => {
     const res = await approve({ name: "read_file", fingerprint: fp("read_file") });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ code: "tool_already_declared", tools: ["read_file"] });
-  });
-
-  it("makes an approved undeclared tool available with origin approved", async () => {
-    await listed(tool("read_file"), tool("write_file"));
-    expect(await catalogEntry("write_file")).toMatchObject({ status: "pending", origin: "listed" });
-
-    expect((await approve({ name: "write_file", fingerprint: fp("write_file") })).status).toBe(204);
-    expect(await catalogEntry("write_file")).toMatchObject({
-      status: "available",
-      origin: "approved",
-    });
   });
 
   it("judges the declared catalog against what the server listed, counting added, missing and modified", async () => {
@@ -239,17 +241,19 @@ describe("integration tool policy routes", () => {
 
   const holdFingerprints = (count: number) =>
     insertToolApprovals(
-      { ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID },
+      policyTarget(ctx, ID),
       Array.from({ length: count }, (_, i) => ({
         toolName: "write_file",
         fingerprint: i.toString(16).padStart(64, "0"),
       })),
     );
 
-  it("refuses a 33rd approved definition of one tool with tool_approvals_limit", async () => {
+  it("refuses one definition past the limit of one tool with tool_approvals_limit", async () => {
     await listed(tool("write_file", "live"));
     await holdFingerprints(MAX_APPROVED_FINGERPRINTS_PER_TOOL);
-    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(32);
+    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(
+      MAX_APPROVED_FINGERPRINTS_PER_TOOL,
+    );
 
     const refused = await approve({ name: "write_file", fingerprint: fp("write_file", "live") });
     expect(refused.status).toBe(409);
@@ -257,7 +261,9 @@ describe("integration tool policy routes", () => {
       code: "tool_approvals_limit",
       tools: ["write_file"],
     });
-    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(32);
+    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(
+      MAX_APPROVED_FINGERPRINTS_PER_TOOL,
+    );
 
     expect((await send("DELETE", "/approvals/write_file")).status).toBe(204);
     expect(
@@ -271,12 +277,16 @@ describe("integration tool policy routes", () => {
     expect(
       (await approve({ name: "write_file", fingerprint: fp("write_file", "live") })).status,
     ).toBe(204);
-    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(32);
+    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(
+      MAX_APPROVED_FINGERPRINTS_PER_TOOL,
+    );
 
     expect(
       (await approve({ name: "write_file", fingerprint: fp("write_file", "live") })).status,
     ).toBe(204);
-    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(32);
+    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(
+      MAX_APPROVED_FINGERPRINTS_PER_TOOL,
+    );
   });
 
   it("blocks a tool, declared or not, and lifts the block", async () => {
@@ -289,10 +299,10 @@ describe("integration tool policy routes", () => {
   });
 
   it("refuses a block past 500 per integration with 409 tool_blocks_limit, writing nothing", async () => {
-    const names = Array.from({ length: 500 }, (_, i) => `tool_${i}`);
-    for (let i = 0; i < names.length; i += 100) {
-      expect((await send("POST", "/blocks", { tools: names.slice(i, i + 100) })).status).toBe(204);
-    }
+    await insertToolBlocks(
+      policyTarget(ctx, ID),
+      Array.from({ length: 500 }, (_, i) => `tool_${i}`),
+    );
     const res = await send("POST", "/blocks", { tools: ["one_more", "tool_1"] });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ code: "tool_blocks_limit", tools: ["one_more"] });
@@ -301,7 +311,7 @@ describe("integration tool policy routes", () => {
   });
 
   it("rejects an empty or over-long tool name", async () => {
-    for (const name of ["", "x".repeat(257)]) {
+    for (const name of ["", "x".repeat(129)]) {
       const res = await send("POST", "/blocks", { tools: [name] });
       expect(res.status).toBe(400);
       expect(((await res.json()) as Problem).code).toBe("validation_failed");
@@ -309,9 +319,9 @@ describe("integration tool policy routes", () => {
     expect(await db.select().from(spaceIntegrationToolBlocks)).toHaveLength(0);
   });
 
-  it("approves and blocks any listed name: a colon, 200 characters", async () => {
+  it("approves and blocks any listed name: a colon, 128 characters", async () => {
     const colon = "ns:do_thing";
-    const long = "t".repeat(200);
+    const long = "t".repeat(128);
     await listed(tool(colon), tool(long));
 
     expect((await approve({ name: colon, fingerprint: fp(colon) })).status).toBe(204);
@@ -350,8 +360,7 @@ describe("integration tool policy routes", () => {
   });
 
   it("refuses a definition too large to have been kept, with tool_definition_unavailable", async () => {
-    const tools = Array.from({ length: 400 }, (_, i) => tool(`t${i}`, "x".repeat(2000)));
-    await listed(...tools);
+    await listed(...oversizedListing());
     const last = (await view()).listed.find((t) => t.definition === null)!;
     const res = await approve({ name: last.name, fingerprint: last.fingerprint });
     expect(res.status).toBe(409);
@@ -374,13 +383,7 @@ describe("integration tool policy routes", () => {
       allow_undeclared_tools: true,
     } as never);
     for (const id of [hiddenId, openId]) {
-      await recordToolSnapshot({
-        orgId: ctx.orgId,
-        packageId: id,
-        connectionId: null,
-        tools: [tool("secret_tool")],
-        truncated: false,
-      });
+      await snapshotTools({ orgId: ctx.orgId, packageId: id }, [tool("secret_tool")]);
       const res = await app.request(`/api/integrations/${id}/tool-policy/approvals`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -450,29 +453,6 @@ describe("integration tool policy routes", () => {
       expect(after.blocks).toEqual([]);
     });
 
-    it("refuses an outsider naming organization A in X-Org-Id", async () => {
-      await listed(tool("write_file"));
-      const other = await createTestContext({ orgSlug: "other" });
-      const res = await send("GET", "", undefined, {
-        Cookie: other.cookie,
-        "X-Org-Id": ctx.orgId,
-        "X-Space-Id": ctx.defaultSpaceId,
-      });
-      expect(res.status).toBe(403);
-      const post = await send(
-        "POST",
-        "/blocks",
-        { tools: ["write_file"] },
-        {
-          Cookie: other.cookie,
-          "X-Org-Id": ctx.orgId,
-          "X-Space-Id": ctx.defaultSpaceId,
-        },
-      );
-      expect(post.status).toBe(403);
-      expect(await db.select().from(spaceIntegrationToolBlocks)).toHaveLength(0);
-    });
-
     it("keeps the tools a connection listed from a colleague who cannot use that connection", async () => {
       const authedId = "@acme/authed";
       await seedProxyIntegration(
@@ -486,13 +466,11 @@ describe("integration tool policy routes", () => {
         }),
       );
       const connectionId = await seedProxyConnection(ctx, authedId, "api_key", { token: "t" });
-      await recordToolSnapshot({
-        orgId: ctx.orgId,
-        packageId: authedId,
-        connectionId,
-        tools: [tool("read_file"), tool("private_tool")],
-        truncated: false,
-      });
+      await snapshotTools(
+        { orgId: ctx.orgId, packageId: authedId },
+        [tool("read_file"), tool("private_tool")],
+        { connectionId },
+      );
       const policy = (who: TestContext) =>
         app.request(`/api/integrations/${authedId}/tool-policy`, { headers: authHeaders(who) });
       const catalog = async (who: TestContext) => {

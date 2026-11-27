@@ -23,10 +23,15 @@ import {
   seedProxyIntegration,
 } from "../../helpers/credential-proxy-fixtures.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { insertToolApprovals, tool, toolFingerprint } from "../../helpers/tool-policy.ts";
+import {
+  insertToolApprovals,
+  policyTarget,
+  snapshotTools,
+  tool,
+  toolFingerprint,
+} from "../../helpers/tool-policy.ts";
 import { seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { drainAudits } from "../../../src/services/audit.ts";
-import { recordToolSnapshot } from "../../../src/services/integration-tool-snapshots.ts";
 
 const ID = "@acme/files";
 
@@ -34,14 +39,8 @@ describe("tool review notifications", () => {
   let ctx: TestContext;
 
   /** The fan-out runs off the listing's path: flushed before anything reads its notices. */
-  const list = async (tools: Tool[], connectionId: string | null = null) => {
-    await recordToolSnapshot({
-      orgId: ctx.orgId,
-      packageId: ID,
-      connectionId,
-      tools,
-      truncated: false,
-    });
+  const list = async (tools: Tool[], connectionId?: string) => {
+    await snapshotTools({ orgId: ctx.orgId, packageId: ID }, tools, { connectionId });
     await drainAudits(5000);
   };
 
@@ -121,7 +120,7 @@ describe("tool review notifications", () => {
       title: "stays silent about a tool the space already approved at its current definition",
       run: async () => {
         await seed();
-        await insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID }, [
+        await insertToolApprovals(policyTarget(ctx, ID), [
           { toolName: "write_file", fingerprint: toolFingerprint("write_file") },
         ]);
         await list([tool("write_file")]);
@@ -139,13 +138,12 @@ describe("tool review notifications", () => {
     await seed();
     const other = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
     await seedSpacePackage(other.id, ID);
-    const holder = await memberHolding(ctx, ["integrations:configure"]);
+    await memberHolding(ctx, ["integrations:configure"]);
     const connectionId = await seedProxyConnection(ctx, ID, "default", {});
 
     await list([tool("write_file")], connectionId);
 
     expect(await notices()).toEqual([`${ctx.defaultSpaceId}:${ctx.user.id}`]);
-    expect(await notices()).not.toContain(`${ctx.defaultSpaceId}:${holder.user.id}`);
   });
 
   it("asks a personal space's owner, unless the operator cap took configure from them", async () => {

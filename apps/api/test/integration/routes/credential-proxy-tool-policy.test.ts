@@ -14,6 +14,7 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   insertToolApprovals,
   insertToolBlocks,
+  policyTarget,
   toolFingerprint,
 } from "../../helpers/tool-policy.ts";
 import { getTestApp } from "../../helpers/app.ts";
@@ -96,9 +97,7 @@ describe("the space tool policy over a remote integration's typed tools", () => 
     return row!.tools.find((t) => t.name === tool)!.fingerprint;
   };
   const approve = (tool: string, fingerprint: string) =>
-    insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID }, [
-      { toolName: tool, fingerprint },
-    ]);
+    insertToolApprovals(policyTarget(ctx, ID), [{ toolName: tool, fingerprint }]);
   /** Approve the tools at the definition the server lists now, then forget what was cached. */
   const approveLive = async (...tools: string[]) => {
     await listNames();
@@ -119,7 +118,7 @@ describe("the space tool policy over a remote integration's typed tools", () => 
     }));
   });
 
-  it("does not offer nor call an undeclared tool nobody approved", async () => {
+  it("offers and calls an undeclared tool only once approved, at the approved definition", async () => {
     const server = serve("Writes a file.");
     await seedProxyIntegration(ctx, closed(server.url));
 
@@ -127,13 +126,8 @@ describe("the space tool policy over a remote integration's typed tools", () => 
     server.requests.length = 0;
     expect((await call("write_file")).status).toBe(404);
     expect(server.requests).toHaveLength(0);
-  });
 
-  it("offers and calls an undeclared tool at the approved definition", async () => {
-    const server = serve("Writes a file.");
-    await seedProxyIntegration(ctx, closed(server.url));
     await approveLive("write_file");
-
     expect((await listNames()).sort()).toEqual([DECLARED, UNDECLARED].sort());
     expect((await call("write_file")).status).toBe(200);
   });
@@ -165,7 +159,7 @@ describe("the space tool policy over a remote integration's typed tools", () => 
   it("refuses a blocked tool before any exchange, whatever its origin, and does not list it", async () => {
     const server = serve("Writes a file.");
     await seedProxyIntegration(ctx, closed(server.url));
-    await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID }, ["read_file"]);
+    await insertToolBlocks(policyTarget(ctx, ID), ["read_file"]);
     clearAllCachesLocally();
     server.requests.length = 0;
 
@@ -234,8 +228,8 @@ describe("the space tool policy over a remote integration's typed tools", () => 
     it("leaves another path of the same server to the proxy", async () => {
       const server = serve("Writes a file.");
       await withAuth(server);
-      const res = await proxy(`${server.origin}/other`);
-      expect(res.status).not.toBe(403);
+      await proxy(`${server.origin}/other`);
+      expect(server.requests.length).toBeGreaterThan(0);
     });
   });
 
@@ -271,7 +265,7 @@ describe("the space tool policy over a remote integration's typed tools", () => 
         }),
       );
       await seedProxyConnection(ctx, API_ID, "primary", { api_key: "k" });
-      await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: API_ID }, blocked);
+      await insertToolBlocks(policyTarget(ctx, API_ID), blocked);
       clearAllCachesLocally();
       server.requests.length = 0;
       return server;
@@ -292,16 +286,14 @@ describe("the space tool policy over a remote integration's typed tools", () => 
       expect(await codeOf(streamed)).toBe("tool_blocked_in_space");
       expect(server.requests).toHaveLength(0);
 
-      const plain = await send(server.origin, false);
-      expect(await codeOf(plain)).not.toBe("tool_blocked_in_space");
+      await send(server.origin, false);
+      expect(server.requests.length).toBeGreaterThan(0);
     });
 
     it("blocking the per-auth name of a multi-auth integration refuses that auth's connection", async () => {
       await seedProxyIntegration(ctx, twoAuthApiIntegrationManifest(API_ID));
       const primary = await seedProxyConnection(ctx, API_ID, "primary", { api_key: "a" }, "p");
-      await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: API_ID }, [
-        "api_call__primary",
-      ]);
+      await insertToolBlocks(policyTarget(ctx, API_ID), ["api_call__primary"]);
 
       const res = await getTestApp().request("/api/credential-proxy/proxy", {
         method: "GET",

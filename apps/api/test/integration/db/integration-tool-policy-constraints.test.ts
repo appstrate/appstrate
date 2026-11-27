@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Constraints of migration 0115: the snapshot's one-row-per-target index (NULL connection
+ * Constraints of the tool policy tables: the snapshot's one-row-per-target index (NULL connection
  * included), the approvals' per-fingerprint uniqueness, the blocks' per-tool uniqueness, the
  * composite space/org FK, and the `integration_tools_review` notification kind with its
  * one-unread-per-(space, recipient, package) index.
@@ -15,9 +15,9 @@ import {
   spaceIntegrationToolApprovals,
   spaceIntegrationToolBlocks,
 } from "@appstrate/db/schema";
-import { db, truncateAll } from "../helpers/db.ts";
-import { createTestContext, type TestContext } from "../helpers/auth.ts";
-import { seedAgent } from "../helpers/seed.ts";
+import { db, truncateAll } from "../../helpers/db.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { seedAgent } from "../../helpers/seed.ts";
 
 /** Resolves to the violated constraint's SQLSTATE and name (both drivers wrap the error). */
 async function violation(run: Promise<unknown>): Promise<{ code: string; name: string }> {
@@ -35,7 +35,7 @@ async function violation(run: Promise<unknown>): Promise<{ code: string; name: s
   throw new Error("expected a constraint violation");
 }
 
-describe("integration tool policy schema (migration 0115)", () => {
+describe("integration tool policy constraints", () => {
   let ctx: TestContext;
   let packageId: string;
 
@@ -105,8 +105,12 @@ describe("integration tool policy schema (migration 0115)", () => {
       payload: { packageId, display_name: "Remote" },
     });
 
-    it("gives a second package its own unread notice", async () => {
+    it("keeps one unread notice per package, a second package having its own", async () => {
       await db.insert(notifications).values(review());
+      expect(await violation(db.insert(notifications).values(review()))).toEqual({
+        code: "23505",
+        name: "uq_notifications_tools_review_unread",
+      });
       await db
         .insert(notifications)
         .values({ ...review(), payload: { packageId: "@testorg/other", display_name: "Other" } });

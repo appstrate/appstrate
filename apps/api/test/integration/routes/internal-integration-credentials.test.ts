@@ -60,7 +60,7 @@ import {
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { seedShares } from "../../helpers/connection-shares.ts";
-import { drainJournal, journaledCalls } from "../../helpers/connection-calls.ts";
+import { drainJournal, journaledCalls, requestedScopesOf } from "../../helpers/connection-calls.ts";
 
 const app = getTestApp();
 
@@ -1220,21 +1220,13 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     const runMetadata = async () =>
       (await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId)))[0]!
         .metadata;
-    const stored = async (connectionId: string) =>
-      (
-        await db
-          .select({ requested: integrationConnections.requestedScopes })
-          .from(integrationConnections)
-          .where(eq(integrationConnections.id, connectionId))
-      )[0]!.requested;
-
     it("records the demand on the connection and stamps the run's metadata", async () => {
       await seedIntegration(INTEGRATION, true);
       const connectionId = await seedConnection(INTEGRATION, undefined, "test-client");
       await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
 
       expect((await report(connectionId, ["mail.send"])).status).toBe(204);
-      expect(await stored(connectionId)).toEqual(["mail.send"]);
+      expect(await requestedScopesOf(connectionId)).toEqual(["mail.send"]);
       expect(await runMetadata()).toMatchObject({
         scope_requests: [
           { integration_id: INTEGRATION, connection_id: connectionId, scopes: ["mail.send"] },
@@ -1262,7 +1254,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         .where(eq(integrationConnectionShares.connectionId, connectionId));
 
       expect((await report(connectionId, ["mail.send"])).status).toBe(204);
-      expect(await stored(connectionId)).toEqual([]);
+      expect(await requestedScopesOf(connectionId)).toEqual([]);
       expect((await runMetadata()) ?? {}).not.toHaveProperty("scope_requests");
     });
 
@@ -1283,7 +1275,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         demand(Array.from({ length: 21 }, (_, i) => `s${i}`)),
       ];
       for (const body of bodies) expect((await reportCalls([body])).status).toBe(400);
-      expect(await stored(connectionId)).toEqual([]);
+      expect(await requestedScopesOf(connectionId)).toEqual([]);
     });
   });
 

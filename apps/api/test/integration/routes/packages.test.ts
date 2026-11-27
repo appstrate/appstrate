@@ -21,7 +21,7 @@ import {
   seedSpacePackage,
   loseVersionArchive,
 } from "../../helpers/seed.ts";
-import { insertToolApprovals } from "../../helpers/tool-policy.ts";
+import { insertToolApprovals, policyTarget } from "../../helpers/tool-policy.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
@@ -1746,7 +1746,7 @@ describe("Packages API", () => {
 
     it("judges a package's selection against its home space's approvals, not the request's", async () => {
       await seedGmailIntegration();
-      await insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: integrationId }, [
+      await insertToolApprovals(policyTarget(ctx, integrationId), [
         { toolName: "delete_message", fingerprint: "a".repeat(64) },
       ]);
       const body = buildAgentBody({ version: "^1.0.0", tools: ["delete_message"] }, "homed");
@@ -2754,7 +2754,7 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(409);
-      expect(((await res.json()) as any).code).toBe("name_collision");
+      expect(((await res.json()) as { code: string }).code).toBe("name_collision");
     });
 
     it("moves the draft version when it overwrites an existing package, so a stale editor save is refused", async () => {

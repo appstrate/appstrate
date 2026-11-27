@@ -5,6 +5,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
 import { spaceIntegrationToolApprovals, spaceIntegrationToolBlocks } from "@appstrate/db/schema";
+import { recordToolSnapshot } from "../../src/services/integration-tool-snapshots.ts";
 import { db } from "./db.ts";
 
 /** An MCP tool descriptor with no parameters; the description defaults to one derived from the name. */
@@ -24,6 +25,31 @@ export interface ToolPolicyTarget {
   spaceId: string;
   packageId: string;
 }
+
+/** The policy target of `packageId` in a space of the test organization (its default space unless named). */
+export const policyTarget = (
+  ctx: { orgId: string; defaultSpaceId: string },
+  packageId: string,
+  spaceId: string = ctx.defaultSpaceId,
+): ToolPolicyTarget => ({ orgId: ctx.orgId, spaceId, packageId });
+
+/** Record what a server listed for an integration: org-wide unless a connection is named, complete unless `truncated`. */
+export const snapshotTools = (
+  target: { orgId: string; packageId: string },
+  tools: readonly Tool[],
+  opts: { connectionId?: string; truncated?: boolean } = {},
+) =>
+  recordToolSnapshot({
+    orgId: target.orgId,
+    packageId: target.packageId,
+    connectionId: opts.connectionId ?? null,
+    tools,
+    truncated: opts.truncated ?? false,
+  });
+
+/** A listing too large for every definition to be kept: the tail of it lists a name and a fingerprint only. */
+export const oversizedListing = (): Tool[] =>
+  Array.from({ length: 400 }, (_, i) => tool(`t${i}`, "x".repeat(2000)));
 
 export interface ApprovalRow {
   toolName: string;
