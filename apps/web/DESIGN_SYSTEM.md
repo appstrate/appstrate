@@ -113,6 +113,11 @@ they start with `packages/` or `e2e/`.
   line each: the title, then the tiles of its spaces, two at most then « +N », named for a screen
   reader; the names are in the "…" panel). Then the footer every drawer has: Catalogue, Settings
   and the account.
+- **Getting-started cards** (`components/sidebar-tips.tsx`, rules in `lib/sidebar-tips.ts`): on a
+  desktop at least 760 px tall, a stack of small cards above Catalogue, one first step each (title,
+  two lines of text, a small visual, one outline button to its page). The next card peeks above the
+  top one; they turn every 6 s, hold still under the pointer or the focus, and stop once turned by
+  hand. A card leaves when its step is done (existing API only), on its own page, or dismissed.
 - **A phone's menus rise from the bottom**, and no screen decides it: `DropdownMenu` and `Popover`
   (`packages/ui`) draw their content below `md` as a panel from the bottom (`SheetMenuContent`,
   `packages/ui/src/components/sheet-menu.tsx`, on the bottom `Sheet`), with the same open state and
