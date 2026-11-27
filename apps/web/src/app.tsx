@@ -55,7 +55,6 @@ import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
 import { useOverviewRules } from "./hooks/use-overview-mode";
 import { useHome, useStudioReach } from "./hooks/use-can-reach";
-import { homeProduct } from "./lib/home-route";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
 import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "@appstrate/ui/components/spinner";
@@ -466,10 +465,10 @@ function MainLayout({ search }: { search: string }) {
   const { features } = useAppConfig();
   const home = useHome();
   const studio = useStudioReach();
-  // `/` only sends the reader home: it is framed as the product it opens, or most likely will.
+  // `/` only sends the reader home: it is framed as the chat while it leads there or may still.
   const product =
     isUnder(pathname, "/chat") ||
-    (pathname === "/" && homeProduct(home, !!features.chat) === "chat")
+    (pathname === "/" && features.chat && (home === "chat" || home === "pending"))
       ? "chat"
       : "studio";
   // Without the Studio, a page outside the chat (a file, a notification, a refusal) keeps the

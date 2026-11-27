@@ -106,21 +106,18 @@ export function useReachReady(): boolean {
 
 /**
  * What `/` shows the reader (`homeOf`): the chat where it opens, for a role with the Studio only
- * where it may also write there (a read-only chat only rereads past sessions); else the
- * dashboard, a refusal, or pending. Write rights are judged across the acting spaces, so the
- * answer waits for the space listing.
+ * where it may also write there (a read-only chat only rereads past sessions), judged across the
+ * acting spaces once their listing answers; else the dashboard, a refusal, or pending.
  */
 export function useHome() {
   const { ready } = usePermissions();
-  const { features } = useAppConfig();
-  const { data: spaces, isError } = useSpaces();
+  const { data: spaces, isPending } = useSpaces();
   const studio = useStudioReach();
   const reachable = useCanReach()("/chat");
-  const known = ready && (spaces !== undefined || isError);
-  const chat = !features.chat
-    ? false
-    : known
-      ? reachable && (!studio || grantedInSomeActingSpace(spaces, "chat:write"))
-      : undefined;
+  // The listing also decides the Studio in « Tous les espaces »: wait for it.
+  const chat =
+    reachable && isPending
+      ? undefined
+      : reachable && (!studio || grantedInSomeActingSpace(spaces, "chat:write"));
   return homeOf({ ready, studio, chat });
 }

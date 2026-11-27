@@ -55,7 +55,7 @@ export function ProductTabs() {
     hasOwnSessions: hasChatSessions,
   });
 
-  // The Chat tab is still undecided: its slot is reserved so Studio does not fill the row then shift.
+  // The Chat tab is still undecided: its slot is reserved so Studio does not fill the row then split.
   const chatPending =
     !ready || (chatReachable && !canWrite && !previewing && hasChatSessions === undefined);
 

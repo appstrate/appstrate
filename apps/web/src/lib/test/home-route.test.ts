@@ -3,7 +3,7 @@
 /** `/` for a role with and without the chat or the Studio. */
 
 import { describe, expect, it } from "bun:test";
-import { homeOf, homeProduct } from "../home-route.ts";
+import { homeOf } from "../home-route.ts";
 
 describe("homeOf", () => {
   it("opens the chat first wherever it is the reader's, with or without the Studio", () => {
@@ -26,18 +26,5 @@ describe("homeOf", () => {
 
   it("refuses a role with neither the Studio nor the chat", () => {
     expect(homeOf({ ready: true, studio: false, chat: false })).toBe("denied");
-  });
-});
-
-describe("homeProduct", () => {
-  it("frames `/` as the chat while it leads there, or may still where the instance loads it", () => {
-    expect(homeProduct("chat", true)).toBe("chat");
-    expect(homeProduct("pending", true)).toBe("chat");
-  });
-
-  it("frames it as the Studio otherwise", () => {
-    expect(homeProduct("pending", false)).toBe("studio");
-    expect(homeProduct("dashboard", true)).toBe("studio");
-    expect(homeProduct("denied", true)).toBe("studio");
   });
 });

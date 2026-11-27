@@ -7,7 +7,6 @@ import { NoAccessState } from "../components/route-gate";
 import { useHome, useStudioReach } from "../hooks/use-can-reach";
 import { useAppConfig } from "../hooks/use-app-config";
 import { usePermissions } from "../hooks/use-permissions";
-import { homeProduct } from "../lib/home-route";
 import { useReplacePage } from "../lib/modal-route";
 import { DashboardPage } from "./dashboard";
 
@@ -25,14 +24,9 @@ export function HomePage() {
   }
 }
 
-/** What `/` draws while the reader's home is still undecided: the product it most likely opens (`homeProduct`). */
+/** What `/` draws while the reader's home is still undecided: the chat, wherever the instance loads it. */
 export function HomeSkeleton() {
-  const { features } = useAppConfig();
-  return homeProduct("pending", !!features.chat) === "chat" ? (
-    <ChatPanelSkeleton />
-  ) : (
-    <DashboardSkeleton />
-  );
+  return useAppConfig().features.chat ? <ChatPanelSkeleton /> : <DashboardSkeleton />;
 }
 
 /** `/dashboard`: the Studio's dashboard, refused to a role without the Studio. */
