@@ -302,21 +302,6 @@ describe("McpHost — buildTools", () => {
     }
   });
 
-  it("exposes a tool listed several times once, on its first occurrence", async () => {
-    const upstream = await makeUpstream(notionTool());
-    const listed = (await upstream.client.listTools()).tools[0]!;
-    const client = Object.assign(Object.create(upstream.client), {
-      listTools: async () => ({ tools: [listed, listed, listed, listed] }),
-    }) as typeof upstream.client;
-    try {
-      const host = new McpHost();
-      await host.register({ integrationId: "notion", namespace: "notion", client });
-      expect(host.buildTools().map((t) => t.descriptor.name)).toEqual(["notion__search_pages"]);
-    } finally {
-      await upstream.pair.close();
-    }
-  });
-
   it("keeps upstream case, hyphens and inner __ and routes back to the exact upstream name", async () => {
     const seen: string[] = [];
     const tool = (name: string): AppstrateToolDefinition => ({

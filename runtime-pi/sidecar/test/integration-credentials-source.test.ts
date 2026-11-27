@@ -22,7 +22,6 @@
 import { describe, it, expect, spyOn } from "bun:test";
 import {
   capObservedTools,
-  capObservedUnavailable,
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
   postIntegrationToolsObserved,
@@ -913,15 +912,5 @@ describe("capObservedTools", () => {
     const capped = capObservedTools(tools);
     expect(capped.tools).toHaveLength(OBSERVED_TOOLS_MAX_COUNT);
     expect(capped.truncated).toBe(true);
-  });
-});
-
-describe("capObservedUnavailable", () => {
-  it("keeps at most the platform's tool count", () => {
-    const many = Array.from({ length: OBSERVED_TOOLS_MAX_COUNT + 5 }, (_, i) => ({
-      name: `t${i}`,
-      reason: "not_listed" as const,
-    }));
-    expect(capObservedUnavailable(many)).toHaveLength(OBSERVED_TOOLS_MAX_COUNT);
   });
 });

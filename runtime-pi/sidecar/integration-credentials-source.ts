@@ -46,7 +46,7 @@ import { computeBackoffDelayMs, isRetryableHttpStatus } from "@appstrate/afps-sh
 import {
   OBSERVED_TOOLS_MAX_BYTES,
   OBSERVED_TOOLS_MAX_COUNT,
-  type UnavailableToolReason,
+  type UnavailableTool,
 } from "@appstrate/core/sidecar-types";
 import { logger } from "./logger.ts";
 
@@ -694,11 +694,6 @@ export function capObservedTools<T>(
   return { tools: kept, truncated: false };
 }
 
-/** At most the count the platform accepts. */
-export function capObservedUnavailable<T extends { name: string }>(unavailable: readonly T[]): T[] {
-  return unavailable.slice(0, OBSERVED_TOOLS_MAX_COUNT);
-}
-
 /** Per-attempt budget of a tools-observed report. */
 const TOOLS_OBSERVED_TIMEOUT_MS = 10_000;
 /** Retries after the first attempt: the route is idempotent, so a network error or 5xx is retried. */
@@ -717,7 +712,7 @@ export async function postIntegrationToolsObserved(
     /** Omitted: the report only carries `unavailable` and records no snapshot. */
     tools?: readonly unknown[];
     truncated?: boolean;
-    unavailable: readonly { name: string; reason: UnavailableToolReason }[];
+    unavailable: readonly UnavailableTool[];
   },
   opts: {
     platformApiUrl: string;

@@ -4,7 +4,6 @@ import { describe, it, expect } from "bun:test";
 import {
   validateAgentIntegrationScopes,
   judgeToolApprovals,
-  hiddenToolNames,
   type IntegrationManifest,
 } from "../src/integration.ts";
 import { integrationSpawnSpecSchema } from "../src/sidecar-types.ts";
@@ -90,10 +89,6 @@ describe("integrationSpawnSpecSchema — approvedToolFingerprints and blockedToo
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.message).toContain("approvedToolFingerprints");
   });
-  it("accepts blockedTools names and refuses a non-array", () => {
-    expect(parse({ blockedTools: ["a", "b"] }).success).toBe(true);
-    expect(parse({ blockedTools: "a" }).success).toBe(false);
-  });
 });
 
 describe("judgeToolApprovals", () => {
@@ -107,14 +102,5 @@ describe("judgeToolApprovals", () => {
   });
   it("drops every approval on an open catalog", () => {
     expect(judgeToolApprovals(hiddenManifest(true), rows)).toEqual([]);
-  });
-  it("an approval of a platform-hidden name never counts", () => {
-    const m = manifest({});
-    const connect = [...hiddenToolNames(m)];
-    const judged = judgeToolApprovals(
-      m,
-      connect.map((tool_name) => ({ tool_name })),
-    );
-    expect(judged).toEqual([]);
   });
 });

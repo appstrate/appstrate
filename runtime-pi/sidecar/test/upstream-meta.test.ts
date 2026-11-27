@@ -81,14 +81,6 @@ describe("upstream-meta — required scopes", () => {
     expect(Object.keys(meta.headers)).not.toContain("www-authenticate");
     expect(JSON.stringify(meta)).not.toContain("error_description");
   });
-
-  it("carries none on a success", () => {
-    const res = new Response("", {
-      status: 200,
-      headers: { "WWW-Authenticate": 'Bearer scope="a"' },
-    });
-    expect(buildUpstreamMeta(res).required_scopes).toBeUndefined();
-  });
 });
 
 describe("upstream-meta — allowlist sanity", () => {

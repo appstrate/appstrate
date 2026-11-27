@@ -71,13 +71,15 @@ import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris
 import {
   integrationSpawnSpecSchema,
   integrationSpawnSpecsSchema,
+  OBSERVED_TOOLS_MAX_COUNT,
   type IntegrationSpawnSpec,
+  type UnavailableTool,
 } from "@appstrate/core/sidecar-types";
 import { SidecarEnvError } from "./env.ts";
 
 import type { CredentialBundle } from "@appstrate/connect/connect";
 
-import { McpHost, type UnavailableTool } from "./mcp-host.ts";
+import { McpHost } from "./mcp-host.ts";
 import { runnerKeyOf } from "./runner-peers.ts";
 import { logger } from "./logger.ts";
 import type { HostResolver, PeerCheck } from "./helpers.ts";
@@ -92,7 +94,6 @@ import {
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
   capObservedTools,
-  capObservedUnavailable,
   isCredentialRejectedResult,
   postIntegrationCredentialsRefresh,
   postIntegrationToolsObserved,
@@ -1522,9 +1523,8 @@ export function pushUnavailableToolBreadcrumb(
 ): void {
   if (unavailable.length === 0) return;
   // The selection, plus any gated tool outside it: the denominator never falls below the shortfall.
-  // The allowlist carries the synthetic api names; `unavailable` never does.
   const requested = new Set([
-    ...(spec.toolAllowlist ?? []).filter((name) => !isSyntheticApiToolName(name)),
+    ...(nativeToolAllowlist(spec) ?? []),
     ...unavailable.map(({ name }) => name),
   ]).size;
   // Server-controlled names reach the run log: only plain tokens are quoted.
@@ -1571,9 +1571,10 @@ async function reportToolsObserved(
   unavailable: readonly UnavailableTool[],
   opts: BundleFetchOptions,
 ): Promise<void> {
-  const observed = listed
-    ? { ...capObservedTools(listed), unavailable: capObservedUnavailable(unavailable) }
-    : { unavailable: capObservedUnavailable(unavailable) };
+  const observed = {
+    ...(listed && capObservedTools(listed)),
+    unavailable: unavailable.slice(0, OBSERVED_TOOLS_MAX_COUNT),
+  };
   const ctx = { integrationId: spec.integrationId, connectionId: spec.connection?.id };
   try {
     const res = await postIntegrationToolsObserved(
@@ -2170,7 +2171,11 @@ export async function bootIntegrations(
       if (upstream.kind === "remote") {
         const { client, authKey } = upstream;
         const sizeBefore = host.routeCount();
-        const registration = await host.register({
+        const {
+          namespace: allocatedNs,
+          unavailable: unavailableTools,
+          listed,
+        } = await host.register({
           integrationId: spec.integrationId,
           namespace: spec.namespace,
           client,
@@ -2184,19 +2189,13 @@ export async function bootIntegrations(
           // tool can never reach the agent via the remote MCP path.
           ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
           blockedTools: spec.blockedTools,
-          ...(spec.approvedToolFingerprints
-            ? { approvedToolFingerprints: spec.approvedToolFingerprints }
-            : {}),
+          approvedToolFingerprints: spec.approvedToolFingerprints,
         });
-        const allocatedNs = registration.namespace;
         const added = host.routeCount() - sizeBefore;
-        const unavailableTools = registration.unavailable;
         pushUnavailableToolBreadcrumb(spec, unavailableTools, breadcrumbs);
         // Always reported, the platform's own endpoint included: the unavailable tools are the
         // only channel to the run's degraded marking (the platform records no snapshot for it).
-        reports.push(
-          reportToolsObserved(spec, registration.listed, unavailableTools, bundleFetchOpts),
-        );
+        reports.push(reportToolsObserved(spec, listed, unavailableTools, bundleFetchOpts));
         // Attach the in-process api_call tool alongside the remote MCP's tools.
         const { count: apiCallAdded } = await attachApiCall(spec, connection, source, allocatedNs);
         assertIntegrationExposesTools(spec, added + apiCallAdded);
@@ -2244,7 +2243,7 @@ export async function bootIntegrations(
       const {
         allocatedNs,
         toolCount: added,
-        unavailable: unavailableTools,
+        unavailable,
       } = await registerLocalIntegration(
         host,
         spec,
@@ -2260,11 +2259,11 @@ export async function bootIntegrations(
           blockedTools: spec.blockedTools,
         },
       );
-      pushUnavailableToolBreadcrumb(spec, unavailableTools, breadcrumbs);
+      pushUnavailableToolBreadcrumb(spec, unavailable, breadcrumbs);
       // Local sources have no snapshot: the report carries only `unavailable` (no `tools`), the
       // channel by which a run losing a selected tool is marked degraded.
-      if (unavailableTools.length > 0) {
-        reports.push(reportToolsObserved(spec, undefined, unavailableTools, bundleFetchOpts));
+      if (unavailable.length > 0) {
+        reports.push(reportToolsObserved(spec, undefined, unavailable, bundleFetchOpts));
       }
 
       // ─── P2 — connect.tool `runAt: "run-start"` session acquisition ───
@@ -2291,7 +2290,7 @@ export async function bootIntegrations(
         namespace: allocatedNs,
         ...connectionLabelOf(spec),
         toolCount: added + apiCallAdded,
-        ...(unavailableTools.length > 0 ? { unavailableTools } : {}),
+        ...(unavailable.length > 0 ? { unavailableTools: unavailable } : {}),
       });
       logger.info("integration registered", {
         integrationId: spec.integrationId,

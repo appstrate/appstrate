@@ -6,19 +6,16 @@ import { targetsMcpEndpoint } from "../src/mcp-endpoint.ts";
 const endpoint = { url: "https://mcp.example.com/v1/mcp", transport: "streamable-http" };
 
 describe("targetsMcpEndpoint", () => {
-  it("matches the endpoint path and below it, on the same origin only", () => {
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/?x=1#f", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/sse", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcpx", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("http://mcp.example.com/v1/mcp", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("https://mcp.example.com:8443/v1/mcp", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("https://other.example.com/v1/mcp", endpoint)).toBe(false);
-  });
-
   it("normalises the target path", () => {
     const cases: [string, boolean][] = [
+      ["https://mcp.example.com/v1/mcp", true],
+      ["https://mcp.example.com/v1/mcp/?x=1#f", true],
+      ["https://mcp.example.com/v1/mcp/sse", true],
+      ["https://mcp.example.com/v1/mcpx", false],
+      ["https://mcp.example.com/v1", false],
+      ["http://mcp.example.com/v1/mcp", false],
+      ["https://mcp.example.com:8443/v1/mcp", false],
+      ["https://other.example.com/v1/mcp", false],
       ["https://MCP.Example.COM/v1/mcp", true],
       ["https://mcp.example.com./v1/mcp", true],
       ["https://mcp.example.com:443/v1/mcp", true],

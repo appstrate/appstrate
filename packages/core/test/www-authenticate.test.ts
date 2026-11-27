@@ -76,23 +76,16 @@ describe("requiredScopesFromChallenge", () => {
 });
 
 describe("sanitiseRequiredScopes", () => {
-  it("keeps valid tokens and drops non-strings and invalid tokens", () => {
-    expect(sanitiseRequiredScopes(["read", 3, null, "has space", "write"])).toEqual([
-      "read",
-      "write",
-    ]);
-  });
-
-  it("drops tokens over the length bound", () => {
-    expect(sanitiseRequiredScopes(["a".repeat(129), "ok"])).toEqual(["ok"]);
-  });
-
-  it("caps the list at 20", () => {
-    const many = Array.from({ length: 30 }, (_, i) => `s${i}`);
-    expect(sanitiseRequiredScopes(many)).toHaveLength(20);
-  });
-
-  it("returns an empty list for undefined", () => {
-    expect(sanitiseRequiredScopes(undefined)).toEqual([]);
+  const cases: [readonly unknown[] | undefined, string[]][] = [
+    [
+      ["read", 3, null, "has space", "write"],
+      ["read", "write"],
+    ],
+    [["a".repeat(129), "ok"], ["ok"]],
+    [Array.from({ length: 30 }, (_, i) => `s${i}`), Array.from({ length: 20 }, (_, i) => `s${i}`)],
+    [undefined, []],
+  ];
+  it.each(cases)("sanitises %j", (input, expected) => {
+    expect(sanitiseRequiredScopes(input)).toEqual(expected);
   });
 });

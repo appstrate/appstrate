@@ -38,7 +38,7 @@ import {
   normaliseMcpToolBody,
   normaliseMcpToolNamespace,
 } from "@appstrate/core/naming";
-import type { IntegrationSpawnSpec, UnavailableToolReason } from "@appstrate/core/sidecar-types";
+import type { IntegrationSpawnSpec, UnavailableTool } from "@appstrate/core/sidecar-types";
 import {
   exposeTool,
   notifyDetached,
@@ -204,12 +204,6 @@ interface McpHostOptions {
    * upstreams (the in-process `api_call` server) budget their own output.
    */
   outputBudget?: ToolOutputBudgetDeps;
-}
-
-/** A tool the agent selected (or the platform gates) that this upstream does not expose. */
-export interface UnavailableTool {
-  name: string;
-  reason: UnavailableToolReason;
 }
 
 /** What {@link McpHost.register} did with one upstream. */
@@ -647,12 +641,7 @@ export class McpHost {
       if (!siblings.has(key)) siblings.set(key, finalName);
     }
 
-    const reported = new Set<string>();
-    return {
-      namespace: normalisedNs,
-      unavailable: unavailable.filter(({ name }) => !reported.has(name) && reported.add(name)),
-      listed: tools,
-    };
+    return { namespace: normalisedNs, unavailable, listed: tools };
   }
 
   private routeFor(upstream: McpHostUpstream, originalName: string): ToolRoute {
