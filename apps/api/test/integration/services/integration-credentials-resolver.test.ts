@@ -27,6 +27,7 @@
  * with no clock games for the lead window.
  */
 
+import { readCredentialRevision } from "../../helpers/refresh-fixtures.ts";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
@@ -39,7 +40,6 @@ import { resolveLiveIntegrationCredentials } from "../../../src/services/integra
 import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
 import {
   clearUpstreamRejections,
-  readCredentialRevision,
   recordUnrefreshableRejection,
   saveIntegrationConnection,
 } from "../../../src/services/integration-connections.ts";

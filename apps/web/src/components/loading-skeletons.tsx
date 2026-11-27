@@ -12,7 +12,7 @@
 
 import {
   ComposerSkeleton,
-  ConversationRowSkeleton,
+  ConversationListSkeleton,
   ConversationSkeleton,
 } from "@appstrate/module-chat/conversation-skeleton";
 import { Card } from "@appstrate/ui/components/card";
@@ -31,15 +31,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { PackageType } from "@appstrate/core/validation";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { Plus } from "lucide-react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import {
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@appstrate/ui/components/sidebar";
 import { cn } from "@appstrate/ui/cn";
 import { usePageBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import type { BreadcrumbEntry } from "../stores/breadcrumb-store";
@@ -203,46 +195,30 @@ function SpaceLineBlocks() {
   );
 }
 
-/** An integration's « Connexion utilisée par défaut », under its connections table: a group heading, the default's row, then the exceptions (sub-heading, table, add button). */
-function DefaultConnectionBlocks({ canConfigure }: { canConfigure: boolean }) {
+/** {@link ListTabBlocks} on its own, while a tab's rows load inside the page. */
+export function ListTabSkeleton() {
   return (
-    <div className="mt-8 flex flex-col gap-6">
-      <header>
-        <SkeletonLine className="w-48 text-base font-semibold" />
-        <div className="mt-1 max-w-2xl">
-          <SkeletonLine className="w-full text-sm leading-relaxed" />
-        </div>
-      </header>
-      <SkeletonLine className="w-64 text-sm" />
-      {canConfigure && (
-        <>
-          <SettingsSkeleton rows={1} />
-          {/* The exceptions: their sub-heading, the table's card, then « Ajouter ». */}
-          <div>
-            <header className="mb-3">
-              <SkeletonLine className="w-44 text-sm font-semibold" />
-              <div className="mt-1 max-w-2xl">
-                <SkeletonLine className="w-full text-sm leading-relaxed" />
-              </div>
-            </header>
-            <div className="mb-4">
-              <TableBlocks framed />
-            </div>
-            <Skeleton className="h-8 w-32" />
-          </div>
-        </>
-      )}
-    </div>
+    <Waiting>
+      <ListTabBlocks />
+    </Waiting>
   );
 }
 
 /** A list tab (runs, connections, usage): its toolbar over the table's own card. */
-function ListTabBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
+function ListTabBlocks({
+  spaceLine = false,
+  footerLine = false,
+}: {
+  spaceLine?: boolean;
+  /** The one line under the table: an integration's default account (`DefaultConnectionLine`). */
+  footerLine?: boolean;
+}) {
   return (
     <>
       {spaceLine && <SpaceLineBlocks />}
       <ToolbarBlocks columns />
       <TableBlocks framed />
+      {footerLine && <SkeletonLine className="mt-4 w-72 text-sm" />}
     </>
   );
 }
@@ -286,7 +262,6 @@ function useOpensWithSpaceLine(type: PackageType, tab: string): boolean {
     );
   }
   if (type !== "integration") return false;
-  if (tab === "connections") return true;
   if (tab !== "settings") return false;
   // A section named in the address exists: the rail offers it.
   const section = resolveIntegrationSettingsSection(search.get("integrationSettings"), {
@@ -301,14 +276,7 @@ function useOpensWithSpaceLine(type: PackageType, tab: string): boolean {
  * A framed two-pane tab (settings, a run's results): `AgentDetailSplit`'s rail beside its section,
  * in the tab panel's card.
  */
-function RailPanelBlocks({
-  spaceLine = false,
-  rows,
-}: {
-  spaceLine?: boolean;
-  /** The open section's rows, when it has fewer than `SettingsSkeleton`'s default. */
-  rows?: number;
-}) {
+function RailPanelBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
   return (
     <Card className="@container/split overflow-hidden">
       <div className="grid min-h-[610px] grid-cols-1 @xl/split:grid-cols-[14rem_minmax(0,1fr)]">
@@ -332,7 +300,7 @@ function RailPanelBlocks({
                 <SkeletonLine className="w-1/3 text-sm leading-relaxed" />
               </div>
             </header>
-            <SettingsSkeleton rows={rows} />
+            <SettingsSkeleton />
           </div>
         </div>
       </div>
@@ -415,17 +383,7 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   const title = useCachedPackageName(type, packageId);
   const tab = useOpenTab();
   const spaceLine = useOpensWithSpaceLine(type, tab);
-  const { can } = usePermissions();
-  const search = new URLSearchParams(useLocation().search);
-  const configuresIntegration = useSpacesFor({ permission: "integrations:configure" }).offered;
-  // « Création de connexions » is one setting; the other sections hold several.
-  const opensAccess =
-    type === "integration" &&
-    resolveIntegrationSettingsSection(search.get("integrationSettings"), {
-      canConfigure: configuresIntegration,
-      isOwned: true,
-      hasDefinition: true,
-    }) === "access";
+  const { on: overview } = useOverviewMode();
   return (
     <DetailPageSkeleton
       title={title}
@@ -437,16 +395,14 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
       spaces
       panel={
         tab === "settings" ? (
-          <RailPanelBlocks spaceLine={spaceLine} rows={opensAccess ? 1 : undefined} />
+          <RailPanelBlocks spaceLine={spaceLine} />
         ) : tab === "memory" ? (
           <MemoryTabBlocks />
-        ) : type === "integration" && tab === "connections" ? (
-          <>
-            <ListTabBlocks spaceLine={spaceLine} />
-            <DefaultConnectionBlocks canConfigure={can("integrations:configure")} />
-          </>
         ) : tab === "runs" || tab === "connections" || tab === "usedBy" ? (
-          <ListTabBlocks spaceLine={spaceLine} />
+          <ListTabBlocks
+            spaceLine={spaceLine}
+            footerLine={type === "integration" && tab === "connections" && !overview}
+          />
         ) : type === "agent" ? (
           <AgentOverviewSkeleton />
         ) : type === "integration" ? (
@@ -1065,36 +1021,8 @@ export function ChatConversationSkeleton() {
   );
 }
 
-/**
- * The conversation list's shape, drawn while its permissions and chunk load:
- * the "new conversation" row (the chat's primary action, so it is real, not
- * grey) above a group of row skeletons — what `ChatConversationList` draws: a title line and the
- * space line under it, drawn by the module's own `ConversationRowSkeleton`.
- */
+/** The conversation list's shape while its permissions and chunk load: the module's own. */
 export function ChatSidebarSkeleton() {
   const { t } = useTranslation("chat");
-  return (
-    <>
-      <SidebarGroup className="pb-0">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton disabled tooltip={t("threads.new")}>
-              <Plus />
-              <span>{t("threads.new")}</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarGroup>
-      <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel className="text-sm md:text-xs">{t("threads.title")}</SidebarGroupLabel>
-        <SidebarMenu>
-          {Array.from({ length: 5 }, (_, i) => (
-            <SidebarMenuItem key={i}>
-              <ConversationRowSkeleton />
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenu>
-      </SidebarGroup>
-    </>
-  );
+  return <ConversationListSkeleton newConversation={t("threads.new")} />;
 }

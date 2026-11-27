@@ -80,6 +80,8 @@ import {
 } from "../../helpers/credential-proxy-fixtures.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
+import { loopbackHeaders } from "../../helpers/loopback.ts";
+import { CHAT_LOOPBACK_AUTH_METHOD } from "@appstrate/core/chat-contract";
 
 const app = getTestApp();
 
@@ -1049,11 +1051,39 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set", ()
       apiKeyId: key.id,
       authMethod: "api_key",
       runId: null,
+      chatSessionId: null,
       method: "GET",
       host: "gmail.googleapis.com",
       outcome: "200",
       requestId: res.headers.get("Request-Id"),
     });
+  });
+
+  /** The chat's loopback bearer of `ctx.user`, issued by conversation `chatSessionId`. */
+  const chatBearer = (chatSessionId: string) =>
+    loopbackHeaders(ctx, ctx.orgId, {
+      orgRole: "member",
+      permissions: [...CALL, "credential-proxy:call-own"],
+      chatSessionId,
+    }).Authorization!;
+
+  it("journals a call issued by a chat conversation with that conversation", async () => {
+    const res = await call({ Authorization: chatBearer("chat_1"), "X-Connection-Id": own1 });
+    expect(res.status).toBe(200);
+
+    const rows = await journaled();
+    expect(rows.map((row) => [row.authMethod, row.runId, row.chatSessionId])).toEqual([
+      [CHAT_LOOPBACK_AUTH_METHOD, null, "chat_1"],
+    ]);
+  });
+
+  it("journals a chat bearer's call naming a run with the run alone", async () => {
+    const runId = await runBinding([shared]);
+    const res = await call({ Authorization: chatBearer("chat_1"), "X-Run-Id": runId });
+    expect(res.status).toBe(200);
+
+    const rows = await journaled();
+    expect(rows.map((row) => [row.runId, row.chatSessionId])).toEqual([[runId, null]]);
   });
 
   it("journals a streamed response once, with the upstream's status", async () => {

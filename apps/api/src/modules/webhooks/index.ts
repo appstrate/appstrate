@@ -21,6 +21,7 @@ import {
   rotateSecretSchema,
 } from "./routes.ts";
 import {
+  dispatchCredentialNeedsReconnectionWebhook,
   dispatchRunConnectionMissingWebhook,
   dispatchRunWebhook,
   initWebhookWorker,
@@ -129,6 +130,7 @@ const webhooksModule: AppstrateModule = {
 
   events: {
     onRunStatusChange: (params: RunStatusChangeParams) => dispatchRunWebhook(params),
+    onCredentialNeedsReconnection: dispatchCredentialNeedsReconnectionWebhook,
     onRunConnectionMissing: (params: RunConnectionMissingParams) => {
       dispatchRunConnectionMissingWebhook(
         { orgId: params.orgId, spaceId: params.spaceId },

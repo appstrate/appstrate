@@ -113,6 +113,7 @@ describe("GET /api/credential-proxy/tools", () => {
       expect(status).toBe(200);
       expect(body).toEqual({
         tools: [],
+        integrations: [],
         connections: [],
         not_ready: [
           {
@@ -296,6 +297,15 @@ describe("GET /api/credential-proxy/tools", () => {
         body.tools.find((tool) => tool.integration_package_id === id)!.description;
       expect(described(open)).toBe("Open. Scrapes any website.");
       expect(described(closed)).toBe("Closed. Scrapes it all!");
+    });
+
+    it("names an integration whose display name or icon is blank by its package name, with no icon", async () => {
+      const blank = "@acme/blank-name";
+      await seedProxyIntegration(ctx, keyManifest(blank, { display_name: "", icon: "" }));
+      await seedProxyConnection(ctx, blank, "api", { api_key: "a" });
+      const { body } = await list({ integration_package_id: blank });
+      expect(body.integrations).toEqual([{ integration_package_id: blank, display_name: blank }]);
+      expect(body.tools.map((tool) => tool.description)).toEqual([`${blank}.`]);
     });
 
     it("omits an integration switched off in the space", async () => {

@@ -9,6 +9,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { FormItem } from "@/components/app-ui/form-item";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { ApiError } from "../../api/client";
 import {
   dependentsLabel,
@@ -52,6 +53,7 @@ import {
 } from "../../lib/permission-labels";
 import { rolesPageDeeds } from "./rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
+import { roleInUseMessage } from "../../lib/role-in-use";
 import type { ViewAsPreset } from "../../lib/view-as-preset";
 
 const ROLE_TABS = ["org", "space"] as const;
@@ -114,20 +116,8 @@ export function OrgSettingsRolesPage() {
       {
         onSuccess: () => setConfirmDelete(null),
         onError: (err) => {
-          // 409 `role_in_use` reports two holders — live memberships and
-          // PENDING invitations that assign the role. Reporting only the first
-          // makes the refusal look wrong when the blocker is an invitation.
           if (err instanceof ApiError && err.code === "role_in_use") {
-            const members = Number(err.details?.member_count ?? 0);
-            const invitations = Number(err.details?.pending_invitation_count ?? 0);
-            setDeleteError(
-              [
-                members > 0 ? t("roles.inUse", { count: members }) : null,
-                invitations > 0 ? t("roles.inUseInvitations", { count: invitations }) : null,
-              ]
-                .filter(Boolean)
-                .join(" ") || t("roles.inUse", { count: 0 }),
-            );
+            setDeleteError(roleInUseMessage(err.details, t));
             return;
           }
           setDeleteError(errorMessage(err));
@@ -308,6 +298,12 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
                 </div>
               ),
             )}
+            {role.shows_studio && (
+              <div className="grid gap-1 px-3 py-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
+                <dt className="text-sm font-medium">{permissionResourceLabel("studio", t)}</dt>
+                <dd className="text-muted-foreground text-sm">{t("roles.showsStudio")}</dd>
+              </div>
+            )}
           </dl>
         </div>
       </div>
@@ -353,6 +349,8 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
     },
   });
   const [selected, setSelected] = useState<Set<string>>(new Set(role?.permissions ?? []));
+  // A new role shows the Studio, as the API's default does.
+  const [showsStudio, setShowsStudio] = useState(role?.shows_studio ?? true);
   const [formError, setFormError] = useState<string | null>(null);
 
   const isPending = createRole.isPending || updateRole.isPending;
@@ -371,6 +369,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       name: data.name.trim(),
       description: data.description.trim() || null,
       permissions,
+      shows_studio: showsStudio,
     };
     if (role?.id) {
       updateRole.mutate(
@@ -501,6 +500,17 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
         )}
         <UnavailablePermissions permissions={unavailable} />
       </div>
+      <CheckboxField
+        id="role-shows-studio"
+        checked={showsStudio}
+        onCheckedChange={(next) => {
+          setShowsStudio(next === true);
+          setFormError(null);
+        }}
+        disabled={isPending}
+        label={t("roles.showsStudio")}
+        description={t("roles.showsStudioHint")}
+      />
     </FormModal>
   );
 }

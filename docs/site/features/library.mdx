@@ -8,10 +8,12 @@ Packages (agents, skills, integrations) belong to the **organization**, but they
 | Idea           | Question it answers                                                                     | Decided by                                                                                      |
 | -------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | **Home**       | Which space owns the package and governs editing, publishing, renaming and deleting it? | `<type>:write` in the home space                                                                |
-| **Share**      | Which other spaces, or people, may use it?                                              | `<type>:share` in the home space                                                                |
+| **Share**      | Which other team spaces may use it?                                                     | `<type>:share` in the home space                                                                |
 | **Activation** | Does this space run it right now?                                                       | The recipient space, with `agents:configure` (agents), `skills:write` or `integrations:install` |
 
-Sharing is the audience. A share lands switched on only where the sharer may activate the package in the target (their own personal space, or a space where they hold the activation permission), and switched off otherwise. A space keeps the decision to run a package its members did not switch on themselves.
+Sharing is the audience of a team space; the organization offer (below) is the audience of the whole organization. A share lands switched on only where the sharer holds the activation permission in the target, and switched off otherwise. A space keeps the decision to run a package its members did not switch on themselves.
+
+A **personal space** takes only what its owner creates, what the organization offers (in either mode) and what the platform activates by default. Anything else is refused with `409 personal_space_takes_offers_only`. Switching a package off is always allowed.
 
 ## Home
 
@@ -33,7 +35,7 @@ By default (`keep_in_previous_home: true`) the space the package leaves keeps re
 
 ## Sharing
 
-A share targets a **space** or a **person**. A person target is resolved to that member's personal space, and the sharer never learns that space's id.
+A share targets a **team space**. There is no sharing with a person: a personal space is reached through the organization offer.
 
 ```bash
 curl -X POST https://your-instance/api/packages/@acme/support-triage/shares \
@@ -42,21 +44,25 @@ curl -X POST https://your-instance/api/packages/@acme/support-triage/shares \
   -d '{ "target": { "kind": "space", "spaceId": "spc_..." } }'
 ```
 
-- `target` is `{ "kind": "space", "spaceId": "spc_..." }` or `{ "kind": "user", "userId": "..." }`.
+- `target` is `{ "kind": "space", "spaceId": "spc_..." }`. Another kind is a `400`, and a personal space is `409 personal_space_takes_offers_only`.
 - The package must have a **published version**. An offer of an unpublished package is `409 package_has_no_version`.
 - You can only target a space you can reach, and not the package's own home (`409 share_target_is_home`).
 - Sharing the same pair twice is idempotent.
-- `GET /api/packages/{scope}/{name}/shares` lists the audience. `DELETE /api/packages/{scope}/{name}/shares/{target}` withdraws that share. If the organization still offers the package, the space keeps its local activation decision. `target` is a space id or a user id. The sharer (holding `<type>:share` in the home space) or the recipient space (holding the type's deactivation permission there) may withdraw it, and every enabled [schedule](/features/scheduling) there is disabled with `disabled_reason: package_removed` if the space loses the package.
+- `GET /api/packages/{scope}/{name}/shares` lists the audience. `DELETE /api/packages/{scope}/{name}/shares/{target}` withdraws that share. If the organization still offers the package, the space keeps its local activation decision. `target` is a space id. The sharer (holding `<type>:share` in the home space) or the recipient space (holding the type's deactivation permission there) may withdraw it, and every enabled [schedule](/features/scheduling) there is disabled with `disabled_reason: package_removed` if the space loses the package.
 - The `share` permission belongs to the `admin` and `builder` presets, and API keys never carry it.
-- A person who receives a share gets a `package_shared` [notification](/features/notifications).
 
 ## Offer to the organization
 
-An organization owner or admin can turn on **Offered to the organization** in the package’s catalog entry. It activates the package by default in every team and personal space. Each space can switch it off locally. An organization package requires a published version and sharing permission in its home space.
+An organization owner or admin can offer a package to the organization from its catalog entry, in one of two modes: `PUT /api/packages/{scope}/{name}/org-offer` with the required body `{ "mode": "available" | "on_by_default" }`.
+
+- **`available`**: the package is placed in every space of the organization, personal ones included, and stays off until a space switches it on. It costs nothing until then.
+- **`on_by_default`**: the package is active in every space without a row of its own. A space can switch it off locally.
+
+`DELETE` on the same path withdraws the offer. The `PUT` response carries `org_offer` (`"available"`, `"on_by_default"` or `null`) and `warnings`. Offering an agent does not offer what it needs: `warnings` holds one `integration_not_offered` item per declared integration that is neither offered nor active by default, and the dashboard proposes to offer them too. An organization package requires a published version and sharing permission in its home space.
 
 Offering an integration lets each member use their own eligible connection. Giving colleagues access to an account takes a separate action on that connection. A member who already owns an organization-scoped connection can use it in their personal space as soon as the integration is active there.
 
-Withdrawing an offer removes the placements and settings that depended on it and disables their schedules. An explicit share survives. A schedule disabled by withdrawal can be enabled again once the agent is active there.
+Withdrawing an offer removes the placements and settings that depended on it and disables their schedules. An explicit share into a team space survives. A schedule disabled by withdrawal can be enabled again once the agent is active there.
 
 ## Placement and activation
 
@@ -73,7 +79,7 @@ curl -X DELETE https://your-instance/api/spaces/spc_.../packages/@acme/support-t
   -H "Cookie: ..." -H "X-Org-Id: <org id>"
 ```
 
-- Activation is the one door for every package type, integrations included. It needs the type's activation permission in the target space. That requirement is waived in your own personal space: ownership is the authorization, which is how a guest takes up a package offered to them.
+- Activation is the one door for every package type, integrations included. It needs the type's activation permission in the target space. That requirement is waived in your own personal space, where only a package that space may take can be activated: ownership is the authorization, which is how a guest takes up a package offered to them.
 - If the package is not placed in the space yet, activation can create the offer in the same step, when you also hold `<type>:share` in the home space. An API key activates only what is already placed.
 - **Deactivation never deletes anything.** The space keeps its model, proxy, generation settings and stored input values, so activating the package again restores them. Only withdrawing the share removes them.
 - `PATCH /api/spaces/{id}/packages/{scope}/{name}` configures a placed package (`modelId`, `proxyId` and `generation_config`). It has no `enabled` field: activation is its own act.

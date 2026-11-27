@@ -5,9 +5,11 @@ import { usePermissions, useRowSpaceGrants } from "./use-permissions";
 import { useAppConfig } from "./use-app-config";
 import { useOverviewMode } from "./use-overview-mode";
 import { useSpaces } from "./use-spaces";
-import { routeVerdict, type RoutePath } from "../lib/route-access";
+import { useSpaceLink } from "./use-current-space";
+import { routeVerdict, STUDIO_PERMISSION, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
-import { spanningRouteVerdict } from "../lib/space-lists";
+import { homeOf } from "../lib/home-route";
+import { grantedInSomeActingSpace, spacesWhere, spanningRouteVerdict } from "../lib/space-lists";
 
 /**
  * The verdict on a declared route, read by `RouteGate` and every link: the working space's
@@ -66,7 +68,56 @@ export function useCanReachInSpace(): (target: string, spaceId: string | undefin
   );
 }
 
+/**
+ * The link to `path` in a row's space, entering it when it is not the working one, or `undefined`
+ * where the page does not open for the reader: judged in the row's space, or in « Tous les
+ * espaces » where some space admits it.
+ */
+export function useReachableSpaceLink(): (
+  path: string,
+  spaceId: string | undefined,
+) => string | undefined {
+  const spaceLink = useSpaceLink();
+  const canReach = useCanReach();
+  const canReachInSpace = useCanReachInSpace();
+  const { on } = useOverviewMode();
+  return useCallback(
+    (path, spaceId) =>
+      (on ? canReach(path) : canReachInSpace(path, spaceId)) ? spaceLink(path, spaceId) : undefined,
+    [on, canReach, canReachInSpace, spaceLink],
+  );
+}
+
+/** Whether the reader reaches the Studio: in the working space, or in « Tous les espaces » in some space. */
+export function useStudioReach(): boolean {
+  const { can } = usePermissions();
+  const { on } = useOverviewMode();
+  const { data: spaces } = useSpaces();
+  return (
+    can(STUDIO_PERMISSION) ||
+    (on && spacesWhere(spaces, (grant) => grant(STUDIO_PERMISSION)).length > 0)
+  );
+}
+
 /** Whether the reach verdicts are answers yet: until the permission set loads every one reads as refused. */
 export function useReachReady(): boolean {
   return usePermissions().ready;
+}
+
+/**
+ * What `/` shows the reader (`homeOf`): the chat where it opens, for a role with the Studio only
+ * where it may also write there (a read-only chat only rereads past sessions), judged across the
+ * acting spaces once their listing answers; else the dashboard, a refusal, or pending.
+ */
+export function useHome() {
+  const { ready } = usePermissions();
+  const { data: spaces, isPending } = useSpaces();
+  const studio = useStudioReach();
+  const reachable = useCanReach()("/chat");
+  // The listing also decides the Studio in « Tous les espaces »: wait for it.
+  const chat =
+    reachable && isPending
+      ? undefined
+      : reachable && (!studio || grantedInSomeActingSpace(spaces, "chat:write"));
+  return homeOf({ ready, studio, chat });
 }

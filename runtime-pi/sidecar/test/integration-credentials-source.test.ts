@@ -533,10 +533,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
   });
 });
 
-describe("createIntegrationCredentialsSource — upstream success report", () => {
-  const SUCCESS_URL =
-    "http://api/internal/integration-credentials/@test/integ/upstream-success?connection_id=conn-a&credential_revision=rev-a";
-
+describe("createIntegrationCredentialsSource — streak-ending revision", () => {
   const held = (payload: IntegrationCredentialsWire): IntegrationCredentialsWire => ({
     ...payload,
     credentialRevision: "rev-a",
@@ -559,25 +556,41 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
       fetchFn,
       minRefreshIntervalMs: 0,
     });
-    const successCalls = () => calls.filter((c) => c.url === SUCCESS_URL && c.method === "POST");
     const refreshCalls = () => calls.filter((c) => c.url.includes("/refresh"));
-    return { source, successCalls, refreshCalls };
+    return { source, calls, refreshCalls };
   }
 
-  it("reports the first success once when the payload announced a streak", () => {
-    const { source, successCalls } = sourceWith({
+  it("names the revision on the first success only when the payload announced a streak", () => {
+    const { source, calls } = sourceWith({
       ...held(makePayload("tok")),
       rejectionStreak: 2,
     });
-    source.reportUpstreamSuccess("rev-a");
-    source.reportUpstreamSuccess("rev-a");
-    expect(successCalls().length).toBe(1);
+    expect(source.streakEndingRevision("rev-a")).toBe("rev-a");
+    expect(source.streakEndingRevision("rev-a")).toBeUndefined();
+    // The revision rides on the journal record: the source itself sends nothing.
+    expect(calls).toEqual([]);
   });
 
-  it("reports nothing when no streak is pending", () => {
-    const { source, successCalls } = sourceWith(held(makePayload("tok")));
-    source.reportUpstreamSuccess("rev-a");
-    expect(successCalls().length).toBe(0);
+  it("names the revision again once the record that carried it was not delivered", () => {
+    const { source } = sourceWith({ ...held(makePayload("tok")), rejectionStreak: 2 });
+    expect(source.streakEndingRevision("rev-a")).toBe("rev-a");
+    expect(source.streakEndingRevision("rev-a")).toBeUndefined();
+    source.streakNotEnded("rev-a");
+    expect(source.streakEndingRevision("rev-a")).toBe("rev-a");
+    // A lost record on a superseded credential re-arms nothing for the held one.
+    source.streakNotEnded("rev-old");
+    expect(source.streakEndingRevision("rev-a")).toBeUndefined();
+  });
+
+  it("names nothing when no streak is pending", () => {
+    const { source } = sourceWith(held(makePayload("tok")));
+    expect(source.streakEndingRevision("rev-a")).toBeUndefined();
+  });
+
+  it("names nothing for a call that carried no revision", () => {
+    const { source } = sourceWith({ ...held(makePayload("tok")), rejectionStreak: 1 });
+    expect(source.streakEndingRevision(undefined)).toBeUndefined();
+    expect(source.streakEndingRevision("rev-a")).toBe("rev-a");
   });
 
   it("names the credential it holds on /refresh", async () => {
@@ -588,23 +601,21 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
     );
   });
 
-  it("reports a success that follows a rejection counted in this run", async () => {
-    const { source, successCalls } = sourceWith(held(makePayload("tok")));
+  it("names the revision on a success that follows a rejection counted in this run", async () => {
+    const { source } = sourceWith(held(makePayload("tok")));
     expect(await source.refreshOnUnauthorized("primary", "rev-a")).toBe(false);
-    source.reportUpstreamSuccess("rev-a");
-    source.reportUpstreamSuccess("rev-a");
-    expect(successCalls().length).toBe(1);
+    expect(source.streakEndingRevision("rev-a")).toBe("rev-a");
+    expect(source.streakEndingRevision("rev-a")).toBeUndefined();
   });
 
   it("an OAuth2 refresh failure is not a rejection streak", async () => {
     const payload = makePayload("tok");
-    const { source, successCalls } = sourceWith({
+    const { source } = sourceWith({
       ...held(payload),
       auths: [{ ...payload.auths[0]!, authType: "oauth2" }],
     });
     await source.refreshOnUnauthorized("primary", "rev-a");
-    source.reportUpstreamSuccess("rev-a");
-    expect(successCalls().length).toBe(0);
+    expect(source.streakEndingRevision("rev-a")).toBeUndefined();
   });
 
   it("credits a late verdict to the revision its call carried, not the one held now", async () => {
@@ -630,11 +641,12 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
     expect(await source.refreshOnUnauthorized("primary", late)).toBe(true);
     expect(source.current().credentialRevision).toBe("rev-b");
     await source.refreshOnUnauthorized("primary", late);
-    source.reportUpstreamSuccess(late);
-    // rev-b's own streak is still pending: its success is reported too.
-    source.reportUpstreamSuccess("rev-b");
+    expect(source.streakEndingRevision(late)).toBe("rev-a");
+    // rev-b's own streak is still pending: its success names it too, and ends it.
+    expect(source.streakEndingRevision("rev-b")).toBe("rev-b");
+    expect(source.streakEndingRevision("rev-b")).toBeUndefined();
     const revisions = calls.map((u) => new URL(u).searchParams.get("credential_revision"));
-    expect(revisions).toEqual(["rev-a", "rev-a", "rev-a", "rev-b"]);
+    expect(revisions).toEqual(["rev-a", "rev-a"]);
   });
 
   it("reads `rejection_streak` and `credential_revision` off the wire", async () => {

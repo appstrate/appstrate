@@ -24,7 +24,7 @@ const local = (over: Partial<Pkg> = {}): Pkg => ({
   type: "skill",
   source: "local",
   homeSpaceId: OTHER,
-  offeredToOrg: false,
+  orgOffer: null,
   ...over,
 });
 const system = (over: Partial<Pkg> = {}): Pkg =>
@@ -37,24 +37,24 @@ const CELLS: Array<[string, Pkg, Row, PlacementVia | null]> = [
   // System package (non-integration): on by default, so the offer is moot.
   ["system, no row", system(), undefined, "system"],
   ["system, a row", system(), SHARE, "system"],
-  ["system, offered, no row", system({ offeredToOrg: true }), undefined, "system"],
-  ["system, offered, a row", system({ offeredToOrg: true }), SHARE, "system"],
+  ["system, offered, no row", system({ orgOffer: "on_by_default" }), undefined, "system"],
+  ["system, offered, a row", system({ orgOffer: "on_by_default" }), SHARE, "system"],
   // System integration the deployment does NOT offer: only the org's offer activates it.
   [
     "unlisted system integration, offered, no row",
-    system({ type: "integration", offeredToOrg: true }),
+    system({ type: "integration", orgOffer: "on_by_default" }),
     undefined,
     "organization",
   ],
   [
     "unlisted system integration, offered, a row",
-    system({ type: "integration", offeredToOrg: true }),
+    system({ type: "integration", orgOffer: "on_by_default" }),
     OFFER_ROW,
     "organization",
   ],
   [
     "unlisted system integration, offered, a share row",
-    system({ type: "integration", offeredToOrg: true }),
+    system({ type: "integration", orgOffer: "on_by_default" }),
     SHARE,
     "system",
   ],
@@ -67,7 +67,7 @@ const CELLS: Array<[string, Pkg, Row, PlacementVia | null]> = [
   // System integration in SYSTEM_INTEGRATIONS: on by default, offer or not.
   [
     "listed system integration, offered, no row",
-    system({ type: "integration", id: OFFERED_SYSTEM_INTEGRATION, offeredToOrg: true }),
+    system({ type: "integration", id: OFFERED_SYSTEM_INTEGRATION, orgOffer: "on_by_default" }),
     undefined,
     "system",
   ],
@@ -75,10 +75,40 @@ const CELLS: Array<[string, Pkg, Row, PlacementVia | null]> = [
   ["homed here", local({ homeSpaceId: SPACE }), undefined, "home"],
   ["homed here, with a share row", local({ homeSpaceId: SPACE }), SHARE, "home"],
   ["homed elsewhere, share row", local(), SHARE, "shared"],
-  ["homed elsewhere, offer row, offered", local({ offeredToOrg: true }), OFFER_ROW, "organization"],
-  ["homed elsewhere, offered, no row", local({ offeredToOrg: true }), undefined, "organization"],
-  ["homed elsewhere, share row, offered", local({ offeredToOrg: true }), SHARE, "shared"],
+  [
+    "homed elsewhere, offer row, offered",
+    local({ orgOffer: "on_by_default" }),
+    OFFER_ROW,
+    "organization",
+  ],
+  [
+    "homed elsewhere, offered, no row",
+    local({ orgOffer: "on_by_default" }),
+    undefined,
+    "organization",
+  ],
+  ["homed elsewhere, share row, offered", local({ orgOffer: "on_by_default" }), SHARE, "shared"],
   ["homed elsewhere, offer row, offer withdrawn", local(), OFFER_ROW, "shared"],
+  // An `available` offer places exactly as an `on_by_default` one does.
+  [
+    "homed elsewhere, available, no row",
+    local({ orgOffer: "available" }),
+    undefined,
+    "organization",
+  ],
+  [
+    "homed elsewhere, available, offer row",
+    local({ orgOffer: "available" }),
+    OFFER_ROW,
+    "organization",
+  ],
+  ["homed elsewhere, available, share row", local({ orgOffer: "available" }), SHARE, "shared"],
+  [
+    "unlisted system integration, available, no row",
+    system({ type: "integration", orgOffer: "available" }),
+    undefined,
+    "organization",
+  ],
   ["homed elsewhere, not placed", local(), undefined, null],
 ];
 
@@ -109,12 +139,19 @@ describe("isActiveByDefault", () => {
       true,
     );
     expect(isActiveByDefault(system({ type: "integration" }))).toBe(false);
-    expect(isActiveByDefault(local({ offeredToOrg: true }))).toBe(false);
+    expect(isActiveByDefault(local({ orgOffer: "on_by_default" }))).toBe(false);
+  });
+
+  it("activates without a row only for an on_by_default offer", () => {
+    expect(isActiveWithoutRow(local({ orgOffer: "on_by_default" }))).toBe(true);
+    expect(isActiveWithoutRow(local({ orgOffer: "available" }))).toBe(false);
+    expect(isActiveWithoutRow(local({ orgOffer: null }))).toBe(false);
+    expect(isActiveWithoutRow(system({ orgOffer: "available" }))).toBe(true);
   });
 
   it("is what isActiveWithoutRow reads once the offer is set aside", () => {
     for (const [, pkg] of CELLS) {
-      expect(isActiveWithoutRow({ ...pkg, offeredToOrg: false })).toBe(isActiveByDefault(pkg));
+      expect(isActiveWithoutRow({ ...pkg, orgOffer: null })).toBe(isActiveByDefault(pkg));
     }
   });
 });

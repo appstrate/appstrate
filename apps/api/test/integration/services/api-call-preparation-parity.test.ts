@@ -173,6 +173,7 @@ describe("api_call — one prepared request on the three paths", () => {
           credentialFieldName: "api_key",
         }),
         reportedAuthFailures: new Set<string>(),
+        journal: () => {},
         resolveHost,
       },
     );

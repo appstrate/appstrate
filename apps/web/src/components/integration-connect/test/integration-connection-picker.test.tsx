@@ -83,6 +83,7 @@ function candidate(id: string, label: string): Candidate {
     missing_scopes: [],
     scope_fit: "unjudged",
     is_own: true,
+    allowed_actions: [],
   };
 }
 
@@ -1519,7 +1520,7 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     },
   ];
   const LABELS = "44444444-4444-4444-8444-444444444444";
-  /** A candidate as the server judged it: its grant, what it misses and its fit. */
+  /** A candidate as the server judged it: its grant, what it misses, its fit, and an owner's renewal. */
   const scoped = (
     id: string,
     granted: string[],
@@ -1530,6 +1531,7 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     scopes_granted: granted,
     missing_scopes: missing,
     scope_fit: missing.length > 0 ? "missing" : "exact",
+    allowed_actions: ["reconnect"],
     ...verdict,
   });
   type OpenPopup = NonNullable<ConnectionPickerDeps["openPopup"]>;
@@ -1662,7 +1664,11 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
   });
 
   it("names creating a connection as a way out only when the actor may create one", () => {
-    const conn = { ...scoped(WEB, ["read"], ["send"]), is_own: false };
+    const conn: Candidate = {
+      ...scoped(WEB, ["read"], ["send"]),
+      is_own: false,
+      allowed_actions: [],
+    };
     const allowed = actionsOf(underScoped(conn), withConnect(pickerOver([conn])));
     expect(propsOf(allowed, `member-pick-new-for-agent-${WEB}`)).toBeDefined();
     // A colleague's connection is theirs to upgrade.
@@ -1704,33 +1710,60 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     expect(confirmModalProps(other)?.open).toBe(false);
   });
 
-  it("offers to renew a dead connection to its owner only", () => {
+  it("offers to renew a dead connection where the server allows it, ahead of its replacement", () => {
     const dead = { ...scoped(WEB, ["read"]), needs_reconnection: true };
     const problem: PickerProblem = { kind: "dead", conn: dead };
-    expect(
-      propsOf(actionsOf(problem, withConnect(pickerOver([dead]))), `member-pick-renew-${WEB}`),
-    ).toBeDefined();
+    const renewable = actionsOf(problem, withConnect(pickerOver([dead])));
+    expect(propsOf(renewable, `member-pick-renew-${WEB}`)).toBeDefined();
+    const html = render(<>{renewable}</>);
+    expect(html.indexOf(`member-pick-renew-${WEB}`)).toBeLessThan(
+      html.indexOf(`member-pick-new-for-agent-${WEB}`),
+    );
+    expect(html).toContain(i18n.t("btn.reconnect", { ns: "common" }));
     const replacements: unknown[][] = [];
     const owner = actionsOf(problem, withConnect(pickerOver([dead])), {
       onConnect: (...args) => replacements.push(args),
     });
     click(propsOf(owner, `member-pick-new-for-agent-${WEB}`));
     expect(replacements).toEqual([["primary", WEB]]);
-    const foreign = { ...dead, is_own: false };
+    // The server withholds `reconnect` from a colleague's connection.
+    const foreign: Candidate = { ...dead, is_own: false, allowed_actions: [] };
     const foreignActions = actionsOf(
       { kind: "dead", conn: foreign },
       withConnect(pickerOver([foreign])),
     );
     expect(propsOf(foreignActions, `member-pick-renew-${WEB}`)).toBeUndefined();
     expect(propsOf(foreignActions, `member-pick-new-for-agent-${WEB}`)).toBeDefined();
-    // Without `integrations:connect` nobody renews.
-    expect(actionsOf(problem, pickerOver([dead], { canAdd: false }))).toBeNull();
+    // Without `integrations:connect` the server allows no action, and nobody can create one.
+    const unconnectable: PickerProblem = { kind: "dead", conn: { ...dead, allowed_actions: [] } };
+    expect(actionsOf(unconnectable, pickerOver([dead], { canAdd: false }))).toBeNull();
+  });
+
+  it("offers « Reconnecter » on a healthy connection the server lets the caller renew", () => {
+    const healthy = scoped(WEB, ["read"]);
+    const other: Candidate = { ...scoped(DB, ["read"]), allowed_actions: [] };
+    const html = fieldsHtml(pickerOver([healthy, other]), []);
+    expect(html).toContain(`member-pick-renew-${WEB}`);
+    expect(html).not.toContain(`member-pick-renew-${DB}`);
+  });
+
+  it("offers a dead ticked connection's « Reconnecter » once, on its problem line", () => {
+    const dead = { ...scoped(WEB, ["read"]), needs_reconnection: true };
+    const html = fieldsHtml(withConnect(pickerOver([dead])), [WEB]);
+    // The problem line is drawn: its replacement is there.
+    expect(html).toContain(`member-pick-new-for-agent-${WEB}`);
+    expect(html.split(`member-pick-renew-${WEB}`).length - 1).toBe(1);
   });
 
   it.each(["oauth2", "api_key"] as const)(
     "offers only a replacement for an unidentified %s account, subject to creation rights",
     (type) => {
-      const conn = { ...scoped(WEB, ["read"]), account_id: "default", needs_reconnection: true };
+      const conn: Candidate = {
+        ...scoped(WEB, ["read"]),
+        account_id: "default",
+        needs_reconnection: true,
+        allowed_actions: [],
+      };
       const problem: PickerProblem = { kind: "dead", conn };
       const manifest = {
         ...OAUTH,

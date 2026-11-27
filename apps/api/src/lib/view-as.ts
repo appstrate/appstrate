@@ -107,6 +107,7 @@ const personaSchema: z.ZodType<ViewAsPersona> = z.object({
             key: z.string(),
             name: z.string(),
             permissions: z.array(z.string()),
+            showsStudio: z.boolean(),
           }),
         }),
       ]),
@@ -243,9 +244,8 @@ async function validatePersonaSpace(
   // the role to someone else. Owners and admins carry no `space_members` row, so `null` IS it.
   const real = effectivePermissions({
     orgPermissions: orgPermissions(realOrgRole),
-    // `null` caller and an `admin` cap: the space is not personal (refused above), so
-    // neither parameter can change the answer.
-    spacePermissions: spacePermissions(resolveSpaceRole(realOrgRole, space, null, null, "admin")),
+    // The space is not personal (refused above): no personal-space default.
+    spacePermissions: spacePermissions(resolveSpaceRole(realOrgRole, space, null, null, null)),
   });
   if (!canGrantSpaceRole(real, role)) {
     onDenial(`view_as:${requested.role.kind}`);
@@ -274,7 +274,13 @@ async function resolvePersonaSpaceRole(
   if (!row) throw viewAsNotFound(`Role '${ref.roleId}' not found in this organization`);
   return {
     kind: "custom",
-    role: { id: row.id, key: row.key, name: row.name, permissions: row.permissions },
+    role: {
+      id: row.id,
+      key: row.key,
+      name: row.name,
+      permissions: row.permissions,
+      showsStudio: row.showsStudio,
+    },
   };
 }
 
@@ -455,14 +461,16 @@ export function personaSpaceMember(persona: ViewAsPersona, spaceId: string): Spa
 }
 
 /** What `resolveSpaceRole` reads about the caller in one space: the snapshot without the org role. */
-type CallerSpaceAccess = Pick<SpaceAccessSnapshot, "space" | "member" | "personalSpaceRole">;
+export type CallerSpaceAccess = Pick<SpaceAccessSnapshot, "space" | "member"> & {
+  personalDefault: SpaceAccessSnapshot["personalDefault"] | null;
+};
 
 function toCallerAccess({
   space,
   member,
-  personalSpaceRole,
+  personalDefault,
 }: SpaceAccessSnapshot): CallerSpaceAccess {
-  return { space, member, personalSpaceRole };
+  return { space, member, personalDefault };
 }
 
 /**
@@ -474,9 +482,9 @@ export async function callerSpaceAccess(
   space: SpaceContextRow,
 ): Promise<CallerSpaceAccess | null> {
   const persona = personaFor(c, space.orgId);
-  // A persona reaches no personal space, so the cap it passes is never read.
+  // A persona reaches no personal space, so it carries no personal-space default.
   if (persona) {
-    return { space, member: personaSpaceMember(persona, space.id), personalSpaceRole: "admin" };
+    return { space, member: personaSpaceMember(persona, space.id), personalDefault: null };
   }
   const snapshot = await loadSpaceAccess(space.id, space.orgId, c.get("user").id);
   return snapshot && toCallerAccess(snapshot);
@@ -494,13 +502,7 @@ export async function callerSpaceAccessById(
   const persona = personaFor(c, orgId);
   if (persona) {
     const space = await validateSpaceInOrg(spaceId, orgId);
-    return (
-      space && {
-        space,
-        member: personaSpaceMember(persona, space.id),
-        personalSpaceRole: "admin",
-      }
-    );
+    return space && { space, member: personaSpaceMember(persona, space.id), personalDefault: null };
   }
   const snapshot = await loadSpaceAccess(spaceId, orgId, c.get("user").id);
   return snapshot && toCallerAccess(snapshot);
@@ -550,7 +552,7 @@ export async function callerPermissionsInSpace(
     snapshot.space,
     persona ? personaSpaceMember(persona, spaceId) : snapshot.member,
     callerPersonalOwnerId(c, orgId),
-    snapshot.personalSpaceRole,
+    snapshot.personalDefault,
   );
   return effectiveInSpace(c, ref, orgHalfFor(c, orgId, snapshot.orgRole).orgPermissions);
 }

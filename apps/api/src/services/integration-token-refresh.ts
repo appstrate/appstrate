@@ -28,12 +28,12 @@ import {
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import type { Actor } from "../lib/actor.ts";
-import type { SpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import { dedupedRefresh } from "../lib/deduped-refresh.ts";
 import { encryptionKeyUnavailable } from "../lib/stored-credential.ts";
 import { OAUTH_REFRESH_LEAD_MS, type CredentialFailureCause } from "@appstrate/core/sidecar-types";
 import {
+  credentialRevision,
   persistCredentialBundle,
   markIntegrationConnectionNeedsReconnection,
   recordIntegrationRefreshFailure,
@@ -49,6 +49,8 @@ interface IntegrationRefreshResult {
   fields: Record<string, string>;
   /** Parsed `expires_at` from the token response, or `null` if upstream did not return `expires_in`. */
   expiresAt: Date | null;
+  /** Of the stored credential these fields are: the one an upstream rejection would name. */
+  credentialRevision: string;
 }
 
 /** A refresh's verdict, thrown out of `dedupedRefresh`. `flaggedBefore`: before the lock. */
@@ -72,6 +74,9 @@ class RefreshVerdictError extends Error {
  */
 export interface RefreshTarget {
   id: string;
+  /** The row's own scope: its OAuth client resolves there, whoever triggers the refresh. */
+  orgId: string;
+  spaceId: string | null;
   credentialsEncrypted: string;
   clientRef: string | null;
   oauthResource: string | null;
@@ -99,6 +104,7 @@ async function refreshUnderLock(
       const [row] = await db
         .select({
           credentialsEncrypted: integrationConnections.credentialsEncrypted,
+          credentialRevision,
           expiresAt: integrationConnections.expiresAt,
           scopesGranted: integrationConnections.scopesGranted,
           clientRef: integrationConnections.clientRef,
@@ -127,6 +133,7 @@ async function refreshUnderLock(
         return {
           fields: decryptCredentialsToStringMap(row.credentialsEncrypted),
           expiresAt: row.expiresAt,
+          credentialRevision: row.credentialRevision,
         };
       }
       return null;
@@ -164,7 +171,7 @@ async function doRefresh(
         connectionId,
       },
     );
-    await markIntegrationConnectionNeedsReconnection(connectionId);
+    await markIntegrationConnectionNeedsReconnection(connectionId, "refresh_token_missing");
     throw new RefreshVerdictError("dead", "refresh_token_missing");
   }
 
@@ -236,7 +243,7 @@ async function doRefresh(
       : new RefreshVerdictError("retry", "connection_changed");
   }
 
-  return { fields: newCreds, expiresAt };
+  return { fields: newCreds, expiresAt, credentialRevision: written.credentialRevision };
 }
 
 async function exchangeFailureVerdict(
@@ -245,7 +252,7 @@ async function exchangeFailureVerdict(
 ): Promise<RefreshVerdictError> {
   switch (err.kind) {
     case "revoked":
-      await markIntegrationConnectionNeedsReconnection(log.connectionId);
+      await markIntegrationConnectionNeedsReconnection(log.connectionId, "refresh_token_revoked");
       return new RefreshVerdictError("dead", "refresh_token_revoked", { cause: err });
     case "client_rejected":
       logger.error("Integration refresh refused — the token endpoint rejected the OAuth client", {
@@ -273,7 +280,12 @@ async function exchangeFailureVerdict(
  * usable; `dead`: flagged. `detail` is for logs.
  */
 type ConnectionRefreshOutcome =
-  | { status: "refreshed"; fields: Record<string, string>; expiresAt: Date | null }
+  | {
+      status: "refreshed";
+      fields: Record<string, string>;
+      expiresAt: Date | null;
+      credentialRevision: string;
+    }
   | { status: "kept"; cause?: CredentialFailureCause; detail?: string }
   | {
       status: "retry";
@@ -289,7 +301,13 @@ export type RefreshTrigger =
    * Upstream rejected the credential of `revision`; `null`: the one the connection holds.
    * `handshake`: the rejected request is the MCP handshake the sidecar writes itself.
    */
-  | { kind: "rejected"; revision: string | null; handshake?: boolean };
+  | {
+      kind: "rejected";
+      revision: string | null;
+      handshake?: boolean;
+      /** The caller a counted rejection is attributed to; a background refresh has none. */
+      reach: { spaceId: string; actor: Actor };
+    };
 
 /**
  * The one decision over a connection's credential. A rejection is evidence only against the
@@ -308,15 +326,16 @@ export async function refreshConnectionCredential(input: {
   /** The caller's manifest, and the declaration of the connection's auth in it. */
   manifest: IntegrationManifest;
   authDef: AfpsManifestAuth;
-  scope: SpaceScope;
-  actor: Actor;
   trigger: RefreshTrigger;
 }): Promise<ConnectionRefreshOutcome> {
-  const { connection, integrationId, manifest, authDef, scope, actor, trigger } = input;
+  const { connection, integrationId, manifest, authDef, trigger } = input;
   const { authKey } = connection;
-  const forced =
+  const rejection =
     trigger.kind === "rejected" &&
-    (trigger.revision === null || trigger.revision === connection.credentialRevision);
+    (trigger.revision === null || trigger.revision === connection.credentialRevision)
+      ? trigger
+      : null;
+  const forced = rejection !== null;
   if (!forced && !expiresWithinLeadWindow(connection.expiresAt)) return { status: "kept" };
 
   // One 401 on a call can be a transient upstream fault, or a permission error the agent provoked,
@@ -324,15 +343,13 @@ export async function refreshConnectionCredential(input: {
   // A rejected handshake is a request no agent shapes: it flags at once.
   const unrefreshable = async (detail: string): Promise<ConnectionRefreshOutcome> => {
     const cause = "unrefreshable";
-    if (!forced) return { status: "kept", cause, detail };
+    if (!rejection) return { status: "kept", cause, detail };
     const counted = await recordUnrefreshableRejection(
       connection.id,
       integrationId,
-      { spaceId: scope.spaceId, actor },
+      rejection.reach,
       connection.credentialRevision,
-      trigger.kind === "rejected" && trigger.handshake
-        ? 1
-        : getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
+      rejection.handshake ? 1 : getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
     );
     if (!counted) return { status: "kept" };
     if (counted.needsReconnection) return { status: "dead", cause, detail };
@@ -351,7 +368,7 @@ export async function refreshConnectionCredential(input: {
       authKey,
       manifest,
       authDef,
-      scope.spaceId,
+      { orgId: connection.orgId, spaceId: connection.spaceId },
       connection,
     );
   } catch (err) {
@@ -383,7 +400,7 @@ export async function refreshConnectionCredential(input: {
     }
     throw err;
   }
-  return { status: "refreshed", fields: refreshed.fields, expiresAt: refreshed.expiresAt };
+  return { status: "refreshed", ...refreshed };
 }
 
 function expiresWithinLeadWindow(expiresAt: Date | null): boolean {
@@ -408,7 +425,8 @@ export async function buildIntegrationOAuthRefreshContext(
   /** The current manifest, and the declaration of the connection's auth in it. */
   manifest: IntegrationManifest,
   authDef: AfpsManifestAuth,
-  spaceId: string,
+  /** Where the client resolves: the connection's own scope (at connect, the space it is made in). */
+  clientScope: { orgId: string; spaceId: string | null },
   /** The minting client (`client_ref`) and RFC 8707 `resource` pinned on the connection. */
   connection: { clientRef: string | null; oauthResource: string | null },
   /** Seam for tests. */
@@ -425,7 +443,7 @@ export async function buildIntegrationOAuthRefreshContext(
       ? null
       : await resolveIntegrationClientById(
           clientRef,
-          spaceId,
+          clientScope,
           packageId,
           authKey,
           authDef.token_endpoint_auth_method,

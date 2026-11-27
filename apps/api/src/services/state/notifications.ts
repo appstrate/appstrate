@@ -10,7 +10,6 @@ import {
   type RunAlertStatus,
   type NotificationPayloads,
   type NotificationType,
-  type PackageType,
 } from "@appstrate/db/schema";
 import { isUuid, scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
@@ -129,47 +128,29 @@ export async function createAgentMessageNotifications(
 }
 
 /**
- * Tell one member that a package was shared INTO a space of theirs — the
- * "user" half of `POST /api/packages/{scope}/{name}/shares` (RBAC spec §6.10).
- *
- * The notification is scoped to the TARGET space, which for a share to a person
- * is their personal space: that is where the package actually became available,
- * and the bell reads notifications of the space the recipient is in.
- *
- * No `runId` — the entity is the package, carried in the payload the way
- * it is for a run, so the bell renders without a join. The SHARER's
- * name is in there for the same reason: "X shared Y with you" is the whole
- * content of this notification, and the bell has no query that would resolve a
- * user id. Best-effort like the run fan-out: the caller wraps it, because a
- * share that succeeded must not be reported as failed because a notification
- * row would not write.
+ * Tell a connection's owner that it died. No dedup index: one announcement per flip, and there is
+ * no `runId`. Model-provider credentials write no row here: who receives it is undecided (#1310).
  */
-export async function createPackageShareNotification(params: {
+export async function createCredentialNeedsReconnectionNotification(params: {
   orgId: string;
   spaceId: string;
-  recipientUserId: string;
-  packageId: string;
-  packageType: PackageType;
-  sharedByName: string;
+  recipient: Actor;
+  payload: NotificationPayloads["credential_needs_reconnection"];
 }): Promise<void> {
   await db.insert(notifications).values({
     orgId: params.orgId,
     spaceId: params.spaceId,
-    recipientType: "user",
-    recipientId: params.recipientUserId,
-    type: "package_shared",
-    payload: {
-      packageId: params.packageId,
-      package_type: params.packageType,
-      shared_by_name: params.sharedByName,
-    },
+    recipientType: params.recipient.type,
+    recipientId: params.recipient.id,
+    type: "credential_needs_reconnection",
+    payload: toPgSafe(params.payload),
   });
 }
 
 // --- The feed ---
 //
 // The bell: every notification of the caller, newest first. What reaches it was
-// decided when it was written (`notifyRunFinished`, the share notice), so no
+// decided when it was written (`notifyRunFinished`, the agent's `notify`, a dead connection), so no
 // read below filters a kind.
 
 const notificationColumns = {

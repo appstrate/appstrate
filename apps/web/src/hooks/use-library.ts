@@ -3,7 +3,7 @@
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { integrationIdOfField } from "../lib/connection-choice";
-import { useSpacesOf } from "./use-spaces";
+import { useSpaces, useSpacesOf } from "./use-spaces";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type paths } from "../api/client";
@@ -12,7 +12,7 @@ import { agentsKeys, invalidatePaths, packageKeys } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { splitPackageRef } from "../lib/package-paths";
-import { activationGate, mayRemoveFromSpace } from "../lib/catalogue-gates";
+import { activationGate, mayRemoveFromSpace, type ActivationGate } from "../lib/catalogue-gates";
 
 /** `GET /api/library`: every package and where it is PLACED. The space form (`/api/spaces/{id}/library`) is the same shape narrowed to one space. */
 export type LibraryResponse =
@@ -263,13 +263,21 @@ export function usePackageActivation(
   const spaceId = useCurrentSpaceId();
   const { data: library, isLoading: libraryLoading } = useSpaceLibrary({ enabled });
   const spaceRow = libraryRow(library, packageId);
-  // Homed elsewhere and not placed here, a package is absent from a personal space's library:
-  // the org-wide library's per-space `activation` verdict answers then.
+  const { data: spaces } = useSpaces();
+  const personal = !!spaces?.find((space) => space.id === spaceId)?.personal;
+  // A team space not holding the package lacks it from its library: the org-wide library's
+  // per-space `activation` verdict answers then. A personal space holds only what it creates
+  // and what the organization offers, so the package's absence there is the refusal.
   const { data: orgLibrary, isLoading: orgLoading } = useCatalogueLibrary({
-    enabled: enabled && !!library && !spaceRow,
+    enabled: enabled && !!library && !spaceRow && !personal,
   });
-  const row = spaceRow ?? libraryRow(orgLibrary, packageId);
-  const gate = spaceId && row ? activationGate(row, spaceId, true) : null;
+  const row = spaceRow ?? (personal ? undefined : libraryRow(orgLibrary, packageId));
+  const gate: ActivationGate | null =
+    spaceId && row
+      ? activationGate(row, spaceId, true)
+      : personal && library && !spaceRow
+        ? { allowed: false, refusal: "notOffered" }
+        : null;
   return {
     mayActivate: !!gate?.allowed,
     /** Why the server refuses; `null` when allowed or no verdict names a reason. */
@@ -283,19 +291,44 @@ export function usePackageActivation(
   };
 }
 
-/** Offers `packageId` to the organization (`PUT …/org-offer`), or withdraws the offer (`DELETE`). */
-export async function setOrgOffer(packageId: string, offered: boolean) {
+/** How an offer to the organization reaches the spaces holding no row of their own. */
+export type OrgOfferMode = NonNullable<LibraryPackageItem["org_offer"]>;
+
+/**
+ * Offers `packageId` to the organization in `mode` (`PUT …/org-offer`) and answers its `warnings[]`
+ * (the integrations an offered agent declares that the organization does not offer), or withdraws
+ * the offer when `mode` is `null` (`DELETE`).
+ */
+export async function setOrgOffer(packageId: string, mode: OrgOfferMode | null) {
   const params = { params: { path: splitPackageRef(packageId) } };
-  if (offered) await client.PUT("/api/packages/{scope}/{name}/org-offer", params);
-  else await client.DELETE("/api/packages/{scope}/{name}/org-offer", params);
+  if (!mode) {
+    await client.DELETE("/api/packages/{scope}/{name}/org-offer", params);
+    return [];
+  }
+  const { data } = await client.PUT("/api/packages/{scope}/{name}/org-offer", {
+    ...params,
+    body: { mode },
+  });
+  return data?.warnings ?? [];
 }
 
 /** The offer changes where the package runs in every space without a row of its own: both libraries and every package cache refresh. */
 export function useSetOrgOffer() {
   const invalidate = useInvalidatePackageActivation();
   return useMutation({
-    mutationFn: ({ packageId, offered }: { packageId: string; offered: boolean }) =>
-      setOrgOffer(packageId, offered),
+    mutationFn: ({ packageId, mode }: { packageId: string; mode: OrgOfferMode | null }) =>
+      setOrgOffer(packageId, mode),
+    onSettled: invalidate,
+  });
+}
+
+/** Offers each package of `requests` in turn (one `PUT …/org-offer` each), then refreshes like {@link useSetOrgOffer}. */
+export function useOfferOrgClosure() {
+  const invalidate = useInvalidatePackageActivation();
+  return useMutation({
+    mutationFn: async (requests: { packageId: string; mode: OrgOfferMode }[]) => {
+      for (const { packageId, mode } of requests) await setOrgOffer(packageId, mode);
+    },
     onSettled: invalidate,
   });
 }

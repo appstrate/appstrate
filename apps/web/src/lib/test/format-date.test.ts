@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterAll, describe, expect, it } from "bun:test";
 import i18n, { i18nReady } from "../../i18n";
-import { formatAge, formatRelativeTime, formatScheduledAt, formatTimeUntil } from "../format-date";
+import { formatRelativeTime, formatScheduledAt, formatTimeUntil } from "../format-date";
 
 await i18nReady;
 
@@ -21,11 +21,9 @@ const plain = (text: string) => text.replace(/\s/g, " ");
 describe("relative dates in the interface's language", () => {
   it("follow the language the interface switches to", async () => {
     expect(plain(formatRelativeTime(at(-3 * HOUR), NOW))).toBe("il y a 3 h");
-    expect(plain(formatAge(at(-3 * HOUR), NOW))).toBe("3 h");
     await i18n.changeLanguage("en");
     try {
       expect(plain(formatRelativeTime(at(-3 * HOUR), NOW, "long"))).toBe("3 hours ago");
-      expect(plain(formatAge(at(-3 * HOUR), NOW))).toBe("3 hr");
     } finally {
       await i18n.changeLanguage("fr");
     }

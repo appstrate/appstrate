@@ -6,8 +6,8 @@
  * whichever space is working and whatever the mode.
  */
 
-import { describe, expect, it, spyOn } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
+import { describe, expect, it } from "bun:test";
+import type { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({
@@ -15,117 +15,70 @@ installFakeStorage({
   location: { pathname: "/", origin: "http://localhost" },
 });
 
-const { render } = await import("../../test/render.tsx");
 const { ProductTabs } = await import("../product-tabs.tsx");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
+const { memberSpaceClient, renderInSpace, testSpace } = await import("../../test/space-context.ts");
 
-const ORG = {
-  id: "org_1",
-  name: "Acme",
-  slug: "acme",
-  icon: null,
-  color: null,
-  role: "member",
-  deleting_at: null,
-  permissions: [],
-  createdAt: "2026-09-05T00:00:00Z",
-};
+/** The toggle standing in spc_a over `spaces`, the chat module loaded unless `chat: false`. */
+function productTabs(
+  spaces: ReturnType<typeof testSpace>[],
+  {
+    overview = false,
+    chat = true,
+    seed,
+  }: { overview?: boolean; chat?: boolean; seed?: (queryClient: QueryClient) => void } = {},
+): string {
+  const config = window.__APP_CONFIG__;
+  window.__APP_CONFIG__ = { ...config, features: { ...config.features, chat } };
+  const queryClient = memberSpaceClient(spaces);
+  seed?.(queryClient);
+  try {
+    return renderInSpace(<ProductTabs />, { queryClient, overview });
+  } finally {
+    window.__APP_CONFIG__ = config;
+  }
+}
+
+const space = (id: string, permissions: string[], studio = true) =>
+  testSpace(id, permissions, id, { studio });
 
 describe("the products toggle", () => {
   it("is not drawn with the Studio alone (the chat module off)", () => {
-    const snapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
-      ...orgStore.getInitialState(),
-      id: "org_1",
-    });
-    const queryClient = new QueryClient();
-    queryClient.setQueryData(["orgs"], [ORG]);
     // No space to enter: the permission set is the org's, and the toggle answers at once.
-    queryClient.setQueryData(
-      ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
-      { object: "list", hasMore: false, data: [] },
-    );
-    try {
-      expect(render(<ProductTabs />, { queryClient })).toBe("");
-    } finally {
-      snapshot.mockRestore();
-    }
+    expect(productTabs([], { chat: false })).toBe("");
   });
 
   it("draws the Chat tab where a space opens the chat and the chat may act, in every mode", () => {
     const OTHER_ACTING = ["runs:read", "chat:read", "chat:write", "mcp:read"];
+    // Two spaces reading runs offer the mode; the other one is where the chat acts.
     const tabs = (
       overview: boolean,
       workingPermissions: string[],
       seedUnread = false,
       otherPermissions = OTHER_ACTING,
-    ) => {
-      const stubs = [
-        spyOn(orgStore, "getInitialState").mockReturnValue({
-          ...orgStore.getInitialState(),
-          id: "org_1",
-        }),
-        spyOn(spaceStore, "getInitialState").mockReturnValue({
-          ...spaceStore.getInitialState(),
-          id: "spc_a",
-        }),
-        spyOn(authStore, "getInitialState").mockReturnValue({
-          ...authStore.getInitialState(),
-          user: { id: "u_1", email: "u@example.test", emailVerified: true },
-        }),
-        spyOn(overviewStore, "getInitialState").mockReturnValue({
-          ...overviewStore.getInitialState(),
-          chosen: overview ? { "u_1:org_1": true } : {},
-        }),
-      ];
-      const config = window.__APP_CONFIG__;
-      window.__APP_CONFIG__ = { ...config, features: { ...config.features, chat: true } };
-      const queryClient = new QueryClient();
-      queryClient.setQueryData(["orgs"], [ORG]);
-      // Two spaces reading runs offer the mode; the other one is where the chat acts.
-      const space = (id: string, permissions: string[]) => ({
-        id,
-        object: "space",
-        access: "member",
-        permissions,
-        personal: false,
-        isDefault: id === "spc_a",
-        name: id,
-        role: null,
-      });
-      queryClient.setQueryData(
-        ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
-        {
-          object: "list",
-          hasMore: false,
-          data: [space("spc_a", workingPermissions), space("spc_b", otherPermissions)],
+    ) =>
+      productTabs([space("spc_a", workingPermissions), space("spc_b", otherPermissions)], {
+        overview,
+        seed: (queryClient) => {
+          if (!seedUnread) return;
+          // The selected space's list holds one unread reply, « Tous les espaces »'s three.
+          const list = (unread: number) => ({
+            pages: [
+              {
+                data: Array.from({ length: unread }, (_, i) => ({ id: `chs_${i}`, unread: true })),
+                hasMore: false,
+              },
+            ],
+            pageParams: [undefined],
+          });
+          queryClient.setQueryData(["chat", "sessions", "spc_a"], list(1));
+          queryClient.setQueryData(["chat", "sessions", null], list(3));
         },
-      );
-      if (seedUnread) {
-        // The selected space's list holds one unread reply, « Tous les espaces »'s three.
-        const list = (unread: number) => ({
-          pages: [
-            {
-              data: Array.from({ length: unread }, (_, i) => ({ id: `chs_${i}`, unread: true })),
-              hasMore: false,
-            },
-          ],
-          pageParams: [undefined],
-        });
-        queryClient.setQueryData(["chat", "sessions", "spc_a"], list(1));
-        queryClient.setQueryData(["chat", "sessions", null], list(3));
-      }
-      try {
-        return render(<ProductTabs />, { queryClient });
-      } finally {
-        window.__APP_CONFIG__ = config;
-        for (const stub of stubs) stub.mockRestore();
-      }
-    };
+      });
     const chatter = OTHER_ACTING;
     expect(tabs(false, chatter)).toContain('href="/chat"');
+    // The chat leads the row; the Studio follows, on its dashboard.
+    const row = tabs(false, chatter);
+    expect(row.indexOf('href="/chat"')).toBeLessThan(row.indexOf('href="/dashboard"'));
     // A thumb: the toggle is 40 px tall below md.
     expect(tabs(false, chatter)).toContain("desktop-pointer:h-7");
     expect(tabs(true, chatter)).toContain('href="/chat"');
@@ -146,5 +99,13 @@ describe("the products toggle", () => {
     const outOfMode = tabs(false, chatter, true);
     expect(outOfMode).toContain('aria-label="1 conversation non lue"');
     expect(outOfMode).not.toContain("3 conversations non lues");
+  });
+
+  it("is not drawn for a role without the Studio: the chat is its one product", () => {
+    // Every space withholding the Studio: the Studio tab goes, and a toggle of one is not drawn.
+    const chatOnly = ["runs:read", "chat:read", "chat:write", "mcp:read", "agents:run"];
+    const spaces = ["spc_a", "spc_b"].map((id) => space(id, chatOnly, false));
+    expect(productTabs(spaces)).toBe("");
+    expect(productTabs(spaces, { overview: true })).toBe("");
   });
 });

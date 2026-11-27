@@ -950,7 +950,7 @@
         },
         "tags": ["Agents"],
         "summary": "List agents across the organization's spaces",
-        "description": "Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: one row per agent ACTIVE in at least one of those spaces, in the order of the single-space index (system agents first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the agent's home first when it is one of them, then in the order of `GET /api/spaces`. `dependencies.skills` is withheld unless one of them grants `agents:read` (`agents:run` alone is a summary read); `running_runs` / `unread_count` add up the agent's runs in every space read, each space counting every run there under `runs:read-all`, the caller's own runs otherwise. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "description": "Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: one row per agent ACTIVE in at least one of those spaces, in the order of the single-space index (by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the agent's home first when it is one of them, then in the order of `GET /api/spaces`. `dependencies.skills` is withheld unless one of them grants `agents:read` (`agents:run` alone is a summary read); `running_runs` / `unread_count` add up the agent's runs in every space read, each space counting every run there under `runs:read-all`, the caller's own runs otherwise. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/OrgIdPath"
@@ -15858,7 +15858,13 @@
                             "name": "admin"
                           }
                         }
-                      ]
+                      ],
+                      "personal_space_role": null,
+                      "personal_space_default_role": {
+                        "kind": "preset",
+                        "key": "admin",
+                        "name": "admin"
+                      }
                     },
                     {
                       "userId": "usr_def456",
@@ -15877,7 +15883,15 @@
                             "name": "operator"
                           }
                         }
-                      ]
+                      ],
+                      "personal_space_role": {
+                        "preset_role": "builder"
+                      },
+                      "personal_space_default_role": {
+                        "kind": "preset",
+                        "key": "admin",
+                        "name": "admin"
+                      }
                     }
                   ],
                   "invitations": []
@@ -16165,7 +16179,7 @@
         },
         "tags": ["Organizations"],
         "summary": "Change member role",
-        "description": "Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner.",
+        "description": "Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner. The member's own role in their personal space (`setMemberPersonalSpaceRole`) is dropped by a promotion to owner or admin (audited as `personalSpaceRoleCleared`) and kept otherwise.",
         "parameters": [
           {
             "name": "orgId",
@@ -16235,7 +16249,13 @@
                         "name": "admin"
                       }
                     }
-                  ]
+                  ],
+                  "personal_space_role": null,
+                  "personal_space_default_role": {
+                    "kind": "preset",
+                    "key": "admin",
+                    "name": "admin"
+                  }
                 }
               }
             }
@@ -16300,6 +16320,256 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/members/{userId}/personal-space-role": {
+      "put": {
+        "operationId": "setMemberPersonalSpaceRole",
+        "x-appstrate-space": {
+          "kind": "organization"
+        },
+        "tags": ["Organizations"],
+        "summary": "Set a member's role in their personal space",
+        "description": "Give one member or guest their own role in their personal space, overriding the organization's `personal_space_role` default Body: exactly one of `preset_role` / `custom_role_id`; a `custom_role_id` must name a role of this organization (404 otherwise). A member holds the chosen role plus, short of `admin`, `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there. A guest holds it capped to `operator` (the permissions the chosen role shares with `operator`, plus the deletes), whatever role is set. The personal space is provisioned if the member has none yet. Owners and admins always hold `admin` in their own personal space: targeting one is `409 redundant_space_role`. A change of the member's org role keeps the override, a guest's capped as above, except a promotion to owner or admin, which drops it. A dropped override is recorded in the `org.member_role_updated` audit entry (`personalSpaceRoleCleared`). Leaving or being removed drops it too; nothing restores a dropped override. A custom role named by an override cannot be deleted (`409 role_in_use`). Same guard as `changeMemberRole` (`members:change-role`).",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Exactly one of `preset_role` / `custom_role_id`.",
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "required": ["preset_role"]
+                      },
+                      {
+                        "required": ["custom_role_id"]
+                      }
+                    ]
+                  }
+                ],
+                "properties": {
+                  "preset_role": {
+                    "type": "string",
+                    "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                  },
+                  "custom_role_id": {
+                    "type": "string",
+                    "pattern": "^srl_"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated member — same shape as the members list in GET /api/orgs/{orgId}",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgMember"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The target is an owner or admin, who always hold `admin` in their personal space (`redundant_space_role`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "clearMemberPersonalSpaceRole",
+        "x-appstrate-space": {
+          "kind": "organization"
+        },
+        "tags": ["Organizations"],
+        "summary": "Return a member to the organization default in their personal space",
+        "description": "Drop the member's own role in their personal space, so they hold the organization's `personal_space_role` again (for a guest, capped to `operator`). Idempotent: 204 whether or not an override was set. 404 when the user is not a member of the organization. Same guard as `changeMemberRole` (`members:change-role`).",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Override cleared, or there was none",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/personal-space-role/impact": {
+      "get": {
+        "operationId": "getPersonalSpaceRoleImpact",
+        "x-appstrate-space": {
+          "kind": "organization"
+        },
+        "tags": ["Organizations"],
+        "summary": "Preview what a personal-space default would stop",
+        "description": "What setting the organization's `personal_space_role` to `role` would stop, without writing anything. `schedules` counts the ENABLED schedules in live personal spaces whose actor is the space's owner, a member or guest who follows the default (no override of their own, see `setMemberPersonalSpaceRole`) and would hold, under `role`, a resolved role without `agents:run` (guest cap and delete floor applied, as the resolver applies them). Each such schedule disables itself at its next fire (`disabled_reason: actor_invalid`), and restoring the role does not re-enable it. `members` counts the distinct owners of those schedules. Owners and admins always hold `admin` in their own personal space and are never counted; a `role` that grants `agents:run` answers `{ schedules: 0, members: 0 }`. A snapshot, which a later change can make stale. It discloses only counts, to a caller who may already rewrite the setting: same guard as `updateOrgSettings` (`org:settings`).",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": true,
+            "description": "The candidate default, as `updateOrgSettings` takes `personal_space_role`: a preset key or the id of one of this organization's custom space roles.",
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^srl_"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the candidate default would stop",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["schedules", "members"],
+                  "properties": {
+                    "schedules": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Enabled schedules that would disable themselves at their next fire."
+                    },
+                    "members": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Distinct members and guests owning those schedules."
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "example": {
+                  "schedules": 3,
+                  "members": 2
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "`role` names a custom role id that is not a role of this organization",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -16754,8 +17024,17 @@
                   },
                   "personal_space_role": {
                     "type": "string",
-                    "enum": ["admin", "operator"],
-                    "description": "The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH."
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^srl_"
+                      }
+                    ],
+                    "description": "The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH."
                   }
                 },
                 "additionalProperties": false
@@ -16790,6 +17069,16 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "`personal_space_role` names a custom role id that is not a role of this organization",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -18440,7 +18729,7 @@
         "operationId": "getMyContext",
         "tags": ["Profile"],
         "summary": "The caller's working context for an AI agent",
-        "description": "Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own, or shared into it). One payload powering the MCP `get_me` tool and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400.",
+        "description": "Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own, or shared into it). One payload powering the MCP `get_me` tool and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names. With neither, the answer holds `user` and `org` alone: every other field belongs to one space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18464,19 +18753,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "user",
-                    "org",
-                    "space",
-                    "connections",
-                    "recent_runs",
-                    "agents",
-                    "agents_truncated",
-                    "agents_total",
-                    "skills",
-                    "skills_truncated",
-                    "skills_total"
-                  ],
+                  "required": ["user", "org"],
+                  "dependentRequired": {
+                    "space": [
+                      "connections",
+                      "connectable_integrations",
+                      "connectable_integrations_truncated",
+                      "connectable_integrations_total",
+                      "recent_runs",
+                      "agents",
+                      "agents_truncated",
+                      "agents_total",
+                      "skills",
+                      "skills_truncated",
+                      "skills_total"
+                    ]
+                  },
                   "properties": {
                     "user": {
                       "type": "object",
@@ -18495,7 +18787,7 @@
                     },
                     "org": {
                       "type": "object",
-                      "required": ["id", "role"],
+                      "required": ["id", "role", "name", "slug"],
                       "properties": {
                         "id": {
                           "type": "string"
@@ -18505,18 +18797,18 @@
                           "enum": ["owner", "admin", "member", "guest", "end_user"]
                         },
                         "name": {
-                          "type": ["string", "null"],
+                          "type": "string",
                           "description": "Human-readable organization name."
                         },
                         "slug": {
-                          "type": ["string", "null"],
+                          "type": "string",
                           "description": "Organization slug."
                         }
                       }
                     },
                     "space": {
                       "type": "object",
-                      "description": "The space this request resolved to. Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list.",
+                      "description": "The space this request resolved to, absent when it named none (as is every list). Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list.",
                       "required": ["id", "name", "personal"],
                       "properties": {
                         "id": {
@@ -18531,6 +18823,21 @@
                           "description": "Whether this space is one member's personal space (always `private`, no other members) rather than a team space."
                         }
                       }
+                    },
+                    "connectable_integrations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Ids of the integrations active in the current space that the caller has not connected and for which a connect flow can start (an `oauth2` auth needs a usable client), sorted by id. One whose only connection needs reconnection is not listed: it stays in `connections`, flagged `needs_reconnection`. Whole or withheld: more than 15 and the list is empty (`connectable_integrations_truncated` true), never a prefix. Empty unless the caller holds `integrations:read` and `integrations:connect`; one whose member connections the space blocks is listed only under `integrations:configure`."
+                    },
+                    "connectable_integrations_truncated": {
+                      "type": "boolean",
+                      "description": "True when `connectable_integrations` was withheld for exceeding 15."
+                    },
+                    "connectable_integrations_total": {
+                      "type": "integer",
+                      "description": "How many connectable integrations there are, listed or withheld."
                     },
                     "recent_runs": {
                       "type": "array",
@@ -18654,7 +18961,7 @@
                     },
                     "agents": {
                       "type": "array",
-                      "description": "Agents ACTIVE in the current space (capped), each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation.",
+                      "description": "Agents ACTIVE in the current space, ordered by id, each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. Listed whole or not at all: past 15 agents the list is empty, `agents_truncated` is true, and the agents are reachable via the `listAgents` operation (the MCP `search` tool finds them by keyword).",
                       "items": {
                         "type": "object",
                         "required": [
@@ -18706,15 +19013,15 @@
                     },
                     "agents_truncated": {
                       "type": "boolean",
-                      "description": "True when the agent list was capped (full list via `listAgents`)."
+                      "description": "True when more agents are active than the cap; `agents` is then empty (full list via `listAgents`)."
                     },
                     "agents_total": {
                       "type": "integer",
-                      "description": "Total active agents before the cap."
+                      "description": "Total active agents, listed or not."
                     },
                     "skills": {
                       "type": "array",
-                      "description": "Skills the caller could attach to an agent in the current space (capped). A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation.",
+                      "description": "Skills the caller could attach to an agent in the current space, ordered by id. A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. Listed whole or not at all: past 15 skills the list is empty, `skills_truncated` is true, and the skills are reachable via the `listSkills` operation (the MCP `search` tool finds them by keyword).",
                       "items": {
                         "type": "object",
                         "required": [
@@ -18758,11 +19065,11 @@
                     },
                     "skills_truncated": {
                       "type": "boolean",
-                      "description": "True when the skill list was capped (full list via `listSkills`)."
+                      "description": "True when more skills are active than the cap; `skills` is then empty (full list via `listSkills`)."
                     },
                     "skills_total": {
                       "type": "integer",
-                      "description": "Total active skills before the cap."
+                      "description": "Total active skills, listed or not."
                     }
                   }
                 },
@@ -18817,6 +19124,9 @@
                       ]
                     }
                   ],
+                  "connectable_integrations": ["@appstrate/slack"],
+                  "connectable_integrations_truncated": false,
+                  "connectable_integrations_total": 1,
                   "recent_runs": [
                     {
                       "packageId": "@appstrate/triage",
@@ -20007,7 +20317,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "502": {
-            "description": "Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count of its rejections.",
+            "description": "Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (journaled with its `credential_revision` on `POST /internal/integration-calls`) or a reconnect resets the count of its rejections.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20048,54 +20358,96 @@
         }
       }
     },
-    "/internal/integration-credentials/{scope}/{name}/upstream-success": {
+    "/internal/integration-calls": {
       "post": {
-        "operationId": "reportIntegrationUpstreamSuccess",
+        "operationId": "reportIntegrationCalls",
         "x-appstrate-space": {
           "kind": "organization"
         },
         "tags": ["Internal"],
-        "summary": "End a connection's upstream-rejection streak",
-        "description": "Sidecar-only. Same Bearer run token, agent-dependency and activation checks and bound-connection check as the GET endpoint; `connection_id` and `credential_revision` are always required. Called once, fire-and-forget, after a successful (2xx) upstream call through the named connection when its credentials payload carried `rejection_streak`, or after the sidecar saw a rejection counted in this run: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0. Nothing is reset when the connection no longer holds the credential named by `credential_revision`, when the run has no actor or its actor can no longer reach the connection (deleted, unshared, moved to another space), or when the connection is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. Idempotent. An ephemeral CONNECT run's token is refused with `409 connect_run_no_refresh`, as on the refresh endpoint.",
+        "summary": "Journal the upstream calls a run's sidecar dispatched",
+        "description": "Sidecar-only. Auth via Bearer run token. A batch of the upstream calls the run's sidecar dispatched for its integrations (the `api_call` tool, the MITM listener, a remote MCP server's operations, a local MCP server's `tools/call` when no MITM listener sees its upstream requests), one record per call that may have reached the upstream, taken from its final attempt. Each is written to the connection-call journal (`connection_calls`) with the run's organization, space, actor and API key, `auth_method` `run_token`, `run_id` set and the batch's request id; the sidecar sends none of those. Every record is checked before any is written, against the run's frozen kickoff snapshot alone — never the live agent or the space's activation, so a call that left stays journaled when its integration is switched off or the agent edited or deleted mid-run: a non-null `connection_id` is one the run bound to that integration (else `400 connection_not_in_run`), and a record with a null `connection_id` names an integration the run resolved (else `400 invalid_request`); one record that fails refuses the whole batch. The text of a record is bounded at 2048 characters and stored truncated to the journal's own caps. A run with no actor writes nothing and answers `204`. A record carrying `credential_revision` (a 2xx answered with that credential) also ends the connection's rejection streak: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0, unless the connection no longer holds that credential, the run's actor can no longer reach it (deleted, unshared, moved to another space), or it is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. A token whose run is no longer `running` is refused (`403`).",
         "security": [
           {
             "bearerExecToken": []
           }
         ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          },
-          {
-            "name": "connection_id",
-            "in": "query",
-            "required": true,
-            "description": "The connection this run bound to the integration: a member of `runs.resolved_connections[<integration id>]`. An id the run did not bind is a `400 connection_not_in_run`.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["calls"],
+                "properties": {
+                  "calls": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "integration_id",
+                        "connection_id",
+                        "method",
+                        "host",
+                        "outcome",
+                        "duration_ms"
+                      ],
+                      "properties": {
+                        "integration_id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 214,
+                          "description": "The integration's package id (`@scope/name`)."
+                        },
+                        "connection_id": {
+                          "type": ["string", "null"],
+                          "format": "uuid",
+                          "description": "The bound connection the call went through; `null` for an integration that binds none."
+                        },
+                        "method": {
+                          "type": "string",
+                          "maxLength": 2048,
+                          "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$",
+                          "description": "The request's HTTP method (an RFC 9110 token), `POST` for a local MCP server's `tools/call`. Stored truncated to 16 characters."
+                        },
+                        "host": {
+                          "type": ["string", "null"],
+                          "minLength": 1,
+                          "maxLength": 2048,
+                          "description": "The target's host as the caller wrote it, before any credential substitution: a `{{field}}` placeholder stays as written. Stored truncated to 255 characters. `null` for a `tools/call` of a local MCP server with no MITM listener (env- or files-delivery, or no credential), whose upstream requests the sidecar does not see."
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "description": "The upstream's HTTP status (any three digits: some upstreams answer outside 1xx-5xx), or the failure code of a call that was sent and got no response: `unauthorized_target`, `blocked_target`, `upstream_unresolvable`, `upstream_unreachable`, `upstream_timeout`."
+                        },
+                        "duration_ms": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483647
+                        },
+                        "credential_revision": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{16}$",
+                          "description": "Set on a 2xx answered with the injected credential when it ends a rejection streak the sidecar knows of: the `credential_revision` of that credential. Only with a non-null `connection_id` and a 2xx `outcome`."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             }
-          },
-          {
-            "name": "credential_revision",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "pattern": "^[0-9a-f]{16}$"
-            },
-            "required": true,
-            "description": "The `credential_revision` of the credential the successful call carried."
           }
-        ],
+        },
         "responses": {
           "204": {
-            "description": "Streak ended (or none to end on that credential)."
+            "description": "Journaled (nothing with no actor)."
           },
           "400": {
-            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A missing or malformed `credential_revision` is an `invalid_request` too.",
+            "description": "`invalid_request`: a malformed body (more than 100 records, an unknown field, a value out of its bounds, a `credential_revision` on a record that cannot end a streak), or a record with a null `connection_id` names an integration the run did not resolve (`param` points at it); or `connection_not_in_run`: a record names a connection the run did not bind to its integration (`param` points at it).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20112,16 +20464,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "description": "The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run, which holds no stored credential.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
@@ -20491,64 +20833,6 @@
                               },
                               "type": {
                                 "type": "string",
-                                "const": "package_shared"
-                              },
-                              "runId": {
-                                "type": ["string", "null"],
-                                "description": "Originating run id, when the notification references one"
-                              },
-                              "payload": {
-                                "type": ["object", "null"],
-                                "additionalProperties": false,
-                                "description": "Render-without-join data.",
-                                "required": ["packageId", "package_type", "shared_by_name"],
-                                "properties": {
-                                  "packageId": {
-                                    "type": "string"
-                                  },
-                                  "package_type": {
-                                    "type": "string",
-                                    "enum": ["agent", "skill", "integration"]
-                                  },
-                                  "shared_by_name": {
-                                    "type": "string"
-                                  }
-                                }
-                              },
-                              "read_at": {
-                                "type": ["string", "null"],
-                                "format": "date-time",
-                                "description": "When the recipient marked it read; null if unread"
-                              },
-                              "createdAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              }
-                            }
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "id",
-                              "spaceId",
-                              "type",
-                              "runId",
-                              "payload",
-                              "read_at",
-                              "createdAt"
-                            ],
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "format": "uuid",
-                                "description": "Notification id"
-                              },
-                              "spaceId": {
-                                "type": "string",
-                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
-                              },
-                              "type": {
-                                "type": "string",
                                 "const": "agent_message"
                               },
                               "runId": {
@@ -20589,6 +20873,77 @@
                                 "format": "date-time"
                               }
                             }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "credential_needs_reconnection"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": ["packageId", "integration_name", "label", "cause"],
+                                "properties": {
+                                  "packageId": {
+                                    "type": "string",
+                                    "description": "The connection's integration (`@scope/name`)."
+                                  },
+                                  "integration_name": {
+                                    "type": "string",
+                                    "description": "The integration's display name as stamped when the notice was written."
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "description": "The connection's label."
+                                  },
+                                  "cause": {
+                                    "type": "string",
+                                    "enum": [
+                                      "refresh_token_revoked",
+                                      "refresh_token_missing",
+                                      "refresh_failures_exhausted",
+                                      "unrefreshable",
+                                      "credentials_undecryptable"
+                                    ],
+                                    "description": "Why the credential is dead."
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
                           }
                         ]
                       }
@@ -20605,12 +20960,13 @@
                     {
                       "id": "550e8400-e29b-41d4-a716-446655440000",
                       "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
-                      "type": "package_shared",
-                      "runId": null,
+                      "type": "agent_message",
+                      "runId": "run_8f14e45fceea167a5a36dedd4bea2543",
                       "payload": {
                         "packageId": "@acme/email-sorter",
-                        "package_type": "agent",
-                        "shared_by_name": "Ada Lovelace"
+                        "agent_name": "Email sorter",
+                        "title": "Inbox sorted",
+                        "message": "42 messages filed."
                       },
                       "read_at": null,
                       "createdAt": "2026-01-15T10:31:12Z"
@@ -20788,64 +21144,6 @@
                               },
                               "type": {
                                 "type": "string",
-                                "const": "package_shared"
-                              },
-                              "runId": {
-                                "type": ["string", "null"],
-                                "description": "Originating run id, when the notification references one"
-                              },
-                              "payload": {
-                                "type": ["object", "null"],
-                                "additionalProperties": false,
-                                "description": "Render-without-join data.",
-                                "required": ["packageId", "package_type", "shared_by_name"],
-                                "properties": {
-                                  "packageId": {
-                                    "type": "string"
-                                  },
-                                  "package_type": {
-                                    "type": "string",
-                                    "enum": ["agent", "skill", "integration"]
-                                  },
-                                  "shared_by_name": {
-                                    "type": "string"
-                                  }
-                                }
-                              },
-                              "read_at": {
-                                "type": ["string", "null"],
-                                "format": "date-time",
-                                "description": "When the recipient marked it read; null if unread"
-                              },
-                              "createdAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              }
-                            }
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "id",
-                              "spaceId",
-                              "type",
-                              "runId",
-                              "payload",
-                              "read_at",
-                              "createdAt"
-                            ],
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "format": "uuid",
-                                "description": "Notification id"
-                              },
-                              "spaceId": {
-                                "type": "string",
-                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
-                              },
-                              "type": {
-                                "type": "string",
                                 "const": "agent_message"
                               },
                               "runId": {
@@ -20886,6 +21184,77 @@
                                 "format": "date-time"
                               }
                             }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "credential_needs_reconnection"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": ["packageId", "integration_name", "label", "cause"],
+                                "properties": {
+                                  "packageId": {
+                                    "type": "string",
+                                    "description": "The connection's integration (`@scope/name`)."
+                                  },
+                                  "integration_name": {
+                                    "type": "string",
+                                    "description": "The integration's display name as stamped when the notice was written."
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "description": "The connection's label."
+                                  },
+                                  "cause": {
+                                    "type": "string",
+                                    "enum": [
+                                      "refresh_token_revoked",
+                                      "refresh_token_missing",
+                                      "refresh_failures_exhausted",
+                                      "unrefreshable",
+                                      "credentials_undecryptable"
+                                    ],
+                                    "description": "Why the credential is dead."
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
                           }
                         ]
                       }
@@ -20902,12 +21271,13 @@
                     {
                       "id": "550e8400-e29b-41d4-a716-446655440000",
                       "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
-                      "type": "package_shared",
-                      "runId": null,
+                      "type": "agent_message",
+                      "runId": "run_8f14e45fceea167a5a36dedd4bea2543",
                       "payload": {
                         "packageId": "@acme/email-sorter",
-                        "package_type": "agent",
-                        "shared_by_name": "Ada Lovelace"
+                        "agent_name": "Email sorter",
+                        "title": "Inbox sorted",
+                        "message": "42 messages filed."
                       },
                       "read_at": null,
                       "createdAt": "2026-01-15T10:31:12Z"
@@ -21165,7 +21535,7 @@
                         },
                         "type": {
                           "type": "string",
-                          "const": "package_shared"
+                          "const": "agent_message"
                         },
                         "runId": {
                           "type": ["string", "null"],
@@ -21175,17 +21545,23 @@
                           "type": ["object", "null"],
                           "additionalProperties": false,
                           "description": "Render-without-join data.",
-                          "required": ["packageId", "package_type", "shared_by_name"],
+                          "required": ["packageId", "agent_name", "title", "message"],
                           "properties": {
                             "packageId": {
-                              "type": "string"
+                              "type": ["string", "null"],
+                              "description": "The agent of the run that sent it; null when the run no longer references its agent."
                             },
-                            "package_type": {
+                            "agent_name": {
+                              "type": ["string", "null"],
+                              "description": "The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted)."
+                            },
+                            "title": {
                               "type": "string",
-                              "enum": ["agent", "skill", "integration"]
+                              "description": "Headline the agent wrote (`notify` tool)."
                             },
-                            "shared_by_name": {
-                              "type": "string"
+                            "message": {
+                              "type": "string",
+                              "description": "Body the agent wrote (`notify` tool)."
                             }
                           }
                         },
@@ -21223,7 +21599,7 @@
                         },
                         "type": {
                           "type": "string",
-                          "const": "agent_message"
+                          "const": "credential_needs_reconnection"
                         },
                         "runId": {
                           "type": ["string", "null"],
@@ -21233,23 +21609,30 @@
                           "type": ["object", "null"],
                           "additionalProperties": false,
                           "description": "Render-without-join data.",
-                          "required": ["packageId", "agent_name", "title", "message"],
+                          "required": ["packageId", "integration_name", "label", "cause"],
                           "properties": {
                             "packageId": {
-                              "type": ["string", "null"],
-                              "description": "The agent of the run that sent it; null when the run no longer references its agent."
-                            },
-                            "agent_name": {
-                              "type": ["string", "null"],
-                              "description": "The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted)."
-                            },
-                            "title": {
                               "type": "string",
-                              "description": "Headline the agent wrote (`notify` tool)."
+                              "description": "The connection's integration (`@scope/name`)."
                             },
-                            "message": {
+                            "integration_name": {
                               "type": "string",
-                              "description": "Body the agent wrote (`notify` tool)."
+                              "description": "The integration's display name as stamped when the notice was written."
+                            },
+                            "label": {
+                              "type": "string",
+                              "description": "The connection's label."
+                            },
+                            "cause": {
+                              "type": "string",
+                              "enum": [
+                                "refresh_token_revoked",
+                                "refresh_token_missing",
+                                "refresh_failures_exhausted",
+                                "unrefreshable",
+                                "credentials_undecryptable"
+                              ],
+                              "description": "Why the credential is dead."
                             }
                           }
                         },
@@ -21420,7 +21803,7 @@
                         },
                         "type": {
                           "type": "string",
-                          "const": "package_shared"
+                          "const": "agent_message"
                         },
                         "runId": {
                           "type": ["string", "null"],
@@ -21430,17 +21813,23 @@
                           "type": ["object", "null"],
                           "additionalProperties": false,
                           "description": "Render-without-join data.",
-                          "required": ["packageId", "package_type", "shared_by_name"],
+                          "required": ["packageId", "agent_name", "title", "message"],
                           "properties": {
                             "packageId": {
-                              "type": "string"
+                              "type": ["string", "null"],
+                              "description": "The agent of the run that sent it; null when the run no longer references its agent."
                             },
-                            "package_type": {
+                            "agent_name": {
+                              "type": ["string", "null"],
+                              "description": "The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted)."
+                            },
+                            "title": {
                               "type": "string",
-                              "enum": ["agent", "skill", "integration"]
+                              "description": "Headline the agent wrote (`notify` tool)."
                             },
-                            "shared_by_name": {
-                              "type": "string"
+                            "message": {
+                              "type": "string",
+                              "description": "Body the agent wrote (`notify` tool)."
                             }
                           }
                         },
@@ -21478,7 +21867,7 @@
                         },
                         "type": {
                           "type": "string",
-                          "const": "agent_message"
+                          "const": "credential_needs_reconnection"
                         },
                         "runId": {
                           "type": ["string", "null"],
@@ -21488,23 +21877,30 @@
                           "type": ["object", "null"],
                           "additionalProperties": false,
                           "description": "Render-without-join data.",
-                          "required": ["packageId", "agent_name", "title", "message"],
+                          "required": ["packageId", "integration_name", "label", "cause"],
                           "properties": {
                             "packageId": {
-                              "type": ["string", "null"],
-                              "description": "The agent of the run that sent it; null when the run no longer references its agent."
-                            },
-                            "agent_name": {
-                              "type": ["string", "null"],
-                              "description": "The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted)."
-                            },
-                            "title": {
                               "type": "string",
-                              "description": "Headline the agent wrote (`notify` tool)."
+                              "description": "The connection's integration (`@scope/name`)."
                             },
-                            "message": {
+                            "integration_name": {
                               "type": "string",
-                              "description": "Body the agent wrote (`notify` tool)."
+                              "description": "The integration's display name as stamped when the notice was written."
+                            },
+                            "label": {
+                              "type": "string",
+                              "description": "The connection's label."
+                            },
+                            "cause": {
+                              "type": "string",
+                              "enum": [
+                                "refresh_token_revoked",
+                                "refresh_token_missing",
+                                "refresh_failures_exhausted",
+                                "unrefreshable",
+                                "credentials_undecryptable"
+                              ],
+                              "description": "Why the credential is dead."
                             }
                           }
                         },
@@ -21667,7 +22063,7 @@
         },
         "tags": ["Packages"],
         "summary": "List skills across the organization's spaces",
-        "description": "Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (system packages first, then newest first). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "description": "Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (newest first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/OrgIdPath"
@@ -21754,7 +22150,7 @@
         },
         "tags": ["Packages"],
         "summary": "List integration packages across the organization's spaces",
-        "description": "Read-only index of the integration packages of every space of the organization where the caller holds `integrations:read`: the rows of `GET /api/packages/integrations`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (system packages first, then newest first). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "description": "Read-only index of the integration packages of every space of the organization where the caller holds `integrations:read`: the rows of `GET /api/packages/integrations`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (newest first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/OrgIdPath"
@@ -24659,7 +25055,7 @@
         "operationId": "listPackageShares",
         "tags": ["Packages"],
         "summary": "List the spaces a package is shared with",
-        "description": "The package's AUDIENCE — the spaces it is placed in outside its home, each with its `enabled` state there. Requires the package type's `share` permission in its home space; a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.",
+        "description": "The package's AUDIENCE — the spaces it is placed in outside its home, each with its `enabled` state there. Requires the package type's `share` permission in its home space; a package the caller cannot reach at all answers 404. Personal spaces never appear: they hold the package through the organization offer, not a share.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -24724,8 +25120,8 @@
       "post": {
         "operationId": "sharePackage",
         "tags": ["Packages"],
-        "summary": "Share a package with a person or a space",
-        "description": "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.",
+        "summary": "Share a package with a team space",
+        "description": "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller holds the type's activation grant in the target and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. The target is a team space the caller can reach (`target: {kind: \"space\", spaceId}`); a `user` target is a 400. A PERSONAL space is never a target: `409 personal_space_takes_offers_only` (a personal space receives packages only through the organization offer, `PUT …/org-offer`; another member's personal space still answers 404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -24796,7 +25192,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The target space is the package's own home (`share_target_is_home`), or the package has no published version to place (`package_has_no_version` — publish one, then share). RFC 9457 problem+json.",
+            "description": "The target space is the package's own home (`share_target_is_home`), the target is a personal space (`personal_space_takes_offers_only`), or the package has no published version to place (`package_has_no_version` — publish one, then share). RFC 9457 problem+json.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -24813,7 +25209,7 @@
         "operationId": "revokePackageShare",
         "tags": ["Packages"],
         "summary": "Withdraw a package share",
-        "description": "Remove the placement: the target's `space_packages` row is deleted, its settings with it, and the package is no longer readable or runnable there. In the same transaction, every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed). Either side may withdraw: the home side, holding the package type's `share` in its home space, or the recipient side, holding the type's deactivation permission in the target space (waived in the caller's own personal space). 404 when the package is not placed in that target outside its home, or when the target is another member's personal space addressed by its space id. Audited as `package.unshared`, with `authority` (`home` or `recipient`) naming the side that withdrew it.",
+        "description": "Remove the placement: the target's `space_packages` row is deleted, its settings with it, and the package is no longer readable or runnable there. In the same transaction, every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed). Either side may withdraw: the home side, holding the package type's `share` in its home space, or the recipient side, holding the type's deactivation permission in the target space. 404 when the package is not placed in that team space outside its home, or when the target is a personal space. Audited as `package.unshared`, with `authority` (`home` or `recipient`) naming the side that withdrew it.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -24834,7 +25230,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "The share's target exactly as `GET …/shares` published it: a space id (`spc_…`) for a `space` target, or the member's user id for a `user` target. A recipient names the space they act in: a team space by its id, their own personal space by its id or by their user id. The two are told apart by the space-id shape. The id of another member's personal space is never on the wire, so it is not a handle here: it answers 404."
+            "description": "The team space id (`spc_…`) exactly as `GET …/shares` published it. A user id is a 400."
           }
         ],
         "responses": {
@@ -24858,7 +25254,7 @@
         "operationId": "offerPackageToOrg",
         "tags": ["Packages"],
         "summary": "Offer a package to the organization",
-        "description": "Offer the package to its organization: it is then placed and ACTIVE in every space of the organization that holds no `space_packages` row of its own, personal spaces included. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Idempotent: offering twice answers 200 and leaves the offer as it is. Audited as `package.offered_to_org` (once, when the offer is created).",
+        "description": "Offer the package to its organization in a `mode`: it is then PLACED in every space of the organization that holds no `space_packages` row of its own, personal spaces included. Each mode is described on `mode`. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Idempotent: offering again in the same mode answers 200 and leaves the offer as it is; offering in the other mode rewrites it. `warnings[]` follows `ActivationWarnings` and answers for both modes: for an AGENT, one item per integration it declares that is neither offered to the organization nor active by default (`code: integration_not_offered`, `required` saying whether a launch in a personal space is refused until it is offered, or proceeds without it); `[]` for any other type. Nothing is offered in their place: offering the integrations is a decision of its own, one `PUT …/org-offer` each. Audited as `package.offered_to_org` when the offer is created and as `package.offer_mode_changed` (with the previous mode) when its mode changes.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -24873,9 +25269,28 @@
             "$ref": "#/components/parameters/PackageName"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["mode"],
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": ["available", "on_by_default"],
+                    "description": "`on_by_default`: placed and active in every space holding no row of its own. `available`: placed in every such space and off until the space switches it on."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "The package is offered to the organization (new or already offered).",
+            "description": "The package is offered to the organization in that mode (new, changed or already so).",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -24887,7 +25302,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PackageOrgOffer"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/PackageOrgOffer"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ActivationWarnings"
+                    }
+                  ]
                 }
               }
             }
@@ -26525,7 +26947,7 @@
         "operationId": "activatePackage",
         "tags": ["Space Packages"],
         "summary": "Activate a package in this space",
-        "description": "Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. Where the package is PLACED here — homed in this space, holding a row here (`POST /api/packages/{scope}/{name}/shares` creates one), or a system package, placed everywhere — the row is switched on. Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest switches on a package placed there for them. The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it. Activating an AGENT activates nothing else: each integration it declares that is not active here is a `warnings[]` item of the response (`code: integration_not_active`, `required` saying whether a launch here is refused until it is activated, or starts without it) — activate it with this same call and its `packageId`, or leave the agent on without it.",
+        "description": "Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. Where the package is PLACED here — homed in this space, holding a row here (`POST /api/packages/{scope}/{name}/shares` creates one), or a system package, placed everywhere — the row is switched on. Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a member switches on a package the organization offers. A PERSONAL space takes only what is homed there, what the organization offers (`PUT /api/packages/{scope}/{name}/org-offer`, either mode) and what the platform activates by default: any other package answers `409 personal_space_takes_offers_only`, and the call never places one there. The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it. Activating an AGENT activates nothing else: each integration it declares that is not active here is a `warnings[]` item of the response (`code: integration_not_active`, `required` saying whether a launch here is refused until it is activated, or starts without it) — activate it with this same call and its `packageId`, or leave the agent on without it.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -26615,6 +27037,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The space is a personal space and the package is neither homed there, offered by the organization nor active by default (`personal_space_takes_offers_only`), or the package has no published version to place (`package_has_no_version`). RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -27259,7 +27691,7 @@
         "operationId": "removeSpaceMember",
         "tags": ["Spaces"],
         "summary": "Remove a space member",
-        "description": "Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if the member's current role is one the caller could not have granted, or if removing the row would grant implicit permissions the caller does not hold.",
+        "description": "Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if the member's current role is one the caller could not have granted, or if removing the row would grant implicit permissions the caller does not hold. A personal space is refused with 409 `personal_space_has_no_members`: its owner's own role there is cleared with `DELETE /api/orgs/{orgId}/members/{userId}/personal-space-role`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27308,6 +27740,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The space is a personal space (`personal_space_has_no_members`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -27453,7 +27895,7 @@
         },
         "tags": ["Roles"],
         "summary": "Create a custom space role",
-        "description": "Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.",
+        "description": "Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop, and so is `studio:read`, which a custom role holds through `shows_studio` instead. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27487,7 +27929,12 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "description": "Space-level permission strings the role grants (at least one)."
+                    "description": "Space-level permission strings the role grants (at least one). Never `studio:read`: a 400, the role resolves it from `shows_studio`."
+                  },
+                  "shows_studio": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Whether holders see the Studio (they resolve `studio:read`). Default `true`. A display setting, not a boundary: the API answers the role's other permissions either way."
                   }
                 },
                 "additionalProperties": false
@@ -27544,7 +27991,7 @@
         },
         "tags": ["Roles"],
         "summary": "List the permissions a custom role may hold",
-        "description": "The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold.",
+        "description": "The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold. `studio:read` is not listed: a custom role holds it through `shows_studio`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27603,7 +28050,7 @@
         },
         "tags": ["Roles"],
         "summary": "Update a custom space role",
-        "description": "Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit. A `permissions` array is validated as on create: an unknown string is a 400 naming it, and a set holding a permission without one of the reads its vocabulary entry's `requires_one_of` names is a 400 naming each missing read. A request without `permissions` is not re-judged.",
+        "description": "Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit. A `permissions` array is validated as on create: an unknown string is a 400 naming it, and a set holding a permission without one of the reads its vocabulary entry's `requires_one_of` names is a 400 naming each missing read. A request without `permissions` is not re-judged. `shows_studio` alone changes whether holders see the Studio.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27645,6 +28092,10 @@
                       "type": "string",
                       "minLength": 1
                     }
+                  },
+                  "shows_studio": {
+                    "type": "boolean",
+                    "description": "Whether holders see the Studio (they resolve `studio:read`). Absent = unchanged."
                   }
                 },
                 "additionalProperties": false
@@ -27702,7 +28153,7 @@
         },
         "tags": ["Roles"],
         "summary": "Delete a custom space role",
-        "description": "Remove a bundle. Requires `roles:delete` (owner/admin). Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.",
+        "description": "Remove a bundle. Requires `roles:delete` (owner/admin). Refused with 409 `role_in_use` while any space member holds the role (a member's own override in their personal space included), any PENDING invitation assigns it, an OIDC client's sign-up policy (`signup_space_assignments`) assigns it, or the organization's `personal_space_role` setting names it — the problem body carries `member_count`, `pending_invitation_count`, `signup_assignment_count` and `org_default`. Reassign them, edit the sign-up policies, or change that setting, first.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27750,7 +28201,12 @@
                     },
                     {
                       "type": "object",
-                      "required": ["member_count", "pending_invitation_count"],
+                      "required": [
+                        "member_count",
+                        "pending_invitation_count",
+                        "signup_assignment_count",
+                        "org_default"
+                      ],
                       "properties": {
                         "member_count": {
                           "type": "integer",
@@ -27759,6 +28215,14 @@
                         "pending_invitation_count": {
                           "type": "integer",
                           "description": "Pending invitations whose `space_assignments` name this role."
+                        },
+                        "signup_assignment_count": {
+                          "type": "integer",
+                          "description": "The organization's OIDC clients whose `signup_space_assignments` assign this role."
+                        },
+                        "org_default": {
+                          "type": "boolean",
+                          "description": "Whether the organization's `personal_space_role` setting names this role."
                         }
                       }
                     }
@@ -30011,6 +30475,7 @@
                   "type": "object",
                   "required": [
                     "tools",
+                    "integrations",
                     "connections",
                     "not_ready",
                     "unlisted",
@@ -30060,6 +30525,10 @@
                             "type": "string",
                             "description": "`remote` only: the name the server lists the tool by, which `tools/call` takes."
                           },
+                          "title": {
+                            "type": "string",
+                            "description": "`remote` only, when the server gives one: the tool's display name (`title`, else `annotations.title`), sanitised. Server text, for display only."
+                          },
                           "input_schema": {
                             "type": "object",
                             "additionalProperties": true,
@@ -30100,6 +30569,28 @@
                               }
                             },
                             "description": "`remote` only, when one of its connections lacks some: per `connection_id`, the scopes the tool's `tools_policy` entry requires on that connection's auth that it lacks; a call with it answers `409 insufficient_scopes`."
+                          }
+                        }
+                      }
+                    },
+                    "integrations": {
+                      "type": "array",
+                      "description": "The integrations of `tools`, each once: how a client names and draws them.",
+                      "items": {
+                        "type": "object",
+                        "required": ["integration_package_id", "display_name"],
+                        "additionalProperties": false,
+                        "properties": {
+                          "integration_package_id": {
+                            "type": "string"
+                          },
+                          "display_name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "icon": {
+                            "type": "string",
+                            "description": "Its manifest icon: an Iconify id or an image URL."
                           }
                         }
                       }
@@ -32661,6 +33152,7 @@
                               "apiKeyId",
                               "auth_method",
                               "runId",
+                              "chat_session_id",
                               "method",
                               "host",
                               "outcome",
@@ -32711,19 +33203,23 @@
                               },
                               "auth_method": {
                                 "type": "string",
-                                "description": "How the caller authenticated (`api_key`, an OAuth token kind, …)."
+                                "description": "How the caller authenticated (`api_key`, an OAuth token kind, …); `run_token` for a call a platform run's sidecar made."
                               },
                               "runId": {
                                 "type": ["string", "null"],
-                                "description": "The run the call declared (`X-Run-Id`), if any."
+                                "description": "The run whose sidecar made the call, or the run the call declared (`X-Run-Id`), if any."
+                              },
+                              "chat_session_id": {
+                                "type": ["string", "null"],
+                                "description": "The chat conversation that issued the call, if any. Null when the call declared a run (at most one of `runId` and `chat_session_id` is set), and on calls recorded before the conversation was journaled."
                               },
                               "method": {
                                 "type": "string",
                                 "description": "The call's HTTP method."
                               },
                               "host": {
-                                "type": "string",
-                                "description": "The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host."
+                                "type": ["string", "null"],
+                                "description": "The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. Null for a `tools/call` of a local MCP server a run's sidecar answered without seeing its upstream requests (an env- or files-delivery integration, or one with no credential)."
                               },
                               "outcome": {
                                 "type": "string",
@@ -32905,6 +33401,7 @@
                           "apiKeyId",
                           "auth_method",
                           "runId",
+                          "chat_session_id",
                           "method",
                           "host",
                           "outcome",
@@ -32955,19 +33452,23 @@
                           },
                           "auth_method": {
                             "type": "string",
-                            "description": "How the caller authenticated (`api_key`, an OAuth token kind, …)."
+                            "description": "How the caller authenticated (`api_key`, an OAuth token kind, …); `run_token` for a call a platform run's sidecar made."
                           },
                           "runId": {
                             "type": ["string", "null"],
-                            "description": "The run the call declared (`X-Run-Id`), if any."
+                            "description": "The run whose sidecar made the call, or the run the call declared (`X-Run-Id`), if any."
+                          },
+                          "chat_session_id": {
+                            "type": ["string", "null"],
+                            "description": "The chat conversation that issued the call, if any. Null when the call declared a run (at most one of `runId` and `chat_session_id` is set), and on calls recorded before the conversation was journaled."
                           },
                           "method": {
                             "type": "string",
                             "description": "The call's HTTP method."
                           },
                           "host": {
-                            "type": "string",
-                            "description": "The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host."
+                            "type": ["string", "null"],
+                            "description": "The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. Null for a `tools/call` of a local MCP server a run's sidecar answered without seeing its upstream requests (an env- or files-delivery integration, or one with no credential)."
                           },
                           "outcome": {
                             "type": "string",
@@ -35244,7 +35745,7 @@
                         "home_writable": true,
                         "home_deletable": true,
                         "home_shareable": true,
-                        "offered_to_org": false,
+                        "org_offer": null,
                         "org_offerable": true,
                         "active_by_default": false,
                         "placements": [
@@ -35290,7 +35791,7 @@
                         "home_writable": false,
                         "home_deletable": false,
                         "home_shareable": false,
-                        "offered_to_org": false,
+                        "org_offer": null,
                         "org_offerable": false,
                         "active_by_default": true,
                         "placements": [
@@ -35439,7 +35940,7 @@
                         "home_writable": true,
                         "home_deletable": true,
                         "home_shareable": true,
-                        "offered_to_org": false,
+                        "org_offer": null,
                         "org_offerable": true,
                         "active_by_default": false,
                         "placements": [
@@ -35485,7 +35986,7 @@
                         "home_writable": false,
                         "home_deletable": false,
                         "home_shareable": false,
-                        "offered_to_org": false,
+                        "org_offer": null,
                         "org_offerable": false,
                         "active_by_default": true,
                         "placements": [
@@ -36238,7 +36739,7 @@
         "properties": {
           "warnings": {
             "type": "array",
-            "description": "Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
+            "description": "Always present. On an organization offer of an AGENT (`PUT …/org-offer`): one item per integration it declares that is neither offered to the organization nor active by default (`code: integration_not_offered`), `[]` for any other type. Otherwise, when the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
             "items": {
               "$ref": "#/components/schemas/ActivationWarning"
             }
@@ -36246,7 +36747,7 @@
         }
       },
       "ActivationWarning": {
-        "description": "A declared integration of the agent that is not active in the space, in the launch `warnings[]` vocabulary (`field: integrations.<id>`, `code: integration_not_active`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item).",
+        "description": "A declared integration of the agent that is not active in the space (`code: integration_not_active`) or, on an organization offer, not offered to the organization (`code: integration_not_offered`), in the launch `warnings[]` vocabulary (`field: integrations.<id>`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item).",
         "allOf": [
           {
             "$ref": "#/components/schemas/ResolutionFieldError"
@@ -36257,7 +36758,7 @@
             "properties": {
               "code": {
                 "type": "string",
-                "enum": ["integration_not_active"]
+                "enum": ["integration_not_active", "integration_not_offered"]
               },
               "required": {
                 "type": "boolean",
@@ -36670,8 +37171,17 @@
           },
           "personal_space_role": {
             "type": "string",
-            "enum": ["admin", "operator"],
-            "description": "The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH."
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": ["admin", "builder", "operator", "runner", "viewer"]
+              },
+              {
+                "type": "string",
+                "pattern": "^srl_"
+              }
+            ],
+            "description": "The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH."
           }
         }
       },
@@ -36771,7 +37281,14 @@
       },
       "OrgMember": {
         "type": "object",
-        "required": ["userId", "role", "joinedAt", "spaces"],
+        "required": [
+          "userId",
+          "role",
+          "joinedAt",
+          "spaces",
+          "personal_space_role",
+          "personal_space_default_role"
+        ],
         "properties": {
           "userId": {
             "type": "string"
@@ -36795,6 +37312,53 @@
             "description": "The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them.",
             "items": {
               "$ref": "#/components/schemas/OrgMemberSpace"
+            }
+          },
+          "personal_space_role": {
+            "description": "The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null`: they follow the organization default. Always `null` for an owner or admin, who hold `admin` there, and for every member when the caller lacks `members:change-role`: only a caller who may change it reads it.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": ["preset_role"],
+                "properties": {
+                  "preset_role": {
+                    "type": "string",
+                    "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": ["custom_role_id"],
+                "properties": {
+                  "custom_role_id": {
+                    "type": "string",
+                    "pattern": "^srl_"
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "personal_space_default_role": {
+            "type": ["object", "null"],
+            "required": ["kind", "key", "name"],
+            "description": "The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it.",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["preset", "custom"]
+              },
+              "key": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
             }
           }
         }
@@ -39114,11 +39678,11 @@
           "rejection_streak": {
             "type": "integer",
             "minimum": 1,
-            "description": "Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar reports its next successful call to `POST .../upstream-success`, which ends the streak."
+            "description": "Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar journals its next successful call on the credential with that credential's revision (`POST /internal/integration-calls`), which ends the streak."
           },
           "credential_revision": {
             "type": "string",
-            "description": "Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and `/upstream-success`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload."
+            "description": "Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and on a streak-ending record of `/internal/integration-calls`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload."
           }
         }
       },
@@ -39257,7 +39821,8 @@
                 "needs_reconnection",
                 "missing_scopes",
                 "scope_fit",
-                "is_own"
+                "is_own",
+                "allowed_actions"
               ],
               "properties": {
                 "id": {
@@ -39333,6 +39898,14 @@
                 },
                 "is_own": {
                   "type": "boolean"
+                },
+                "allowed_actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["rename", "reconnect", "share", "share_all_spaces", "unshare_here"]
+                  },
+                  "description": "What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space)."
                 }
               }
             }
@@ -39828,6 +40401,7 @@
           "name",
           "description",
           "permissions",
+          "shows_studio",
           "unavailable_permissions",
           "createdAt",
           "updatedAt"
@@ -39860,7 +40434,11 @@
             "items": {
               "type": "string"
             },
-            "description": "Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back."
+            "description": "Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back: never `studio:read`, which `shows_studio` carries."
+          },
+          "shows_studio": {
+            "type": "boolean",
+            "description": "Whether holders of the role see the Studio (they resolve `studio:read`). A display setting, not a boundary: the REST API and an MCP client answer the role's other permissions either way. Always `true` for a preset."
           },
           "unavailable_permissions": {
             "type": "array",
@@ -40035,7 +40613,7 @@
             "home_writable",
             "home_deletable",
             "home_shareable",
-            "offered_to_org",
+            "org_offer",
             "org_offerable",
             "active_by_default",
             "placements",
@@ -40078,9 +40656,10 @@
               "type": "boolean",
               "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
             },
-            "offered_to_org": {
-              "type": "boolean",
-              "description": "Offered to the organization: placed and active in every space of it that holds no `space_packages` row of its own (a row always wins; `enabled = false` keeps it off)."
+            "org_offer": {
+              "type": ["string", "null"],
+              "enum": ["available", "on_by_default", null],
+              "description": "The offer to the organization, or `null` when there is none. An offer in either mode PLACES the package in every space of it that holds no `space_packages` row of its own. `on_by_default`: it is also ACTIVE there (a row always wins; `enabled = false` keeps it off). `available`: it is placed and listed but off until the space switches it on (`POST /api/spaces/{id}/packages`)."
             },
             "org_offerable": {
               "type": "boolean",
@@ -40092,7 +40671,7 @@
             },
             "activation": {
               "type": "array",
-              "description": "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance.",
+              "description": "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_offered` — `activate` only, in a personal space: the package is not the space's own, is not offered to the organization and is not on by the deployment's default, so a personal space cannot switch it on (an organization owner or admin can offer it); `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance.",
               "items": {
                 "type": "object",
                 "required": ["spaceId", "activate", "deactivate"],
@@ -40102,7 +40681,7 @@
                   },
                   "activate": {
                     "type": "string",
-                    "enum": ["allowed", "not_shareable", "forbidden"]
+                    "enum": ["allowed", "not_offered", "not_shareable", "forbidden"]
                   },
                   "deactivate": {
                     "type": "string",
@@ -40128,7 +40707,7 @@
           "via",
           "state",
           "shared_by",
-          "offered_to_org",
+          "org_offer",
           "org_offerable",
           "active_by_default"
         ],
@@ -40141,7 +40720,7 @@
           "state": {
             "type": "string",
             "enum": ["active", "inactive", "none"],
-            "description": "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it."
+            "description": "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off — the package is not offered to the organization, or offered as `available` and not yet switched on here. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization as `on_by_default`, which activates it."
           },
           "shared_by": {
             "type": ["object", "null"],
@@ -40156,9 +40735,10 @@
               }
             }
           },
-          "offered_to_org": {
-            "type": "boolean",
-            "description": "Offered to the organization (`offered_to_org` of the library entry)."
+          "org_offer": {
+            "type": ["string", "null"],
+            "enum": ["available", "on_by_default", null],
+            "description": "The offer to the organization (`org_offer` of the library entry)."
           },
           "org_offerable": {
             "type": "boolean",
@@ -40187,7 +40767,7 @@
           "state": {
             "type": "string",
             "enum": ["active", "inactive", "none"],
-            "description": "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it."
+            "description": "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off — the package is not offered to the organization, or offered as `available` and not yet switched on here. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization as `on_by_default`, which activates it."
           },
           "shared_by": {
             "type": ["object", "null"],
@@ -40206,61 +40786,36 @@
       },
       "ShareTarget": {
         "type": "object",
-        "description": "Where a package is placed outside its home. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
-        "required": ["kind"],
-        "oneOf": [
-          {
-            "type": "object",
-            "required": ["kind", "userId"],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": ["user"]
-              },
-              "userId": {
-                "type": "string",
-                "description": "Organization member's user id."
-              }
-            },
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "required": ["kind", "spaceId"],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": ["space"]
-              },
-              "spaceId": {
-                "type": "string",
-                "description": "Space id (`spc_…`) the caller can reach."
-              }
-            },
-            "additionalProperties": false
-          }
-        ]
-      },
-      "ShareTargetView": {
-        "type": "object",
-        "description": "A share's subject as the server renders it back. A personal-space target comes back as its OWNER — never as a space id, which is the one fact a personal space withholds.",
-        "required": ["kind", "name"],
+        "description": "Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only. A person is not a target either: `kind: \"user\"` is a 400.",
+        "required": ["kind", "spaceId"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["user", "space"]
-          },
-          "userId": {
-            "type": "string",
-            "description": "Present when `kind` is `user`."
+            "enum": ["space"]
           },
           "spaceId": {
             "type": "string",
-            "description": "Present when `kind` is `space`."
+            "description": "Team space id (`spc_…`) the caller can reach."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ShareTargetView": {
+        "type": "object",
+        "description": "A share's subject as the server renders it back: a team space.",
+        "required": ["kind", "spaceId", "name"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["space"]
+          },
+          "spaceId": {
+            "type": "string",
+            "description": "Space id (`spc_…`)."
           },
           "name": {
             "type": "string",
-            "description": "The member's display name, or the space's name."
+            "description": "The space's name."
           }
         }
       },
@@ -40303,7 +40858,7 @@
       "PackageOrgOffer": {
         "type": "object",
         "description": "The offer of a package to its organization, as it stands after `PUT …/org-offer`.",
-        "required": ["object", "packageId", "offered_to_org"],
+        "required": ["object", "packageId", "org_offer"],
         "properties": {
           "object": {
             "type": "string",
@@ -40313,9 +40868,10 @@
             "type": "string",
             "description": "Package id (`@scope/name`)."
           },
-          "offered_to_org": {
-            "type": "boolean",
-            "enum": [true]
+          "org_offer": {
+            "type": "string",
+            "enum": ["available", "on_by_default"],
+            "description": "The mode the offer now has."
           }
         }
       },

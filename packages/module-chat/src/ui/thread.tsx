@@ -39,17 +39,19 @@ import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
-import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
-import { TurnSpaceChoice } from "./space-choice.tsx";
+import { LoadingLine, ReasoningGroup } from "./reasoning.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
+import { ActivityGroup } from "./activity-group.tsx";
+import { activityGroupOf } from "./conversation-tools.ts";
+import { useStoredResults } from "./use-call-presentation.ts";
 import {
-  InvokeOperationToolUI,
-  SearchToolUI,
-  DescribeToolUI,
-  ImportPackageFileToolUI,
-  RunAndWaitToolUI,
+  ImportPackageFileTool,
+  InvokeOperationTool,
+  RunAndWaitTool,
+  SearchTool,
+  type ToolCardProps,
 } from "./tool-uis.tsx";
-import { ReadResourceToolUI, ReadToolUI } from "./skill-load.tsx";
+import { ResourceReadTool } from "./skill-load.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import {
@@ -99,6 +101,7 @@ import {
   NOTE_TEXT_CLASS,
   READING_TEXT_CLASS,
   THREAD_FOOTER_CLASS,
+  THREAD_SIDE_PADDING_CLASS,
   THREAD_VIEWPORT_CLASS,
   USER_MESSAGE_CLASS,
 } from "./phone-text.ts";
@@ -162,17 +165,9 @@ export function Thread({
           // Lets a control inside find this thread's own composer (`ScrollToBottom`).
           data-chat-thread=""
         >
-          {/* Register the rich tool cards (these render nothing themselves). */}
           {initialComposerDraft && canWrite && (
             <InitialComposerDraft draft={initialComposerDraft} seededRef={seededDraft} />
           )}
-          <InvokeOperationToolUI />
-          <RunAndWaitToolUI />
-          <SearchToolUI />
-          <DescribeToolUI />
-          <ImportPackageFileToolUI />
-          <ReadResourceToolUI />
-          <ReadToolUI />
 
           {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
@@ -264,7 +259,12 @@ function ThreadWelcome({
   const outsideActingSet =
     canWrite && !!spaceId && actingSpaceIds !== null && !actsIn(actingSpaceIds, spaceId);
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 md:justify-center-safe">
+    <div
+      className={cn(
+        "flex min-h-0 flex-1 flex-col items-center overflow-y-auto md:justify-center-safe",
+        THREAD_SIDE_PADDING_CLASS,
+      )}
+    >
       <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-1 flex-col items-stretch gap-6 max-md:pb-4 md:flex-none">
         {/* A phone keeps the composer at the bottom, where the thumb is, as every messenger does;
             the greeting takes the room above. From `md` up both sit mid-screen. */}
@@ -856,12 +856,6 @@ export function UserMessage() {
 // branches that aren't persisted — corrupting history on reload — so they're
 // intentionally absent.
 
-/** Gated on running: a dead message with no visible parts must not animate "thinking" forever. */
-function ThinkingIndicator() {
-  const running = useAuiState((s) => s.message.status?.type === "running");
-  return running ? <ThinkingStatus /> : null;
-}
-
 /** Always shown, not on hover, so a mid-conversation model switch is visible. */
 function TurnModelBadge() {
   const { t } = useChatHost();
@@ -963,21 +957,66 @@ export function MessageError() {
   );
 }
 
-/** Module-level: assistant-ui memoizes each part on these members' identity. */
-const ASSISTANT_PART_COMPONENTS = {
-  Text: MarkdownText,
-  Reasoning: ReasoningText,
-  ReasoningGroup,
-  tools: { Fallback: ToolFallback },
-  Empty: ThinkingIndicator,
-} satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
+/**
+ * Memoized: GroupedParts renders every part on each chunk, while a settled part's state, and so
+ * its props, keep their identity.
+ */
+const ToolFallbackCard = React.memo(ToolFallback);
+const ResourceReadCard = React.memo(ResourceReadTool);
+const TOOL_CARDS: Partial<Record<string, React.ComponentType<ToolCardProps>>> = {
+  invoke_operation: React.memo(InvokeOperationTool),
+  run_and_wait: React.memo(RunAndWaitTool),
+  search: React.memo(SearchTool),
+  import_package_file: React.memo(ImportPackageFileTool),
+  read_resource: ResourceReadCard,
+  read: ResourceReadCard,
+};
+
+function AssistantParts() {
+  const stored = useStoredResults();
+  return (
+    <MessagePrimitive.GroupedParts groupBy={activityGroupOf}>
+      {({ part, children }) => {
+        switch (part.type) {
+          case "group-activity":
+            return (
+              <ActivityGroup indices={part.indices} stored={stored}>
+                {children}
+              </ActivityGroup>
+            );
+          case "group-reasoning":
+            return (
+              <ReasoningGroup
+                startIndex={part.indices[0] ?? 0}
+                endIndex={part.indices[part.indices.length - 1] ?? 0}
+              >
+                {children}
+              </ReasoningGroup>
+            );
+          case "text":
+            return <MarkdownText />;
+          case "reasoning":
+            return <ReasoningText />;
+          case "tool-call": {
+            const Card = TOOL_CARDS[part.toolName] ?? ToolFallbackCard;
+            return <Card {...part} stored={stored.get(part.toolCallId)} />;
+          }
+          // While the message runs and its last part is neither text nor reasoning.
+          case "indicator":
+            return <LoadingLine />;
+          default:
+            return null;
+        }
+      }}
+    </MessagePrimitive.GroupedParts>
+  );
+}
 
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className={ASSISTANT_MESSAGE_CLASS}>
-        <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
-        <TurnSpaceChoice />
+        <AssistantParts />
         <TurnLimitNotice />
         <MessageError />
       </div>

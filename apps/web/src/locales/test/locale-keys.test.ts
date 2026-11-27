@@ -26,6 +26,7 @@ import { describe, it, expect } from "bun:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
+import { CREDENTIAL_DEATH_CAUSES } from "@appstrate/core/sidecar-types";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 
 /**
@@ -254,6 +255,9 @@ const DYNAMIC_KEY_PREFIXES = [
   "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
   "chat:skills.load.live.", // packages/module-chat/src/ui/skill-load.tsx — one live line per load state
   "chat:skills.state.refused.", // packages/module-chat/src/ui/skills-picker.tsx — one per refusal
+  "chat:tool.name.", // packages/module-chat/src/ui/tool-presentation.ts — showCall(), one per MCP tool
+  "chat:tool.tag.", // packages/module-chat/src/ui/tool-presentation.ts — showCall(), one per OpenAPI tag (tied to the catalog by apps/api mcp presentation.test.ts)
+  "chat:tool.verb.", // packages/module-chat/src/ui/tool-presentation.ts — showCall(), one per HTTP method
   "common:status.", // components/status-badge.tsx — t(`status.${status}`)
   "settings:creation.chat.draft.", // lib/creation-handoff.ts — buildChatCreationDraft(), one per package type
   "settings:creation.title.", // components/creation-handoff-modal.tsx — one per package type
@@ -270,6 +274,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)
   "log.type.", // components/log-viewer.tsx — t(`log.type.${value}`)
   "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
+  "notifications.credentialCause.", // lib/notification-row.ts — one per credential_needs_reconnection cause
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
   "orgRolesGuide.access.", // pages/org-settings/org-roles.tsx — space reach per org role
@@ -381,5 +386,16 @@ describe("schedule disabled reasons", () => {
     expect(reasons.filter((reason) => !allKeys.has(`schedule.disabledReason.${reason}`))).toEqual(
       [],
     );
+  });
+});
+
+describe("credential death causes", () => {
+  it("each have a sentence in en and fr", () => {
+    for (const bundle of [en, fr]) {
+      const common = bundle.get("common")!;
+      for (const cause of CREDENTIAL_DEATH_CAUSES) {
+        expect(common[`notifications.credentialCause.${cause}`]).toBeTruthy();
+      }
+    }
   });
 });

@@ -12,6 +12,7 @@ import { FieldError } from "@appstrate/ui/components/field";
 import { FormItem } from "@/components/app-ui/form-item";
 import { $api, ApiError } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { useAuth, useCanCreateOrg } from "../../hooks/use-auth";
 import { createStepRedirect } from "../../lib/onboarding-entry";
 import { toSlug, toLiveSlug } from "../../lib/strings";
@@ -40,6 +41,7 @@ export function OnboardingCreateStep() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { switchOrg, currentOrg, orgs, loading } = useOrg();
+  const overview = useOverviewMode();
   const { user } = useAuth();
   const canCreateOrg = useCanCreateOrg();
   const { nextRoute } = useOnboardingNav("create");
@@ -93,7 +95,11 @@ export function OnboardingCreateStep() {
     onSuccess: async (data) => {
       // The org list is served solely by the legacy ["orgs"] key (use-org.ts).
       await queryClient.invalidateQueries({ queryKey: orgKeys.all });
-      if (data.id) switchOrg(data.id);
+      // A new organization opens on « Tous les espaces », not on its default space.
+      if (data.id) {
+        overview.choose(true, data.id);
+        switchOrg(data.id);
+      }
       if (nextRoute) navigate(nextRoute);
     },
     onError: (err) => {

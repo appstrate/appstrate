@@ -10,7 +10,12 @@ Staging runs the head of `main`. Nobody deploys it: every push to `main` does.
 2. once every image is pushed, moves the `main` tag onto all 8 (`promote`);
 3. calls the staging **deploy hook** (`deploy-staging`);
 4. reads `/health` until the platform answers with that commit. A platform that never reports it
-   within 20 minutes fails the job.
+   within 20 minutes fails the job, and so does one that answers nothing for 5 minutes once the
+   previous build has stopped: the new build failed to boot, and the job says so then.
+
+Before calling the hook, the job reads the commit staging runs and names, in a warning, every script
+this deploy adds to `PENDING_DATA_SCRIPTS` (`apps/api/src/lib/boot-guards/pending-data-scripts.ts`).
+A failure repeats those names as its likely cause ("Schema and data" below).
 
 A merge landing while a run is in flight cancels it: staging converges on the newest commit, it does
 not replay every one.
@@ -50,7 +55,10 @@ The scripts in `scripts/migration/` are **not** run on staging, by the workflow 
 they are run once, deliberately, by an operator, against a deployment whose rows need them
 (`docs/NO_TRANSITIONAL_CODE.md`). Staging's rows are not such rows. **Its data is disposable**: when
 a merge leaves existing rows in a shape the new build refuses, staging is reset, not repaired. An
-empty database needs no script.
+empty database needs no script. The usual case is a merge that adds an entry to
+`PENDING_DATA_SCRIPTS`: the job names the script, the platform refuses to boot on staging's rows,
+and staging is reset — or, to keep its rows, the script is run by hand with the procedure of
+`scripts/migration/README.md`.
 
 What this costs: staging never shows a migration passing on real data. That evidence is the
 rehearsal on a production dump before each release (`scripts/migration/README.md`), and staging does

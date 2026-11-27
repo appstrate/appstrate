@@ -22,7 +22,7 @@ import { registerTestPlatformApp } from "../../../../../test/helpers/platform-ap
 import { loopbackHeaders } from "../../../../../test/helpers/loopback.ts";
 import { db } from "@appstrate/db/client";
 import { asRecord } from "@appstrate/core/safe-json";
-import { OPERATION_SPACES_META_KEY, SPACE_CHOICE_META_KEY } from "@appstrate/core/mcp-spaces";
+import { OPERATION_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
 import { chatSessions, runs, uploads } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import { eq } from "drizzle-orm";
@@ -118,7 +118,6 @@ describe("file reads on the space-pinned MCP endpoint", () => {
     return {
       tool: JSON.stringify(tool.result?.content),
       ids: meta[OPERATION_SPACES_META_KEY],
-      choices: meta[SPACE_CHOICE_META_KEY],
       resource,
     };
   }
@@ -259,7 +258,6 @@ describe("file reads on the space-pinned MCP endpoint", () => {
     expect(JSON.stringify(resource.resource.result)).toContain("ailleurs");
     expect(resource.tool).toContain("ailleurs");
     expect(resource.ids).toEqual([other]);
-    expect(resource.choices).toBeUndefined();
     const ownRead = await read(endpoint, bound, own);
     expect(ownRead.tool).toContain("joint");
     expect(ownRead.ids).toEqual([]);
@@ -270,7 +268,6 @@ describe("file reads on the space-pinned MCP endpoint", () => {
       const missing = await read(endpoint, bound, uri);
       expect(missing.tool).toContain(code);
       expect(missing.ids).toEqual([]);
-      expect(missing.choices).toBeUndefined();
     }
 
     // The conversation's own upload, in the personal space outside the set, from either space.

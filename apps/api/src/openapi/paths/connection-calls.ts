@@ -27,6 +27,7 @@ const connectionCallSchema = {
     "apiKeyId",
     "auth_method",
     "runId",
+    "chat_session_id",
     "method",
     "host",
     "outcome",
@@ -65,19 +66,30 @@ const connectionCallSchema = {
     },
     auth_method: {
       type: "string",
-      description: "How the caller authenticated (`api_key`, an OAuth token kind, …).",
+      description:
+        "How the caller authenticated (`api_key`, an OAuth token kind, …); `run_token` for a call a platform run's sidecar made.",
     },
     runId: {
       type: ["string", "null"],
-      description: "The run the call declared (`X-Run-Id`), if any.",
+      description:
+        "The run whose sidecar made the call, or the run the call declared (`X-Run-Id`), if any.",
+    },
+    chat_session_id: {
+      type: ["string", "null"],
+      description:
+        "The chat conversation that issued the call, if any. Null when the call declared a run " +
+        "(at most one of `runId` and `chat_session_id` is set), and on calls recorded before " +
+        "the conversation was journaled.",
     },
     method: { type: "string", description: "The call's HTTP method." },
     host: {
-      type: "string",
+      type: ["string", "null"],
       description:
         "The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder " +
         "is kept as written, never its value. `<templated>` or `<unparseable>` when the target " +
-        "names no readable host.",
+        "names no readable host. Null for a `tools/call` of a local MCP server a run's sidecar " +
+        "answered without seeing its upstream requests (an env- or files-delivery integration, " +
+        "or one with no credential).",
     },
     outcome: {
       type: "string",

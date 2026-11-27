@@ -57,8 +57,13 @@ describe("GET /api/orgs/{orgId}/notifications", () => {
         spaceId,
         recipientId: userId,
         recipientType: "user",
-        type: "package_shared",
-        payload: { packageId: "@orgnotif/pkg", package_type: "skill", shared_by_name: "Ada" },
+        type: "credential_needs_reconnection",
+        payload: {
+          packageId: "@orgnotif/pkg",
+          integration_name: "Ada's integration",
+          label: "work",
+          cause: "refresh_token_revoked",
+        },
       })
       .returning({ id: notifications.id });
     return row!.id;
@@ -207,7 +212,11 @@ describe("GET /api/orgs/{orgId}/notifications", () => {
       const res = await app.request(onePath(n.unMember!), { headers: session(member) });
       expect(res.status).toBe(200);
       const body = (await res.json()) as ListedNotification;
-      expect(body).toMatchObject({ id: n.unMember, spaceId: un, type: "package_shared" });
+      expect(body).toMatchObject({
+        id: n.unMember,
+        spaceId: un,
+        type: "credential_needs_reconnection",
+      });
     });
 
     it("answers 404 for a space not reached, another recipient's, and an id that is none", async () => {

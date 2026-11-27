@@ -283,9 +283,9 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   LaunchWarnings:
     "`warnings` envelope merged by allOf into the launch success bodies; its items are ConnectionResolutionWarning, no shared-type",
   ActivationWarnings:
-    "`warnings` envelope merged by allOf into the activation and share success bodies; its items are ActivationWarning, no shared-type",
+    "`warnings` envelope merged by allOf into the activation, share and org-offer success bodies; its items are ActivationWarning, no shared-type",
   ActivationWarning:
-    "ResolutionFieldError narrowed to `integration_not_active` plus the agent's `required` flag; built by activationWarnings in services/space-packages.ts, no shared-type",
+    "ResolutionFieldError narrowed to `integration_not_active` | `integration_not_offered` plus the agent's `required` flag; built by activationWarnings in services/space-packages.ts and offerClosureWarnings in services/package-org-offers.ts, no shared-type",
   RunAndWaitResult:
     "MCP `run_and_wait` structuredContent and outputSchema; projected by @appstrate/core/run-and-wait-client, no shared-type",
   RunAndWaitPending: "RunAndWaitResult branch for `done: false`; no shared-type",
@@ -320,7 +320,7 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   PackageAvailability:
     "package detail sub-object (integration, agent, skill); mirrored by the optional `availability` of the AgentDetail / OrgPackageItemDetail shared-types",
   PackageShare:
-    "share-audience wire projected by `listPackageShares` (a space rendered as its owner when personal); no persisted row shape and no shared-type — the SPA consumes the generated spec type",
+    "share-audience wire projected by `listPackageShares` (team spaces only); no persisted row shape and no shared-type — the SPA consumes the generated spec type",
   PackageOrgOffer:
     "offer acknowledgement of `PUT …/org-offer`; no persisted row shape and no shared-type — the SPA consumes the generated spec type",
   ShareTarget:
@@ -343,6 +343,8 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "module-chat wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
   ChatMessage: "module-chat opaque history-node wire DTO; no shared-type",
   ChatCommands: "module-chat wire DTO; the composer's `/` menu, no shared-type",
+  ChatSessionIntegration:
+    "module-chat wire DTO; an integration a conversation reached, no shared-type",
   // @appstrate/module-billing billing wire DTOs. The module keeps a Drizzle schema
   // of its own (packages/module-billing/drizzle/schema.ts), so none of these has a
   // shared-type in this repo at all; the dashboard consumes the generated spec

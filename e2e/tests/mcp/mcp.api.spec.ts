@@ -435,12 +435,12 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
     apiClient,
   }) => {
     const id = "@appstrate/airtable";
-    const offer = await apiClient.put(`/packages/${id}/org-offer`);
+    const offer = await apiClient.put(`/packages/${id}/org-offer`, { mode: "on_by_default" });
     expect(offer.ok(), await offer.text()).toBe(true);
     const detail = await apiClient.get(`/integrations/${id}`);
     expect(detail.ok(), await detail.text()).toBe(true);
     const { availability } = await detail.json();
-    expect(availability).toMatchObject({ state: "active", offered_to_org: true });
+    expect(availability).toMatchObject({ state: "active", org_offer: "on_by_default" });
 
     const anon = await playwright.request.newContext();
     try {
@@ -470,10 +470,10 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
       const { data, isError } = toolPayload(result.envelope);
       expect(isError).toBe(false);
       // A credential's ceiling may change org_offerable, but not the placement.
-      const { via, state, offered_to_org, shared_by } = availability;
+      const { via, state, org_offer, shared_by } = availability;
       expect(data).toMatchObject({
         status: 200,
-        body: { availability: { via, state, offered_to_org, shared_by } },
+        body: { availability: { via, state, org_offer, shared_by } },
       });
     } finally {
       await anon.dispose();

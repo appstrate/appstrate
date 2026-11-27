@@ -39,7 +39,6 @@ import {
   assertIntegrationActive,
   loadAccessibleConnectionById,
   markIntegrationConnectionNeedsReconnection,
-  readCredentialRevision,
   upstreamRejectionStreak,
 } from "./integration-connections.ts";
 import {
@@ -55,6 +54,10 @@ interface MutableCredentialsWire {
   rejectionStreak?: number;
   credentialRevision?: string;
 }
+
+/** What the run's sidecar reports: it names no actor, so the run context supplies `reach`. */
+type RunRefreshTrigger =
+  { kind: "expiring" } | Omit<Extract<RefreshTrigger, { kind: "rejected" }>, "reach">;
 
 /**
  * NEVER returns an empty payload — the sidecar would read it as "skip the MITM
@@ -92,7 +95,7 @@ export async function resolveLiveIntegrationCredentials(
      */
     resolvedIntegrationVersions?: Record<string, ResolvedIntegrationVersion> | null;
   },
-  trigger: RefreshTrigger = { kind: "expiring" },
+  trigger: RunRefreshTrigger = { kind: "expiring" },
 ): Promise<IntegrationCredentialsWire> {
   if (!context.actor) {
     // Scheduled runs without an actor cannot connect to user-scoped
@@ -203,21 +206,22 @@ export async function resolveLiveIntegrationCredentials(
     // a credential nobody can read is dead — flag + 410, even on a plain read.
     // `return` rather than a bare `await`: the helper's `Promise<never>` does
     // not narrow `fields` on its own, and everything below reads it non-null.
-    await markIntegrationConnectionNeedsReconnection(connection.id);
+    await markIntegrationConnectionNeedsReconnection(connection.id, "credentials_undecryptable");
     return throwTerminal("credentials_undecryptable");
   }
 
   let expiresAtEpochMs = connection.expiresAt ? connection.expiresAt.getTime() : null;
-  let credentialRevision: string | null = connection.credentialRevision;
+  let { credentialRevision } = connection;
 
   const outcome = await refreshConnectionCredential({
     connection,
     integrationId,
     manifest,
     authDef,
-    scope: { orgId: context.orgId, spaceId: context.spaceId },
-    actor: context.actor,
-    trigger,
+    trigger:
+      trigger.kind === "rejected"
+        ? { ...trigger, reach: { spaceId: context.spaceId, actor: context.actor } }
+        : trigger,
   });
   switch (outcome.status) {
     case "dead":
@@ -255,7 +259,7 @@ export async function resolveLiveIntegrationCredentials(
       break;
     case "refreshed":
       fields = outcome.fields;
-      credentialRevision = await readCredentialRevision(connection.id);
+      ({ credentialRevision } = outcome);
       expiresAtEpochMs = outcome.expiresAt ? outcome.expiresAt.getTime() : null;
       break;
   }
@@ -289,7 +293,7 @@ export async function resolveLiveIntegrationCredentials(
   out.expiresAtEpochMs[authKey] = expiresAtEpochMs;
   const streak = upstreamRejectionStreak(connection);
   if (streak > 0) out.rejectionStreak = streak;
-  if (credentialRevision !== null) out.credentialRevision = credentialRevision;
+  out.credentialRevision = credentialRevision;
 
   return out;
 }

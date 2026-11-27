@@ -53,6 +53,7 @@ live under the governance surface.
 
 ## Events listened to
 
+- `onCredentialNeedsReconnection` — a stored credential died. Dispatches `credential.needs_reconnection`; payload and reach: `docs/site/features/webhooks.mdx`.
 - `onRunStatusChange` — broadcast from core on every run lifecycle transition. The handler dispatches delivery jobs to the BullMQ webhook queue for every subscription whose event list includes the new status and whose optional package filter matches. Delivery is asynchronous and isolated per subscription.
 
 ## Workers & background activity

@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { seedShares } from "../../helpers/connection-shares.ts";
+import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
@@ -131,11 +131,12 @@ describe("org-scope connections across spaces", () => {
 
   const listed = async (spaceId: string, actor = me) =>
     (
-      await listAccessibleConnections({ orgId: ctx.orgId, spaceId }, INTEGRATION, {
-        kind: "person",
-        binding: null,
-        actor,
-      })
+      await listAccessibleConnections(
+        { orgId: ctx.orgId, spaceId },
+        INTEGRATION,
+        testCaller({ kind: "person", binding: null, actor }),
+        null,
+      )
     )
       .map((c) => c.id)
       .sort();

@@ -14,9 +14,11 @@
  *   - the activation filter applied to the page but not the count → a
  *     deactivated placement is asserted absent from `total` as well as from
  *     `items`;
- *   - a different total order than `listActivePackages` (system first,
- *     then id — load-bearing for the prompt cache) → the page's ids are
- *     asserted in that order, with a system package seeded to lead it.
+ *   - a partial list past the cap, which would rank the rows it keeps above
+ *     the rest → a truncated page is asserted empty;
+ *   - a different total order than `listActivePackages` (by id alone, whatever
+ *     the source — load-bearing for the prompt cache) → the whole list's ids
+ *     are asserted in that order, with a system package seeded among them.
  *
  * The last `describe` pins the other half of the contract: the hints and the
  * per-type INDEX page render the same set. They are two queries over one rule
@@ -64,11 +66,11 @@ describe("listActivePackageHints — bounded in SQL", () => {
     await seedSpacePackage(ctx.defaultSpaceId, id, overrides);
   }
 
-  it("caps the page, counts the whole enabled catalog, and keeps the system-first order", async () => {
+  it("withholds a list past the cap, counts the whole enabled catalog, and orders by id", async () => {
     // Five active local placements, ids chosen so the id tie-break is known.
     for (const n of ["a1", "a2", "a3", "a4", "a5"]) await seedActiveAgent(`@hintorg/${n}`);
-    // A system agent: no `space_packages` row (active by construction), and it
-    // sorts FIRST whatever its id.
+    // A system agent: no `space_packages` row (active by construction), sorted
+    // by its id like any other.
     await seedPackage({ id: "@zsys/system-agent", orgId: null, source: "system" });
     // Placed but switched off in the space → in neither the page nor the count.
     await seedActiveAgent("@hintorg/a0-disabled", { enabled: false });
@@ -88,11 +90,7 @@ describe("listActivePackageHints — bounded in SQL", () => {
     await seedSpacePackage(ctx.defaultSpaceId, "@hintorg/a0-skill");
 
     const page = await listActiveAgentHints(scope, { limit: 3 });
-    expect(page.agents.map((a) => a.packageId)).toEqual([
-      "@zsys/system-agent",
-      "@hintorg/a1",
-      "@hintorg/a2",
-    ]);
+    expect(page.agents).toEqual([]);
     expect(page.truncated).toBe(true);
     // 1 system + 5 active placements. Not 7: the deactivated one is filtered
     // before the count, not after it.
@@ -100,13 +98,19 @@ describe("listActivePackageHints — bounded in SQL", () => {
 
     // Control: a cap above the catalog returns it whole, with the same count.
     const whole = await listActiveAgentHints(scope, { limit: 10 });
-    expect(whole.agents).toHaveLength(6);
+    expect(whole.agents.map((a) => a.packageId)).toEqual([
+      "@hintorg/a1",
+      "@hintorg/a2",
+      "@hintorg/a3",
+      "@hintorg/a4",
+      "@hintorg/a5",
+      "@zsys/system-agent",
+    ]);
     expect(whole.truncated).toBe(false);
     expect(whole.total).toBe(6);
-    const ids = new Set(whole.agents.map((a) => a.packageId));
-    expect(ids.has("@hintorg/a0-disabled")).toBe(false);
-    expect(ids.has("@hintorg/a0-uninstalled")).toBe(false);
-    expect(ids.has("@hintorg/a0-skill")).toBe(false);
+
+    // A cap equal to the catalog is not past it.
+    expect((await listActiveAgentHints(scope, { limit: 6 })).agents).toHaveLength(6);
   });
 
   it("bounds skills the same way", async () => {
@@ -123,10 +127,13 @@ describe("listActivePackageHints — bounded in SQL", () => {
     await seedSpacePackage(ctx.defaultSpaceId, "@hintorg/s3", { enabled: false });
 
     const page = await listActiveSkills(scope, { limit: 1 });
-    expect(page.skills.map((s) => s.packageId)).toEqual(["@hintorg/s1"]);
-    expect(page.skills[0]!.version).toBe("1.0.0");
-    expect(page.truncated).toBe(true);
-    expect(page.total).toBe(2);
+    expect(page).toEqual({ skills: [], truncated: true, total: 2 });
+
+    const whole = await listActiveSkills(scope, { limit: 2 });
+    expect(whole.skills.map((s) => [s.packageId, s.version])).toEqual([
+      ["@hintorg/s1", "1.0.0"],
+      ["@hintorg/s2", "1.0.0"],
+    ]);
   });
 
   it("reports an empty catalog as zero, not truncated", async () => {

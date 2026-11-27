@@ -45,6 +45,9 @@ describe("the section an integration's settings open", () => {
       "files",
     );
     expect(resolveIntegrationSettingsSection("access", grants)).toBe("access");
+    expect(resolveIntegrationSettingsSection("access", { ...grants, canConfigure: false })).toBe(
+      "files",
+    );
   });
 
   it("opens the versions and the definition only where they exist", () => {

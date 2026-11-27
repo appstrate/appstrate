@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { AgentListItem, EnrichedRun } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
 import { RunStatusBadge } from "./status-badge";
 import { RunIdentity } from "./run-identity";
 import { runDetailPath } from "../lib/package-paths";
-import { useSpaceLink } from "../hooks/use-current-space";
+import { useReachableSpaceLink } from "../hooks/use-can-reach";
 import { SpaceNameOf } from "./space-name";
 
 /**
@@ -14,7 +15,8 @@ import { SpaceNameOf } from "./space-name";
  * dashboard, the chat's context panel): its identity (`RunIdentity`, the runs
  * table's « Run » column), then the run's space in a list spanning spaces (the runs table's
  * « Espace » cell), then its status.
- * The row is the run's link when the run still has an agent to live under.
+ * The row is the run's link when the run still has an agent to live under and its page opens
+ * for the reader.
  */
 export function RunRow({
   run,
@@ -34,7 +36,6 @@ export function RunRow({
   spanning?: boolean;
   className?: string;
 }) {
-  const linkInSpace = useSpaceLink();
   const content = (
     <>
       <RunIdentity run={run} agent={{ name: agentName, identity: agent }} />
@@ -44,18 +45,42 @@ export function RunRow({
   );
 
   // Its own container: a compact status follows the row's width, not the screen's.
-  const rowClass = cn("@container flex min-h-16 items-center gap-3 px-4 py-3", className);
-
-  return run.packageId ? (
-    <Link
-      to={linkInSpace(runDetailPath(run.packageId, run.id), run.spaceId)}
-      state={{ runNumber: run.runNumber }}
-      className={cn(rowClass, "hover:bg-muted/50 transition-colors")}
+  return (
+    <RunLink
+      run={run}
+      className={cn("@container flex min-h-16 items-center gap-3 px-4 py-3", className)}
     >
       {content}
+    </RunLink>
+  );
+}
+
+/**
+ * A run's row, whatever it draws of the run: the run's link, hovering like a list row, when the run
+ * still has an agent to live under and its page opens for the reader, else a plain row. {@link RunRow}, and the chat summary's
+ * one-line runs.
+ */
+export function RunLink({
+  run,
+  className,
+  children,
+}: {
+  run: Pick<EnrichedRun, "id" | "packageId" | "runNumber" | "spaceId">;
+  className: string;
+  children: ReactNode;
+}) {
+  const linkInSpace = useReachableSpaceLink();
+  const href = run.packageId && linkInSpace(runDetailPath(run.packageId, run.id), run.spaceId);
+  return href ? (
+    <Link
+      to={href}
+      state={{ runNumber: run.runNumber }}
+      className={cn(className, "hover:bg-muted/50 transition-colors")}
+    >
+      {children}
     </Link>
   ) : (
-    <div className={rowClass}>{content}</div>
+    <div className={className}>{children}</div>
   );
 }
 

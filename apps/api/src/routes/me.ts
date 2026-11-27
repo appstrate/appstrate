@@ -60,7 +60,7 @@ import { connectionPrincipal } from "../lib/connection-principal.ts";
 import { listCallerOrganizations } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import { callerPermissions } from "../lib/permissions.ts";
-import { requireSpaceContext } from "../middleware/space-context.ts";
+import { optionalSpaceContext, requireSpaceContext } from "../middleware/space-context.ts";
 import { requireCeiling } from "../middleware/require-permission.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getSpaceScope } from "../lib/scope.ts";
@@ -93,7 +93,11 @@ import { handoffStepsFor } from "../services/connect/provisioning.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
 import { logger } from "../lib/logger.ts";
-import { listActiveAgentHints, listActiveSkills } from "../services/space-packages.ts";
+import {
+  listActiveAgentHints,
+  listActiveSkills,
+  listConnectableIntegrations,
+} from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
 import { VIEW_AS_HEADER, canReadRuns } from "@appstrate/core/permissions";
@@ -467,18 +471,22 @@ router.get(
  * role (operations beyond it will 403 at invoke time).
  *
  * Space context resolves as `requireSpaceContext` does: the credential's
- * space, else `X-Space-Id`; with neither, a 400. The payload names that space: an empty list alone cannot
- * tell an agent whether nothing is there for it or it is in the wrong space.
+ * space, else `X-Space-Id`; with neither, the answer is the organization-level
+ * part alone (identity and org role): every list belongs to one space. With a
+ * space, the payload names it: an empty list alone cannot tell an agent whether
+ * nothing is there for it or it is in the wrong space.
  */
-router.get("/context", requireSpaceContext(), async (c) => {
+router.get("/context", optionalSpaceContext(), async (c) => {
   const actor = getActor(c);
-  const scope = getSpaceScope(c);
-  // Always set here: `requireSpaceContext` admits the space or throws.
-  const space = c.get("space")!;
+  // Set exactly when the request named a space: `optionalSpaceContext` admitted it.
+  const space = c.get("space");
+  // Always set: unlike `/orgs` and `/connections`, this route runs inside org context.
+  const orgId = c.get("orgId")!;
 
   let identity: { id: string; name: string | null; email: string | null };
   if (actor.type === "end_user") {
-    const eu = await getEndUser(scope, actor.id);
+    // An end-user credential is always bound to its space.
+    const eu = await getEndUser(getSpaceScope(c), actor.id);
     identity = { id: eu.id, name: eu.name ?? null, email: eu.email ?? null };
   } else {
     const user = c.get("user");
@@ -489,6 +497,9 @@ router.get("/context", requireSpaceContext(), async (c) => {
   // The persona's while previewing: this payload tells the model what the caller
   // may do, and every operation it names is checked against the persona.
   const role = (callerOrgRole(c) as string | undefined) ?? "end_user";
+  const org = { id: orgId, role, name: c.get("orgName"), slug: c.get("orgSlug") };
+  if (!space) return c.json({ user: identity, org });
+  const scope = getSpaceScope(c);
 
   // Agents are a runnable-hint: only surface them when the caller actually holds
   // `agents:run` (otherwise the model would propose agents that 403 at invoke).
@@ -518,34 +529,48 @@ router.get("/context", requireSpaceContext(), async (c) => {
     return (pkg: Parameters<typeof homeWireForCaller>[0]) =>
       homeWireForCaller(pkg, accessible).home_writable;
   };
-  const [connections, runnable, activeSkills, recentRuns] = await Promise.all([
-    mayReadIntegrations
-      ? listUsableIntegrationsForActor(scope, actor)
-      : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
-    canRun
-      ? withHomeWritable().then((homeWritable) => listActiveAgentHints(scope, { homeWritable }))
-      : Promise.resolve({ agents: [], truncated: false, total: 0 }),
-    canReadSkills
-      ? withHomeWritable().then((homeWritable) => listActiveSkills(scope, { homeWritable }))
-      : Promise.resolve({ skills: [], truncated: false, total: 0 }),
-    // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
-    // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
-    mayReadRuns
-      ? listRecentForActor(scope, actor)
-      : Promise.resolve([] as Awaited<ReturnType<typeof listRecentForActor>>),
-  ]);
+  // What a connect flow would make usable here: only for a caller who may run one.
+  const noneConnectable = { integrations: [] as string[], truncated: false, total: 0 };
+  const integrationsRead = mayReadIntegrations
+    ? listUsableIntegrationsForActor(scope, actor).then(async (usable) => ({
+        usable,
+        connectable: permissions.has("integrations:connect")
+          ? await listConnectableIntegrations(
+              scope,
+              new Set(usable.map((entry) => entry.integration_package_id)),
+              { canConfigure: permissions.has("integrations:configure") },
+            )
+          : noneConnectable,
+      }))
+    : Promise.resolve({
+        usable: [] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>,
+        connectable: noneConnectable,
+      });
+  const [{ usable: connections, connectable }, runnable, activeSkills, recentRuns] =
+    await Promise.all([
+      integrationsRead,
+      canRun
+        ? withHomeWritable().then((homeWritable) => listActiveAgentHints(scope, { homeWritable }))
+        : Promise.resolve({ agents: [], truncated: false, total: 0 }),
+      canReadSkills
+        ? withHomeWritable().then((homeWritable) => listActiveSkills(scope, { homeWritable }))
+        : Promise.resolve({ skills: [], truncated: false, total: 0 }),
+      // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
+      // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
+      mayReadRuns
+        ? listRecentForActor(scope, actor)
+        : Promise.resolve([] as Awaited<ReturnType<typeof listRecentForActor>>),
+    ]);
 
   return c.json({
     user: identity,
-    org: {
-      id: scope.orgId,
-      role,
-      name: (c.get("orgName") as string | undefined) ?? null,
-      slug: (c.get("orgSlug") as string | undefined) ?? null,
-    },
+    org,
     // `personal` as the spaces routes derive it (`spaceWireForCaller`).
     space: { id: space.id, name: space.name, personal: space.ownerUserId !== null },
     connections,
+    connectable_integrations: connectable.integrations,
+    connectable_integrations_truncated: connectable.truncated,
+    connectable_integrations_total: connectable.total,
     recent_runs: recentRuns,
     agents: runnable.agents,
     agents_truncated: runnable.truncated,

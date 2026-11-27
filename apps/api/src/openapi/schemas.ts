@@ -43,6 +43,7 @@ import {
   OVERRIDE_REFUSAL_CODES,
 } from "@appstrate/core/integration";
 import {
+  connectionActionsSchema,
   connectionIdSetJsonSchema,
   connectionScopeSchema,
   originSpaceIdSchema,
@@ -96,7 +97,7 @@ const PACKAGE_PLACEMENT_STATE_PROPERTIES = {
     type: "string",
     enum: ["active", "inactive", "none"],
     description:
-      "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it.",
+      "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off — the package is not offered to the organization, or offered as `available` and not yet switched on here. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization as `on_by_default`, which activates it.",
   },
   shared_by: {
     type: ["object", "null"],
@@ -208,9 +209,12 @@ export const ORG_SETTINGS_PROPERTIES = {
   },
   personal_space_role: {
     type: "string",
-    enum: ["admin", "operator"],
+    oneOf: [
+      { type: "string", enum: [...SPACE_ROLE_PRESETS] },
+      { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
+    ],
     description:
-      "The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.",
+      "The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH.",
   },
 };
 
@@ -678,21 +682,21 @@ export const schemas = {
       warnings: {
         type: "array",
         description:
-          "Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
+          "Always present. On an organization offer of an AGENT (`PUT …/org-offer`): one item per integration it declares that is neither offered to the organization nor active by default (`code: integration_not_offered`), `[]` for any other type. Otherwise, when the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
         items: { $ref: "#/components/schemas/ActivationWarning" },
       },
     },
   },
   ActivationWarning: {
     description:
-      "A declared integration of the agent that is not active in the space, in the launch `warnings[]` vocabulary (`field: integrations.<id>`, `code: integration_not_active`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item).",
+      "A declared integration of the agent that is not active in the space (`code: integration_not_active`) or, on an organization offer, not offered to the organization (`code: integration_not_offered`), in the launch `warnings[]` vocabulary (`field: integrations.<id>`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item).",
     allOf: [
       { $ref: "#/components/schemas/ResolutionFieldError" },
       {
         type: "object",
         required: ["required"],
         properties: {
-          code: { type: "string", enum: ["integration_not_active"] },
+          code: { type: "string", enum: ["integration_not_active", "integration_not_offered"] },
           required: {
             type: "boolean",
             description: "Whether the agent declares the integration `required`.",
@@ -996,7 +1000,14 @@ export const schemas = {
     type: "object",
     // `email`/`displayName` are best-effort joins (getOrgMembers emits
     // `?? undefined` when the user/profile row is missing) — NOT required.
-    required: ["userId", "role", "joinedAt", "spaces"],
+    required: [
+      "userId",
+      "role",
+      "joinedAt",
+      "spaces",
+      "personal_space_role",
+      "personal_space_default_role",
+    ],
     properties: {
       userId: { type: "string" },
       displayName: { type: "string" },
@@ -1008,6 +1019,36 @@ export const schemas = {
         description:
           "The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them.",
         items: { $ref: "#/components/schemas/OrgMemberSpace" },
+      },
+      personal_space_role: {
+        description:
+          "The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null`: they follow the organization default. Always `null` for an owner or admin, who hold `admin` there, and for every member when the caller lacks `members:change-role`: only a caller who may change it reads it.",
+        oneOf: [
+          { type: "null" },
+          {
+            type: "object",
+            required: ["preset_role"],
+            properties: { preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] } },
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            required: ["custom_role_id"],
+            properties: { custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN } },
+            additionalProperties: false,
+          },
+        ],
+      },
+      personal_space_default_role: {
+        type: ["object", "null"],
+        required: ["kind", "key", "name"],
+        description:
+          "The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it.",
+        properties: {
+          kind: { type: "string", enum: ["preset", "custom"] },
+          key: { type: "string" },
+          name: { type: "string" },
+        },
       },
     },
   },
@@ -2582,12 +2623,12 @@ export const schemas = {
         type: "integer",
         minimum: 1,
         description:
-          "Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar reports its next successful call to `POST .../upstream-success`, which ends the streak.",
+          "Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar journals its next successful call on the credential with that credential's revision (`POST /internal/integration-calls`), which ends the streak.",
       },
       credential_revision: {
         type: "string",
         description:
-          "Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and `/upstream-success`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload.",
+          "Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and on a streak-ending record of `/internal/integration-calls`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload.",
       },
     },
   },
@@ -2694,6 +2735,7 @@ export const schemas = {
             "missing_scopes",
             "scope_fit",
             "is_own",
+            "allowed_actions",
           ],
           properties: {
             id: { type: "string", format: "uuid" },
@@ -2723,6 +2765,7 @@ export const schemas = {
                 "The granted scopes against the agent's selection. `exact` — covers it and grants nothing beyond it and the auth's `default_scopes`. `unjudged` — covers it on an auth that is not `oauth2` or declares no `scope_catalog`, so breadth is unknown. `broader` — covers it and grants more. `missing` — does not cover it (`missing_scopes`).",
             },
             is_own: { type: "boolean" },
+            allowed_actions: connectionActionsSchema,
           },
         },
       },
@@ -3077,6 +3120,7 @@ export const schemas = {
       "name",
       "description",
       "permissions",
+      "shows_studio",
       "unavailable_permissions",
       "createdAt",
       "updatedAt",
@@ -3099,7 +3143,15 @@ export const schemas = {
         description:
           "Space-level permission strings the role grants on this deployment, sorted. " +
           "A custom bundle is projected through the same vocabulary enforcement uses, so " +
-          "this array is always one a `PATCH` accepts back.",
+          "this array is always one a `PATCH` accepts back: never `studio:read`, which " +
+          "`shows_studio` carries.",
+      },
+      shows_studio: {
+        type: "boolean",
+        description:
+          "Whether holders of the role see the Studio (they resolve `studio:read`). A display " +
+          "setting, not a boundary: the REST API and an MCP client answer the role's other " +
+          "permissions either way. Always `true` for a preset.",
       },
       unavailable_permissions: {
         type: "array",
@@ -3250,7 +3302,7 @@ export const schemas = {
         "home_writable",
         "home_deletable",
         "home_shareable",
-        "offered_to_org",
+        "org_offer",
         "org_offerable",
         "active_by_default",
         "placements",
@@ -3275,10 +3327,11 @@ export const schemas = {
             "Description from the package draft manifest; empty string when not provided.",
         },
         ...PACKAGE_HOME_PROPERTIES,
-        offered_to_org: {
-          type: "boolean",
+        org_offer: {
+          type: ["string", "null"],
+          enum: ["available", "on_by_default", null],
           description:
-            "Offered to the organization: placed and active in every space of it that holds no `space_packages` row of its own (a row always wins; `enabled = false` keeps it off).",
+            "The offer to the organization, or `null` when there is none. An offer in either mode PLACES the package in every space of it that holds no `space_packages` row of its own. `on_by_default`: it is also ACTIVE there (a row always wins; `enabled = false` keeps it off). `available`: it is placed and listed but off until the space switches it on (`POST /api/spaces/{id}/packages`).",
         },
         org_offerable: {
           type: "boolean",
@@ -3293,13 +3346,16 @@ export const schemas = {
         activation: {
           type: "array",
           description:
-            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance.",
+            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_offered` — `activate` only, in a personal space: the package is not the space's own, is not offered to the organization and is not on by the deployment's default, so a personal space cannot switch it on (an organization owner or admin can offer it); `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance.",
           items: {
             type: "object",
             required: ["spaceId", "activate", "deactivate"],
             properties: {
               spaceId: { type: "string" },
-              activate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
+              activate: {
+                type: "string",
+                enum: ["allowed", "not_offered", "not_shareable", "forbidden"],
+              },
               deactivate: {
                 type: "string",
                 enum: ["allowed", "not_shareable", "forbidden", "runtime_bound"],
@@ -3322,12 +3378,13 @@ export const schemas = {
     type: "object",
     description:
       "What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`) and the package's offer fields. A projection of `GET /api/spaces/{id}/library`, never a second computation, carried by the detail of every package type (`getIntegration`, `getAgentPackage`, `getSkill`, `getIntegrationPackage`).",
-    required: ["via", "state", "shared_by", "offered_to_org", "org_offerable", "active_by_default"],
+    required: ["via", "state", "shared_by", "org_offer", "org_offerable", "active_by_default"],
     properties: {
       ...PACKAGE_PLACEMENT_STATE_PROPERTIES,
-      offered_to_org: {
-        type: "boolean",
-        description: "Offered to the organization (`offered_to_org` of the library entry).",
+      org_offer: {
+        type: ["string", "null"],
+        enum: ["available", "on_by_default", null],
+        description: "The offer to the organization (`org_offer` of the library entry).",
       },
       org_offerable: {
         type: "boolean",
@@ -3357,42 +3414,22 @@ export const schemas = {
   ShareTarget: {
     type: "object",
     description:
-      "Where a package is placed outside its home. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
-    required: ["kind"],
-    oneOf: [
-      {
-        type: "object",
-        required: ["kind", "userId"],
-        properties: {
-          kind: { type: "string", enum: ["user"] },
-          userId: { type: "string", description: "Organization member's user id." },
-        },
-        additionalProperties: false,
-      },
-      {
-        type: "object",
-        required: ["kind", "spaceId"],
-        properties: {
-          kind: { type: "string", enum: ["space"] },
-          spaceId: { type: "string", description: "Space id (`spc_…`) the caller can reach." },
-        },
-        additionalProperties: false,
-      },
-    ],
+      'Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only. A person is not a target either: `kind: "user"` is a 400.',
+    required: ["kind", "spaceId"],
+    properties: {
+      kind: { type: "string", enum: ["space"] },
+      spaceId: { type: "string", description: "Team space id (`spc_…`) the caller can reach." },
+    },
+    additionalProperties: false,
   },
   ShareTargetView: {
     type: "object",
-    description:
-      "A share's subject as the server renders it back. A personal-space target comes back as its OWNER — never as a space id, which is the one fact a personal space withholds.",
-    required: ["kind", "name"],
+    description: "A share's subject as the server renders it back: a team space.",
+    required: ["kind", "spaceId", "name"],
     properties: {
-      kind: { type: "string", enum: ["user", "space"] },
-      userId: { type: "string", description: "Present when `kind` is `user`." },
-      spaceId: { type: "string", description: "Present when `kind` is `space`." },
-      name: {
-        type: "string",
-        description: "The member's display name, or the space's name.",
-      },
+      kind: { type: "string", enum: ["space"] },
+      spaceId: { type: "string", description: "Space id (`spc_…`)." },
+      name: { type: "string", description: "The space's name." },
     },
   },
   PackageShare: {
@@ -3429,11 +3466,15 @@ export const schemas = {
     type: "object",
     description:
       "The offer of a package to its organization, as it stands after `PUT …/org-offer`.",
-    required: ["object", "packageId", "offered_to_org"],
+    required: ["object", "packageId", "org_offer"],
     properties: {
       object: { type: "string", enum: ["package_org_offer"] },
       packageId: { type: "string", description: "Package id (`@scope/name`)." },
-      offered_to_org: { type: "boolean", enum: [true] },
+      org_offer: {
+        type: "string",
+        enum: ["available", "on_by_default"],
+        description: "The mode the offer now has.",
+      },
     },
   },
   PackageHome: {

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Who may create connections is the integration's `block_user_connections`
- * switch alone: an enforced space default does not lock it.
+ * Paramètres › Gestion des connexions: who may create connections is the integration's
+ * `block_user_connections` switch alone (an enforced space default does not lock it), beside the
+ * space default and the per-agent exceptions.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -97,10 +98,14 @@ describe("who may create connections", () => {
     }
   });
 
-  it("holds that toggle alone: the default and the per-agent exceptions live in Connexions", () => {
+  it("holds the toggle, the space default and the per-agent exceptions, in that order", () => {
     const html = renderSection(false);
-    expect(html).toContain('data-testid="block-user-connections-section"');
-    expect(html).not.toContain('data-testid="org-default-section"');
-    expect(html).not.toContain('data-testid="pin-management-section"');
+    const order = [
+      'data-testid="block-user-connections-section"',
+      'data-testid="org-default-section"',
+      'data-testid="pin-management-section"',
+    ].map((marker) => html.indexOf(marker));
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 });

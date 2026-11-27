@@ -39,7 +39,7 @@ function packageRow(
     home_space_id: null,
     home_writable: false,
     home_shareable: false,
-    offered_to_org: false,
+    org_offer: null,
     org_offerable: false,
     active_by_default: false,
     home_deletable: false,
@@ -56,6 +56,7 @@ describe("activationGate", () => {
     activation: [
       { spaceId: "spc_a", activate: "allowed", deactivate: "forbidden" },
       { spaceId: "spc_b", activate: "not_shareable", deactivate: "not_shareable" },
+      { spaceId: "spc_p", activate: "not_offered", deactivate: "allowed" },
     ],
   });
 
@@ -66,6 +67,11 @@ describe("activationGate", () => {
 
   it("blames the home's share right when the package is not placed there", () => {
     expect(activationGate(pkg, "spc_b", true)).toEqual({ allowed: false, refusal: "notPlaced" });
+  });
+
+  it("blames the missing organization offer in a personal space", () => {
+    expect(activationGate(pkg, "spc_p", true)).toEqual({ allowed: false, refusal: "notOffered" });
+    expect(activationGate(pkg, "spc_p", false)).toEqual(ALLOWED);
   });
 
   it("words a missing grant by direction", () => {
@@ -104,7 +110,7 @@ describe("catalogueDeeds", () => {
           home_space_id: "spc_home",
           home_writable: true,
           home_shareable: true,
-          offered_to_org: false,
+          org_offer: null,
           org_offerable: false,
           active_by_default: false,
         }),
@@ -136,7 +142,7 @@ describe("catalogueDeeds", () => {
   it("does not list the current space twice for a sharer who is also its recipient", () => {
     const row = packageRow("agent", placements, {
       home_shareable: true,
-      offered_to_org: false,
+      org_offer: null,
       org_offerable: false,
       active_by_default: false,
       activation: [{ spaceId: "spc_guest", activate: "allowed", deactivate: "allowed" }],

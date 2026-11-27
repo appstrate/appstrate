@@ -21,7 +21,7 @@ export function navLocation(input: {
   return input.overlayPath ?? (root || input.pathname);
 }
 
-/** Whether the entry at `path` is active where the page sits (`navLocation`): the dashboard exactly, any other entry with its sub-pages. */
+/** Whether the entry at `path` is active where the page sits (`navLocation`): on it or one of its sub-pages. */
 export function navEntryActive(path: string, location: string): boolean {
-  return path === "/" ? location === "/" : isUnder(location, path);
+  return isUnder(location, path);
 }

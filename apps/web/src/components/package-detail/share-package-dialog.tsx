@@ -21,9 +21,9 @@ import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../../api/errors";
+import type { components } from "../../api/schema";
 import { Modal } from "../modal";
 import { splitPackageRef } from "../../lib/package-paths";
-import { useOrgDetail } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useSpaceGrant } from "../../hooks/use-permissions";
 import { useSpaceSwitcher } from "../../hooks/use-current-space";
@@ -31,42 +31,24 @@ import { isSpaceEnterable } from "../../lib/space-lists";
 import { useCreateVersion, usePackageDetail } from "../../hooks/use-packages";
 import { useIntegrationsById } from "../../hooks/use-integrations";
 import {
-  shareTargetHandle,
   type PackageShare,
   usePackageShares,
   useSharePackage,
 } from "../../hooks/use-package-shares";
-import { memberLabel } from "../../lib/members";
 import { toastError } from "../../lib/mutation-error";
 import { TextSkeleton } from "../loading-skeletons";
 import { RemoveFromSpaceConfirm, type RemovalTarget } from "../remove-from-space-confirm";
 
-/** The subject of one share, as the picker encodes it. */
-type ShareTarget = { kind: "user"; userId: string } | { kind: "space"; spaceId: string };
-
-/** One `<SelectItem>` value carrying both halves of a target; the prefix keeps a value from being read as the other kind. */
-function targetValue(target: ShareTarget): string {
-  return target.kind === "user" ? `user:${target.userId}` : `space:${target.spaceId}`;
-}
-
-function parseTargetValue(value: string): ShareTarget | null {
-  const separator = value.indexOf(":");
-  if (separator < 0) return null;
-  const kind = value.slice(0, separator);
-  const id = value.slice(separator + 1);
-  if (!id) return null;
-  if (kind === "user") return { kind: "user", userId: id };
-  if (kind === "space") return { kind: "space", spaceId: id };
-  return null;
-}
+/** The subject of one share: a team space. */
+type ShareTarget = components["schemas"]["ShareTarget"];
 
 /** The URL parameter that opens the dialog; its value is the package. */
 export const SHARE_PARAM = "share";
 
 /**
  * Distribution only (RBAC §6.10): the package is placed in the recipient's space and runs with
- * THEIR credentials on its latest published version. One picker over people AND spaces (kind is a
- * property of the target, not a second intent). Co-editing is membership of the HOME space, so the
+ * THEIR credentials on its latest published version. The picker lists team spaces only: a personal
+ * space receives a package through the organization offer. Co-editing is membership of the HOME space, so the
  * dialog only points there.
  */
 export function SharePackageDialog({
@@ -91,7 +73,6 @@ export function SharePackageDialog({
   const { t } = useTranslation(["settings", "common"]);
   const { data: shares, isLoading } = usePackageShares(packageId, true);
   const { data: spaces } = useSpaces();
-  const { data: org } = useOrgDetail();
   // Only an AGENT declares integrations.
   const detail = usePackageDetail("agent", type === "agent" ? packageId : undefined);
   const declared = detail.data?.dependencies.integrations ?? [];
@@ -111,12 +92,12 @@ export function SharePackageDialog({
   const [removing, setRemoving] = useState<RemovalTarget | null>(null);
 
   /** Subjects already holding a placement, so the picker does not propose a no-op. */
-  const placed = useMemo(() => new Set((shares ?? []).map(shareTargetHandle)), [shares]);
+  const placed = useMemo(
+    () => new Set((shares ?? []).map((entry) => entry.target.spaceId)),
+    [shares],
+  );
 
-  // The home's OWNER is a no-op target too, but a personal space's owner is not named on the wire,
-  // so the picker lists them; the `409 share_target_is_home` branch below says so.
-  const members = (org?.members ?? []).filter((member) => !placed.has(member.userId));
-  // Neither the package's home (already has it) nor the caller's own personal space (reached by activating).
+  // Team spaces only, neither the package's home (already has it) nor one that already holds a placement.
   const destinations = (spaces ?? []).filter(
     (candidate) =>
       !candidate.personal &&
@@ -125,7 +106,6 @@ export function SharePackageDialog({
       !placed.has(candidate.id),
   );
 
-  const selected = parseTargetValue(target);
   // The members page edits the CURRENT space, so reaching the home's means standing in it.
   const manageMembers =
     homeSpaceId && home && isSpaceEnterable(home) ? () => switchSpace(homeSpaceId) : undefined;
@@ -148,11 +128,6 @@ export function SharePackageDialog({
           // A missing step, performed by the next panel; every other refusal is a toast.
           if (error instanceof ApiError && error.code === "package_has_no_version") {
             setNeedsVersion(subject);
-            return;
-          }
-          // The picker cannot always rule this target out beforehand (another member's personal space is unknown to it).
-          if (error instanceof ApiError && error.code === "share_target_is_home") {
-            toast.error(t("packages.shareTargetIsHome"));
             return;
           }
           toastError(error);
@@ -189,32 +164,16 @@ export function SharePackageDialog({
           {t("packages.shareUseLabel")}
         </Label>
         <div className="flex gap-2">
-          <Select value={target || undefined} onValueChange={setTarget}>
+          <Select value={target} onValueChange={setTarget}>
             <SelectTrigger id="share-target" className="w-full">
               <SelectValue placeholder={t("packages.shareUsePlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              {members.length > 0 && (
-                <SelectGroup>
-                  <SelectLabel>{t("packages.shareGroupPeople")}</SelectLabel>
-                  {members.map((member) => (
-                    <SelectItem
-                      key={member.userId}
-                      value={targetValue({ kind: "user", userId: member.userId })}
-                    >
-                      {memberLabel(member)}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              )}
               {destinations.length > 0 && (
                 <SelectGroup>
                   <SelectLabel>{t("orgSettings.inviteSpacesLabel")}</SelectLabel>
                   {destinations.map((candidate) => (
-                    <SelectItem
-                      key={candidate.id}
-                      value={targetValue({ kind: "space", spaceId: candidate.id })}
-                    >
+                    <SelectItem key={candidate.id} value={candidate.id}>
                       {candidate.name}
                     </SelectItem>
                   ))}
@@ -225,18 +184,14 @@ export function SharePackageDialog({
           <PendingButton
             type="button"
             pending={share.isPending}
-            disabled={!selected}
-            onClick={() => selected && submit(selected)}
+            disabled={!target}
+            onClick={() => submit({ kind: "space", spaceId: target })}
           >
             {t("packages.shareSubmit")}
           </PendingButton>
         </div>
         <p className="text-muted-foreground text-sm">
-          {selected?.kind === "user"
-            ? t("packages.shareUserHint")
-            : selected?.kind === "space"
-              ? t("packages.shareSpaceHint")
-              : t("packages.shareUseHint")}
+          {target ? t("packages.shareSpaceHint") : t("packages.shareUseHint")}
         </p>
         {/* Said BEFORE the share: integrations are judged where the run starts, so a recipient without them gets an unexplained `integration_not_active`. */}
         {declaredIntegrations.length > 0 && (
@@ -283,11 +238,8 @@ export function SharePackageDialog({
             setRemoving({
               packageId,
               name: splitPackageRef(packageId).name,
-              target: shareTargetHandle(entry),
-              targetLabel:
-                entry.target.kind === "user"
-                  ? t("catalogue.personalSpaceOf", { name: entry.target.name })
-                  : entry.target.name,
+              target: entry.target.spaceId,
+              targetLabel: entry.target.name,
             })
           }
         />
@@ -327,14 +279,12 @@ export function ShareList({
         <ul className="divide-y">
           {(shares ?? []).map((entry) => (
             <li
-              key={`${entry.target.kind}:${shareTargetHandle(entry)}`}
+              key={entry.target.spaceId}
               className="flex items-center justify-between gap-2 py-1.5"
             >
               <span className="flex min-w-0 items-center gap-2 text-sm">
                 <span className="truncate">
-                  {entry.target.kind === "user"
-                    ? t("packages.shareWithPerson", { name: entry.target.name })
-                    : t("packages.shareWithSpace", { name: entry.target.name })}
+                  {t("packages.shareWithSpace", { name: entry.target.name })}
                 </span>
                 <Badge variant={entry.enabled ? "success" : "pending"}>
                   {entry.enabled

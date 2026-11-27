@@ -8,9 +8,8 @@
 
 import { asRecord } from "./safe-json.ts";
 
-/** Actual operation spaces and choices, stamped by the platform for its chat client. */
+/** Actual operation spaces, stamped by the platform for its chat client. */
 export const OPERATION_SPACES_META_KEY = "dev.appstrate/operation-space-ids";
-export const SPACE_CHOICE_META_KEY = "dev.appstrate/space-choice-ids";
 
 /** First-party result metadata: the spaces whose activation state the result disclosed. */
 export const ACTIVE_SPACES_META_KEY = "dev.appstrate/active-space-ids";
@@ -66,6 +65,22 @@ export interface NamedSpace {
 export function describeSpace(space: NamedSpace): string {
   const personal = space.personal ? ", your personal space" : "";
   return `${space.name} (\`${space.id}\`, role ${space.role}${personal})`;
+}
+
+/** What a caller may do in one space, in reading order: `get_me`'s `spaces[].can` and the chat's. */
+const SPACE_ACTS = [
+  "invoke_operations",
+  "run_agents",
+  "inline_runs",
+  "call_integration_tools",
+  "create_packages",
+] as const;
+
+export type SpaceAct = (typeof SPACE_ACTS)[number];
+
+/** The acts `held` grants, in {@link SPACE_ACTS} order; an act left out is refused there. */
+export function spaceActs(held: Readonly<Record<SpaceAct, boolean>>): SpaceAct[] {
+  return SPACE_ACTS.filter((act) => held[act]);
 }
 
 /** The refusal of a `space_id` argument that is missing or names no reachable space. */

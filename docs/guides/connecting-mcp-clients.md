@@ -461,7 +461,11 @@ role. Runs keep their connections there:
   `authorized_uris` or egress refusal, or the server refusing the connection's
   credential: `upstream_credential_rejected`), each with that `refusal`: their typed tools are
   missing until it is cleared, and calling one returns that refusal. Tools,
-  `not_ready` and `unlisted` all come from `GET /api/credential-proxy/tools`.
+  `not_ready` and `unlisted` all come from `GET /api/credential-proxy/tools`,
+  which also lists the tools' integrations once each (`integrations`:
+  `integration_package_id`, `display_name`, and `icon` when the manifest
+  declares one) and a remote tool's sanitised `title`; its full shape is in
+  `docs/architecture/INTEGRATIONS_RUNTIME.md`.
   `connections` lists what a call would accept: per connection, the
   `connection_id` to pass, `label`, `auth_key`, `scopes_granted`, `owned_by_actor`
   (`false` for another member's), the `authorized_uris` a target must match,
@@ -578,11 +582,15 @@ role. Runs keep their connections there:
   within 45 s `upstream_timeout` (the tool may have run), the server refusing
   the connection's credential `upstream_credential_rejected` (`upstream_status`,
   and `credential.status` `needs_reconnection` when the connection is now
-  flagged for its owner to reconnect), any other server fault `bad_gateway`. The
-  server's tool annotations are not relayed: `call_integration_tool` stays
-  annotated destructive and open-world; `search` and `describe` are annotated
-  open-world and not read-only wherever they declare the `integration_tool`
-  kind, read-only otherwise.
+  flagged for its owner to reconnect), any other server fault `bad_gateway`. Of
+  the server's descriptor, only its display name is relayed: `title`, else
+  `annotations.title`, with hidden Unicode and control characters stripped and
+  cut at 512 bytes, as the listing's `title` and a call's presentation `title`
+  (see "Showing a call" below). Its behaviour hints (`readOnlyHint`,
+  `destructiveHint`, …) are not: `call_integration_tool` stays annotated
+  destructive and open-world; `search` and `describe` are annotated open-world
+  and not read-only wherever they declare the `integration_tool` kind,
+  read-only otherwise.
 - **Rate limit.** Each route has its own bucket, at the proxy's per-minute
   rate: a search counts one request against `GET /api/credential-proxy/tools`;
   a call counts one there too (it resolves the tool by name), then each request
@@ -682,3 +690,38 @@ declares a non-empty `output.schema`.
 Streaming/SSE operations (live logs, realtime) cannot be called through
 `invoke_operation` — use `run_and_wait`, fetch logs, or poll instead. Nor can
 the credential proxy: use `call_integration_tool`.
+
+### Showing a call
+
+Display data for a client that draws tool calls. None of it changes a
+result's `content`; the schema is `toolPresentationSchema` in
+`@appstrate/core/mcp-presentation`, read with `readToolPresentation`.
+
+- **Icons.** Every tool in `tools/list` carries `icons` (MCP `Tool.icons`): two
+  inline `data:image/svg+xml` icons, `theme: "light"` and `theme: "dark"`.
+  Nothing is fetched.
+- **Lookups.** `search` and `describe` declaring the `integration_tool` kind
+  withhold `readOnlyHint` (they may read a third-party catalog) and carry
+  `_meta["dev.appstrate/lookup"]: true` instead: their calls only look things
+  up. `isLookupTool` reads either.
+- **Presentation.** A result carries `_meta["dev.appstrate/presentation"]`
+  when the server knows more of the call than its tool's descriptor, a failed
+  call's included (a tool that fails unexpectedly answers `isError` with the
+  error's message, not a JSON-RPC error):
+  - `title` (`call_integration_tool` of a remote server's tool): the server's
+    title for it, else its name there, never the call's arguments;
+  - `tag`: an operation's first OpenAPI tag; `method`: its HTTP method, or the
+    method of an `{ns}__api_call` holding one request (none for a batch of
+    several);
+  - `subject` (`{ kind, id, display_name?, icon? }`, `kind` one of `agent`,
+    `skill`, `integration`, `user`): the package an operation's path names by
+    its `agents`, `skills` or `integrations` segment (so a run or schedule
+    operation under `/api/agents/{scope}/{name}` names that agent), whether
+    the operation succeeds or fails: it is what the call aimed at; the
+    integration `call_integration_tool` reached, its refusal of the arguments
+    included; the caller `get_me` answered for;
+  - `count` and `items` (`search`): `count` is the sum of its sections'
+    `total`, what each kind matched before `limit` (an agent or an integration
+    tool once, an operation you may invoke once, a skill once per space it is
+    listed in); `items` the distinct agents, skills and integrations its shown
+    items name, at most 8.

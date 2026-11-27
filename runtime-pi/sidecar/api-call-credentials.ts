@@ -41,7 +41,6 @@ interface ApiCallCredentialAdapter {
     integrationId: string,
     rejected: ProxyCredentialsPayload,
   ) => Promise<ProxyCredentialsPayload | null>;
-  reportUpstreamSuccess: (answered: ProxyCredentialsPayload) => void;
 }
 
 /**
@@ -97,6 +96,5 @@ export function createApiCallCredentialAdapter(opts: {
         .catch(() => false);
       return rotated ? toPayload() : null;
     },
-    reportUpstreamSuccess: (answered) => source.reportUpstreamSuccess(answered.credentialRevision),
   };
 }

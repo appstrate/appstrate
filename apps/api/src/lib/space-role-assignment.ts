@@ -8,7 +8,7 @@
 import { z } from "zod";
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import type { SpaceAssignment, SpaceRolePreset } from "@appstrate/core/permissions";
-import type { SpaceRoleAssignment } from "../services/space-members.ts";
+import type { SpaceRoleAssignment } from "@appstrate/shared-types";
 import { isSpaceId, isSpaceRoleId } from "./ids.ts";
 
 /** `.refine()` returns a wrapper nothing can `.extend()`, so shape and rule ship apart. */
@@ -54,11 +54,16 @@ export const spaceAssignmentSchema = exactlyOneRole(
   }),
 );
 
-/** Audit payloads name a role with camelCase explicit keys (CASING_CONVENTIONS 4m), never the body. */
+/** A `space_members` row's role columns, one set; how audits name a role (CASING_CONVENTIONS 4m). */
+export type SpaceRoleColumns = {
+  presetRole: SpaceRolePreset | null;
+  customRoleId: string | null;
+};
+
 export function auditSpaceRole(data: {
   preset_role?: SpaceRolePreset | null;
   custom_role_id?: string | null;
-}): { presetRole: SpaceRolePreset | null; customRoleId: string | null } {
+}): SpaceRoleColumns {
   return { presetRole: data.preset_role ?? null, customRoleId: data.custom_role_id ?? null };
 }
 

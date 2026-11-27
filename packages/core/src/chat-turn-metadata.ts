@@ -100,6 +100,13 @@ export function formatBudgetDuration(ms: number): string {
   return minutes > 0 ? `${minutes}m${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
 }
 
+const TURN_BUDGET_NOTE_PREFIX = "[turn budget]";
+
+/** Whether a tool result's text part is the budget note, which is the model's, not the reader's. */
+export function isTurnBudgetNote(text: string): boolean {
+  return text.startsWith(`${TURN_BUDGET_NOTE_PREFIX} `);
+}
+
 /**
  * The budget line shown to the MODEL on every step (A5). A model that cannot
  * see its budget cannot manage it — the audited turn launched a ~2-minute
@@ -119,7 +126,7 @@ export function formatBudgetDuration(ms: number): string {
 export function formatTurnBudgetNote(input: { remainingMs: number; stepsUsed: number }): string {
   const launchThreshold = formatBudgetDuration(CHAT_LAUNCH_THRESHOLD_MS);
   return (
-    `[turn budget] ${formatBudgetDuration(input.remainingMs)} left in this turn, ` +
+    `${TURN_BUDGET_NOTE_PREFIX} ${formatBudgetDuration(input.remainingMs)} left in this turn, ` +
     `step ${input.stepsUsed}/${CHAT_MAX_STEPS}. ` +
     `A run_and_wait launch needs at least ${launchThreshold} left or it is refused; ` +
     `anything not written into your reply before the turn ends is lost.`

@@ -100,24 +100,47 @@ function pickMessage(rec: Record<string, unknown> | null): string | undefined {
   return undefined;
 }
 
+/** A JSON object written as text (a failure's error text), else null. */
+function jsonRecordOf(text: string): Record<string, unknown> | null {
+  if (!text.trimStart().startsWith("{")) return null;
+  try {
+    return asRecordOrNull(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Human-readable error message from an unwrapped failure payload. Looks at the
- * top level first, then digs into the HTTP `body` (the real error for a 4xx/5xx
+ * top level first, then at a nested `error` or `refusal` object, then digs into the HTTP `body` (the real error for a 4xx/5xx
  * lives there — e.g. a problem+json `{ title, detail }`), only falling back to
- * a bare `HTTP <status>` when nothing carries a message.
+ * a bare `HTTP <status>` when nothing carries a message; a batch says what its first failure says.
+ * A refusal's JSON error text is read for its message, never shown as JSON.
  */
 export function extractErrorMessage(unwrapped: unknown): string | undefined {
+  if (typeof unwrapped === "string") {
+    const parsed = jsonRecordOf(unwrapped);
+    return (parsed && extractErrorMessage(parsed)) ?? (unwrapped || undefined);
+  }
   const rec = asRecordOrNull(unwrapped);
-  if (!rec) return typeof unwrapped === "string" ? unwrapped : undefined;
+  if (!rec) return undefined;
 
   const direct = pickMessage(rec);
-  if (direct) return direct;
+  if (direct) return extractErrorMessage(direct);
+  const nested = pickMessage(asRecordOrNull(rec.error)) ?? pickMessage(asRecordOrNull(rec.refusal));
+  if (nested) return nested;
 
   if (typeof rec.status === "number" && rec.status >= 400) {
     if (typeof rec.body === "string" && rec.body) return rec.body;
     const fromBody = pickMessage(asRecordOrNull(rec.body));
     if (fromBody) return fromBody;
     return `HTTP ${rec.status}`;
+  }
+  if (Array.isArray(rec.results)) {
+    for (const entry of rec.results) {
+      const message = asRecordOrNull(entry) && extractErrorMessage(entry);
+      if (message) return message;
+    }
   }
   return undefined;
 }

@@ -9,9 +9,9 @@ import i18n, { i18nReady } from "../../../i18n.ts";
 import { render } from "../../../test/render.tsx";
 import type {
   IntegrationClient,
-  IntegrationConnection,
   IntegrationManifestView,
 } from "../../../hooks/use-integrations.ts";
+import type { ConnectionRow } from "../../../lib/connection-rows.ts";
 import type { ClientRow } from "../../../lib/integration-clients.ts";
 import type { DataColumn } from "../../data-table.tsx";
 import {
@@ -24,14 +24,15 @@ import {
 await i18nReady;
 afterAll(() => i18n.changeLanguage("fr"));
 
-function expiresCell(): DataColumn<IntegrationConnection>["cell"] {
-  let columns: DataColumn<IntegrationConnection>[] = [];
+function expiresCell(): DataColumn<ConnectionRow>["cell"] {
+  let columns: DataColumn<ConnectionRow>[] = [];
   function Probe(): ReactElement | null {
     columns = useConnectionColumns({
       packageId: "@appstrate/google-drive",
-      manifest: {} as IntegrationManifestView,
+      manifestOf: () => ({}) as IntegrationManifestView,
       userId: "user_1",
-      isAdmin: false,
+      isAdminOf: () => false,
+      spanning: false,
       authForConnection: () => ({
         authKey: "drive",
         methodReady: true,
@@ -46,7 +47,7 @@ function expiresCell(): DataColumn<IntegrationConnection>["cell"] {
   return columns.find((column) => column.id === "expires")!.cell;
 }
 
-const CONNECTION = { expiresAt: "2026-03-04T12:00:00Z" } as IntegrationConnection;
+const CONNECTION = { expiresAt: "2026-03-04T12:00:00Z" } as ConnectionRow;
 
 describe("the connection expiry column", () => {
   it("writes the date the French way in French", async () => {

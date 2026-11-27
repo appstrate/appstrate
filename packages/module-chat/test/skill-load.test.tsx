@@ -10,6 +10,7 @@
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MessageProvider, type ThreadMessage } from "@assistant-ui/react";
 
 import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "../src/skills.ts";
 import { ChatHostProvider, ChatTransportProvider } from "../src/ui/runtime-context.ts";
@@ -45,6 +46,22 @@ const host = testHost({
   t: (key, options) => (options?.name ? `${key} name=${String(options.name)}` : key),
 });
 
+/** The assistant message a card sits in, as the thread mounts it. */
+const MESSAGE = {
+  id: "msg_1",
+  role: "assistant",
+  content: [],
+  status: { type: "complete", reason: "stop" },
+  metadata: {
+    unstable_state: null,
+    unstable_annotations: [],
+    unstable_data: [],
+    steps: [],
+    custom: {},
+  },
+  createdAt: new Date(0),
+} as unknown as ThreadMessage;
+
 function render(
   part: {
     toolName?: string;
@@ -70,7 +87,9 @@ function render(
       <ChatHostProvider value={host}>
         <ChatTransportProvider value={transport}>
           <ConversationSkillsProvider value={conversation}>
-            <ResourceReadTool {...(props as unknown as Parameters<typeof ResourceReadTool>[0])} />
+            <MessageProvider message={MESSAGE} index={0}>
+              <ResourceReadTool {...(props as unknown as Parameters<typeof ResourceReadTool>[0])} />
+            </MessageProvider>
           </ConversationSkillsProvider>
         </ChatTransportProvider>
       </ChatHostProvider>
@@ -177,7 +196,7 @@ describe("ResourceReadTool", () => {
     expect(html).not.toContain("skill-load-pin");
   });
 
-  it("draws a skill loaded through the forwarded `read` the same way; any other read keeps the generic row", () => {
+  it("draws a skill loaded through the forwarded `read` the same way; any other read keeps the generic card, named as a read", () => {
     const skill = render({
       toolName: "read",
       args: { uri: SKILL_MD, space_id: "spc_a" },
@@ -193,7 +212,8 @@ describe("ResourceReadTool", () => {
       status: { type: "complete" },
     });
     expect(file).not.toContain("directive-chip");
-    expect(file).toContain(">read<");
+    expect(file).toContain(">tool.name.read<");
+    expect(file).toContain("appfile://spc_a/fil_1");
     const guide = render({
       args: { uri: "skill://spc_a/acme/tone/brand-tone/refs/guide.md" },
       result: { content: [{ type: "text", text: "guide" }] },

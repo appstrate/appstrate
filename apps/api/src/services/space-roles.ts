@@ -11,18 +11,28 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgInvitations, spaceMembers, spaceRoles } from "@appstrate/db/schema";
-import { SPACE_ROLE_PRESETS, type SpaceRolePreset } from "@appstrate/core/permissions";
-import { isForeignKeyViolation } from "@appstrate/db/errors";
-import { isUniqueViolation } from "../lib/db-helpers.ts";
+import {
+  oauthClient,
+  orgInvitations,
+  organizations,
+  spaceMembers,
+  spaceRoles,
+} from "@appstrate/db/schema";
+import {
+  isSpaceRolePreset,
+  SPACE_ROLE_PRESETS,
+  type SpaceRolePreset,
+} from "@appstrate/core/permissions";
+import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import {
+  assignableSpaceLevelPermissions,
   describeMissingRead,
-  knownSpaceLevelPermissions,
   missingReadGrants,
   partitionSpacePermissions,
   presetPermissions,
+  RESOLVED_SPACE_PERMISSIONS,
 } from "../lib/permissions.ts";
 
 /** One entry of `GET /api/roles`; `id` is null for a preset (it has no row). */
@@ -34,6 +44,8 @@ export interface SpaceRoleWire {
   name: string;
   description: string | null;
   permissions: string[];
+  /** Whether the role resolves `studio:read`, never listed in `permissions`; `true` on a preset. */
+  shows_studio: boolean;
   /**
    * Stored entries this deployment cannot name — always empty for a preset.
    * Never part of `permissions`: the two are what the role grants and what it
@@ -50,9 +62,9 @@ export interface SpaceRoleInput {
   name: string;
   description?: string | null;
   permissions: string[];
+  /** Absent on create = `true`; absent on update = unchanged. */
+  shows_studio?: boolean;
 }
-
-const PRESET_KEYS: ReadonlySet<string> = new Set<string>(SPACE_ROLE_PRESETS);
 
 type SpaceRoleRow = typeof spaceRoles.$inferSelect;
 
@@ -74,6 +86,7 @@ function toWire(row: SpaceRoleRow): SpaceRoleWire {
     name: row.name,
     description: row.description,
     permissions: [...granted].sort(),
+    shows_studio: row.showsStudio,
     unavailable_permissions: unavailable.sort(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -88,7 +101,11 @@ function presetWire(preset: SpaceRolePreset): SpaceRoleWire {
     key: preset,
     name: preset,
     description: null,
-    permissions: [...presetPermissions(preset)].sort(),
+    // Without the resolved grants `shows_studio` carries, so it is what a write accepts back.
+    permissions: [...presetPermissions(preset)]
+      .filter((permission) => !RESOLVED_SPACE_PERMISSIONS.has(permission))
+      .sort(),
+    shows_studio: true,
     // A preset is code, not a row: nothing can be stored on it that the
     // deployment does not name.
     unavailable_permissions: [],
@@ -124,7 +141,7 @@ export async function listSpaceRoles(orgId: string): Promise<SpaceRoleWire[]> {
  * named, never added: that would grant what the author did not pick.
  */
 function normalizePermissions(permissions: string[]): string[] {
-  const known = knownSpaceLevelPermissions();
+  const known = assignableSpaceLevelPermissions();
   if (permissions.length > known.size) {
     throw invalidRequest(
       `A role can hold at most ${known.size} permissions — the whole vocabulary — ` +
@@ -137,8 +154,11 @@ function normalizePermissions(permissions: string[]): string[] {
   for (const permission of permissions) {
     if (!known.has(permission)) {
       throw invalidRequest(
-        `Unknown space-level permission '${permission}'. ` +
-          `See GET /api/roles/vocabulary for the permissions a role can hold.`,
+        RESOLVED_SPACE_PERMISSIONS.has(permission)
+          ? `'${permission}' is not stored in a role's permissions: it follows the role's ` +
+              `shows_studio. See GET /api/roles/vocabulary for the permissions a role can hold.`
+          : `Unknown space-level permission '${permission}'. ` +
+              `See GET /api/roles/vocabulary for the permissions a role can hold.`,
         "permissions",
       );
     }
@@ -159,7 +179,7 @@ function normalizePermissions(permissions: string[]): string[] {
 
 /** The DB CHECK backs this; a constraint violation would be a 500 naming nothing readable. */
 function assertNotPresetKey(key: string): void {
-  if (!PRESET_KEYS.has(key)) return;
+  if (!isSpaceRolePreset(key)) return;
   throw invalidRequest(
     `'${key}' is a built-in preset and cannot be redefined. ` +
       `Reserved keys: ${SPACE_ROLE_PRESETS.join(", ")}.`,
@@ -207,6 +227,7 @@ export async function createSpaceRole(params: {
       name: input.name,
       description: input.description ?? null,
       permissions,
+      showsStudio: input.shows_studio ?? true,
       createdBy,
     })
     .returning()
@@ -235,6 +256,7 @@ export async function updateSpaceRole(params: {
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
       ...(permissions !== undefined ? { permissions } : {}),
+      ...(patch.shows_studio !== undefined ? { showsStudio: patch.shows_studio } : {}),
       updatedAt: new Date(),
     })
     .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))
@@ -244,86 +266,105 @@ export async function updateSpaceRole(params: {
   return toWire(row);
 }
 
+interface RoleHolders {
+  memberCount: number;
+  pendingInvitationCount: number;
+  /** The org's OIDC clients whose `signup_space_assignments` name this role. */
+  signupAssignmentCount: number;
+  /** The org's personal-space default names this role. */
+  orgDefault: boolean;
+}
+
 /**
- * Two things hold a bundle: a `space_members` row, and a PENDING invitation
- * whose JSONB `space_assignments` name it. The second has no FK, so deleting
- * under it would strand the invitee with an assignment that never applies.
+ * What holds a bundle: `space_members` rows (personal-space overrides included), the org's
+ * personal-space default, and PENDING invitations and OIDC clients whose JSONB assignments name
+ * it; those two have no FK, so a delete under them would strand an assignment that never applies.
  */
-async function countRoleHolders(
-  orgId: string,
-  id: string,
-): Promise<{ memberCount: number; pendingInvitationCount: number }> {
-  const [assigned, invited] = await Promise.all([
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(spaceMembers)
-      .where(eq(spaceMembers.customRoleId, id)),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(orgInvitations)
-      .where(
-        and(
-          eq(orgInvitations.orgId, orgId),
-          eq(orgInvitations.status, "pending"),
-          // JSONB containment: the assignments array holds an entry naming
-          // this role. One predicate for an array of objects, no unnest.
-          sql`${orgInvitations.spaceAssignments} @> ${JSON.stringify([{ custom_role_id: id }])}::jsonb`,
-        ),
+async function countRoleHolders(orgId: string, id: string, executor: DbOrTx): Promise<RoleHolders> {
+  const assigned = await executor
+    .select({ count: sql<number>`count(*)::int` })
+    .from(spaceMembers)
+    .where(eq(spaceMembers.customRoleId, id));
+  const invited = await executor
+    .select({ count: sql<number>`count(*)::int` })
+    .from(orgInvitations)
+    .where(
+      and(
+        eq(orgInvitations.orgId, orgId),
+        eq(orgInvitations.status, "pending"),
+        // JSONB containment: the assignments array holds an entry naming
+        // this role. One predicate for an array of objects, no unnest.
+        sql`${orgInvitations.spaceAssignments} @> ${JSON.stringify([{ custom_role_id: id }])}::jsonb`,
       ),
-  ]);
+    );
+  const signupPolicies = await executor
+    .select({ count: sql<number>`count(*)::int` })
+    .from(oauthClient)
+    .where(
+      and(
+        eq(oauthClient.referencedOrgId, orgId),
+        sql`${oauthClient.signupSpaceAssignments} @> ${JSON.stringify([{ custom_role_id: id }])}::jsonb`,
+      ),
+    );
+  const [org] = await executor
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(and(eq(organizations.id, orgId), eq(organizations.personalSpaceRoleId, id)))
+    .limit(1);
   return {
     memberCount: assigned[0]?.count ?? 0,
     pendingInvitationCount: invited[0]?.count ?? 0,
+    signupAssignmentCount: signupPolicies[0]?.count ?? 0,
+    orgDefault: org !== undefined,
   };
 }
 
-function roleInUse(
-  key: string,
-  counts: { memberCount: number; pendingInvitationCount: number },
-): never {
+function roleInUse(key: string, counts: RoleHolders): never {
   throw conflict(
     "role_in_use",
-    `Role '${key}' is still held by ${counts.memberCount} space member(s) and ` +
-      `${counts.pendingInvitationCount} pending invitation(s). Reassign them before deleting it.`,
+    `Role '${key}' is still held by ${counts.memberCount} space member(s), ` +
+      `${counts.pendingInvitationCount} pending invitation(s) and ` +
+      `${counts.signupAssignmentCount} OIDC client signup assignment(s)` +
+      (counts.orgDefault
+        ? ", and it is the organization's default role in personal spaces. " +
+          "Reassign them and change that setting before deleting it."
+        : ". Reassign them before deleting it."),
     {
       member_count: counts.memberCount,
       pending_invitation_count: counts.pendingInvitationCount,
+      signup_assignment_count: counts.signupAssignmentCount,
+      org_default: counts.orgDefault,
     },
   );
 }
 
 /**
- * The loser of a delete/assign race gets the same 409 as the pre-count, not a
- * 500 naming a constraint — the same shape {@link asKeyConflict} gives the
- * create/update races. `space_members.custom_role_id` is ON DELETE RESTRICT,
- * so an assignment landing between the count and the delete fires the
- * referential-integrity violation; recount to name who now holds the role.
- */
-async function asRoleInUse(err: unknown, orgId: string, id: string, key: string): Promise<never> {
-  if (!isForeignKeyViolation(err)) throw err;
-  roleInUse(key, await countRoleHolders(orgId, id));
-}
-
-/**
  * Holders are counted rather than left to `ON DELETE RESTRICT`, whose error
- * names neither the role nor how many people would lose access. The count is
- * lock-free on purpose: {@link asRoleInUse} turns the race it leaves open into
- * the very same 409, so the delete never has to hold a lock to be honest.
+ * names neither the role nor how many people would lose access. The row is locked
+ * `FOR UPDATE` first; every writer naming a custom role share-locks it (`lockOrgSpaceRole`), so it
+ * is counted (409) or answers 404. A pending invitation, validated outside its insert's
+ * transaction, can still slip past; acceptance then skips the vanished role.
  */
 export async function deleteSpaceRole(orgId: string, id: string): Promise<SpaceRoleWire> {
-  const [row] = await db
-    .select()
-    .from(spaceRoles)
-    .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))
-    .limit(1);
-  if (!row) throw notFound(`Role '${id}' not found in this organization`);
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(spaceRoles)
+      .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))
+      .for("update");
+    if (!row) throw notFound(`Role '${id}' not found in this organization`);
 
-  const counts = await countRoleHolders(orgId, id);
-  if (counts.memberCount > 0 || counts.pendingInvitationCount > 0) roleInUse(row.key, counts);
+    const counts = await countRoleHolders(orgId, id, tx);
+    if (
+      counts.memberCount > 0 ||
+      counts.pendingInvitationCount > 0 ||
+      counts.signupAssignmentCount > 0 ||
+      counts.orgDefault
+    ) {
+      roleInUse(row.key, counts);
+    }
 
-  await db
-    .delete(spaceRoles)
-    .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))
-    .catch((err: unknown) => asRoleInUse(err, orgId, id, row.key));
-  return toWire(row);
+    await tx.delete(spaceRoles).where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)));
+    return toWire(row);
+  });
 }

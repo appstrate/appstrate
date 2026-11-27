@@ -291,6 +291,23 @@ export async function readPublishedIntegrationManifests(
   return { manifests, unpublished };
 }
 
+/**
+ * The manifest that governs `id`, off a {@link readPublishedIntegrationManifests} read: the
+ * published one, the draft only while no version is published, none when versions exist but none
+ * resolves (the sheet's 404).
+ */
+export function governingIntegrationManifest(
+  id: string,
+  read: Awaited<ReturnType<typeof readPublishedIntegrationManifests>>,
+  draftManifest: unknown,
+): IntegrationManifest | undefined {
+  const published = read.manifests.get(id);
+  if (published) return published;
+  return read.unpublished.has(id)
+    ? ((draftManifest as IntegrationManifest | null) ?? undefined)
+    : undefined;
+}
+
 /** Load version metadata once for all requested packages. Only selected manifests need loading. */
 async function integrationVersionCatalog(ids: string[], orgId: string, executor: DbOrTx = db) {
   const [versions, tags] = await Promise.all([

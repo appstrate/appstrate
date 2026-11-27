@@ -30,7 +30,7 @@ export function DashboardPage() {
   // The same query as the agents above: no second request.
   const agentName = useRunAgentName({ spanning });
   // Their failure is not the dashboard's, but the body waits so nothing reflows from « none ».
-  const { data: schedules, isLoading: schedulesLoading } = useAllSchedules(spanning);
+  const { data: schedules, isLoading: schedulesLoading } = useAllSchedules({ spanning });
   const firstName = useFirstName();
 
   // A disabled query is not loading, so an unresolved permission set (or listing) must be.

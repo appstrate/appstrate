@@ -11,15 +11,15 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import type { ExtensionAPI } from "@appstrate/runner-pi";
+import { isToolUIPart, type UIMessage } from "ai";
+import { loadPiCodingAgentSdk, type Api, type ExtensionAPI } from "@appstrate/runner-pi";
 
-import {
-  ACTIVE_SPACES_META_KEY,
-  OPERATION_SPACES_META_KEY,
-  SPACE_CHOICE_META_KEY,
-} from "@appstrate/core/mcp-spaces";
+import { ACTIVE_SPACES_META_KEY, OPERATION_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
+import { TOOL_PRESENTATION_META_KEY } from "@appstrate/core/mcp-presentation";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
+import { buildStructuredPiTurn, type PiHistoryModel } from "../src/pi-chat/structured-session.ts";
+import { streamedMessage, toolCallEvents } from "./pi-turn.ts";
 
 /** Nothing listens here: a hop that escapes the injected fetch throws. */
 const ORIGIN = "http://127.0.0.1:1";
@@ -60,7 +60,6 @@ interface RegisteredTool {
     signal?: AbortSignal,
   ) => Promise<{
     content: Array<{ type: "text"; text: string }>;
-    spaceChoice?: unknown;
     actedSpaceIds?: readonly string[];
     terminate?: boolean;
   }>;
@@ -257,7 +256,7 @@ function organizationOf(
 async function tools(
   transport: ReturnType<typeof transcript>,
   failingTouch?: string,
-  scope: Partial<Pick<TurnSpaces, "originSpaceId" | "spaceChoice" | "spaces">> = {},
+  scope: Partial<Pick<TurnSpaces, "originSpaceId" | "spaces">> = {},
 ) {
   const built = await buildPlatformMcpTools({
     url: platformMcpUrl(ORIGIN, "org_1"),
@@ -280,11 +279,64 @@ async function tools(
 
 const text = (result: { content: Array<{ text: string }> }) => result.content[0]!.text;
 
+const USER: UIMessage = { id: "u1", role: "user", parts: [{ type: "text", text: "go" }] };
+const REPLAY_MODEL: PiHistoryModel = {
+  api: "openai-completions" as Api,
+  provider: "openai",
+  model: "preset_org",
+};
+
 describe("a forwarded tool", () => {
   const remote = (meta: Record<string, unknown>, isError = false) => ({
     content: [{ type: "text", text: "platform response" }],
     _meta: meta,
     isError,
+  });
+
+  it("hands the card the platform's presentation, and the model none of it", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      const presentation = { title: "List models" };
+      transport.answers.remote = remote({
+        [OPERATION_SPACES_META_KEY]: [],
+        [TOOL_PRESENTATION_META_KEY]: presentation,
+      });
+      const args = { operation_id: "listModels", space_id: "spc_beta" };
+      const result = await tool("invoke_operation").execute("c1", args);
+      expect((result as { presentation?: unknown }).presentation).toEqual(presentation);
+
+      // The call as the chat streams it, stores it, and replays it on the next turn.
+      const message = await streamedMessage([
+        ...toolCallEvents(0, "c1", "invoke_operation", args),
+        {
+          type: "tool_execution_end",
+          toolCallId: "c1",
+          toolName: "invoke_operation",
+          result,
+          isError: false,
+        },
+      ]);
+      const part = message.parts.find(isToolUIPart)!;
+      expect(part).toMatchObject({
+        state: "output-available",
+        resultProviderMetadata: { appstrate: { presentation } },
+      });
+      // Out of the stored output: a replay that finds no text in it sends the output's JSON.
+      expect(JSON.stringify("output" in part ? part.output : null)).not.toContain("List models");
+      const next: UIMessage = { id: "u2", role: "user", parts: [{ type: "text", text: "ok" }] };
+      const { estimateTokens } = await loadPiCodingAgentSdk();
+      const turn = buildStructuredPiTurn([USER, message, next], REPLAY_MODEL, {
+        estimateTokens,
+        baseTokens: 0,
+        fileDelivery: { image: false, pdf: false },
+      });
+      const replayed = JSON.stringify(turn.history);
+      expect(replayed).toContain("platform response");
+      expect(replayed).not.toContain("List models");
+    } finally {
+      await built.close();
+    }
   });
 
   it("uses the platform's resolved space receipt even when an org-level call named a space", async () => {
@@ -322,63 +374,20 @@ describe("a forwarded tool", () => {
     }
   });
 
-  it("waits for an explicit user answer to the operation that requested a destination", async () => {
+  it("relays a missing-space refusal to the model without ending the turn", async () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
-    const ids = ["spc_alpha", "spc_beta"];
     try {
-      transport.answers.remote = remote({ [SPACE_CHOICE_META_KEY]: ids }, true);
+      transport.answers.remote = remote({}, true);
       const refused = await tool("invoke_operation").execute("c", { operation_id: "listAgents" });
-      expect(refused.spaceChoice).toEqual({
-        tool: "invoke_operation",
-        operationId: "listAgents",
-        spaceIds: ids,
-      });
-      expect(refused.terminate).toBe(true);
-      const retry = await tool("invoke_operation").execute("again", {
+      expect(refused.terminate).toBeUndefined();
+      expect(text(refused)).toBe("platform response");
+      // The model asks the user, then calls again with the space named.
+      await tool("invoke_operation").execute("again", {
         operation_id: "listAgents",
-        space_id: ids[0],
+        space_id: "spc_alpha",
       });
-      expect(retry.terminate).toBe(true);
-      await tool("run_and_wait").execute("wrong", { kind: "agent", space_id: ids[0] });
-      expect(transport.events).toEqual(["tools/call"]);
-    } finally {
-      await built.close();
-    }
-  });
-
-  it("keeps the turn open when the refused operation cannot be represented by the picker", async () => {
-    const transport = transcript();
-    const { built, tool } = await tools(transport);
-    try {
-      transport.answers.remote = remote({ [SPACE_CHOICE_META_KEY]: ["spc_beta"] }, true);
-      for (const args of [{ operation_id: "" }, {}]) {
-        const refused = await tool("invoke_operation").execute("invalid", args);
-        expect(refused.spaceChoice).toBeUndefined();
-        expect(refused.terminate).toBeUndefined();
-        expect(text(refused)).toBe("platform response");
-      }
-      const valid = await tool("invoke_operation").execute("valid", { operation_id: "listAgents" });
-      expect(valid.terminate).toBe(true);
-      expect(transport.events).toEqual(["tools/call", "tools/call", "tools/call"]);
-    } finally {
-      await built.close();
-    }
-  });
-
-  it("does not present a picker for a success, a relayed result or a refusal naming an outside space", async () => {
-    const transport = transcript();
-    const { built, tool } = await tools(transport);
-    try {
-      for (const answer of [
-        remote({ [SPACE_CHOICE_META_KEY]: ["spc_beta"] }),
-        remote({ [SPACE_CHOICE_META_KEY]: ["spc_beta"], "dev.appstrate/relayed": true }, true),
-        remote({ [SPACE_CHOICE_META_KEY]: ["spc_outside"] }, true),
-      ]) {
-        transport.answers.remote = answer;
-        const result = await tool("invoke_operation").execute("c", { operation_id: "listAgents" });
-        expect(result.spaceChoice).toBeUndefined();
-      }
+      expect(transport.events.filter((event) => event === "tools/call")).toHaveLength(2);
     } finally {
       await built.close();
     }
@@ -472,67 +481,22 @@ describe("the conversation's run_and_wait", () => {
     }
   });
 
-  it("offers eligible destinations only on a genuinely missing space and never launches on the user's behalf", async () => {
+  it("lists the eligible destinations on a genuinely missing space and launches nothing", async () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
     try {
       const run = tool("run_and_wait");
       const unknown = await run.execute("c1", { kind: "agent", space_id: "spc_nope" });
       expect(JSON.parse(text(unknown)).code).toBe("unknown_space");
-      expect(unknown.spaceChoice).toBeUndefined();
       const missing = await run.execute("c2", { kind: "agent" });
       expect(JSON.parse(text(missing))).toMatchObject({
         code: "missing_argument",
         accepted: ["spc_alpha", "spc_beta"],
       });
-      expect(missing.spaceChoice).toEqual({
-        tool: "run_and_wait",
-        spaceIds: ["spc_alpha", "spc_beta"],
-      });
-      expect(missing.terminate).toBe(true);
-      await run.execute("c3", { kind: "agent", space_id: "spc_alpha" });
+      expect(missing.terminate).toBeUndefined();
       expect(transport.events).toEqual([]);
     } finally {
       await built.close();
-    }
-  });
-
-  it("honors the chosen space, refuses a conflicting argument and retains the origin for unrelated choices", async () => {
-    const agent = { kind: "agent", scope: "@acme", name: "demo" };
-    for (const [chosenTool, expected] of [
-      ["run_and_wait", "spc_beta"],
-      ["invoke_operation", "spc_alpha"],
-    ] as const) {
-      const transport = transcript();
-      const { built, tool } = await tools(transport, undefined, {
-        originSpaceId: "spc_alpha",
-        spaceChoice: {
-          tool: chosenTool,
-          operationId: chosenTool === "invoke_operation" ? "listAgents" : undefined,
-          spaceId: "spc_beta",
-        },
-      });
-      try {
-        if (chosenTool === "run_and_wait") {
-          const conflict = await tool("run_and_wait").execute("c1", {
-            ...agent,
-            space_id: "spc_alpha",
-          });
-          expect(JSON.parse(text(conflict)).code).toBe("space_mismatch");
-          expect(transport.events).toEqual([]);
-        }
-        const result = await tool("run_and_wait").execute("c2", agent);
-        expect(result.actedSpaceIds).toEqual([expected]);
-        expect(transport.events.slice(0, 2)).toEqual([`touch ${expected}`, "launch"]);
-        const repeated = await tool("run_and_wait").execute("c3", { ...agent, name: "another" });
-        expect(repeated.actedSpaceIds).toEqual([expected]);
-        expect(transport.launches.map((launch) => launch.spaceHeader)).toEqual([
-          expected,
-          expected,
-        ]);
-      } finally {
-        await built.close();
-      }
     }
   });
 
@@ -545,7 +509,6 @@ describe("the conversation's run_and_wait", () => {
     try {
       const result = await tool("run_and_wait").execute("c", { kind: "inline" });
       expect(JSON.parse(text(result)).code).toBe("not_granted");
-      expect(result.spaceChoice).toBeUndefined();
       expect(transport.events).toEqual([]);
     } finally {
       await built.close();

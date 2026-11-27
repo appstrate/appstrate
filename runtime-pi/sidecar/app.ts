@@ -148,6 +148,8 @@ export interface AppDeps {
    * tests / sidecars launched without integrations.
    */
   integrationBootReportProvider?: () => IntegrationBootReport;
+  /** Sends the run's queued call journal and resolves once it has landed. Absent: no journal. */
+  flushCallJournal?: () => Promise<void>;
 }
 
 /**
@@ -613,6 +615,7 @@ export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
  * Build the sidecar's HTTP surface.
  *
  *   - `GET  /health`     — readiness probe.
+ *   - `POST /calls/flush` — sends the queued call journal; the agent calls it before finalizing.
  *   - `ALL  /llm/*`      — reverse proxy to the run's LLM upstream (the
  *                          platform's metered LLM proxy, or the OAuth
  *                          subscription provider). The Pi SDK (in-container)
@@ -709,6 +712,12 @@ export function createApp(deps: AppDeps): Hono {
     // Block until the initial boot pass settles so the report is authoritative.
     await deps.integrationBootPromise;
     return c.json(deps.integrationBootReportProvider());
+  });
+
+  // The platform takes the journal only while the run is `running`: what is queued must land first.
+  app.post("/calls/flush", async (c) => {
+    await deps.flushCallJournal?.();
+    return c.body(null, 204);
   });
 
   // LLM reverse proxy. Two modes:

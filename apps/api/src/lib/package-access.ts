@@ -41,12 +41,7 @@ import {
 } from "./permissions.ts";
 import { isUserPrincipal } from "./principal.ts";
 import { recordDispatchSpaces } from "./internal-dispatch.ts";
-import {
-  callerOrgRole,
-  callerPersonalOwnerId,
-  credentialAdmitsSpace,
-  credentialConfinedToSpaces,
-} from "./view-as.ts";
+import { callerOrgRole, credentialAdmitsSpace, credentialConfinedToSpaces } from "./view-as.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
 import {
@@ -476,7 +471,7 @@ async function holdsPackageWriteAuthority(c: Context<AppEnv>, packageId: string)
 /**
  * {@link assertPackageShareAccessForPlacement} as a question, for bundle import: place the
  * root here when the caller may ({@link callerPlacementAuthority}), else `null`
- * and `root_active: false`.
+ * and `root_active: false`. A personal space is never a placement target: `null`.
  */
 export async function heldPlacementAuthority(
   c: Context<AppEnv>,
@@ -485,6 +480,10 @@ export async function heldPlacementAuthority(
   record?: (ids: readonly string[]) => Promise<boolean>,
 ): Promise<PlacementAuthority | null> {
   const orgId = c.get("orgId");
+  const accessible = await placementAccessSpaces(c);
+  if (accessible.some((space) => space.id === visibleSpaceId && space.ownerUserId !== null)) {
+    return null;
+  }
   const pkg = await findPackageRow(packageId, orgId);
   if (!pkg || isSystemPackageRow(pkg) || pkg.orgId !== orgId) return null;
   const authority = await callerPlacementAuthority(c, pkg, { visibleSpaceId, record });
@@ -716,8 +715,8 @@ export type PlacementRemovalAuthority = "home" | "recipient";
 
 /**
  * Authority to withdraw a placement from `targetSpaceId`, held by either side
- * (RBAC spec §6.10): the home's `<type>:share`, or the target's deactivation
- * grant (waived in the caller's own personal space). Same 404/403 split as
+ * (RBAC spec §6.10): the home's `<type>:share`, or the target space's
+ * deactivation grant. Same 404/403 split as
  * {@link assertPackageShareAccess}. Returns the rule as a predicate over the
  * home, which `revokePackageShare` re-asks against the locked home.
  */
@@ -725,7 +724,6 @@ export async function assertPlacementRemovalAccess(
   c: Context<AppEnv>,
   packageId: string,
   targetSpaceId: string,
-  targetKind: "space" | "user",
 ): Promise<{
   pkg: PackageAccessRow;
   authorityFor: (homeSpaceId: string | null) => PlacementRemovalAuthority | null;
@@ -741,11 +739,10 @@ export async function assertPlacementRemovalAccess(
   );
   const share = packagePermission(pkg.type, "share");
   const target = accessible.find((space) => space.id === targetSpaceId);
-  const ownerId = callerPersonalOwnerId(c, c.get("orgId"));
   const recipientSide =
     target !== undefined &&
-    ((ownerId !== null && target.ownerUserId === ownerId) ||
-      target.permissions.has(spacePackagePermission(pkg.type, "deactivate")));
+    target.ownerUserId === null &&
+    target.permissions.has(spacePackagePermission(pkg.type, "deactivate"));
   const authorityFor = (homeSpaceId: string | null): PlacementRemovalAuthority | null =>
     holdsHomeAuthority({ homeSpaceId }, accessible, share)
       ? "home"
@@ -773,7 +770,7 @@ export async function assertPlacementRemovalAccess(
   }
   const tracked = await recordDispatchSpaces(c, [
     ...(authority === "home" && pkg.homeSpaceId ? [pkg.homeSpaceId] : []),
-    ...(targetKind === "space" && target ? [target.id] : []),
+    ...(target ? [target.id] : []),
   ]);
   return {
     pkg,

@@ -27,7 +27,7 @@ export interface IntegrationSectionGrants {
 
 /**
  * The section the rail opens: the one asked for by name where it exists, else the files when the
- * reader does not configure it, else the Authentification (or the Accès asked for).
+ * reader does not configure it, else the Authentification (or the space section asked for).
  */
 export function resolveIntegrationSettingsSection(
   requested: string | null,
@@ -44,9 +44,14 @@ export function resolveIntegrationSettingsSection(
     return requested as IntegrationSettingsSection;
   }
   if (requested === "files" || !canConfigure) return "files";
-  return requested === "access" ? "access" : "authentication";
+  return requested === "access" ? requested : "authentication";
 }
 
+const INTEGRATION_SPACE_SECTIONS = ["authentication", "access"] as const;
+type IntegrationSpaceSection = (typeof INTEGRATION_SPACE_SECTIONS)[number];
+
 /** Whether `section` is set in one space, read from the one the space line names. */
-export const isIntegrationSpaceSection = (section: IntegrationSettingsSection) =>
-  section === "authentication" || section === "access";
+export const isIntegrationSpaceSection = (
+  section: IntegrationSettingsSection,
+): section is IntegrationSpaceSection =>
+  (INTEGRATION_SPACE_SECTIONS as readonly string[]).includes(section);

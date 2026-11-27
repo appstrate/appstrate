@@ -317,7 +317,22 @@ async function killContainer(containerId: string): Promise<void> {
   // the orphan reaper (label `appstrate.managed=true`) is the safety
   // net for sidecar crashes.
   await dockerExec(["rm", "-f", containerId]).catch(() => {});
+  // `rm -f` loses a race it cannot see: closing the MCP client ends the
+  // container's attach stdio, its own `--rm` starts removing it, and a
+  // concurrent `rm -f` fails at once with "removal … already in progress"
+  // while the container is still listed. Wait for the daemon to finish, so
+  // shutdown returns with the run's containers gone rather than going.
+  const deadline = Date.now() + CONTAINER_REMOVAL_WAIT_MS;
+  while (Date.now() < deadline) {
+    const listed = await dockerExec(["ps", "-aq", "--filter", `id=${containerId}`]).catch(() => "");
+    if (!listed.trim()) return;
+    await Bun.sleep(CONTAINER_REMOVAL_POLL_MS);
+  }
 }
+
+/** Bound on waiting for a container's removal at shutdown; the orphan reaper covers the rest. */
+const CONTAINER_REMOVAL_WAIT_MS = 10_000;
+const CONTAINER_REMOVAL_POLL_MS = 100;
 
 /**
  * R8a — reject container destination paths that escape the runner's safe

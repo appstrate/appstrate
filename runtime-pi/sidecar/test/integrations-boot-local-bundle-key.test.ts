@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { noCallReporter } from "./helpers/call-journal.ts";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
@@ -50,7 +51,12 @@ describe("local integration spawn — the bundle is keyed by the integration id"
           version: "1.2.0",
         }),
       ],
-      { platformApiUrl: "http://platform.local", runToken: "run-token", fetchFn },
+      {
+        platformApiUrl: "http://platform.local",
+        runToken: "run-token",
+        fetchFn,
+        callReporter: noCallReporter,
+      },
       undefined,
     );
     try {

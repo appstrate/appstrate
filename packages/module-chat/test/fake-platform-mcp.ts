@@ -38,6 +38,8 @@ export interface FakePlatformMcpOptions {
   getPrompt?: (params: Record<string, unknown>) => unknown;
   /** Replaces the advertised capabilities. */
   capabilities?: Record<string, unknown>;
+  /** Answers `get_me` with this body for a `space_id`; a space it has no body for is a 403. */
+  getMe?: (spaceId: string) => Record<string, unknown> | undefined;
   /** Runs on each message, before it is answered. */
   onMethod?: (
     method: string,
@@ -128,6 +130,19 @@ export function fakePlatformMcp(
       case "prompts/list":
         if (opts.promptsFail) return reply({ error: { code: -32603, message: "boom" } });
         return result({ prompts: opts.prompts ?? [] });
+      case "tools/call": {
+        const args = (message.params?.arguments ?? {}) as { space_id?: string };
+        if (message.params?.name !== "get_me" || !opts.getMe) {
+          return reply({ error: { code: -32602, message: "Unknown tool" } });
+        }
+        const body = args.space_id ? opts.getMe(args.space_id) : undefined;
+        const outcome = body ? { status: 200, body } : { status: 403, body: {} };
+        return result({
+          content: [{ type: "text", text: JSON.stringify(outcome) }],
+          structuredContent: outcome,
+          isError: !body,
+        });
+      }
       case "prompts/get": {
         const answer = opts.getPrompt?.(message.params ?? {}) as { error?: unknown } | undefined;
         if (!answer) return reply({ error: { code: -32602, message: "Invalid prompt name" } });

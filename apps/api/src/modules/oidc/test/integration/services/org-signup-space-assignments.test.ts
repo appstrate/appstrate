@@ -11,6 +11,8 @@ import {
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import { seedSpace, seedSpaceRole } from "../../../../../../test/helpers/seed.ts";
+import { ApiError } from "../../../../../lib/errors.ts";
+import { deleteSpaceRole } from "../../../../../services/space-roles.ts";
 import { createClient, updateClient } from "../../../services/oauth-admin.ts";
 import {
   resolveOrCreateOrgMembership,
@@ -156,5 +158,26 @@ describe("OIDC signup space assignments", () => {
     expect(
       await db.select().from(spaceMembers).where(eq(spaceMembers.userId, target.id)),
     ).toHaveLength(0);
+  });
+  it("holds a custom role its signup policy names: the delete 409s until the policy drops it", async () => {
+    const role = await seedSpaceRole({ orgId: owner.orgId, permissions: ["agents:read"] });
+    const other = await seedSpace({ orgId: owner.orgId });
+    const client = await orgClient({
+      signupRole: "guest",
+      signupSpaceAssignments: [{ spaceId: other.id, custom_role_id: role.id }],
+    });
+
+    const refused = await deleteSpaceRole(owner.orgId, role.id).catch((err: unknown) => err);
+    expect(refused).toBeInstanceOf(ApiError);
+    expect(refused).toMatchObject({
+      status: 409,
+      code: "role_in_use",
+      extensions: { member_count: 0, pending_invitation_count: 0, signup_assignment_count: 1 },
+    });
+
+    await updateClient(client.clientId, {
+      signupSpaceAssignments: [{ spaceId: other.id, preset_role: "viewer" }],
+    });
+    expect((await deleteSpaceRole(owner.orgId, role.id)).id).toBe(role.id);
   });
 });

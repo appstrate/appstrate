@@ -29,7 +29,12 @@ import { inTransaction, mergeSystemAndDb, scopedWhere } from "../../lib/db-helpe
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { ApiError, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
 import { getModelProvider } from "./registry.ts";
-import type { ModelApiShape, OAuthTokenResponse } from "@appstrate/core/sidecar-types";
+import type {
+  CredentialDeathCause,
+  ModelApiShape,
+  OAuthTokenResponse,
+} from "@appstrate/core/sidecar-types";
+import { announceCredentialNeedsReconnection } from "../credential-reconnection.ts";
 import type { ModelProviderDefinition, ModelProviderIdentity } from "@appstrate/core/module";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { getEnv } from "@appstrate/env";
@@ -210,7 +215,7 @@ interface DecryptedModelProviderCredentials {
   accountId?: string;
   /** OAuth only — if true, the connection is dead and apiKey may be stale. */
   needsReconnection?: boolean;
-  /** OAuth only — epoch ms. Refresh worker uses this to schedule renewals. */
+  /** OAuth only — epoch ms. The refresh sweep filters on its denormalized column. */
   expiresAt?: number | null;
 }
 
@@ -521,9 +526,10 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
       label: input.label,
       providerId: input.providerId,
       credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
-      // Mirror `blob.expiresAt` onto the dedicated column so the refresh
-      // worker scan can filter at SQL level. Blob remains source of truth.
+      // Mirror the blob's expiry onto its column so the refresh sweep can
+      // filter at SQL level. Blob remains source of truth.
       expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
+      refreshCheckedAt: new Date(),
       createdBy: input.userId,
       ownerUserId,
     },
@@ -619,7 +625,9 @@ export async function reconnectOAuthCredential(
       .set({
         credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
         expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
+        needsReconnection: false,
         refreshFailureCount: 0,
+        refreshCheckedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(where);
@@ -673,6 +681,7 @@ export async function updateModelProviderCredential(
     const next: ApiKeyBlob = { kind: "api_key", apiKey: patch.apiKey };
     updates.credentialsEncrypted = encryptCredentials(next as unknown as Record<string, unknown>);
     updates.refreshFailureCount = 0;
+    updates.needsReconnection = false;
   }
 
   if (Object.keys(updates).length === 0) return;
@@ -890,7 +899,7 @@ export function deriveCredentialLabel(
 }
 
 /**
- * Persist refreshed OAuth tokens. Called by the refresh worker / on-demand
+ * Persist refreshed OAuth tokens. Called by the refresh sweep / on-demand
  * resolver after a successful upstream refresh. Preserves blob fields the
  * upstream didn't return (e.g. `email`, `accountId` when not rotated).
  */
@@ -903,21 +912,21 @@ interface UpdateOAuthCredentialTokensInput {
 }
 
 /**
- * Shared blob read-modify-write: select → decrypt → apply `mutate` →
- * re-encrypt → update (org-scoped). `mutate` returns the next blob, or `null`
- * to leave a blob of the wrong kind alone; a missing or unreadable row is a
- * no-op. The denormalized `expiresAt` column is mirrored
- * ONLY when the next blob's `expiresAt` differs from the existing one — so
- * callers that don't touch expiry (e.g. {@link markCredentialNeedsReconnection})
- * leave the column untouched. `extraColumns` lets a caller piggyback plain
- * column writes (e.g. the refresh-failure streak reset) onto the same UPDATE.
+ * Shared blob read-modify-write: select → decrypt → apply `mutate` → re-encrypt → update
+ * (org-scoped). `mutate` returns the next blob, or `null` to leave it alone (wrong kind, or
+ * already in the wanted state); a missing or unreadable row is a no-op. Resolves the row's
+ * `providerId` when it wrote, `null` otherwise: the `needsReconnection` flip points announce on a
+ * write only. The denormalized `expiresAt` and `needsReconnection` columns are mirrored only when
+ * the next blob's value differs, so callers that don't touch expiry leave that column alone.
+ * `extraColumns` piggybacks plain column writes (e.g. the refresh-failure streak reset) onto the
+ * same UPDATE.
  */
 async function updateBlob(
   orgId: string,
   id: string,
   mutate: (existing: CredentialsBlob) => CredentialsBlob | null,
   extraColumns?: Partial<typeof modelProviderCredentials.$inferInsert>,
-): Promise<void> {
+): Promise<{ providerId: string } | null> {
   // Optimistic concurrency (compare-and-swap). The read-modify-write below is
   // NOT atomic on its own: a refresh (rotating tokens) and a dead-marking
   // (`markCredentialNeedsReconnection`) can interleave so the last writer
@@ -930,7 +939,10 @@ async function updateBlob(
   const MAX_CAS_ATTEMPTS = 5;
   for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
     const [row] = await db
-      .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
+      .select({
+        credentialsEncrypted: modelProviderCredentials.credentialsEncrypted,
+        providerId: modelProviderCredentials.providerId,
+      })
       .from(modelProviderCredentials)
       .where(
         scopedWhere(modelProviderCredentials, {
@@ -939,17 +951,17 @@ async function updateBlob(
         }),
       )
       .limit(1);
-    if (!row) return;
+    if (!row) return null;
     const existing = decryptBlob(row.credentialsEncrypted, id);
     const next = existing && mutate(existing);
-    if (!existing || !next) return;
+    if (!existing || !next) return null;
     const set: Record<string, unknown> = {
       ...extraColumns,
       credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
       updatedAt: new Date(),
     };
-    // Keep the denormalized cache in lockstep with the blob — the refresh worker
-    // scan filters on this column to skip the per-row decrypt. Only write it when
+    // Keep the denormalized cache in lockstep with the blob — the refresh sweep
+    // filters on this column to skip the per-row decrypt. Only write it when
     // the mutation actually changed the expiry.
     if (
       next.kind === "oauth" &&
@@ -957,6 +969,10 @@ async function updateBlob(
       next.expiresAt !== existing.expiresAt
     ) {
       set.expiresAt = next.expiresAt !== null ? new Date(next.expiresAt) : null;
+    }
+    // Same for the death flag: the sweep skips a flagged row from this column alone.
+    if (!!next.needsReconnection !== !!existing.needsReconnection) {
+      set.needsReconnection = !!next.needsReconnection;
     }
 
     const updated = await db
@@ -979,12 +995,13 @@ async function updateBlob(
       // bust the resolved-model cache so a rotated token or a freshly-dead credential
       // stops being served immediately, not after the TTL.
       clearResolvedModelCache();
-      return;
+      return { providerId: row.providerId };
     }
     // Lost the CAS race (a concurrent writer rotated the ciphertext) — re-read
     // and re-apply against the fresh blob.
   }
   logger.warn("updateBlob: exhausted CAS retries under contention", { id });
+  return null;
 }
 
 export async function updateOAuthCredentialTokens(
@@ -1010,12 +1027,38 @@ export async function updateOAuthCredentialTokens(
     // working refresh proves the credential is healthy again, so the
     // escalation counter must not carry over. See
     // `recordModelCredentialRefreshFailure`.
-    { refreshFailureCount: 0 },
+    { refreshFailureCount: 0, refreshCheckedAt: new Date() },
   );
 }
 
-export async function markCredentialNeedsReconnection(orgId: string, id: string): Promise<void> {
-  await updateBlob(orgId, id, (existing) => ({ ...existing, needsReconnection: true }));
+/**
+ * Flip point of `needsReconnection` for a dead credential: writes only a blob not yet flagged, and
+ * announces only the call whose CAS write did the flip.
+ */
+export async function markCredentialNeedsReconnection(
+  orgId: string,
+  id: string,
+  cause: CredentialDeathCause,
+): Promise<void> {
+  const wrote = await updateBlob(orgId, id, (existing) =>
+    existing.needsReconnection ? null : { ...existing, needsReconnection: true },
+  );
+  if (wrote) announceModelCredentialDeath(orgId, id, wrote.providerId, cause);
+}
+
+function announceModelCredentialDeath(
+  orgId: string,
+  credentialId: string,
+  providerId: string,
+  cause: CredentialDeathCause,
+): void {
+  announceCredentialNeedsReconnection({
+    kind: "model_provider_credential",
+    orgId,
+    credentialId,
+    providerId,
+    cause,
+  });
 }
 
 /**
@@ -1080,7 +1123,7 @@ export async function recordModelCredentialRefreshFailure(
     refreshFailureCount: failures,
     expiresAt: row.expiresAt?.toISOString() ?? null,
   });
-  await markCredentialNeedsReconnection(orgId, id);
+  await markCredentialNeedsReconnection(orgId, id, "refresh_failures_exhausted");
   return { failures, needsReconnection: true };
 }
 
@@ -1110,9 +1153,14 @@ export async function recordModelCredentialRejection(
     credentialId: id,
     failures: updated.failures,
   });
-  await updateBlob(orgId, id, (b) =>
-    b.kind === "api_key" && b.apiKey === rejectedApiKey ? { ...b, needsReconnection: true } : null,
+  // An api key nothing can refresh, rejected upstream: the same cause as an integration's
+  // unrefreshable credential.
+  const wrote = await updateBlob(orgId, id, (b) =>
+    b.kind === "api_key" && b.apiKey === rejectedApiKey && !b.needsReconnection
+      ? { ...b, needsReconnection: true }
+      : null,
   );
+  if (wrote) announceModelCredentialDeath(orgId, id, wrote.providerId, "unrefreshable");
 }
 
 /** A successful upstream call ends the credential's rejection streak. */
@@ -1368,7 +1416,7 @@ export async function loadInferenceCredentials(
   id: string,
 ): Promise<DecryptedModelProviderCredentials | null> {
   // 1) System (env-driven) keys — providerId is declared on the env
-  // entry so downstream code (refresh worker, hooks) resolves the same
+  // entry so downstream code (refresh sweep, hooks) resolves the same
   // registered ModelProviderDefinition it would for a DB-stored
   // credential.
   const systemKey = getSystemModelProviderCredentials().get(id);

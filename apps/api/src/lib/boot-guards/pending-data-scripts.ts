@@ -94,6 +94,36 @@ export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
       "shared with.",
     removeWhen: "the release that drops `package_shares`: delete this entry and its test case.",
   },
+  {
+    script: "scripts/migration/0059-personal-space-audience.ts",
+    after: "0117",
+    // EXACTLY what `0059` fixes: an organization package's row in a personal space outside its
+    // home with no offer to that organization (before its step (a) offers the enabled
+    // integrations), plus the notifications of the retired kind.
+    pending: (database) =>
+      count(
+        database,
+        sql`
+      SELECT (
+        SELECT count(*) FROM space_packages sp
+          JOIN spaces s ON s.id = sp.space_id AND s.owner_user_id IS NOT NULL
+          JOIN packages p ON p.id = sp.package_id
+          WHERE p.org_id IS NOT NULL
+            AND p.org_id = s.org_id
+            AND sp.space_id IS DISTINCT FROM p.home_space_id
+            AND NOT EXISTS (SELECT 1 FROM org_package_offers o
+              WHERE o.org_id = s.org_id AND o.package_id = p.id)
+      )::int + (SELECT count(*) FROM notifications WHERE type = 'package_shared')::int AS pending
+    `,
+      ),
+    consequence:
+      "Personal spaces still run packages the organization never offered (shares and integrations " +
+      "switched on under the previous rule) and notifications of a retired kind remain (migration " +
+      "0117 applied, `0059` not). The API refuses to switch such packages on again, so they must " +
+      "be brought under the rule first.",
+    removeWhen:
+      "the release after the one that ships `0059`: delete this entry, its test case and the README note.",
+  },
 ];
 
 function commandFor(script: string, embeddedDataDir: string | null): string {

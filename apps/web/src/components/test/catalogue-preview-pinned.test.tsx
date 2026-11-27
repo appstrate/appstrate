@@ -35,7 +35,7 @@ const PACKAGE: LibraryPackageItem = {
   home_writable: true,
   home_deletable: true,
   home_shareable: true,
-  offered_to_org: false,
+  org_offer: null,
   org_offerable: false,
   active_by_default: false,
   activation: [],

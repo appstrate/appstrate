@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import type { IntegrationDetailWire } from "../../hooks/use-integrations";
 import { connectionOptionLabel } from "../../lib/connection-set";
-import { SettingsHeading } from "../settings/settings-heading";
-import { OrgDefaultSection } from "./org-default-section";
-import { PinManagementSection } from "./pin-management-section";
 
 const directCallLabels = {
   ready: "integration.defaultConnection.direct.ready",
@@ -24,14 +22,19 @@ const directCallLabels = {
   string
 >;
 
-export function DefaultConnectionSection({
-  packageId,
+type DefaultConnectionDetail = Pick<IntegrationDetailWire, "auths" | "proxy_connection" | "active">;
+
+/**
+ * One line under the Connexions table, for every reader: the account a call naming none uses in
+ * this space (`proxy_connection`), or why there is none. A configurer gets the way to
+ * Paramètres › Gestion des connexions (`editHref`), where the default and the exceptions are set.
+ */
+export function DefaultConnectionLine({
   detail,
-  canConfigure,
+  editHref,
 }: {
-  packageId: string;
-  detail: Pick<IntegrationDetailWire, "auths" | "proxy_connection" | "active">;
-  canConfigure: boolean;
+  detail: DefaultConnectionDetail;
+  editHref?: string;
 }) {
   const { t } = useTranslation("settings");
   const verdict = detail.proxy_connection;
@@ -42,29 +45,25 @@ export function DefaultConnectionSection({
   const selectedKey = verdict.imposed
     ? "integration.defaultConnection.direct.imposedAccount"
     : "integration.defaultConnection.direct.account";
-  const existingOnly = detail.auths.length === 0;
   return (
-    <section
-      id="default-connection"
-      className="mt-8 flex flex-col gap-6"
-      data-testid="default-connection"
+    <p
+      className="text-muted-foreground mt-4 flex flex-wrap items-baseline gap-x-2 text-sm"
+      data-testid="default-connection-verdict"
     >
-      <SettingsHeading
-        className="mb-0"
-        title={t("integration.defaultConnection.title")}
-        description={t("integration.defaultConnection.description")}
-      />
-      <p className="text-sm">
+      <span>
         {status === "ready" && selected
           ? t(selectedKey, { account: connectionOptionLabel(selected) })
           : t(directCallLabels[status])}
-      </p>
-      {canConfigure && (
-        <>
-          <OrgDefaultSection packageId={packageId} existingOnly={existingOnly} />
-          <PinManagementSection packageId={packageId} existingOnly={existingOnly} />
-        </>
+      </span>
+      {editHref && (
+        <Link
+          to={editHref}
+          className="text-primary hover:underline"
+          data-testid="default-connection-edit"
+        >
+          {t("integration.defaultConnection.edit")}
+        </Link>
       )}
-    </section>
+    </p>
   );
 }

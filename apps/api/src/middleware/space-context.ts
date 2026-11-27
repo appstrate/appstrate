@@ -4,11 +4,7 @@ import { markHandler } from "./handler-marker.ts";
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
-import {
-  validateSpaceInOrg,
-  type SpaceAccessSnapshot,
-  type SpaceContextRow,
-} from "../lib/space-lookup.ts";
+import { validateSpaceInOrg, type SpaceContextRow } from "../lib/space-lookup.ts";
 import { setSpaceContextApplier } from "@appstrate/core/permissions";
 import {
   callerOrgRole,
@@ -16,6 +12,7 @@ import {
   callerSpaceAccess,
   callerSpaceAccessById,
   effectiveInSpace,
+  type CallerSpaceAccess,
 } from "../lib/view-as.ts";
 import { resolveSpaceRole } from "../lib/space-role.ts";
 
@@ -113,7 +110,7 @@ function spaceNotFound(spaceId: string): ApiError {
 async function admitSpace(
   c: Context<AppEnv>,
   space: SpaceContextRow,
-  preloaded?: Pick<SpaceAccessSnapshot, "space" | "member" | "personalSpaceRole">,
+  preloaded?: CallerSpaceAccess,
 ): Promise<SpaceContextRow> {
   // An end-user belongs to a space, never to a person (RBAC spec §3.6): a
   // personal space is a 404 for it whatever else it carries.
@@ -143,7 +140,7 @@ async function admitSpace(
     access.space,
     access.member,
     callerPersonalOwnerId(c, space.orgId),
-    access.personalSpaceRole,
+    access.personalDefault,
   );
   if (!ref) {
     if (access.space.visibility === "private") throw spaceNotFound(space.id);
@@ -202,6 +199,20 @@ export function requireSpaceContext() {
     c.set("spaceId", explicitSpace);
     return next();
   }, REQUEST_SPACE_CONTEXT);
+}
+
+/**
+ * Middleware: {@link requireSpaceContext} when the request names a space (a credential pin or
+ * `X-Space-Id`), nothing otherwise — for a route whose answer has an organization-level form.
+ * It carries the same marker: a space the caller names is admitted by the same rule.
+ */
+export function optionalSpaceContext() {
+  const required = requireSpaceContext();
+  return markHandler(
+    (c: Context<AppEnv>, next: Next) =>
+      c.get("spaceId") || c.req.header("X-Space-Id") ? required(c, next) : next(),
+    REQUEST_SPACE_CONTEXT,
+  );
 }
 
 /**

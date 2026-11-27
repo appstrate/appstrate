@@ -7,7 +7,7 @@ description: "A tour of the Appstrate dashboard: navigation, agents, runs, integ
   The redesigned navigation and dashboard described on this page are not yet in the latest release.
 </Callout>
 
-The webapp is the dashboard served by the instance itself, at `http://localhost:3000` on a local install. It uses the same [authentication](/api/authentication) as the REST API (cookie sessions), is available in French and English (change it under **Settings → Account → Appearance**), and shows each person only the pages their role can reach.
+The webapp is the dashboard served by the instance itself, at `http://localhost:3000` on a local install. It uses the same [authentication](/api/authentication) as the REST API (cookie sessions), is available in French and English (change it under **Preferences → Appearance**), and shows each person only the pages their role can reach.
 
 ## First login
 
@@ -22,10 +22,12 @@ Onboarding for a new organization has three steps: create the organization (a de
 
 ## Navigation
 
+The app opens on the chat when your role can write in it, and on the Studio's dashboard otherwise. A role without the Studio opens on the chat whenever it can open it. Signing in, finishing onboarding or accepting an invitation lands on the same page. Switching organization keeps you in the product you were using.
+
 The sidebar has four parts, top to bottom:
 
 - **The organization switcher** at its head. It lists your organizations and, for the one you open, its spaces (the switcher calls them workspaces). Picking one applies the organization and the space together. Each organization and space shows its own icon and color (Preview).
-- **Studio and Chat tabs.** **Studio** is the management console below. **Chat** swaps the sidebar for your conversations and the [assistant](/using-appstrate/chat), with a badge for unread ones. The Chat tab only appears when the chat module is on and your role can write in the chat, or already has conversations to reread.
+- **Chat and Studio tabs.** **Chat** comes first: it swaps the sidebar for your conversations and the [assistant](/using-appstrate/chat), with a badge for unread ones. **Studio** is the management console below; its dashboard is at `/dashboard`. The Chat tab only appears when the chat module is on and your role can write in the chat, or already has conversations to reread.
 - **The Studio navigation.** Two groups, each shown only for the pages your role can reach:
 
 | Group    | Page             | What you do here                                                                                                                                                                                                                                                            |
@@ -40,7 +42,9 @@ The sidebar has four parts, top to bottom:
 
 - **The footer.** **Catalog** (the packages the organization and Appstrate offer, see below), **Settings**, and your user menu.
 
-The user menu opens **Preferences** (the Account section of Settings), the theme, the documentation, a help link and the **API Documentation** (Swagger UI of your instance), and lets you sign out. The bell at the top right of the page shows notifications about your runs, and each page shows a breadcrumb and an **Actions** menu in its header. On a phone the navigation is a sheet opened from the menu button.
+On a computer, getting-started cards sit above **Catalog**: connect a service, create with the chat, invite colleagues, schedule your agents, explore the catalog. They take turns every few seconds and hold still while the pointer is on them; the edge of the card behind shows the next one, and clicking it stops the turns. A card goes away once its step is done or when you close it with its **×**. Closed cards stay closed in that browser. The cards are hidden on a phone and on a short screen.
+
+The user menu opens **Preferences**, the theme, the documentation, a help link and the **API Documentation** (Swagger UI of your instance), and lets you sign out. The bell at the top right of the page shows notifications about your runs, and each page shows a breadcrumb and an **Actions** menu in its header. On a phone the navigation is a sheet opened from the menu button.
 
 Webhooks and End-Users are not in the sidebar: they are in **Settings → Workspace**. In a personal space, End-Users is hidden, and so are the space's Members, API Keys and end-user SSO settings.
 
@@ -52,7 +56,7 @@ An agent's **Settings** tab has a left rail in three groups. **Explore** holds t
 
 Each index page (Agents, Skills, Integrations) has an **Actions** menu in its header: **Browse the catalog**, **Import** and **New agent** (or **New skill**, **New integration**). **New** opens a choice: **Create manually** (a short form, the rest is set in the package's settings), **Build with Chat**, **Import a package** (an `.afps` or `.zip` archive or a GitHub URL), and for an integration first **From an MCP URL** (Preview), which guides you from the address of a remote MCP server to an integration and its tools. A local integration, which carries its own MCP server, is created manually or imported (an `.afps` archive). Packages have a draft you edit, and versions you publish from it.
 
-Agents that use integrations need a **connection** for each. Connect your accounts from the agent's Connections section or from the integration's page. **Settings → Account → My connections** lists them, to edit a connection's label, choose the spaces it is shared with, or disconnect it. A run is refused until each required integration has a working connection, and one whose sign-in expired is flagged for reconnection. When several connections could serve an integration, the run form, the schedule form and the agent's Connections section offer the same connection menu to choose one, and an administrator can impose connections that members cannot remove. See [How integrations work](/integrations/how-integrations-work).
+Agents that use integrations need a **connection** for each. Connect your accounts from the agent's Connections section or from the integration's page. **Preferences → My connections** lists them, to edit a connection's label, choose the spaces it is shared with, or disconnect it. A run is refused until each required integration has a working connection, and one whose sign-in expired is flagged for reconnection. When several connections could serve an integration, the run form, the schedule form and the agent's Connections section offer the same connection menu to choose one, and an administrator can impose connections that members cannot remove. See [How integrations work](/integrations/how-integrations-work).
 
 ## Spaces and the catalog
 
@@ -62,7 +66,7 @@ The **Catalog** (footer of the sidebar) lists what the organization and Appstrat
 
 ## Settings
 
-**Settings** (footer of the sidebar) opens over the page you were on, in three sections. Pages that edit text or values that only make sense together show a save bar with **Save** and **Cancel**, and ask before you leave with unsaved edits (Preview). A single choice, such as a switch, a menu or an icon, applies at once.
+**Settings** (footer of the sidebar) opens over the page you were on, in two sections, and ends on a link to **Preferences**, your own account's settings, which the user menu also opens. Pages that edit text or values that only make sense together show a save bar with **Save** and **Cancel**, and ask before you leave with unsaved edits (Preview). A single choice, such as a switch, a menu or an icon, applies at once.
 
 | Section      | Page             | Purpose                                                                                                                                              |
 | ------------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -82,19 +86,26 @@ The **Catalog** (footer of the sidebar) lists what the organization and Appstrat
 |              | End-user SSO     | OAuth clients for sign-in of your product's end-users, when enabled                                                                                  |
 |              | End-Users        | The customers of your own product, on whose behalf agents run                                                                                        |
 |              | Webhooks         | Signed callbacks for run events                                                                                                                      |
-| Account      | General          | Your email and display name                                                                                                                          |
-|              | Appearance       | Theme and language                                                                                                                                   |
-|              | Security         | Password and linked Google or GitHub accounts                                                                                                        |
-|              | Devices and apps | The MCP clients you authorized and your CLI sessions, which you can revoke                                                                           |
-|              | My connections   | Your connected accounts                                                                                                                              |
-|              | MCP access       | The URL and snippets to connect an [MCP client](/using-appstrate/mcp-clients)                                                                        |
-|              | My model keys    | Your own API keys and subscriptions for the models the organization leaves to each member                                                            |
 
 A tab appears only when the instance has the feature and your role can open it. API keys are bound to one space.
 
+## Preferences
+
+**Preferences** holds your own account. It opens from the user menu and from the foot of **Settings**, with the same save rules, and shows a page only when the instance has the feature and your role can open it.
+
+| Page             | Purpose                                                                                   |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| General          | Your email and display name                                                               |
+| Appearance       | Theme and language                                                                        |
+| Security         | Password and linked Google or GitHub accounts                                             |
+| Devices and apps | The MCP clients you authorized and your CLI sessions, which you can revoke                |
+| My connections   | Your connected accounts                                                                   |
+| MCP access       | The URL and snippets to connect an [MCP client](/using-appstrate/mcp-clients)             |
+| My model keys    | Your own API keys and subscriptions for the models the organization leaves to each member |
+
 Infrastructure configuration (database and Redis URLs, rate limits, enabled modules) is set through [environment variables](/self-hosting/environment-variables) and is not exposed in the webapp.
 
-Account details:
+Preferences details:
 
 - **General.** With SMTP configured, a new email takes effect only after you approve the change from a link sent to your current address.
 - **Appearance.** The language also sets the one used by the sign-in and account emails.

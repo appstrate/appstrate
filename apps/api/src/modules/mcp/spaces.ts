@@ -15,7 +15,12 @@ import { toSpaceRoleWire } from "../../lib/space-role.ts";
 import type { DispatchPin } from "../../lib/internal-dispatch.ts";
 import type { Dispatch, McpSurface } from "./tools.ts";
 import { resolveCallSpace } from "./call-space.ts";
-import { describeSpace, spaceIdRefusal } from "@appstrate/core/mcp-spaces";
+import {
+  describeSpace,
+  spaceActs,
+  spaceIdRefusal,
+  type SpaceAct,
+} from "@appstrate/core/mcp-spaces";
 import type { Refusal } from "./tool-results.ts";
 
 /** A space this connection may act in, with the caller's permissions there. */
@@ -31,6 +36,17 @@ export interface McpSpace {
   surface: McpSurface;
 }
 
+/** The acts `surface` carries, in the vocabulary `get_me` and the chat's context block share. */
+export function mcpSpaceActs(surface: McpSurface): SpaceAct[] {
+  return spaceActs({
+    invoke_operations: surface.invokes,
+    run_agents: surface.runs,
+    inline_runs: surface.composes,
+    call_integration_tools: surface.proxies,
+    create_packages: surface.creates,
+  });
+}
+
 /** The spaces of an org-wide connection, and the one this request entered. */
 export interface OrgWideSpaces {
   reachable: readonly McpSpace[];
@@ -40,7 +56,6 @@ export interface OrgWideSpaces {
   ceiling?: ReadonlySet<string>;
   orgPermissions?: ReadonlySet<string>;
   originSpaceId?: string;
-  spaceChoice?: { spaceId: string; tool: string; operationId?: string };
   beforeAct?: (spaceId: string) => Promise<void>;
 }
 

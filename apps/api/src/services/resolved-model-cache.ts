@@ -72,7 +72,7 @@ export function resolveModelCached(
  * Drop the whole cache — call on a credential or model mutation. An entry depends
  * on up to three rows (model, payer credential, org credential) and the bus carries
  * one key at a time, so there is no cheap by-row eviction. These mutations are rare
- * admin or refresh-worker operations; the cache just rebuilds on next use.
+ * admin edits and credential refreshes; the cache just rebuilds on next use.
  */
 export function clearResolvedModelCache(): void {
   cache.clear();

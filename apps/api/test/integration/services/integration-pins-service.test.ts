@@ -125,6 +125,10 @@ const person = (id: string): ConnectionPrincipal => ({
   actor: { type: "user", id },
 });
 
+/** What `userId` can bind in `scope`, as the agent picker lists it. */
+const accessible = (scope: SpaceScope, userId: string) =>
+  listAccessibleConnections(scope, INTEGRATION, testCaller(person(userId)), null);
+
 const CONNECT: ReadonlySet<Permission> = new Set<Permission>(["integrations:connect"]);
 const GOVERN: ReadonlySet<Permission> = new Set<Permission>([
   "integrations:connect",
@@ -255,7 +259,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       // Another member's private connection — must NOT be visible.
       await seedConnection({ spaceId: scope.spaceId, userId: memberId });
 
-      const list = await listAccessibleConnections(scope, INTEGRATION, person(ctx.user.id));
+      const list = await accessible(scope, ctx.user.id);
       const ids = list.map((c) => c.id);
       expect(ids).toContain(own);
       expect(ids).toContain(sharedByMember);
@@ -281,7 +285,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         shared: true,
       });
 
-      const list = await listAccessibleConnections(scope, INTEGRATION, person(ctx.user.id));
+      const list = await accessible(scope, ctx.user.id);
       expect(list.map((c) => c.id)).toEqual([visible]);
     });
   });
@@ -1510,7 +1514,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         userId: memberId,
         sharedSpaceIds: [other],
       });
-      const list = await listAccessibleConnections(scope, INTEGRATION, person(ctx.user.id));
+      const list = await accessible(scope, ctx.user.id);
       expect(list.map((c) => c.id).sort()).toEqual([mine, sharedHere].sort());
       const byId = new Map(list.map((c) => [c.id, c]));
       // The owner sees every target and the origin; a colleague only "shared here".

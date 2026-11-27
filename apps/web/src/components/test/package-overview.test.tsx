@@ -22,7 +22,7 @@ const AVAILABILITY = {
   via: "home",
   state: "inactive",
   shared_by: null,
-  offered_to_org: false,
+  org_offer: null,
   org_offerable: false,
   active_by_default: false,
 } as const;

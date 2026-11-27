@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { asRecord } from "@appstrate/core/safe-json";
-import { OPERATION_SPACES_META_KEY, SPACE_CHOICE_META_KEY } from "@appstrate/core/mcp-spaces";
+import { OPERATION_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import {
   createTestContext,
@@ -49,7 +49,6 @@ describe("effective target of an MCP operation", () => {
     return {
       data: asRecord(JSON.parse(content[0]!.text)),
       ids: asRecord(envelope.result?._meta)[OPERATION_SPACES_META_KEY],
-      choices: asRecord(envelope.result?._meta)[SPACE_CHOICE_META_KEY],
     };
   }
 
@@ -196,7 +195,6 @@ describe("effective target of an MCP operation", () => {
     for (const query of [{ spaceId: [teamId] }, { all: [true] }]) {
       const result = await invoke("listWebhooks", { query });
       expect(result.data.code).toBe("invalid_argument");
-      expect(result.choices).toBeUndefined();
     }
   });
 
@@ -211,7 +209,7 @@ describe("effective target of an MCP operation", () => {
     ] as const) {
       const missing = await invoke(operation, args);
       expect(missing.data.code).toBe("missing_argument");
-      expect(missing.choices).toContain(teamId);
+      expect(missing.data.accepted).toContain(teamId);
       const selected = await invoke(operation, { ...args, space_id: teamId });
       expect(selected.data).toMatchObject({ status, space: { id: teamId } });
       expect(selected.ids).toEqual([teamId]);
@@ -239,7 +237,6 @@ describe("effective target of an MCP operation", () => {
     ] as const) {
       const unavailable = await invoke(operation, args, token);
       expect(unavailable.data.code).toBe("not_granted");
-      expect(unavailable.choices).toBeUndefined();
     }
   });
 
@@ -271,38 +268,5 @@ describe("effective target of an MCP operation", () => {
     const row = await invoke("getWebhook", { path_params: { id: hook.id } }, token);
     expect(row.data).toMatchObject({ status: 200, space: { id: teamId } });
     expect(row.ids).toEqual([teamId]);
-  });
-
-  it("honors the space chosen on the previous turn, refusing conflicting named and route targets", async () => {
-    const tokenFor = (operationId: string) =>
-      mintMcpLoopbackToken({
-        userId: owner.user.id,
-        name: owner.user.name,
-        email: owner.user.email,
-        orgId: owner.orgId,
-        orgRole: "owner",
-        permissions: ["mcp:read", "mcp:invoke", "agents:read", "space-members:read"],
-        spaceIds: [owner.defaultSpaceId, teamId],
-        originSpaceId: owner.defaultSpaceId,
-        restricted: false,
-        spaceChoice: { tool: "invoke_operation", operationId, spaceId: teamId },
-      });
-    const resumed = await invoke("listSpaceMembers", {}, tokenFor("listSpaceMembers"));
-    expect(resumed.data).toMatchObject({ status: 200, space: { id: teamId } });
-    const token = tokenFor("listAgents");
-    const selected = await invoke("listAgents", {}, token);
-    expect(selected.data).toMatchObject({ status: 200, space: { id: teamId } });
-    expect((await invoke("listAgents", { space_id: owner.defaultSpaceId }, token)).data.code).toBe(
-      "space_mismatch",
-    );
-    expect(
-      (
-        await invoke(
-          "listSpaceMembers",
-          { path_params: { id: owner.defaultSpaceId } },
-          tokenFor("listSpaceMembers"),
-        )
-      ).data.code,
-    ).toBe("space_mismatch");
   });
 });

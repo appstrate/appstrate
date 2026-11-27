@@ -11,7 +11,11 @@
  */
 import { useId, useState, type ComponentProps, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useLandAfterOrgSwitch, useOpenOverlayAfterOrgSwitch } from "../lib/modal-route";
+import {
+  orgSwitchLanding,
+  useLandAfterOrgSwitch,
+  useOpenOverlayAfterOrgSwitch,
+} from "../lib/modal-route";
 import { mayCreateSpaceIn, settingsEntry } from "../lib/switcher-context";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, ChevronsUpDown, Globe, Plus, Settings, Star } from "lucide-react";
@@ -235,17 +239,17 @@ export function OrgSwitcher() {
 
   /**
    * « Tous les espaces » of the explored organization, in one pick. In the current one it keeps
-   * the working space, and a page that does not hold the mode gives way to its home, the
+   * the working space, and a page that does not hold the mode gives way to the Studio's home, the
    * dashboard. In another it switches there (the space resolver enters the space remembered
-   * there, else the default) and lands on that home.
+   * there, else the default) and lands on the home of the product it leaves.
    */
   const chooseOverview = () =>
     requestScopeChange(() => {
       overview.choose(true, exploredId ?? undefined);
       if (isExploringElsewhere && exploredId) {
         switchOrg(exploredId);
-        navigate("/");
-      } else if (!holdsOverview(routeOf(pathname))) navigate("/");
+        navigate(orgSwitchLanding(pathname));
+      } else if (!holdsOverview(routeOf(pathname))) navigate("/dashboard");
       closeSwitcherAndSidebar();
     });
   const maySpaceWrite = mayCreateSpaceIn(orgs, exploredId);

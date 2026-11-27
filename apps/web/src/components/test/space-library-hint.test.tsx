@@ -73,7 +73,8 @@ function spaceFixture(permissions: string[]) {
     personal: false,
     access: "member" as const,
     role: null,
-    permissions,
+    // Every preset opens the Studio, where the library is.
+    permissions: [...new Set(["studio:read", ...permissions])],
     created_by: null,
     createdAt: "2026-09-05T10:00:00Z",
     updatedAt: "2026-09-05T10:00:00Z",

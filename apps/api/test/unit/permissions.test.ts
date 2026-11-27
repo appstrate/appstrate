@@ -34,7 +34,7 @@ function inDefaultSpace(role: Parameters<typeof orgPermissions>[0]): ReadonlySet
     { id: "spc_test", visibility: "open", defaultRole: "operator", ownerUserId: null },
     null,
     "usr_test",
-    "admin",
+    null,
   );
   return effectivePermissions({
     orgPermissions: orgPermissions(role),
@@ -133,7 +133,7 @@ describe("effective permissions in an open space", () => {
       { id: "spc_test", visibility: "closed", defaultRole: "operator", ownerUserId: null },
       { ref: { kind: "preset", preset: "viewer" } },
       "usr_test",
-      "admin",
+      null,
     );
     const perms = effectivePermissions({
       orgPermissions: orgPermissions("guest"),
@@ -244,6 +244,7 @@ describe("the `runner` preset", () => {
     "persistence:read",
     "runs:cancel",
     "runs:read",
+    "studio:read",
   ];
 
   /** The half of a preset's set that core defines, module contributions removed. */
@@ -253,7 +254,7 @@ describe("the `runner` preset", () => {
       .sort();
   }
 
-  it("holds exactly the eight core space-level grants it is defined by", () => {
+  it("holds exactly the nine core space-level grants it is defined by", () => {
     expect(coreGrants("runner")).toEqual(RUNNER_GRANTS);
   });
 
@@ -284,7 +285,7 @@ describe("the `runner` preset", () => {
       { id: "spc_test", visibility: "closed", defaultRole: "operator", ownerUserId: null },
       { ref: { kind: "preset", preset: "runner" } },
       "usr_test",
-      "admin",
+      null,
     );
     const effective = effectivePermissions({
       orgPermissions: orgPermissions("member"),
@@ -444,7 +445,13 @@ describe("implied permissions across a delegation", () => {
       orgPermissions: orgPermissions("member"),
       spacePermissions: spacePermissions({
         kind: "custom",
-        role: { id: "srl_test", key: "custom", name: "Custom", permissions: granted },
+        role: {
+          id: "srl_test",
+          key: "custom",
+          name: "Custom",
+          permissions: granted,
+          showsStudio: false,
+        },
       }),
     });
 
@@ -485,7 +492,13 @@ describe("implied permissions across a delegation", () => {
   it("lets a holder of the wider grant hand out a role naming the narrower one", () => {
     const bundle = (permission: string) => ({
       kind: "custom" as const,
-      role: { id: "srl_test", key: "bundle", name: "Bundle", permissions: [permission] },
+      role: {
+        id: "srl_test",
+        key: "bundle",
+        name: "Bundle",
+        permissions: [permission],
+        showsStudio: false,
+      },
     });
     expect(
       canGrantSpaceRole(customRole("credential-proxy:call"), bundle("credential-proxy:call-own")),

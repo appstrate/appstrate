@@ -365,11 +365,12 @@
 
 /* Without scroll-driven animations (Firefox stable), shadcn's `scroll-fade-*`
    falls back to a static fade on both edges, whatever the scroll position,
-   marking edges that hide nothing. No fade there instead: the row just
-   scrolls. Unlayered on purpose, to beat the utility. Matched on the class
+   marking edges that hide nothing. No fade there instead: the row or the
+   list just scrolls. Unlayered on purpose, to beat the utility. Matched on the class
    substring so a variant (`max-md:scroll-fade-x`) is covered too. */
 @supports not (animation-timeline: scroll()) {
-  [class*="scroll-fade-x"] {
+  [class*="scroll-fade-x"],
+  [class*="scroll-fade-y"] {
     --scroll-fade-mask: none;
   }
 }
@@ -466,4 +467,70 @@
 }
 .skeleton-form :is(button, [role="radio"], [role="checkbox"], [role="switch"]) * {
   visibility: hidden;
+}
+
+/* The chat's working indicator (`ThinkingStatus`), the Appstrate spark: four
+   coral balls in a square. The two balls of one diagonal swap places, then
+   the two of the other diagonal, and so on: one pair moves while the other
+   rests, each swap surging and easing out, so the motion never stops, except
+   under reduced motion, where the balls hold still. The shading makes each
+   ball read as a sphere; the motion stays flat. The loop
+   (2.4s) is two swaps of each pair; the second diagonal runs a quarter loop
+   later. `--spark-phase` (a negative delay) keeps the phase across remounts. */
+.spark {
+  position: relative;
+  width: 0.75rem;
+  height: 0.75rem;
+}
+.spark > i {
+  /* Drawn at 12px and scaled to 3px so the shading stays crisp. */
+  position: absolute;
+  top: calc(50% - 6px);
+  left: calc(50% - 6px);
+  width: 12px;
+  height: 12px;
+  scale: 0.25;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 30%,
+    color-mix(in oklab, var(--spark) 45%, white),
+    var(--spark) 55%,
+    color-mix(in oklab, var(--spark) 70%, black)
+  );
+  translate: var(--x) var(--y);
+  animation: spark-swap 2.4s cubic-bezier(0.65, 0, 0.35, 1) var(--spark-phase, 0s) infinite;
+}
+.spark > i:nth-child(1) {
+  --x: -4px;
+  --y: -4px;
+}
+.spark > i:nth-child(2) {
+  --x: 4px;
+  --y: 4px;
+}
+.spark > i:nth-child(3) {
+  --x: 4px;
+  --y: -4px;
+  animation-delay: calc(var(--spark-phase, 0s) - 1.8s);
+}
+.spark > i:nth-child(4) {
+  --x: -4px;
+  --y: 4px;
+  animation-delay: calc(var(--spark-phase, 0s) - 1.8s);
+}
+@keyframes spark-swap {
+  0%,
+  75%,
+  100% {
+    translate: var(--x) var(--y);
+  }
+  25%,
+  50% {
+    translate: calc(var(--x) * -1) calc(var(--y) * -1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spark > i {
+    animation: none;
+  }
 }
