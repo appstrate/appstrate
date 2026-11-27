@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Withdrawing a placement (#2045 R6, R7) — `DELETE /api/packages/{scope}/{name}/shares/{target}`
+ * Withdrawing a placement (#2045 R6, R7) — `DELETE /api/packages/{scope}/{name}/shares/{spaceId}`
  * and the `keep_in_previous_home: false` move.
  *
  *   1. EITHER SIDE may withdraw: the home's `<type>:share`, or the target
@@ -95,11 +95,11 @@ async function principal(space?: {
   };
 }
 
-const share = (headers: Headers, target: object) =>
+const share = (headers: Headers, spaceId: string) =>
   app.request(`/api/packages/${AGENT}/shares`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ target }),
+    body: JSON.stringify({ spaceId }),
   });
 
 const withdraw = (headers: Headers, target: string) =>
@@ -173,7 +173,7 @@ describe("conversation receipts for package placement", () => {
   }
 
   it("records the authorized home and target before sharing and stops if recording fails", async () => {
-    const body = { target: { kind: "space", spaceId: teamId } };
+    const body = { spaceId: teamId };
     const rejected = await dispatch(shares, "POST", owner(), body, async () => {
       throw forbidden("Conversation could not record the placement");
     });
@@ -190,15 +190,9 @@ describe("conversation receipts for package placement", () => {
 
   it("refuses a tracked placement if the authorization moved to another home before the write", async () => {
     const nextHome = await seedSpace({ orgId: ctx.orgId, name: "New home" });
-    const result = await dispatch(
-      shares,
-      "POST",
-      owner(),
-      { target: { kind: "space", spaceId: teamId } },
-      async () => {
-        await db.update(packages).set({ homeSpaceId: nextHome.id }).where(eq(packages.id, AGENT));
-      },
-    );
+    const result = await dispatch(shares, "POST", owner(), { spaceId: teamId }, async () => {
+      await db.update(packages).set({ homeSpaceId: nextHome.id }).where(eq(packages.id, AGENT));
+    });
     expect(result.response.status).toBe(403);
     expect(result.ids).toEqual([homeId, teamId]);
     expect(await placedIn(teamId)).toBe(false);
@@ -218,7 +212,7 @@ describe("conversation receipts for package placement", () => {
 
 describe("the recipient side may withdraw", () => {
   beforeEach(async () => {
-    expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(201);
+    expect((await share(owner(), teamId)).status).toBe(201);
   });
 
   it("answers 404 for a personal space named by id: it holds no share, whoever asks", async () => {
@@ -239,7 +233,6 @@ describe("the recipient side may withdraw", () => {
     expect(await placedIn(teamId)).toBe(false);
     expect((await unsharedAudit()).after).toEqual({
       spaceId: teamId,
-      targetKind: "space",
       authority: "recipient",
     });
   });
@@ -263,7 +256,7 @@ describe("the recipient side may withdraw", () => {
     const elsewhere = (
       await seedSpace({ orgId: ctx.orgId, name: "Elsewhere", visibility: "closed" })
     ).id;
-    expect((await share(owner(), { kind: "space", spaceId: elsewhere })).status).toBe(201);
+    expect((await share(owner(), elsewhere)).status).toBe(201);
     await expectProblem(await withdraw(teamBuilder.headers(teamId), elsewhere), 403);
     expect(await placedIn(elsewhere)).toBe(true);
   });
@@ -309,7 +302,7 @@ describe("the recipient side learns nothing about an unreachable package", () =>
 
 describe("withdrawing disables the package's schedules in that space", () => {
   beforeEach(async () => {
-    expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(201);
+    expect((await share(owner(), teamId)).status).toBe(201);
   });
 
   it("disables every schedule there, whoever armed it, and nothing elsewhere", async () => {
@@ -396,7 +389,7 @@ describeRequiresRedis("the disabled schedules' jobs", () => {
   });
 
   it("are removed once the withdrawal commits", async () => {
-    expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(201);
+    expect((await share(owner(), teamId)).status).toBe(201);
     const schedule = await createJudgedSchedule(
       { orgId: ctx.orgId, spaceId: teamId },
       AGENT,

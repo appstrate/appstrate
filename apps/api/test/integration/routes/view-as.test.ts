@@ -241,7 +241,7 @@ describe("view as role", () => {
       request("/api/packages/@view-as/shared/shares", {
         view,
         space: owner.defaultSpaceId,
-        body: { target: { kind: "space", spaceId: target.id } },
+        body: { spaceId: target.id },
       });
 
     await expectProblem(await share(persona("member", "preset:viewer")), 403);

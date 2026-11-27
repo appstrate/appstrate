@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Upgrade and client changes
 
+- **BREAKING** A package share names its space directly (#2437). `POST /api/packages/{scope}/{name}/shares` takes `{ "spaceId": "spc_…" }` in place of `{ "target": { "kind": "space", "spaceId" } }` (the old body is a `400`), a `PackageShare` carries `spaceId` and `space_name` in place of `target`, and the withdrawal path parameter is named `spaceId` (`DELETE …/shares/{spaceId}`, same URL). The audit payloads of `package.shared` and `package.unshared` no longer carry `targetKind`.
 - A background sweep now keeps the refresh tokens of idle OAuth2 credentials alive, for integration connections and OAuth model-provider credentials alike (#2411). It runs on every install and needs no setting; mechanics in `docs/architecture/INTEGRATIONS_RUNTIME.md`.
 - `OAUTH_REFRESH_WORKER_ENABLED` is removed, together with the optional model-provider refresh worker it switched on. An `.env` that still sets it is ignored and named by the boot's unread-keys warning; remove the line. That warning now covers a fixed list of platform-owned prefixes (`docs/ENV.md`, « Unread keys »), so removing the last variable of a prefix no longer hides a leftover one.
 - The default of `INTEGRATION_REFRESH_GRACE_SECONDS` goes from 3600 to 259200 (3 days); see `docs/ENV.md`. An explicitly configured value is kept.

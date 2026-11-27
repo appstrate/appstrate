@@ -543,7 +543,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   ]),
   ...rowDecided("`assertPackageShareAccess`: `<type>:share` in the package's home", [
     [["GET", "POST"], "/api/packages/{scope}/{name}/shares"],
-    [["DELETE"], "/api/packages/{scope}/{name}/shares/{target}"],
+    [["DELETE"], "/api/packages/{scope}/{name}/shares/{spaceId}"],
   ]),
   ...rowDecided(
     "`assertPackageOfferAccess`: an owner or admin session, plus `<type>:share` in the package's home",

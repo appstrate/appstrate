@@ -284,7 +284,7 @@ describe("the activation remedy, through every door", () => {
         operation_id: "sharePackage",
         space_id: spaceId,
         path_params: { scope: "@remedy", name: "svc" },
-        body: { target: { kind: "space", spaceId: vitrine } },
+        body: { spaceId: vitrine },
       });
       expect({ spaceId, status: res.status }).toEqual({ spaceId, status: 201 });
       expect(await rowIn(vitrine, INTEGRATION)).toEqual({ enabled: true });
@@ -395,7 +395,7 @@ describe("the activation remedy, through every door", () => {
       invoke(orgEndpoint, headers, {
         operation_id: "revokePackageShare",
         space_id: vitrine,
-        path_params: { scope: "@remedy", name: "svc", target: vitrine },
+        path_params: { scope: "@remedy", name: "svc", spaceId: vitrine },
       });
     // The turn carries no deactivation grant: only the home's `share` can withdraw it.
     expect((await revoke(chat([vitrine]))).status).toBe(403);

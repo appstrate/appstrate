@@ -429,19 +429,14 @@ export const packageHomeSpaceSchema = z
 
 /**
  * Body of `POST /api/packages/{scope}/{name}/shares` (RBAC spec §6.10): a
- * team space the sharer reaches. A person is no target and a personal space
- * takes no share (`personal_space_takes_offers_only`).
+ * team space the sharer reaches. A personal space takes no share
+ * (`personal_space_takes_offers_only`).
  */
-export const shareTargetSchema = z
+export const sharePackageSchema = z
   .object({
-    target: z
-      .object({
-        kind: z.literal("space"),
-        spaceId: z.string().refine(isSpaceId, {
-          message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
-        }),
-      })
-      .strict(),
+    spaceId: z.string().refine(isSpaceId, {
+      message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
+    }),
   })
   .strict();
 
@@ -2072,12 +2067,11 @@ export function createPackagesRouter() {
     const accessible = await placementAccessSpaces(c);
     // Authority before the body is read.
     const pkg = await assertPackageShareAccessForPlacement(c, packageId);
-    const { target } = await readJsonBody(c, shareTargetSchema);
+    const { spaceId } = await readJsonBody(c, sharePackageSchema);
 
     // An unreachable space (someone else's personal space included) is a 404.
-    const destination = accessible.find((space) => space.id === target.spaceId);
-    if (!destination) throw notFound(`Space '${target.spaceId}' not found`);
-    const spaceId = destination.id;
+    const destination = accessible.find((space) => space.id === spaceId);
+    if (!destination) throw notFound(`Space '${spaceId}' not found`);
 
     // `sharePackage` re-decides authority under the locked home and refuses a personal
     // target before anything lands. The row lands ON when the caller holds the activation
@@ -2100,7 +2094,7 @@ export function createPackagesRouter() {
         action: "package.shared",
         resourceType: "package",
         resourceId: packageId,
-        after: { spaceId, targetKind: "space" },
+        after: { spaceId },
       });
       if (enabled) {
         await recordAuditFromContext(c, {
@@ -2135,13 +2129,12 @@ export function createPackagesRouter() {
     return c.json(listResponse(shares.map((share) => ({ object: "package_share", ...share }))));
   });
 
-  // The target is a space id, as the listing published it. Somebody else's
-  // personal space id is no handle here (404, §3.6).
-  router.delete(`/${SCOPED_PACKAGE_ROUTE}/shares/:target`, async (c) => {
+  // Somebody else's personal space id is no handle here (404, §3.6).
+  router.delete(`/${SCOPED_PACKAGE_ROUTE}/shares/:spaceId`, async (c) => {
     const packageId = getItemId(c);
-    const spaceId = c.req.param("target")!;
+    const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
-    assertSpaceId(spaceId, "target");
+    assertSpaceId(spaceId, "spaceId");
 
     const { authorityFor } = await assertPlacementRemovalAccess(c, packageId, spaceId);
     const { authority, disabledScheduleIds } = await revokePackageShare({
@@ -2158,7 +2151,6 @@ export function createPackagesRouter() {
       // Subject as `package.shared` records it; `authority` says which side withdrew.
       after: {
         spaceId,
-        targetKind: "space",
         authority,
         ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
       },

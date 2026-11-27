@@ -21,7 +21,6 @@ import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../../api/errors";
-import type { components } from "../../api/schema";
 import { Modal } from "../modal";
 import { splitPackageRef } from "../../lib/package-paths";
 import { useSpaces } from "../../hooks/use-spaces";
@@ -40,7 +39,6 @@ import { TextSkeleton } from "../loading-skeletons";
 import { RemoveFromSpaceConfirm, type RemovalTarget } from "../remove-from-space-confirm";
 
 /** The subject of one share: a team space. */
-type ShareTarget = components["schemas"]["ShareTarget"];
 
 /** The URL parameter that opens the dialog; its value is the package. */
 export const SHARE_PARAM = "share";
@@ -87,15 +85,12 @@ export function SharePackageDialog({
   const { switchSpace } = useSpaceSwitcher();
   const [target, setTarget] = useState("");
   /** The share the server refused for want of a version, kept to replay it. */
-  const [needsVersion, setNeedsVersion] = useState<ShareTarget | null>(null);
+  const [needsVersion, setNeedsVersion] = useState<string | null>(null);
   /** The placement the user is about to withdraw, pending confirmation. */
   const [removing, setRemoving] = useState<RemovalTarget | null>(null);
 
   /** Subjects already holding a placement, so the picker does not propose a no-op. */
-  const placed = useMemo(
-    () => new Set((shares ?? []).map((entry) => entry.target.spaceId)),
-    [shares],
-  );
+  const placed = useMemo(() => new Set((shares ?? []).map((entry) => entry.spaceId)), [shares]);
 
   // Team spaces only, neither the package's home (already has it) nor one that already holds a placement.
   const destinations = (spaces ?? []).filter(
@@ -116,9 +111,9 @@ export function SharePackageDialog({
     onClose();
   };
 
-  const submit = (subject: ShareTarget) =>
+  const submit = (spaceId: string) =>
     share.mutate(
-      { params: { path: splitPackageRef(packageId) }, body: { target: subject } },
+      { params: { path: splitPackageRef(packageId) }, body: { spaceId } },
       {
         onSuccess: () => {
           setTarget("");
@@ -127,7 +122,7 @@ export function SharePackageDialog({
         onError: (error) => {
           // A missing step, performed by the next panel; every other refusal is a toast.
           if (error instanceof ApiError && error.code === "package_has_no_version") {
-            setNeedsVersion(subject);
+            setNeedsVersion(spaceId);
             return;
           }
           toastError(error);
@@ -185,7 +180,7 @@ export function SharePackageDialog({
             type="button"
             pending={share.isPending}
             disabled={!target}
-            onClick={() => submit({ kind: "space", spaceId: target })}
+            onClick={() => submit(target)}
           >
             {t("packages.shareSubmit")}
           </PendingButton>
@@ -238,8 +233,8 @@ export function SharePackageDialog({
             setRemoving({
               packageId,
               name: splitPackageRef(packageId).name,
-              target: entry.target.spaceId,
-              targetLabel: entry.target.name,
+              target: entry.spaceId,
+              targetLabel: entry.space_name,
             })
           }
         />
@@ -278,13 +273,10 @@ export function ShareList({
       ) : (
         <ul className="divide-y">
           {(shares ?? []).map((entry) => (
-            <li
-              key={entry.target.spaceId}
-              className="flex items-center justify-between gap-2 py-1.5"
-            >
+            <li key={entry.spaceId} className="flex items-center justify-between gap-2 py-1.5">
               <span className="flex min-w-0 items-center gap-2 text-sm">
                 <span className="truncate">
-                  {t("packages.shareWithSpace", { name: entry.target.name })}
+                  {t("packages.shareWithSpace", { name: entry.space_name })}
                 </span>
                 <Badge variant={entry.enabled ? "success" : "pending"}>
                   {entry.enabled

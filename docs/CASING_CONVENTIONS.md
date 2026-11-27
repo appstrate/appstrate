@@ -603,7 +603,7 @@ camelCase: `id`, `createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `lastUsedAt
 
 The snake_case twin of a 4b name is itself a bug, with an enumerated set of exceptions — the OpenAPI gate's `SNAKE_TWIN_EXCEPTIONS`, and nothing generalises from it:
 
-- the package **placement / share** family: `space_id` on `PackagePlacement`, and `user_id` inside `shared_by` on both `PackagePlacement` and `PackageShare`. They sit beside `home_space_id` in the same objects, and two ids of one kind disagreeing inside one object would cost more than either convention buys. Elsewhere in the same family `spaceId` and `userId` stay camelCase: a share's `target` (`ShareTarget` / `ShareTargetView`: `userId`, `spaceId`), `PackageShare.createdAt`, `SpaceAssignment.spaceId` (invitations, OAuth signup policies) and `SpaceSweepResult.spaceId`;
+- the package **placement / share** family: `space_id` on `PackagePlacement`, and `user_id` inside `shared_by` on both `PackagePlacement` and `PackageShare`. They sit beside `home_space_id` in the same objects, and two ids of one kind disagreeing inside one object would cost more than either convention buys. Elsewhere in the same family `spaceId` stays camelCase: `PackageShare.spaceId` and the body of `POST …/shares`, `PackageShare.createdAt`, `SpaceAssignment.spaceId` (invitations, OAuth signup policies) and `SpaceSweepResult.spaceId`;
 - `expires_at` on the OAuth 2.0 token response (`POST /api/auth/oauth2/token`, RFC 6749 wire) and on the internal `IntegrationCredentialsResponse` (snake_case end to end, above).
 
 Rule of thumb: a field qualifies for the camelCase carve-out only if its literal name appears in the list above — never by suffix similarity.

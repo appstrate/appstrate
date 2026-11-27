@@ -4321,7 +4321,7 @@ export interface paths {
         put?: never;
         /**
          * Share a package with a team space
-         * @description Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller holds the type's activation grant in the target and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. The target is a team space the caller can reach (`target: {kind: "space", spaceId}`); a `user` target is a 400. A PERSONAL space is never a target: `409 personal_space_takes_offers_only` (a personal space receives packages only through the organization offer, `PUT …/org-offer`; another member's personal space still answers 404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.
+         * @description Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller holds the type's activation grant in the target and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. The target is a team space the caller can reach (`spaceId`). A PERSONAL space is never a target: `409 personal_space_takes_offers_only` (a personal space receives packages only through the organization offer, `PUT …/org-offer`; another member's personal space still answers 404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.
          */
         post: operations["sharePackage"];
         delete?: never;
@@ -4330,7 +4330,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/packages/{scope}/{name}/shares/{target}": {
+    "/api/packages/{scope}/{name}/shares/{spaceId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -5286,7 +5286,7 @@ export interface paths {
         post?: never;
         /**
          * Deactivate a package in this space
-         * @description Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off. `400` for a system integration bound to the runtime (it serves the run's own tools and stays active in every space).
+         * @description Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{spaceId}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off. `400` for a system integration bound to the runtime (it serves the run's own tools and stays active in every space).
          */
         delete: operations["deactivatePackage"];
         options?: never;
@@ -6067,7 +6067,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
@@ -6689,7 +6689,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** Format: date-time */
             createdAt: string;
@@ -6746,7 +6746,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /**
              * @description The offer to the organization, or `null` when there is none. An offer in either mode PLACES the package in every space of it that holds no `space_packages` row of its own. `on_by_default`: it is also ACTIVE there (a row always wins; `enabled = false` keeps it off). `available`: it is placed and listed but off until the space switches it on (`POST /api/spaces/{id}/packages`).
@@ -7130,7 +7130,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** Format: date-time */
             createdAt: string;
@@ -7176,7 +7176,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** @description The reached spaces where the caller can open this package detail, including inactive placements. */
             read_space_ids: string[];
@@ -7341,7 +7341,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** @description Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space holding a `space_packages` row for it; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404. */
             read_space_ids: string[];
@@ -7382,7 +7382,10 @@ export interface components {
         PackageShare: {
             /** @enum {string} */
             object: "package_share";
-            target: components["schemas"]["ShareTargetView"];
+            /** @description The team space (`spc_…`) the package is placed in. */
+            spaceId: string;
+            /** @description That space's name. */
+            space_name: string;
             /** @description Who placed it there. `null` once that account is gone, once they have left this organization, and on a row a home move left behind. */
             shared_by: {
                 user_id: string;
@@ -7816,7 +7819,7 @@ export interface components {
             name: string | null;
             enabled: boolean;
             /**
-             * @description The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more — or an imposed set (an admin pin, an enforced org default, or that enforcement) was removed while the schedule's own `connection_overrides` set strictly narrowed it (only connections of it, fewer than it holds, `[]` included), which added nothing under it and would bind fewer connections as written without it; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin closed to additions or an enforced org default (`override_outranked`), binding a floor plus additions above the per-integration cap (`connection_set_too_large`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. `package_removed`: the agent's placement in the space was withdrawn (`DELETE /api/packages/{scope}/{name}/shares/{target}`, or a home move leaving the space); re-enabling it fails every fire until the agent is placed there again. Cleared by re-enabling.
+             * @description The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more — or an imposed set (an admin pin, an enforced org default, or that enforcement) was removed while the schedule's own `connection_overrides` set strictly narrowed it (only connections of it, fewer than it holds, `[]` included), which added nothing under it and would bind fewer connections as written without it; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin closed to additions or an enforced org default (`override_outranked`), binding a floor plus additions above the per-integration cap (`connection_set_too_large`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. `package_removed`: the agent's placement in the space was withdrawn (`DELETE /api/packages/{scope}/{name}/shares/{spaceId}`, or a home move leaving the space); re-enabling it fails every fire until the agent is placed there again. Cleared by re-enabling.
              * @enum {string|null}
              */
             disabled_reason: "actor_invalid" | "actor_left_org" | "connection_deleted" | "connection_unshared" | "connection_set_unnamed" | "connection_choice_invalid" | "package_removed" | null;
@@ -7862,22 +7865,6 @@ export interface components {
         ScheduleIdsProblem: components["schemas"]["ProblemDetail"] & {
             /** @description On `model_scheduled`: the enabled schedules the write would leave on that model. */
             schedule_ids?: string[];
-        };
-        /** @description Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only. */
-        ShareTarget: {
-            /** @enum {string} */
-            kind: "space";
-            /** @description Team space id (`spc_…`) the caller can reach. */
-            spaceId: string;
-        };
-        /** @description A share's subject as the server renders it back: a team space. */
-        ShareTargetView: {
-            /** @enum {string} */
-            kind: "space";
-            /** @description Space id (`spc_…`). */
-            spaceId: string;
-            /** @description The space's name. */
-            name: string;
         };
         SmtpConfigView: {
             spaceId: string;
@@ -8016,7 +8003,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        /** @description A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the placement behind it is withdrawn: the share is revoked (`DELETE /api/packages/{scope}/{name}/shares/{target}`), or the package's home moves out of the space with `keep_in_previous_home: false`. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it. */
+        /** @description A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the placement behind it is withdrawn: the share is revoked (`DELETE /api/packages/{scope}/{name}/shares/{spaceId}`), or the package's home moves out of the space with `keep_in_previous_home: false`. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it. */
         SpacePackage: {
             /** @enum {string} */
             object?: "space_package";
@@ -25593,7 +25580,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    target: components["schemas"]["ShareTarget"];
+                    /** @description Team space id (`spc_…`) the caller can reach. A personal space is `409 personal_space_takes_offers_only`: it receives packages through the organization offer (`PUT …/org-offer`) only. */
+                    spaceId: string;
                 };
             };
         };
@@ -25638,8 +25626,8 @@ export interface operations {
                 scope: components["parameters"]["PackageScope"];
                 /** @description Package name */
                 name: components["parameters"]["PackageName"];
-                /** @description The team space id (`spc_…`) exactly as `GET …/shares` published it. A user id is a 400. */
-                target: string;
+                /** @description The team space id (`spc_…`), the `spaceId` of a `GET …/shares` entry. Anything else is a 400. */
+                spaceId: string;
             };
             cookie?: never;
         };

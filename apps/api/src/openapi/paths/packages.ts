@@ -2159,7 +2159,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Share a package with a team space",
       description:
-        "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller holds the type's activation grant in the target and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. The target is a team space the caller can reach (`target: {kind: \"space\", spaceId}`); a `user` target is a 400. A PERSONAL space is never a target: `409 personal_space_takes_offers_only` (a personal space receives packages only through the organization offer, `PUT …/org-offer`; another member's personal space still answers 404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.",
+        "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller holds the type's activation grant in the target and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. The target is a team space the caller can reach (`spaceId`). A PERSONAL space is never a target: `409 personal_space_takes_offers_only` (a personal space receives packages only through the organization offer, `PUT …/org-offer`; another member's personal space still answers 404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2172,8 +2172,14 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["target"],
-              properties: { target: { $ref: "#/components/schemas/ShareTarget" } },
+              required: ["spaceId"],
+              properties: {
+                spaceId: {
+                  type: "string",
+                  description:
+                    "Team space id (`spc_…`) the caller can reach. A personal space is `409 personal_space_takes_offers_only`: it receives packages through the organization offer (`PUT …/org-offer`) only.",
+                },
+              },
               additionalProperties: false,
             },
           },
@@ -2210,7 +2216,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/{scope}/{name}/shares/{target}": {
+  "/api/packages/{scope}/{name}/shares/{spaceId}": {
     delete: {
       operationId: "revokePackageShare",
       tags: ["Packages"],
@@ -2223,12 +2229,12 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
-          name: "target",
+          name: "spaceId",
           in: "path",
           required: true,
           schema: { type: "string" },
           description:
-            "The team space id (`spc_…`) exactly as `GET …/shares` published it. A user id is a 400.",
+            "The team space id (`spc_…`), the `spaceId` of a `GET …/shares` entry. Anything else is a 400.",
         },
       ],
       responses: {

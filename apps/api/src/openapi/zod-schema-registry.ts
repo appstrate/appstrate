@@ -85,7 +85,7 @@ import {
   packageJsonUpdateSchema,
   packageHomeSpaceSchema,
   packageOrgOfferSchema,
-  shareTargetSchema,
+  sharePackageSchema,
   createVersionBodySchema,
 } from "../routes/packages.ts";
 
@@ -539,8 +539,8 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "POST",
     path: "/api/packages/{scope}/{name}/shares",
-    jsonSchema: toJsonSchema(shareTargetSchema),
-    description: "Share a package with a person or a space",
+    jsonSchema: toJsonSchema(sharePackageSchema),
+    description: "Share a package with a team space",
   },
 
   {

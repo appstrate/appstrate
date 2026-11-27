@@ -16,7 +16,8 @@ await i18nReady;
 function share(name: string, enabled: boolean): PackageShare {
   return {
     object: "package_share",
-    target: { kind: "space", spaceId: `spc_${name}`, name },
+    spaceId: `spc_${name}`,
+    space_name: name,
     shared_by: null,
     enabled,
     createdAt: "2026-10-17T10:00:00.000Z",

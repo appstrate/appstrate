@@ -855,7 +855,7 @@ export function createSpacesRouter() {
         action: "package.shared",
         resourceType: "package",
         resourceId: data.packageId,
-        after: { spaceId, targetKind: "space" },
+        after: { spaceId },
       });
     }
     // A repeat is not audited.

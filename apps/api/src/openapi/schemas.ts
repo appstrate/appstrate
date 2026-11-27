@@ -156,7 +156,7 @@ const PACKAGE_HOME_PROPERTIES = {
   home_shareable: {
     type: "boolean",
     description:
-      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
+      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
   },
 } as const;
 
@@ -892,7 +892,7 @@ export const schemas = {
   SpacePackage: {
     type: "object",
     description:
-      "A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the placement behind it is withdrawn: the share is revoked (`DELETE /api/packages/{scope}/{name}/shares/{target}`), or the package's home moves out of the space with `keep_in_previous_home: false`. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it.",
+      "A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the placement behind it is withdrawn: the share is revoked (`DELETE /api/packages/{scope}/{name}/shares/{spaceId}`), or the package's home moves out of the space with `keep_in_previous_home: false`. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it.",
     // The spacePackageSelect projection emits every field unconditionally
     // (package_type/package_source come from the join). `object` is spec-only
     // (not on the SpacePackage shared type). Stored input values and their locks
@@ -2109,7 +2109,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: [...scheduleDisabledReasonValues, null],
         description:
-          "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more — or an imposed set (an admin pin, an enforced org default, or that enforcement) was removed while the schedule's own `connection_overrides` set strictly narrowed it (only connections of it, fewer than it holds, `[]` included), which added nothing under it and would bind fewer connections as written without it; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin closed to additions or an enforced org default (`override_outranked`), binding a floor plus additions above the per-integration cap (`connection_set_too_large`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. `package_removed`: the agent's placement in the space was withdrawn (`DELETE /api/packages/{scope}/{name}/shares/{target}`, or a home move leaving the space); re-enabling it fails every fire until the agent is placed there again. Cleared by re-enabling.",
+          "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more — or an imposed set (an admin pin, an enforced org default, or that enforcement) was removed while the schedule's own `connection_overrides` set strictly narrowed it (only connections of it, fewer than it holds, `[]` included), which added nothing under it and would bind fewer connections as written without it; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin closed to additions or an enforced org default (`override_outranked`), binding a floor plus additions above the per-integration cap (`connection_set_too_large`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. `package_removed`: the agent's placement in the space was withdrawn (`DELETE /api/packages/{scope}/{name}/shares/{spaceId}`, or a home move leaving the space); re-enabling it fails every fire until the agent is placed there again. Cleared by re-enabling.",
       },
       cron_expression: { type: "string" },
       timezone: { type: "string" },
@@ -3408,35 +3408,18 @@ export const schemas = {
       ...PACKAGE_PLACEMENT_STATE_PROPERTIES,
     },
   },
-  ShareTarget: {
-    type: "object",
-    description:
-      "Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only.",
-    required: ["kind", "spaceId"],
-    properties: {
-      kind: { type: "string", enum: ["space"] },
-      spaceId: { type: "string", description: "Team space id (`spc_…`) the caller can reach." },
-    },
-    additionalProperties: false,
-  },
-  ShareTargetView: {
-    type: "object",
-    description: "A share's subject as the server renders it back: a team space.",
-    required: ["kind", "spaceId", "name"],
-    properties: {
-      kind: { type: "string", enum: ["space"] },
-      spaceId: { type: "string", description: "Space id (`spc_…`)." },
-      name: { type: "string", description: "The space's name." },
-    },
-  },
   PackageShare: {
     type: "object",
     description:
       "One entry of a package's AUDIENCE: a space the package is placed in outside its home — its `space_packages` row there. The placement grants READ; whether the space RUNS the package is the row's `enabled`.",
-    required: ["object", "target", "shared_by", "enabled", "createdAt"],
+    required: ["object", "spaceId", "space_name", "shared_by", "enabled", "createdAt"],
     properties: {
       object: { type: "string", enum: ["package_share"] },
-      target: { $ref: "#/components/schemas/ShareTargetView" },
+      spaceId: {
+        type: "string",
+        description: "The team space (`spc_…`) the package is placed in.",
+      },
+      space_name: { type: "string", description: "That space's name." },
       shared_by: {
         type: ["object", "null"],
         description:

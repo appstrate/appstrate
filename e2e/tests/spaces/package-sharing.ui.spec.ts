@@ -453,9 +453,7 @@ test("a draft-only agent is published from the share dialog itself, then shared"
   const shares = await apiClient.get(`/packages/${scope}/${name}/shares`);
   expect(shares.status(), await shares.text()).toBe(200);
   expect(
-    ((await shares.json()).data as Array<{ target: { spaceId?: string } }>).map(
-      (entry) => entry.target.spaceId,
-    ),
+    ((await shares.json()).data as Array<{ spaceId: string }>).map((entry) => entry.spaceId),
   ).toContain(destination.id);
 });
 
@@ -492,7 +490,7 @@ test("a non-admin builder switches a team placement off and on from the space pa
   expect(
     (
       await author.post(`/packages/${scope}/${name}/shares`, {
-        target: { kind: "space", spaceId },
+        spaceId,
       })
     ).status(),
   ).toBe(201);
