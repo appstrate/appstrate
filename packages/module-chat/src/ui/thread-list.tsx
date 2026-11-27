@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Conversation list + the conversation's settings dialog. Plain React Query over
+ * Conversation list + the conversation's « … » menu. Plain React Query over
  * the session REST API (no assistant-ui thread-list runtime): the URL is the
  * single source of truth, selection just navigates. Mutations (rename/delete)
  * invalidate the list; the active conversation's first message invalidates it too
@@ -9,18 +9,19 @@
  *
  * Both pieces are mounted by the HOST SHELL, not by `ChatPage`: the list is the
  * chat's navigation (it sits in the shell sidebar, where Studio's nav sits) and
- * the settings button sits in the shell header's actions. They read the same two
- * contexts `ChatPage` publishes, so the host renders both below its own
+ * the open conversation's « … » sits in the shell header's actions. They read the
+ * same two contexts `ChatPage` publishes, so the host renders both below its own
  * `ChatTransportProvider` / `SelectConversationProvider`, and they share the
- * thread's React Query key, so one request feeds all of it. Renaming happens in
- * the settings dialog only: the header's trail shows the name, it does not edit it.
+ * thread's React Query key, so one request feeds all of it. A row and the header
+ * open the same menu (`ConversationActionsMenu`): the trail shows the name, it does
+ * not edit it.
  *
  * The list renders into the host's sidebar (a `SidebarProvider` must be above
  * it): it IS the chat's navigation, so it uses the same rows, groups and active
  * fill as Studio's, or the two products would not read as one app.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -102,7 +103,7 @@ import {
   READING_TEXT_DENSE_CLASS,
   SEARCH_INPUT_CLASS,
 } from "./phone-text.ts";
-import { useSessions } from "./use-sessions.ts";
+import { useActiveSession, useSessions } from "./use-sessions.ts";
 
 const SEARCH_DEBOUNCE_MS = 250;
 const SEARCH_MAX_LENGTH = 200;
@@ -415,52 +416,7 @@ function ConversationRow({
   canWrite: boolean;
   renderSpaces: RenderSpaces;
 }) {
-  const transport = useChatTransport();
   const select = useSelectConversation();
-  const queryClient = useQueryClient();
-  const [renaming, setRenaming] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // Closing a dialog opened from a row hands the focus back to what opened it.
-  const dialogTrigger = useRef<HTMLButtonElement | null>(null);
-  const menuTrigger = useRef<HTMLButtonElement>(null);
-  const restoreDialogFocus = (event: Event) => {
-    if (dialogTrigger.current?.isConnected) {
-      event.preventDefault();
-      dialogTrigger.current.focus();
-    }
-  };
-  const [deleting, setDeleting] = useState(false);
-  const [deleteFailed, setDeleteFailed] = useState(false);
-  // The « … »'s two items; selecting one closes the menu.
-  const openRename = () => {
-    dialogTrigger.current = menuTrigger.current;
-    setRenaming(true);
-  };
-  const openDelete = () => {
-    dialogTrigger.current = menuTrigger.current;
-    setDeleteFailed(false);
-    setConfirmingDelete(true);
-  };
-
-  // The dialog stays open while the delete is in flight and on failure (it says
-  // so); it closes only once the row is gone.
-  const onDelete = async () => {
-    if (!transport) return;
-    setDeleting(true);
-    setDeleteFailed(false);
-    try {
-      await deleteSession(transport, session.id);
-    } catch {
-      // Not a `useMutation`, so the app's mutation cache does not toast it: say it in the dialog.
-      setDeleteFailed(true);
-      setDeleting(false);
-      return;
-    }
-    setConfirmingDelete(false);
-    setDeleting(false);
-    await dropSessionFromLists(queryClient, session.id);
-    if (active) select?.(null);
-  };
 
   return (
     <SidebarMenuItem>
@@ -526,82 +482,165 @@ function ConversationRow({
         </span>
       </SidebarMenuButton>
       {/* One « … », the same items on every format: always there and a thumb's size on touch,
-          revealed by hover or focus under a mouse. Below `md` the menu is a panel from the bottom,
-          titled by the conversation. */}
+          revealed by hover or focus under a mouse. */}
       {canWrite && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={t("threads.actions.openFor", {
-                title: session.title ?? t("threads.new"),
-              })}
-              ref={menuTrigger}
-              className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-2 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
-            >
-              <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="min-w-40"
-            sheetTitle={session.title ?? t("threads.new")}
+        <ConversationActionsMenu
+          session={session}
+          active={active}
+          t={t}
+          canWrite
+          renderSpaces={renderSpaces}
+        >
+          <button
+            type="button"
+            aria-label={t("threads.actions.openFor", {
+              title: session.title ?? t("threads.new"),
+            })}
+            className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-2 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
           >
-            {/* The spaces it reaches, by name: the row shows their tiles alone, and a touch has
-                no hover to read their `title`. */}
-            <DropdownMenuLabel
-              data-testid="chat-menu-spaces"
-              className={cn(
-                "text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)]",
-                NOTE_TEXT_CLASS,
-              )}
-            >
-              {session.space_ids.length > 0
-                ? renderSpaces(session.space_ids)
-                : t("common:overview.title")}
-            </DropdownMenuLabel>
-            <DropdownMenuItem onSelect={openRename}>
-              <PencilIcon />
-              {t("threads.rename")}
-            </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onSelect={openDelete}>
-              <Trash2Icon />
-              {t("common:btn.delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
+          </button>
+        </ConversationActionsMenu>
       )}
-      <AlertDialog
-        open={confirmingDelete}
-        onOpenChange={(open) => !deleting && setConfirmingDelete(open)}
-      >
-        <AlertDialogContent data-testid="chat-delete-confirm" onCloseAutoFocus={restoreDialogFocus}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("threads.delete.title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("threads.delete.description", { title: session.title ?? t("threads.new") })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {deleteFailed && (
-            <p role="alert" className="text-destructive text-sm">
-              {t("threads.delete.error")}
-            </p>
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * A conversation's « … »: the spaces it reaches, then for a writer « Renommer » and « Supprimer »,
+ * for a row and for the open conversation in the host's header alike. `children` is the trigger. Below
+ * `md` the menu is a panel from the bottom, titled by the conversation. Deleting the `active`
+ * conversation leaves it for a new one.
+ */
+function ConversationActionsMenu({
+  session,
+  active,
+  t,
+  canWrite,
+  renderSpaces,
+  children,
+}: {
+  session: SessionSummary;
+  active: boolean;
+  t: ChatTranslate;
+  /** Renaming and deleting are writes: a reader's menu names the spaces alone. */
+  canWrite: boolean;
+  renderSpaces: RenderSpaces;
+  children: ReactElement;
+}) {
+  const transport = useChatTransport();
+  const select = useSelectConversation();
+  const queryClient = useQueryClient();
+  const [renaming, setRenaming] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFailed, setDeleteFailed] = useState(false);
+  // Closing a dialog opened from the menu hands the focus back to its trigger.
+  const menuTrigger = useRef<HTMLButtonElement>(null);
+  const restoreDialogFocus = (event: Event) => {
+    if (menuTrigger.current?.isConnected) {
+      event.preventDefault();
+      menuTrigger.current.focus();
+    }
+  };
+  const title = session.title ?? t("threads.new");
+
+  // The dialog stays open while the delete is in flight and on failure (it says
+  // so); it closes only once the conversation is gone.
+  const onDelete = async () => {
+    if (!transport) return;
+    setDeleting(true);
+    setDeleteFailed(false);
+    try {
+      await deleteSession(transport, session.id);
+    } catch {
+      // Not a `useMutation`, so the app's mutation cache does not toast it: say it in the dialog.
+      setDeleteFailed(true);
+      setDeleting(false);
+      return;
+    }
+    setConfirmingDelete(false);
+    setDeleting(false);
+    await dropSessionFromLists(queryClient, session.id);
+    if (active) select?.(null);
+  };
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild ref={menuTrigger}>
+          {children}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-40" sheetTitle={title}>
+          {/* The spaces it reaches, by name: a row shows their tiles alone, and a touch has
+              no hover to read their `title`. */}
+          <DropdownMenuLabel
+            data-testid="chat-menu-spaces"
+            className={cn(
+              "text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)]",
+              NOTE_TEXT_CLASS,
+            )}
+          >
+            {session.space_ids.length > 0
+              ? renderSpaces(session.space_ids)
+              : t("common:overview.title")}
+          </DropdownMenuLabel>
+          {canWrite && (
+            <>
+              <DropdownMenuItem onSelect={() => setRenaming(true)}>
+                <PencilIcon />
+                {t("threads.rename")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => {
+                  setDeleteFailed(false);
+                  setConfirmingDelete(true);
+                }}
+              >
+                <Trash2Icon />
+                {t("common:btn.delete")}
+              </DropdownMenuItem>
+            </>
           )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>{t("common:btn.cancel")}</AlertDialogCancel>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={deleting}
-              onClick={() => void onDelete()}
-            >
-              {deleting && <Spinner className="mr-1.5 size-3.5" />}
-              {t("common:btn.delete")}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      {renaming && (
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {canWrite && (
+        <AlertDialog
+          open={confirmingDelete}
+          onOpenChange={(open) => !deleting && setConfirmingDelete(open)}
+        >
+          <AlertDialogContent
+            data-testid="chat-delete-confirm"
+            onCloseAutoFocus={restoreDialogFocus}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("threads.delete.title")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("threads.delete.description", { title })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {deleteFailed && (
+              <p role="alert" className="text-destructive text-sm">
+                {t("threads.delete.error")}
+              </p>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>{t("common:btn.cancel")}</AlertDialogCancel>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={deleting}
+                onClick={() => void onDelete()}
+              >
+                {deleting && <Spinner className="mr-1.5 size-3.5" />}
+                {t("common:btn.delete")}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+      {canWrite && renaming && (
         <ConversationRenameDialog
           session={session}
           t={t}
@@ -609,49 +648,50 @@ function ConversationRow({
           onClose={() => setRenaming(false)}
         />
       )}
-    </SidebarMenuItem>
+    </>
   );
 }
 
 /**
- * « Renommer » for the open conversation, a pencil in the host's header on every format. Renders
- * nothing until the conversation is known, or for a reader (renaming is a write).
+ * The open conversation's « … » in the host's header, on every format: the same menu as its row.
+ * Renders nothing until the conversation is stored. A reader gets it too, with the spaces alone
+ * (renaming and deleting are writes). The conversation is read like the trail reads it, so one
+ * opened outside the list's filter has it too.
  */
-export function ChatConversationRenameButton(props: {
-  activeId: string | null;
-  t: ChatTranslate;
-  can: ChatCan;
-}) {
-  return <ConversationRenameButton key={props.activeId} {...props} />;
-}
-
-function ConversationRenameButton({
+export function ChatConversationMenu({
   activeId,
   t,
   can,
+  renderSpaces,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
+  renderSpaces: RenderSpaces;
 }) {
-  const [open, setOpen] = useState(false);
-  const { data: sessions } = useSessions();
-  const session = activeId ? sessions?.find((s) => s.id === activeId) : undefined;
-  if (!session || !can("chat:write")) return null;
+  const transport = useChatTransport() ?? undefined;
+  const session = useActiveSession(transport, activeId ?? "", activeId !== null);
+  if (!session) return null;
   return (
-    <>
+    <ConversationActionsMenu
+      key={session.id}
+      session={session}
+      active
+      t={t}
+      canWrite={can("chat:write")}
+      renderSpaces={renderSpaces}
+    >
       <Button
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label={t("threads.rename")}
-        title={t("threads.rename")}
-        onClick={() => setOpen(true)}
+        aria-label={t("threads.actions.conversation")}
+        title={t("threads.actions.conversation")}
+        data-testid="chat-conversation-menu"
       >
-        <PencilIcon className="size-4" />
+        <EllipsisIcon className="size-4" />
       </Button>
-      {open && <ConversationRenameDialog session={session} t={t} onClose={() => setOpen(false)} />}
-    </>
+    </ConversationActionsMenu>
   );
 }
 
