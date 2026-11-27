@@ -3,13 +3,10 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Per-browser preferences. One key format, `appstrate:<zone>:<key>[:<scope>]`,
- * one inventory (`LOCAL_STORAGE_KEYS`) and one factory (`createLocalStore`).
- * `localStorage` can be absent (tests), blocked or full, so every access is
- * guarded: a failure only costs the preference, never the click that sets it.
- *
- * Not inventoried, because another library owns them: `i18nextLng` (the language
- * detector's convention) and the emoji picker's own cache.
+ * Per-browser preferences: one key format (`appstrate:<zone>:<key>[:<scope>]`), one inventory
+ * (`LOCAL_STORAGE_KEYS`), one factory (`createLocalStore`). `localStorage` can be absent, blocked
+ * or full, so every access is guarded: a failure costs the preference, never the click.
+ * Not inventoried, owned by a library: `i18nextLng` and the emoji picker's cache.
  */
 
 /** Where a key lives, so one feature's keys sort together in the devtools. */
@@ -139,9 +136,8 @@ export interface LocalStore<T> {
 }
 
 /**
- * The one store factory. Entries with a keyed family (a table, a list, a user) take the sub-key on
- * each call; entries declared `scope: "user"` are bound once with `bind`. Shared by every
- * component and, through the `storage` event, by every tab.
+ * The one store factory. A keyed family (a table, a list) takes its sub-key on each call; a
+ * `scope: "user"` entry is bound once with `bind`. Shared by every component and every tab.
  */
 export function createLocalStore<T>(
   entry: LocalStorageEntry,

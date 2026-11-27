@@ -832,14 +832,7 @@
       "idx": 118,
       "version": "7",
       "when": 1795800609530,
-      "tag": "0118_credential_death_cause_and_personal_preset_role",
-      "breakpoints": true
-    },
-    {
-      "idx": 119,
-      "version": "7",
-      "when": 1795801680962,
-      "tag": "0119_connection_calls_call_identity",
+      "tag": "0118_credential_death_cause_preset_role_and_call_identity",
       "breakpoints": true
     }
   ]

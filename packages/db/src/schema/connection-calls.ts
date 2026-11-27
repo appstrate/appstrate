@@ -33,7 +33,7 @@ import {
  * `called_at` is when the call started and `call_id` its identity (a UUID minted where the call was
  * dispatched: the sidecar for a run's call, the platform otherwise); `(run_id, call_id)` is unique,
  * so a batch the sidecar sends twice is stored once. Both are NULL on a row recorded before
- * migration 0119 (never backfilled); `created_at` is when the row was written, which for a
+ * migration 0118 (never backfilled); `created_at` is when the row was written, which for a
  * sidecar-reported call is later than the call. `request_id` is the `Request-Id` of the platform
  * request that made the call, NULL for a call a run's sidecar reported (the batch's own request
  * is not the call's).
@@ -81,9 +81,8 @@ export const connectionCalls = pgTable(
     index("idx_connection_calls_run_id")
       .on(table.runId, table.id)
       .where(sql`${table.runId} IS NOT NULL`),
-    // NULLs never collide: only a row with a `call_id` is deduplicated.
-    // A run's call recorded once, whatever the sidecar retries. Partial: rows recorded before
-    // migration 0119 carry no call id and stay out of it.
+    // A run's call recorded once, whatever the sidecar retries. Partial: a row recorded before
+    // migration 0118 carries no `call_id` and stays out of it.
     uniqueIndex("uq_connection_calls_run_call")
       .on(table.runId, table.callId)
       .where(sql`${table.callId} IS NOT NULL`),

@@ -43,9 +43,9 @@ export interface ConnectionCallView {
   duration_ms: number;
   /** The platform request that made the call; NULL for a call a run's sidecar reported. */
   request_id: string | null;
-  /** When the call started; NULL on a row recorded before migration 0119. */
+  /** When the call started; NULL on a row recorded before migration 0118. */
   called_at: string | null;
-  /** The call's identity; NULL on a row recorded before migration 0119. */
+  /** The call's identity; NULL on a row recorded before migration 0118. */
   call_id: string | null;
 }
 
@@ -89,7 +89,7 @@ function toView(row: ConnectionCallRow): ConnectionCallView {
   };
 }
 
-/** When the call happened: its start, else the write time of a row recorded before 0119. */
+/** When the call happened: its start, else the write time of a row recorded before 0118. */
 const callTime = sql`coalesce(${connectionCalls.calledAt}, ${connectionCalls.createdAt})`;
 
 async function listCalls(

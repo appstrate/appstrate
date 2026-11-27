@@ -1,5 +1,5 @@
 {
-  "id": "0352b909-1a80-4b10-8b65-1c9580e8bf4f",
+  "id": "6d47628c-224f-4da9-8313-6b69186b4d1c",
   "prevId": "d7dd6498-17a5-416b-8ac7-982c27abdb89",
   "version": "7",
   "dialect": "postgresql",
@@ -7854,7 +7854,19 @@
           "name": "request_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "called_at": {
+          "name": "called_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "call_id": {
+          "name": "call_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -7947,6 +7959,28 @@
           ],
           "isUnique": false,
           "where": "\"connection_calls\".\"run_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_connection_calls_run_call": {
+          "name": "uq_connection_calls_run_call",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "call_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"connection_calls\".\"call_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

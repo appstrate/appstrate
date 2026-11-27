@@ -117,13 +117,13 @@ const connectionCallSchema = {
       type: ["string", "null"],
       format: "date-time",
       description:
-        "When the call started. Null on a call recorded before this field existed (migration 0119), never backfilled.",
+        "When the call started. Null on a call recorded before this field existed (migration 0118), never backfilled.",
     },
     call_id: {
       type: ["string", "null"],
       format: "uuid",
       description:
-        "The call's identity (UUIDv7). Null on a call recorded before this field existed (migration 0119).",
+        "The call's identity (UUIDv7). Null on a call recorded before this field existed (migration 0118).",
     },
   },
 } as const;
@@ -149,7 +149,7 @@ const filterParameters = [
     required: false,
     schema: { type: "string", format: "date-time" },
     description:
-      "Only the calls that started at or after this instant (`called_at`, else `created_at` for a call recorded before 0119; ISO 8601 with an offset).",
+      "Only the calls that started at or after this instant (`called_at`, else `created_at` for a call recorded before 0118; ISO 8601 with an offset).",
   },
   {
     name: "end_date",
@@ -157,7 +157,7 @@ const filterParameters = [
     required: false,
     schema: { type: "string", format: "date-time" },
     description:
-      "Only the calls that started at or before this instant (`called_at`, else `created_at` for a call recorded before 0119; ISO 8601 with an offset).",
+      "Only the calls that started at or before this instant (`called_at`, else `created_at` for a call recorded before 0118; ISO 8601 with an offset).",
   },
   {
     name: "limit",
