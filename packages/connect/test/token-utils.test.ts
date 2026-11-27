@@ -172,7 +172,7 @@ describe("classifyTokenErrorBody", () => {
     ["invalid_grant", "revoked"],
     ["invalid_client", "client_rejected"],
     ["unauthorized_client", "client_rejected"],
-    ["invalid_request", "misconfigured"],
+    ["invalid_request", "transient"],
     ["invalid_scope", "misconfigured"],
     ["unsupported_grant_type", "misconfigured"],
     ["unsupported_response_type", "transient"],

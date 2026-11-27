@@ -13,11 +13,11 @@ import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { flattenName } from "@appstrate/core/mcp-spaces";
 import { getMeResultSchema } from "@appstrate/core/me-context";
 import { logger } from "./logger.ts";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
+import { compare } from "./space-acts.ts";
 
 /** About 2k tokens. */
 export const CHAT_CONTEXT_DETAILS_BUDGET_CHARS = 8_000;
-
-const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** At most this many spaces are read per turn, in the order the caller gives them; the rest are counted. */
 export const MAX_DETAIL_SPACES = 20;
@@ -89,10 +89,7 @@ export interface SpaceDetail {
 
 export type SpaceDetailsClient = Pick<AppstrateMcpClient, "callTool">;
 
-const record = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+const record = (value: unknown): Record<string, unknown> => asRecordOrNull(value) ?? {};
 
 /** The `get_me` payload of one space, or `undefined` when it is not a well-formed 200 answer. */
 function parseDetail(space: DetailSpace, result: unknown): SpaceDetail | undefined {
@@ -171,10 +168,7 @@ export async function readSpaceDetails(
   const read = (space: DetailSpace): Promise<SpaceDetail | undefined> =>
     client.callTool({ name: "get_me", arguments: { space_id: space.id } }, { signal }).then(
       (result) => {
-        const detail = parseDetail(space, result);
-        if (!detail)
-          logger.warn("get_me of a space answered no context — left out", { spaceId: space.id });
-        return detail;
+        return parseDetail(space, result);
       },
       (err: unknown) => {
         logger.warn("get_me of a space failed — left out", {
@@ -417,8 +411,8 @@ function showsEntries(detail: SpaceDetail): boolean {
  */
 export function formatSpaceDetails(
   details: readonly SpaceDetail[],
+  unread: number,
   budget = CHAT_CONTEXT_DETAILS_BUDGET_CHARS,
-  unread = 0,
 ): { text: string; shown: string[] } {
   if (details.length === 0 && unread === 0) return { text: "", shown: [] };
   const unreadLine =

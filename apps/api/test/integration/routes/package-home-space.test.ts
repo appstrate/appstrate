@@ -739,8 +739,9 @@ describe("PUT /api/packages/{scope}/{name}/home", () => {
     expect(moved).toBeDefined();
     expect(moved!.before).toEqual({ homeSpaceId: null, homeOwnerUserId: ctx.user.id });
     // The destination is a team space by construction now, so `after` carries
-    // its id plainly, beside the choice the move made about the space it left.
-    expect(moved!.after).toEqual({ homeSpaceId: alphaId, keptInPreviousHome: true });
+    // its id plainly. A personal space never keeps what it no longer homes, whatever
+    // `keep_in_previous_home` asked: outside its home it takes the offer only.
+    expect(moved!.after).toEqual({ homeSpaceId: alphaId, keptInPreviousHome: false });
   });
 
   it("accepts a no-op PATCH of a package already homed in the caller's personal space", async () => {

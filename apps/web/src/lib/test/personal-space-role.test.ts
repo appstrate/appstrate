@@ -11,7 +11,6 @@ const {
   memberOverrideToSelectValue,
   memberPersonalSpaceRoleRequest,
   orgPersonalSpaceRoleBody,
-  storedRoleToSelectValue,
 } = await import("../personal-space-role.ts");
 
 describe("memberPersonalSpaceRoleRequest", () => {
@@ -39,11 +38,6 @@ describe("select values", () => {
     expect(memberOverrideToSelectValue(null)).toBe(FOLLOW_ORG_DEFAULT);
     expect(memberOverrideToSelectValue({ preset_role: "builder" })).toBe("preset:builder");
     expect(memberOverrideToSelectValue({ custom_role_id: "srl_abc" })).toBe("custom:srl_abc");
-  });
-
-  it("reads the stored org role", () => {
-    expect(storedRoleToSelectValue({ preset_role: "runner" })).toBe("preset:runner");
-    expect(storedRoleToSelectValue({ custom_role_id: "srl_abc" })).toBe("custom:srl_abc");
   });
 
   it("writes the org role as a role reference", () => {

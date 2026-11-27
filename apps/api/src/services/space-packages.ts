@@ -38,7 +38,12 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
-import { listOrgOffers, placementReadFilter, placementRowJoin } from "./package-placement.ts";
+import {
+  isPersonalSpace,
+  listOrgOffers,
+  placementReadFilter,
+  placementRowJoin,
+} from "./package-placement.ts";
 import { getLatestVersionId } from "./package-versions.ts";
 import {
   governingIntegrationManifest,
@@ -132,16 +137,6 @@ export function mayLandInPersonalSpace(
   spaceId: string,
 ): boolean {
   return pkg.homeSpaceId === spaceId || pkg.orgOffer !== null || isActiveByDefault(pkg);
-}
-
-/** Is `spaceId` a personal space (`spaces.owner_user_id` set)? Read inside the caller's transaction. */
-async function isPersonalSpace(tx: Tx, spaceId: string): Promise<boolean> {
-  const [row] = await tx
-    .select({ ownerUserId: spaces.ownerUserId })
-    .from(spaces)
-    .where(eq(spaces.id, spaceId))
-    .limit(1);
-  return row?.ownerUserId != null;
 }
 
 /** 409 `personal_space_takes_offers_only`: the package is not offered to the organization. */
@@ -734,7 +729,7 @@ export function isPublished(row: { source: string | null; latestVersionId: numbe
   return row.source === "system" || row.latestVersionId != null;
 }
 
-const DEFAULT_PACKAGE_HINT_LIMIT = 15;
+export const DEFAULT_PACKAGE_HINT_LIMIT = 15;
 
 /**
  * Options every hint listing takes. `homeWritable` is a callback rather than a

@@ -19,7 +19,7 @@ import { type TokenErrorKind } from "./token-utils.ts";
  *   (`invalid_client` / `unauthorized_client`); only fixing its registration helps.
  *
  * - `"misconfigured"`: the token endpoint refused the request itself
- *   (`invalid_request` / `invalid_scope` / `unsupported_grant_type`); only fixing the
+ *   (`invalid_scope` / `unsupported_grant_type`); only fixing the
  *   integration manifest or client helps.
  *
  * - `"transient"`: anything else (network, 5xx, non-JSON, other 4xx, unknown

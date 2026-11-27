@@ -32,7 +32,6 @@ import {
   missingReadGrants,
   partitionSpacePermissions,
   presetPermissions,
-  SPACE_PRESET_SHOWS_STUDIO,
 } from "../lib/permissions.ts";
 
 /** One entry of `GET /api/roles`; `id` is null for a preset (it has no row). */
@@ -102,7 +101,7 @@ function presetWire(preset: SpaceRolePreset): SpaceRoleWire {
     name: preset,
     description: null,
     permissions: [...presetPermissions(preset)].sort(),
-    shows_studio: SPACE_PRESET_SHOWS_STUDIO[preset],
+    shows_studio: true,
     // A preset is code, not a row: nothing can be stored on it that the
     // deployment does not name.
     unavailable_permissions: [],
@@ -335,9 +334,11 @@ function roleInUse(key: string, counts: RoleHolders): never {
 /**
  * Holders are counted rather than left to `ON DELETE RESTRICT`, whose error
  * names neither the role nor how many people would lose access. The row is locked
- * `FOR UPDATE` first; every writer naming a custom role share-locks it (`lockOrgSpaceRole`), so it
- * is counted (409) or answers 404. A pending invitation, validated outside its insert's
- * transaction, can still slip past; acceptance then skips the vanished role.
+ * `FOR UPDATE` first. A `space_members` insert naming the role holds it `FOR KEY SHARE` until
+ * commit (the explicit `lockOrgSpaceRole`, or the foreign key's own check), so that member is
+ * counted (409) or the role answers 404. A pending invitation or OIDC signup assignment is
+ * counted too; one validated outside its insert's transaction can still slip past, and
+ * acceptance then skips the vanished role.
  */
 export async function deleteSpaceRole(orgId: string, id: string): Promise<SpaceRoleWire> {
   return db.transaction(async (tx) => {

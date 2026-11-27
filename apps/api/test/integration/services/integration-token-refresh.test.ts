@@ -629,13 +629,21 @@ describe("integration refresh-failure escalation", () => {
     expect((await readRow(connId)).refreshFailureCount).toBe(1);
   });
 
+  // Providers also answer `invalid_request` for a dead refresh token: ambiguous, so counted.
+  it("counts an invalid_request refusal toward the streak", async () => {
+    const connId = await seedConn({ expiresAt: new Date(Date.now() - HOUR_MS) });
+    token.setResponse({ error: "invalid_request" }, 400);
+
+    expect(await refresh(connId)).toMatchObject({ status: "retry", cause: "upstream_transient" });
+    expect((await readRow(connId)).refreshFailureCount).toBe(1);
+  });
+
   // A reconnect cannot repair a client the token endpoint refuses: never counted, never flagged,
   // even on a token expired past the grace window with a streak one short of the threshold.
   it.each([
     ["invalid_client", 401],
     ["unauthorized_client", 401],
     ["invalid_scope", 400],
-    ["invalid_request", 400],
     ["unsupported_grant_type", 400],
   ] as const)(
     "a refused client or request (%s) answers retry without counting toward the streak",

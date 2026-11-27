@@ -87,6 +87,7 @@ import {
 import {
   auditSpaceRole,
   exactlyOneRole,
+  spaceRoleAssignmentSchema,
   spaceRoleAssignmentShape,
   toAssignment,
 } from "../lib/space-role-assignment.ts";
@@ -231,8 +232,6 @@ export const addSpaceMemberSchema = exactlyOneRole(
 ).refine((data) => (data.userId !== undefined) !== (data.email !== undefined), {
   message: "Provide exactly one of userId or email",
 });
-
-export const updateSpaceMemberSchema = exactlyOneRole(z.object({ ...spaceRoleAssignmentShape }));
 
 // Neither body carries the agent's stored input values: `PUT
 // /api/agents/{scope}/{name}/input-settings` is their single write path,
@@ -732,7 +731,7 @@ export function createSpacesRouter() {
       const orgId = c.get("orgId");
       const spaceId = c.req.param("id")!;
       const userId = c.req.param("userId")!;
-      const data = await readJsonBody(c, updateSpaceMemberSchema);
+      const data = await readJsonBody(c, spaceRoleAssignmentSchema);
       const assignment = toAssignment(data);
 
       await saveSpaceMember({

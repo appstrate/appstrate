@@ -178,7 +178,8 @@ export async function reconcilePlacementsAfterRehome(
     newHomeSpaceId: string;
     /**
      * The home being left. `keep: true` keeps its row; `keep: false` withdraws
-     * it. A space with no row is withdrawn either way (its schedules go off).
+     * it. A space with no row is withdrawn either way (its schedules go off), and
+     * so is a personal space: outside its home it takes the offer only.
      */
     previousHome: { spaceId: string; keep: boolean };
   },
@@ -190,7 +191,7 @@ export async function reconcilePlacementsAfterRehome(
     .set({ placedByOffer: false })
     .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, newHomeSpaceId)));
   if (previousHome.spaceId === newHomeSpaceId) return [];
-  if (previousHome.keep) {
+  if (previousHome.keep && !(await isPersonalSpace(tx, previousHome.spaceId))) {
     const [row] = await tx
       .select({ packageId: spacePackages.packageId })
       .from(spacePackages)
@@ -204,6 +205,16 @@ export async function reconcilePlacementsAfterRehome(
     if (row) return [];
   }
   return (await withdrawPlacement(tx, packageId, previousHome.spaceId)).disabledScheduleIds;
+}
+
+/** Is `spaceId` a personal space (`spaces.owner_user_id` set)? Read inside the caller's transaction. */
+export async function isPersonalSpace(tx: Tx, spaceId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ ownerUserId: spaces.ownerUserId })
+    .from(spaces)
+    .where(eq(spaces.id, spaceId))
+    .limit(1);
+  return row?.ownerUserId != null;
 }
 
 /**

@@ -149,7 +149,7 @@ const filterParameters = [
     required: false,
     schema: { type: "string", format: "date-time" },
     description:
-      "Only the calls that started at or after this instant (`called_at`, else `created_at` for a call recorded before 0118; ISO 8601 with an offset).",
+      "Only the calls recorded at or after this instant (`createdAt`; ISO 8601 with an offset).",
   },
   {
     name: "end_date",
@@ -157,7 +157,7 @@ const filterParameters = [
     required: false,
     schema: { type: "string", format: "date-time" },
     description:
-      "Only the calls that started at or before this instant (`called_at`, else `created_at` for a call recorded before 0118; ISO 8601 with an offset).",
+      "Only the calls recorded at or before this instant (`createdAt`; ISO 8601 with an offset).",
   },
   {
     name: "limit",

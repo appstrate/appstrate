@@ -2,7 +2,7 @@
 
 /** The credential refresh sweep: which rows a scan claims, and what refreshing a claimed row does. */
 
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
 import { decryptCredentialsToStringMap, encryptCredentials } from "@appstrate/connect";
 import {
@@ -22,6 +22,7 @@ import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import { announced, installDeathSpy, settle, until } from "../../helpers/credential-death-spy.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { createMockOAuthServer } from "../../helpers/oauth-server.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import {
   scanCredentialRefreshes,
@@ -209,6 +210,24 @@ describe("credential refresh sweep — integration connections", () => {
       const row = await readRow(id);
       expect(row.refreshFailureCount).toBe(0);
       expect(row.needsReconnection).toBe(false);
+    });
+
+    it("names a refused OAuth client once per pass, whatever the number of its connections", async () => {
+      await publish();
+      await seedConnection({ expiresInMs: -HOUR });
+      await seedConnection({ expiresInMs: -HOUR, spaceId: null });
+      mockServer.setTokenStatus(401);
+      mockServer.setTokenResponse({ error: "invalid_client" });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(await claimedIntegrations()).toBe(2);
+        const refused = warn.mock.calls.filter(
+          ([message]) => message === "credential_refresh_oauth_client_refused",
+        );
+        expect(refused).toHaveLength(1);
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it("flags the row on invalid_grant and takes it out of the due set", async () => {

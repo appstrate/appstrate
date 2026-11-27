@@ -64,7 +64,6 @@ describe("spaceRoleReferenceSchema (the wire value)", () => {
       orgSettingsWireSchema.parse({ personal_space_role: { custom_role_id: id } })
         .personal_space_role,
     ).toEqual({ custom_role_id: id });
-    expect(orgSettingsWireSchema.parse({}).personal_space_role).toEqual({ preset_role: "admin" });
     expect(orgSettingsWireSchema.safeParse({ personal_space_role: id }).success).toBe(false);
   });
 });

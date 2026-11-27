@@ -47,7 +47,6 @@ import {
   addMemberSchema,
   updateInvitationSchema,
   updateRoleSchema,
-  personalSpaceRoleOverrideSchema,
 } from "../routes/organizations.ts";
 
 // --- Org settings schema (services/organizations.ts) ---
@@ -95,13 +94,13 @@ import {
   createSpaceSchema,
   updateSpaceSchema,
   addSpaceMemberSchema,
-  updateSpaceMemberSchema,
   activatePackageSchema,
   updatePackageSchema,
 } from "../routes/spaces.ts";
 
 // --- Role schemas (routes/roles.ts) ---
 import { createSpaceRoleSchema, updateSpaceRoleSchema } from "../routes/roles.ts";
+import { spaceRoleAssignmentSchema } from "../lib/space-role-assignment.ts";
 
 // --- Run launch schemas (routes/runs.ts) ---
 import { runAgentBodySchema } from "../routes/runs.ts";
@@ -310,7 +309,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "PUT",
     path: "/api/orgs/{orgId}/members/{userId}/personal-space-role",
-    jsonSchema: toJsonSchema(personalSpaceRoleOverrideSchema),
+    jsonSchema: toJsonSchema(spaceRoleAssignmentSchema),
     description: "Set a member's role in their personal space",
   },
   {
@@ -443,7 +442,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "PATCH",
     path: "/api/spaces/{id}/members/{userId}",
-    jsonSchema: toJsonSchema(updateSpaceMemberSchema),
+    jsonSchema: toJsonSchema(spaceRoleAssignmentSchema),
     description: "Change a space member's role",
   },
 

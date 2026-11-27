@@ -58,8 +58,12 @@ const CONFIG_PATH = "/config/config.json";
  */
 const TRANSPILER_CACHE_PATH = "/runtime/.transpiler-cache";
 
-/** Above the sidecar's journal POST timeout (3 s), so a drain that is landing is not cut short. */
-const SIDECAR_STOP_GRACE_MS = 4_000;
+/**
+ * Must exceed `SIDECAR_SIGTERM_GRACE_SECONDS` of `@appstrate/core/sidecar-types` (5 s; the sidecar's
+ * 4 s journal drain deadline plus margins), so a drain that is landing is not cut short. Kept as a
+ * literal: the guest bundle is built standalone and does not pull in core.
+ */
+const SIDECAR_STOP_GRACE_MS = 6_000;
 
 function log(msg: string): void {
   process.stdout.write(`[supervisor] ${msg}\n`);

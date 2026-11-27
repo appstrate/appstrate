@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ToolPresentation`, `PresentationSubject`. `readToolPresentation` reads it, `undefined` when the
   entry is absent or malformed (a result without `call` included). `isLookupTool` tells a tool
   whose calls only look things up: it declares the standard `annotations.readOnlyHint: true`.
-- **`TURN_BUDGET_NOTE_META_KEY`, `turnBudgetNoteBlock`, `isTurnBudgetNoteBlock`,
+- **`turnBudgetNoteBlock`, `isTurnBudgetNoteBlock`,
   `omitTurnBudgetNote`** (`@appstrate/core/chat-turn-metadata`): the chat's model-facing
   turn-budget line (`formatTurnBudgetNote`) is a text block marked
   `_meta["dev.appstrate/turn-budget"]` (audience `assistant`); readers recognise it by the marker,
@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `spaces[].can` and the chat's context block. `SPACE_ACTS` lists them.
 - **`@appstrate/core/me-context`**: `meContextSchema` (the body of `GET /api/me/context`, each
   capped list one `{ data, truncated, total }` envelope), `getMeResultSchema` (the MCP `get_me`
-  result, which declares it as its `outputSchema`), types `MeContext`, `GetMeResult`. Objects are
+  result, which declares it as its `outputSchema`). Objects are
   loose: a field the server adds does not fail a reader.
 - **`flattenName`** (`@appstrate/core/mcp-spaces`): a name made one bounded line (control and
   format characters removed, whitespace runs collapsed). `describeSpace` flattens the space name
@@ -56,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`CALL_JOURNAL_DRAIN_DEADLINE_MS`, `CALL_JOURNAL_FLUSH_TIMEOUT_MS`,
   `SIDECAR_SIGTERM_GRACE_SECONDS`** (`@appstrate/core/sidecar-types`): the three bounds of a run's
   call-journal drain, derived one from another (drain deadline < flush timeout < SIGTERM grace).
-  `IntegrationCallRecord` gains the required `call_id` (UUIDv7) and `started_at` (RFC 3339).
+  A sidecar call record carries the required `call_id` (UUIDv7) and `started_at` (RFC 3339).
 
 ### Removed
 

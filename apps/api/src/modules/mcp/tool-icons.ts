@@ -7,6 +7,7 @@
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { parseIcon } from "@appstrate/core/appearance";
+import { escapeHtml } from "@appstrate/core/html";
 import type { PresentationIcon } from "@appstrate/core/mcp-presentation";
 import type { McpToolName } from "./tools.ts";
 
@@ -76,7 +77,7 @@ export function manifestIcons(value: unknown): PresentationIcon[] | undefined {
       return [{ src: `${ICONIFY_SVG_BASE}/${prefix}/${name}.svg`, mimeType: "image/svg+xml" }];
     }
     case "emoji": {
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><text x="12" y="12" font-size="18" text-anchor="middle" dominant-baseline="central">${icon.emoji}</text></svg>`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><text x="12" y="12" font-size="18" text-anchor="middle" dominant-baseline="central">${escapeHtml(icon.emoji)}</text></svg>`;
       return [
         {
           src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,

@@ -3,7 +3,9 @@
 /**
  * A conversation's tool calls, for the context panel, in order: pure, like `conversationStats`. It
  * reads the messages the open chat holds (`live-conversation.ts`), the turn in flight included.
- * What counts as a lookup lives here too, for the panel and the thread's activity group.
+ * Two notions of lookup live here, on purpose: the thread folds the calls the engine stamped before
+ * they ran ({@link activityGroupOf}), so its cards never move when a result arrives; the panel's
+ * count ({@link isPanelLookup}) also takes the reads presented once their result landed.
  */
 
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
@@ -34,7 +36,7 @@ export interface ConversationToolCall {
   error?: string;
   /** How long the tool ran, as the engine measured it. Absent while it runs. */
   durationMs?: number;
-  /** A lookup ({@link isLookupCall}): counted, kept apart from the actions. False once it failed. */
+  /** A lookup by the panel's count ({@link isPanelLookup}), kept apart from the actions. False once it failed. */
   lookup: boolean;
   /** The space the call acted in, stamped on it by the chat. */
   spaceId?: string;
@@ -100,8 +102,8 @@ export function endsFolded(parts: readonly GroupablePart[]): boolean {
   return lookups >= FOLD_AT;
 }
 
-/** A lookup, unless it failed: a stamped one, or presented as a read once its result landed. */
-export function isLookupCall(
+/** The panel's lookup, unless it failed: a stamped call, or one presented as a read once its result landed. */
+export function isPanelLookup(
   callMetadata: unknown,
   presentation: ToolPresentation | undefined,
   status: ConversationToolStatus,
@@ -112,14 +114,14 @@ export function isLookupCall(
   return method === "GET" || method === "HEAD";
 }
 
-function statusOf(part: ToolPart, output: unknown, turnRuns: boolean): ConversationToolStatus {
+function statusOf(part: ToolPart, turnRuns: boolean): ConversationToolStatus {
   switch (part.state) {
     case "output-denied":
       return "denied";
     case "output-available":
       // A preliminary result (a run's progress) is not the call's outcome yet.
       if (part.preliminary === true) return turnRuns ? "running" : "error";
-      return deriveToolPhase({ status: { type: "complete" }, result: output }) === "error"
+      return deriveToolPhase({ status: { type: "complete" }, result: part.output }) === "error"
         ? "error"
         : "success";
     case "output-error":
@@ -149,7 +151,7 @@ function messageCalls(message: UIMessage, turn: number, turnRuns: boolean): Conv
     if (!isToolUIPart(part)) continue;
     const toolName = getToolName(part);
     const output = "output" in part ? unwrapToolResult(part.output) : undefined;
-    const status = statusOf(part, output, turnRuns);
+    const status = statusOf(part, turnRuns);
     const error =
       status !== "error"
         ? undefined
@@ -173,7 +175,7 @@ function messageCalls(message: UIMessage, turn: number, turnRuns: boolean): Conv
       status,
       ...(error ? { error } : {}),
       ...(typeof durationMs === "number" ? { durationMs } : {}),
-      lookup: isLookupCall(part.callProviderMetadata, presentation, status),
+      lookup: isPanelLookup(part.callProviderMetadata, presentation, status),
       ...(spaceId ? { spaceId } : {}),
       ...(runId ? { runId } : {}),
     });

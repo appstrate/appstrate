@@ -80,7 +80,7 @@ function ownTarget(toolName: string, input: unknown): { Icon: LucideIcon; target
   }
 }
 
-/** The engine's stamp on a call's outcome, failed or not (`ui-stream-mapper.ts`); `null` while it runs. */
+/** The engine's stamp on a call's outcome, failed or not (`ui-stream-mapper.ts`); `undefined` while it runs. */
 export function callOutcome(part: object | undefined): AppstrateToolPartMetadata | undefined {
   const metadata =
     part && "resultProviderMetadata" in part ? part.resultProviderMetadata : undefined;

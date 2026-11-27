@@ -998,7 +998,9 @@ function AssistantParts() {
           case "reasoning":
             return <ReasoningText />;
           case "tool-call": {
-            const Card = TOOL_CARDS[part.toolName] ?? ToolFallbackCard;
+            const Card = Object.prototype.hasOwnProperty.call(TOOL_CARDS, part.toolName)
+              ? (TOOL_CARDS[part.toolName] ?? ToolFallbackCard)
+              : ToolFallbackCard;
             return <Card {...part} stored={stored.get(part.toolCallId)} />;
           }
           // While the message runs and its last part is neither text nor reasoning.

@@ -7,10 +7,10 @@
  *   set -a && . ./.env && set +a && \
  *     bun scripts/migration/0058-model-credential-needs-reconnection-mirror.ts [--apply]
  *
- * The column mirrors `blob.needsReconnection` (the background refresh sweep skips a flagged row
- * without decrypting it) and `updateBlob` keeps it in step on every write. It was added defaulting
- * to false, so a credential flagged dead before it existed still reads false: the sweep would
- * claim it and its job would end on a 410. This copies the blob's flag into the column.
+ * The column is the one authority on whether a credential is dead (the background refresh sweep
+ * skips a flagged row without decrypting it). It was added defaulting to false, so a credential
+ * whose blob carried the flag before the column existed still reads false: the sweep would claim
+ * it and its job would end on a 410. This copies that blob flag into the column.
  *
  * Run in the release window that ships the column. Dry run by default: lists the rows to flag,
  * writes nothing. With `--apply`, `needs_reconnection = true` on exactly those rows, in one

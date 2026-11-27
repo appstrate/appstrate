@@ -130,8 +130,8 @@ export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
     script: "scripts/migration/0059-personal-space-audience.ts",
     after: "0117",
     // EXACTLY what `0059` fixes: an organization package's row in a personal space outside its
-    // home with no offer to that organization (before its step (a) offers the enabled
-    // integrations), plus the notifications of the retired kind.
+    // home that no offer to that organization keeps (none, or a row that is not a decision about
+    // it), plus the notifications of the retired kind.
     pending: (database) =>
       count(
         database,
@@ -143,8 +143,8 @@ export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
           WHERE p.org_id IS NOT NULL
             AND p.org_id = s.org_id
             AND sp.space_id IS DISTINCT FROM p.home_space_id
-            AND NOT EXISTS (SELECT 1 FROM org_package_offers o
-              WHERE o.org_id = s.org_id AND o.package_id = p.id)
+            AND (sp.placed_by_offer = false OR NOT EXISTS (SELECT 1 FROM org_package_offers o
+              WHERE o.org_id = s.org_id AND o.package_id = p.id))
       )::int + (SELECT count(*) FROM notifications WHERE type = 'package_shared')::int AS pending
     `,
       ),
@@ -154,7 +154,8 @@ export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
       "0117 applied, `0059` not). The API refuses to switch such packages on again, so they must " +
       "be brought under the rule first.",
     removeWhen:
-      "the release after the one that ships `0059`: delete this entry, its test case and the README note.",
+      "the release after the one that ships `0059`: delete this entry, its test case and the README note, " +
+      "and add the drizzle migration that validates `notifications_type_valid` (a fresh install never ran `0059`).",
   },
   {
     script: "scripts/migration/0060-personal-space-preset-role.ts",

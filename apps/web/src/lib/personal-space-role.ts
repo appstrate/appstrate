@@ -15,13 +15,6 @@ type OrgMember = components["schemas"]["OrgMember"];
 /** The select value of « selon l'organisation »: no override of the member's own. */
 export const FOLLOW_ORG_DEFAULT = "org-default";
 
-/** The org setting is a role reference; a select carries `preset:<key>` / `custom:<id>`. */
-export function storedRoleToSelectValue(
-  stored: components["schemas"]["OrgSettings"]["personal_space_role"],
-): string {
-  return spaceRoleValue(stored);
-}
-
 /**
  * What « selon l'organisation » resolves to for a member (`personal_space_default_role`, guest cap
  * applied), named as the role selects name it, or said invalid when it names no role.
@@ -48,10 +41,7 @@ function spaceRoleReference(
 
 /** What a member's own override reads as in the select. */
 export function memberOverrideToSelectValue(role: OrgMember["personal_space_role"]): string {
-  if (!role) return FOLLOW_ORG_DEFAULT;
-  return "preset_role" in role
-    ? spaceRoleValue({ preset_role: role.preset_role })
-    : spaceRoleValue({ custom_role_id: role.custom_role_id });
+  return role ? spaceRoleValue(role) : FOLLOW_ORG_DEFAULT;
 }
 
 export type MemberPersonalSpaceRoleRequest =

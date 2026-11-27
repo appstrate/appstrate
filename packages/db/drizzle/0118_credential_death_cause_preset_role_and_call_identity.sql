@@ -21,8 +21,7 @@
 -- see 0041's header): it takes SHARE on `connection_calls`, blocking the journal's INSERTs until the
 -- batch commits. It is partial on `call_id IS NOT NULL`, so it indexes no existing row but still
 -- scans the whole table once; `connection_calls` has no retention (#1945), so the scan scales with
--- its row count. Release instruction: time it with 0116's two builds on a restored production dump
--- and size the deploy window on the total. Every column change is catalog-only (no rewrite).
+-- its row count. Every column change is catalog-only (no rewrite).
 ALTER TABLE "organizations" DROP CONSTRAINT "organizations_personal_space_role_preset";--> statement-breakpoint
 ALTER TABLE "organizations" DROP CONSTRAINT "organizations_personal_space_role_one_shape";--> statement-breakpoint
 ALTER TABLE "model_provider_credentials" ADD COLUMN "needs_reconnection_cause" text;--> statement-breakpoint

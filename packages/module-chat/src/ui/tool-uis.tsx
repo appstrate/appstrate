@@ -46,14 +46,13 @@ import {
   extractRunAndWaitAuthOffers,
   isStartedRunResult,
 } from "./auth-offer.ts";
-import { asRecordOrNull } from "@appstrate/core/safe-json";
 import {
   packageCreatedByImport,
   packageCreatedByOperation,
   packagePageHref,
   type CreatedPackage,
 } from "./package-created.ts";
-import { showCall } from "./tool-presentation.ts";
+import { callOutcome, showCall } from "./tool-presentation.ts";
 import { cardSpaceOf, type StoredResult } from "./use-call-presentation.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
 import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
@@ -73,16 +72,6 @@ import {
  * card (button + auto-resume on completion — see oauth-connect-card).
  */
 const INITIATE_CONNECT_OP = "initiateIntegrationConnect";
-
-// assistant-stream ToolCallTiming = { startedAt, completedAt? } (epoch ms;
-// completedAt absent while running).
-function readDurationMs(timing: unknown): number | undefined {
-  const t = asRecordOrNull(timing);
-  if (t && typeof t.startedAt === "number" && typeof t.completedAt === "number") {
-    return t.completedAt - t.startedAt;
-  }
-  return undefined;
-}
 
 /**
  * The small red cross of a failed call, the only red its row keeps. Given a `label` it is an image
@@ -137,7 +126,7 @@ export function ToolCallCard({
   result,
   isError,
   toolCallId,
-  timing,
+  stored,
   spaceId,
   footer,
 }: {
@@ -154,7 +143,8 @@ export function ToolCallCard({
   result: unknown;
   isError?: boolean;
   toolCallId: string;
-  timing?: unknown;
+  /** The call's stored outcome stamp: where its duration is read. */
+  stored?: StoredResult | undefined;
   /** Where the call acted: the space stamped on it. */
   spaceId?: string;
   /** Under the header, e.g. the link to the package the call created. */
@@ -163,12 +153,11 @@ export function ToolCallCard({
   const { t, lang } = useChatHost();
   const anchor = useRevealAnchor(toolCallId);
   const [open, setOpen] = React.useState(false);
-  // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on
-  // every render of this card — and during a stream the thread re-renders per
-  // chunk, so a tool-heavy conversation paid it once per card per frame.
+  // `unwrapToolResult` JSON-parses the tool payload; memoized because the thread re-renders per
+  // stream chunk.
   const unwrapped = React.useMemo(() => unwrapToolResult(result), [result]);
   const status = httpStatusOf(unwrapped);
-  const durationMs = readDurationMs(timing);
+  const durationMs = callOutcome(stored)?.durationMs;
   const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
   const meta = definedEntries({
     tool_call_id: toolCallId,
@@ -288,7 +277,7 @@ function RunLaunchCard(props: ToolCardProps): React.ReactNode {
     tool_call_id: props.toolCallId,
     is_error: props.isError,
     http_status: httpStatusOf(unwrapped),
-    duration_ms: readDurationMs(props.timing),
+    duration_ms: callOutcome(props.stored)?.durationMs,
   });
   const agentLabel = extractAgentLabel(props.args);
   const phase = deriveToolPhase(props);
@@ -385,7 +374,7 @@ export function InvokeOperationTool(props: ToolCardProps) {
       result={result}
       isError={props.isError}
       toolCallId={props.toolCallId}
-      timing={props.timing}
+      stored={props.stored}
       spaceId={spaceId}
       footer={
         created ? (
@@ -447,7 +436,7 @@ export function ImportPackageFileTool(props: ToolCardProps) {
       result={props.result}
       isError={props.isError}
       toolCallId={props.toolCallId}
-      timing={props.timing}
+      stored={props.stored}
       spaceId={spaceId}
       footer={
         created ? (
@@ -477,7 +466,7 @@ export function SearchTool(props: ToolCardProps) {
       result={props.result}
       isError={props.isError}
       toolCallId={props.toolCallId}
-      timing={props.timing}
+      stored={props.stored}
       spaceId={cardSpaceOf(props)}
     />
   );

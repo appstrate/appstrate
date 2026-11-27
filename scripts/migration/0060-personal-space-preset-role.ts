@@ -21,12 +21,12 @@
 import { parseArgs } from "node:util";
 import { sql } from "drizzle-orm";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { exitUnlessDatabaseNamed } from "./lib/database-target.ts";
+import { describeDatabaseTarget, exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 class DryRunRollback extends Error {}
 
 export interface PersonalSpacePresetRole {
-  /** Organizations whose key was moved, with the column's new value (`null`: dropped, not a usable preset). */
+  /** Organizations whose key was moved, with the column's new value (`null`: a custom role is named, which wins). */
   moved: { orgId: string; presetRole: string | null }[];
 }
 
@@ -37,12 +37,7 @@ export async function runPersonalSpacePresetRole(options: {
   const { apply, out } = options;
   // Imported here: `@appstrate/db/client` opens its database on import, after the entry point's guard.
   const { db, toRows } = await import("@appstrate/db/client");
-  const [target] = toRows<{ name: string; addr: string | null; port: number | null }>(
-    await db.execute(
-      "SELECT current_database() AS name, inet_server_addr()::text AS addr, inet_server_port() AS port",
-    ),
-  );
-  out(`database: ${target!.name} at ${target!.addr ?? "local socket"}:${target!.port ?? "-"}`);
+  out(await describeDatabaseTarget());
 
   const result: PersonalSpacePresetRole = { moved: [] };
   try {
@@ -53,10 +48,7 @@ export async function runPersonalSpacePresetRole(options: {
       const rows = toRows<{ id: string; preset_role: string | null }>(
         await tx.execute(sql`UPDATE organizations SET
             personal_space_preset_role = CASE
-              WHEN personal_space_role_id IS NULL
-                AND org_settings ->> 'personal_space_role'
-                  IN ('admin', 'builder', 'operator', 'runner', 'viewer')
-              THEN org_settings ->> 'personal_space_role'
+              WHEN personal_space_role_id IS NULL THEN org_settings ->> 'personal_space_role'
               ELSE personal_space_preset_role
             END,
             org_settings = org_settings - 'personal_space_role'

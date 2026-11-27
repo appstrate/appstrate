@@ -51,8 +51,8 @@ export interface ConnectionCall {
 }
 
 /** Who called, as the journal records it: read from the request by {@link proxyCaller} alone. */
-/** A platform request always has its Request-Id: only a sidecar-reported row has none. */
 export type ProxyCaller = Pick<ConnectionCall, "apiKeyId" | "authMethod" | "chatSessionId"> & {
+  /** A platform request always has its Request-Id: only a sidecar-reported row has none. */
   requestId: string;
 };
 

@@ -7,7 +7,7 @@
  * whatever the connection. Newest first, keyset-paginated on the row id.
  */
 
-import { and, desc, eq, gte, lt, lte, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, lt, lte, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   connectionCalls,
@@ -89,9 +89,6 @@ function toView(row: ConnectionCallRow): ConnectionCallView {
   };
 }
 
-/** When the call happened: its start, else the write time of a row recorded before 0118. */
-const callTime = sql`coalesce(${connectionCalls.calledAt}, ${connectionCalls.createdAt})`;
-
 async function listCalls(
   reach: SQL | undefined,
   filters: ConnectionCallFilters,
@@ -106,8 +103,8 @@ async function listCalls(
         filters.connectionId ? eq(connectionCalls.connectionId, filters.connectionId) : undefined,
         filters.actorId ? eq(connectionCalls.actorId, filters.actorId) : undefined,
         filters.runId ? eq(connectionCalls.runId, filters.runId) : undefined,
-        filters.startDate ? gte(callTime, filters.startDate.toISOString()) : undefined,
-        filters.endDate ? lte(callTime, filters.endDate.toISOString()) : undefined,
+        filters.startDate ? gte(connectionCalls.createdAt, filters.startDate) : undefined,
+        filters.endDate ? lte(connectionCalls.createdAt, filters.endDate) : undefined,
         page.startingAfter !== undefined ? lt(connectionCalls.id, page.startingAfter) : undefined,
       ),
     )

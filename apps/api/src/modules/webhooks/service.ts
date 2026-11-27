@@ -609,18 +609,19 @@ async function getDeliveryQueue(): Promise<JobQueue<DeliveryJobData>> {
 }
 
 /**
- * Dispatch webhook events for a run status change.
- * Called from the run pipeline after status transitions.
+ * Queue a delivery of `eventType` to every matching webhook. `subject` is the event's `data.object`
+ * (a run, a run attempt, a credential…): the caller sets its `object` discriminator, which defaults
+ * to `run`.
  *
  * Fires both **org-level** webhooks (pinned to the org, `space_id IS NULL`)
- * and **space-level** webhooks pinned to the run's space. A `null` `spaceId` (an event with no
+ * and **space-level** webhooks pinned to the event's space. A `null` `spaceId` (an event with no
  * space) reaches org-level webhooks only. A webhook's package filter is matched against
- * `run.packageId`; absent, only webhooks without a filter receive the event.
+ * `subject.packageId`; absent, only webhooks without a filter receive the event.
  */
 export async function dispatchWebhookEvents(
   scope: { orgId: string; spaceId: string | null },
   eventType: WebhookEventType,
-  run: Record<string, unknown>,
+  subject: Record<string, unknown>,
 ): Promise<void> {
   const rows = await db
     .select({
@@ -646,11 +647,11 @@ export async function dispatchWebhookEvents(
 
   for (const wh of rows) {
     if (!wh.events?.includes(eventType)) continue;
-    if (wh.packageId && wh.packageId !== run.packageId) continue;
+    if (wh.packageId && wh.packageId !== subject.packageId) continue;
 
     const { eventId, payload } = buildEventEnvelope({
       eventType,
-      run,
+      run: subject,
       payloadMode: wh.payloadMode as "full" | "summary",
     });
 

@@ -83,6 +83,8 @@ const BASE_OPTS = {
   restricted: false,
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
+  spaces: [],
+  spaceDetails: "",
 } as const;
 
 /** A line of the catalogue: the published entry of `@<scope>/<name>`, or its draft. */

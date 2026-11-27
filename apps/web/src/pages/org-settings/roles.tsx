@@ -300,7 +300,7 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
             )}
             {role.shows_studio && (
               <div className="grid gap-1 px-3 py-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
-                <dt className="text-sm font-medium">{permissionResourceLabel("studio", t)}</dt>
+                <dt className="text-sm font-medium">{t("products.studio", { ns: "common" })}</dt>
                 <dd className="text-muted-foreground text-sm">{t("roles.showsStudio")}</dd>
               </div>
             )}

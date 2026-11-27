@@ -587,7 +587,7 @@ export const orgSettingsReadSchema = orgSettingsSchema
  * is a role reference projected from the `organizations` columns, not a stored key.
  */
 export const orgSettingsWireSchema = orgSettingsReadSchema.extend({
-  personal_space_role: spaceRoleReferenceSchema.default({ preset_role: "admin" }),
+  personal_space_role: spaceRoleReferenceSchema,
 });
 
 // ---------------------------------------------------------------------------

@@ -79,6 +79,7 @@ import {
   onDispatchSpaces,
   onDispatchTarget,
 } from "../../lib/internal-dispatch.ts";
+import { DEFAULT_PACKAGE_HINT_LIMIT } from "../../services/space-packages.ts";
 import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
 import {
   credentialProxyClosedDetail,
@@ -2622,10 +2623,10 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
           : "") +
       "`connectable_integrations` names the integrations active in " +
       "THIS space that the caller has not connected and for which a connect flow can start: " +
-      "connecting one makes it usable here. It is whole or withheld: more than 15 and it is " +
+      `connecting one makes it usable here. It is whole or withheld: more than ${DEFAULT_PACKAGE_HINT_LIMIT} and it is ` +
       "empty with `connectable_integrations.truncated` true and the count in " +
       "`connectable_integrations.total`; `search` finds them by keyword. " +
-      "`agents` and `skills` are listed whole, by id, or not at all: past 15 entries a list is " +
+      `\`agents\` and \`skills\` are listed whole, by id, or not at all: past ${DEFAULT_PACKAGE_HINT_LIMIT} entries a list is ` +
       "empty, with `truncated` true and `total` counting it, and `search` finds its entries by keyword.",
     annotations: {
       title: "Get caller context",

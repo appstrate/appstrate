@@ -79,7 +79,7 @@ export interface NamedSpace {
 /** One line per space, for refusals and instructions. */
 export function describeSpace(space: NamedSpace): string {
   const personal = space.personal ? ", your personal space" : "";
-  return `${flattenName(space.name)} (\`${space.id}\`, role ${space.role}${personal})`;
+  return `${flattenName(space.name)} (\`${space.id}\`, role ${flattenName(space.role)}${personal})`;
 }
 
 /**

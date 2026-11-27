@@ -258,10 +258,9 @@ function tokenRequestRefusal(err: RefreshError): ApiError {
     );
   }
   if (
-    err.oauthError &&
-    ["invalid_request", "invalid_scope", "unsupported_grant_type", "insufficient_scope"].includes(
-      err.oauthError,
-    )
+    err.kind === "misconfigured" ||
+    err.oauthError === "invalid_request" ||
+    err.oauthError === "insufficient_scope"
   ) {
     return connectionNotReady(
       "The service refused this integration's OAuth request. Ask an administrator to check its grant type, fields and scopes.",

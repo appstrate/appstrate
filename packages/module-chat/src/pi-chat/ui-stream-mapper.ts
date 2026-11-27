@@ -489,8 +489,9 @@ function toolCallAt(partial: unknown, index: number): PiToolCallBlock | undefine
 }
 
 /**
- * The tool output that crosses the wire and gets persisted: the Pi result
- * WITHOUT `details`.
+ * The tool output that crosses the wire and gets persisted: the Pi result without `details`,
+ * `persistedContent` (which replaces `content` when present), `presentation` and `actedSpaceIds`
+ * (the last two returned beside the output, for the call's metadata stamp).
  *
  * A Pi `AgentToolResult` carries its payload twice — `content[0].text` is the
  * JSON string the MODEL reads, `details` the same object for Pi's own in-memory
@@ -499,8 +500,8 @@ function toolCallAt(partial: unknown, index: number): PiToolCallBlock | undefine
  * and every tool output is persisted, served by the history GET and re-uploaded
  * by the client on every later turn — so the wire/persisted shape is the model
  * channel plus the typed offers: `content`, `connectOffers`, `isError` and
- * whatever else the result carries, minus `details`. The in-memory Pi result
- * itself is untouched (`mcp-tools.ts` builds it with `details`).
+ * whatever else the result carries. The in-memory Pi result itself is untouched
+ * (`mcp-tools.ts` builds it with `details`).
  */
 function persistedToolOutput(result: unknown): {
   output: unknown;

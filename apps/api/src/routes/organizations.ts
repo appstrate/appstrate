@@ -8,9 +8,8 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import {
   auditSpaceAssignments,
   auditSpaceRole,
-  exactlyOneRole,
   spaceAssignmentSchema,
-  spaceRoleAssignmentShape,
+  spaceRoleAssignmentSchema,
   toAssignment,
 } from "../lib/space-role-assignment.ts";
 import { defaultPersonalSpaceRole, toSpaceRoleReference } from "../lib/space-role.ts";
@@ -118,11 +117,6 @@ export const updateRoleSchema = z
     role: z.enum(ORG_ROLES),
   })
   .strict();
-
-/** Body of `PUT …/members/{userId}/personal-space-role`: one preset, or one custom role. */
-export const personalSpaceRoleOverrideSchema = exactlyOneRole(
-  z.object({ ...spaceRoleAssignmentShape }),
-);
 
 /**
  * Omitting `space_assignments` keeps the stored ones; the role rules are
@@ -662,7 +656,7 @@ router.put(
   async (c) => {
     const orgId = c.req.param("orgId")!;
     const targetUserId = c.req.param("userId")!;
-    const data = await readJsonBody(c, personalSpaceRoleOverrideSchema);
+    const data = await readJsonBody(c, spaceRoleAssignmentSchema);
     const { previous } = await setPersonalSpaceRoleOverride(
       orgId,
       targetUserId,
@@ -735,18 +729,13 @@ router.post("/:orgId/leave", async (c) => {
   return c.body(null, 204);
 });
 
-// Exactly one of `preset_role` / `custom_role_id`, the same reference every role write takes.
-const personalSpaceRoleImpactQuerySchema = exactlyOneRole(
-  z.object({ ...spaceRoleAssignmentShape }),
-);
-
 // GET /api/orgs/:orgId/personal-space-role/impact?preset_role=… | ?custom_role_id=… — what the candidate default would stop
 router.get(
   "/:orgId/personal-space-role/impact",
   requirePermission("org", "settings"),
   async (c) => {
     const orgId = c.req.param("orgId")!;
-    const query = parseBody(personalSpaceRoleImpactQuerySchema, c.req.query());
+    const query = parseBody(spaceRoleAssignmentSchema, c.req.query());
     return c.json(await personalSpaceRoleImpact(orgId, toAssignment(query)));
   },
 );

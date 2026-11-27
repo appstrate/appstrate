@@ -305,7 +305,7 @@ export const modelProviderCredentials = pgTable(
      * refresh sweep (avoids decrypting every row to test a single timestamp).
      *
      * The blob remains the source of truth; this column is a cache, written
-     * by `updateBlob` (whenever the next blob's expiry differs) and by
+     * by `updateOAuthCredentialTokens` (whenever the next blob's expiry differs) and by
      * `createOAuthCredential` / `reconnectOAuthCredential`. NULL for api-key
      * credentials and OAuth blobs without an upstream-supplied expiry. The
      * background refresh sweep reads it: a row with a NULL expiry is never due.

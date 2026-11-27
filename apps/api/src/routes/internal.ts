@@ -25,7 +25,6 @@ import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { verifyRunToken } from "../lib/verify-run-token.ts";
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
-import { trackAudit } from "../services/audit.ts";
 import { recordConnectionCalls } from "../services/credential-proxy/call-journal.ts";
 import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { RUN_ROUTE_RATE_PER_MIN, rateLimitByBearer } from "../middleware/rate-limit.ts";
@@ -618,29 +617,27 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
       });
       return c.body(null, 204);
     }
-    // Off the response path, in one statement that keeps the batch's order.
-    void trackAudit(
-      recordConnectionCalls(
-        calls.map((call, i) => ({
-          orgId: run.orgId,
-          spaceId: run.spaceId,
-          connectionId: connectionIds[i] ?? null,
-          integrationId: call.integration_id,
-          actor,
-          apiKeyId: run.apiKeyId,
-          authMethod: RUN_SIDECAR_AUTH_METHOD,
-          runId,
-          chatSessionId: null,
-          method: call.method,
-          host: call.host,
-          outcome: call.outcome,
-          durationMs: call.duration_ms,
-          // The batch's `Request-Id` is not the call's: a sidecar row has none.
-          requestId: null,
-          calledAt: new Date(call.started_at),
-          callId: call.call_id,
-        })),
-      ),
+    // One statement that keeps the batch's order; it never throws (a fault is logged).
+    await recordConnectionCalls(
+      calls.map((call, i) => ({
+        orgId: run.orgId,
+        spaceId: run.spaceId,
+        connectionId: connectionIds[i] ?? null,
+        integrationId: call.integration_id,
+        actor,
+        apiKeyId: run.apiKeyId,
+        authMethod: RUN_SIDECAR_AUTH_METHOD,
+        runId,
+        chatSessionId: null,
+        method: call.method,
+        host: call.host,
+        outcome: call.outcome,
+        durationMs: call.duration_ms,
+        // The batch's `Request-Id` is not the call's: a sidecar row has none.
+        requestId: null,
+        calledAt: new Date(call.started_at),
+        callId: call.call_id,
+      })),
     );
     // A record carrying `credential_revision` ends its connection's rejection streak.
     for (const [i, call] of calls.entries()) {

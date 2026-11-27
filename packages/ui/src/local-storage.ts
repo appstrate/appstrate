@@ -30,8 +30,7 @@ export const LOCAL_STORAGE_KEYS = {
   viewAs: { zone: "web", key: "viewAs" },
   overview: { zone: "web", key: "overview" },
   pendingPairings: { zone: "web", key: "pendingPairings" },
-  /** Per user id (sub-key). */
-  sidebarTips: { zone: "web", key: "sidebarTips" },
+  sidebarTips: { zone: "web", key: "sidebarTips", scope: "user" },
   /** Per list name (sub-key). */
   listView: { zone: "web", key: "view" },
   rolesView: { zone: "web", key: "rolesView" },

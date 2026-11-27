@@ -63,8 +63,8 @@ export interface RefreshContext {
  *   or `unauthorized_client`). The grant may be intact: callers MUST NOT flag
  *   the connection nor count it as a transient failure.
  *
- * - `"misconfigured"`: the request is wrong whatever the grant (`invalid_request`,
- *   `invalid_scope`, `unsupported_grant_type`): a manifest or client defect. Same
+ * - `"misconfigured"`: the request is wrong whatever the grant (`invalid_scope`,
+ *   `unsupported_grant_type`): a manifest or client defect. Same
  *   treatment as `"client_rejected"`: never flag, never count.
  */
 export class RefreshError extends Error {

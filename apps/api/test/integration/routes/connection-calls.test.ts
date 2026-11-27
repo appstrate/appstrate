@@ -353,7 +353,7 @@ describe("connection call journal routes", () => {
       });
       await db
         .update(connectionCalls)
-        .set({ createdAt: new Date("2026-01-01T00:00:00Z"), calledAt: null })
+        .set({ createdAt: new Date("2026-01-01T00:00:00Z") })
         .where(eq(connectionCalls.requestId, "req_old"));
 
       const matching = async (query: string) =>
@@ -459,26 +459,6 @@ describe("connection call journal routes", () => {
       expect(written).toHaveLength(2);
       expect(written.find((row) => row.callId === callId)).toMatchObject({ requestId: null });
       expect(written.filter((row) => row.callId !== callId)[0]!.callId).toMatch(/^[0-9a-f-]{36}$/);
-    });
-
-    it("filters on the call's start when it has one, on the write time otherwise", async () => {
-      const connectionId = await seedIntegrationConnection(ctx, CRM);
-      await record(connectionId, {
-        requestId: "req_started",
-        calledAt: new Date("2026-01-01T00:00:00Z"),
-      });
-      await record(connectionId, { requestId: "req_recorded_late" });
-      // Written long after it started: the filter reads the start.
-      await db
-        .update(connectionCalls)
-        .set({ createdAt: new Date("2026-12-01T00:00:00Z") })
-        .where(eq(connectionCalls.requestId, "req_started"));
-
-      const matching = async (query: string) =>
-        (await page(`${ownDoor(connectionId)}?${query}`)).data.map((row) => row.request_id);
-
-      expect(await matching("end_date=2026-06-01T00:00:00Z")).toEqual(["req_started"]);
-      expect(await matching("start_date=2026-06-01T00:00:00Z")).toEqual(["req_recorded_late"]);
     });
 
     it("records a call whose connection is gone, with no owner", async () => {

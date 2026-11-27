@@ -2075,7 +2075,6 @@ interface PersistCredentialInput {
   /** Bootstrap secrets (login password), stored non-injectable (v2 envelope `inputs`). */
   inputs?: Record<string, unknown>;
   expiresAt?: Date | null;
-  needsReconnection?: boolean;
   accountId?: string;
   identityClaims?: Record<string, unknown>;
   scopesGranted?: string[];
@@ -2313,7 +2312,7 @@ export async function persistCredentialBundle(
           credentialsEncrypted: ciphertext,
           identityClaims: input.identityClaims ?? {},
           scopesGranted: input.scopesGranted ?? [],
-          needsReconnection: input.needsReconnection ?? false,
+          needsReconnection: false,
           clientRef: input.clientRef ?? null,
           variables: input.variables ?? null,
           oauthResource: input.oauthResource ?? null,
@@ -2337,11 +2336,10 @@ export async function persistCredentialBundle(
   }
 
   // UPDATE — shared column set; WHERE differs by target.
-  const clearsReconnection = !(input.needsReconnection ?? false);
   const set: Partial<typeof integrationConnections.$inferInsert> = {
     credentialsEncrypted: ciphertext,
     expiresAt: input.expiresAt ?? null,
-    needsReconnection: input.needsReconnection ?? false,
+    needsReconnection: false,
     needsReconnectionCause: null,
     needsReconnectionAt: null,
     // A credential write proves the connection healthy: the escalation count restarts.
@@ -2452,8 +2450,8 @@ export async function persistCredentialBundle(
     });
   }
 
-  // update-by-id (system write-back), a no-op (`null`) on miss. A clearing write is gated on
-  // `needs_reconnection = false`, so a `true` set concurrently by
+  // update-by-id (system write-back), a no-op (`null`) on miss. The write clears the flag, so it
+  // is gated on `needs_reconnection = false`: a `true` set concurrently by
   // `markIntegrationConnectionNeedsReconnection` survives (that row's credentials are stale anyway).
   const { clientRef, credentialsEncrypted } = target.expect;
   const byIdWhere = and(
@@ -2462,7 +2460,7 @@ export async function persistCredentialBundle(
       ? isNull(integrationConnections.clientRef)
       : eq(integrationConnections.clientRef, clientRef),
     eq(integrationConnections.credentialsEncrypted, credentialsEncrypted),
-    clearsReconnection ? eq(integrationConnections.needsReconnection, false) : undefined,
+    eq(integrationConnections.needsReconnection, false),
   );
   const [row] = await db
     .update(integrationConnections)
@@ -2706,7 +2704,6 @@ export async function saveIntegrationConnection(
     accountId: input.accountId,
     identityClaims: input.identityClaims ?? {},
     scopesGranted: input.scopesGranted ?? [],
-    needsReconnection: false,
     expiresAt: input.expiresAt ?? null,
     ...(input.labelHint ? { labelHint: input.labelHint } : {}),
     ...(input.clientRef !== undefined ? { clientRef: input.clientRef } : {}),

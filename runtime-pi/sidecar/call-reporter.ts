@@ -35,7 +35,10 @@ export interface IntegrationCallRecord {
 export interface CallReporter {
   /** `onUndelivered` runs when the POST carrying the record does not answer 2xx. */
   report(record: IntegrationCallRecord, onUndelivered?: () => void): void;
-  /** Sends what is queued and resolves once every POST in flight has settled. */
+  /**
+   * Sends what is queued and resolves once every POST in flight has settled, or at the deadline.
+   * Drains that overlap share the one running deadline.
+   */
   drain(): Promise<void>;
 }
 
@@ -44,7 +47,7 @@ const DEFAULT_MAX_BATCH = 100;
 const DEFAULT_FLUSH_INTERVAL_MS = 2_000;
 /** Most batches held, queued or awaiting their turn: at most 5 POSTs per 2 s, under the route's 200/min. */
 const QUEUED_BATCHES = 5;
-/** One POST attempt; a running drain's deadline bounds it too. */
+/** One POST attempt; the deadline of a drain already running when the attempt starts bounds it too. */
 const POST_TIMEOUT_MS = 3_000;
 
 export function createCallReporter(opts: {
@@ -53,10 +56,13 @@ export function createCallReporter(opts: {
   fetchFn?: typeof fetch;
   flushIntervalMs?: number;
   maxBatch?: number;
+  /** Overrides {@link CALL_JOURNAL_DRAIN_DEADLINE_MS}; tests only, to avoid waiting it out. */
+  drainDeadlineMs?: number;
 }): CallReporter {
   const fetchFn = opts.fetchFn ?? fetch;
   const flushIntervalMs = opts.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS;
   const maxBatch = opts.maxBatch ?? DEFAULT_MAX_BATCH;
+  const drainDeadlineMs = opts.drainDeadlineMs ?? CALL_JOURNAL_DRAIN_DEADLINE_MS;
   const url = `${opts.platformApiUrl.replace(/\/$/, "")}/internal/integration-calls`;
   let queue: { record: IntegrationCallRecord; onUndelivered?: () => void }[] = [];
   let dropped = 0;
@@ -66,6 +72,8 @@ export function createCallReporter(opts: {
   let sending: Promise<void> | undefined;
   // The running drain's deadline: it also bounds every POST attempt made while it runs.
   let drainDeadline: AbortSignal | undefined;
+  // Overlapping drains (the agent's flush, then SIGTERM) share one run, hence one deadline.
+  let draining: Promise<void> | undefined;
   const held = () => queue.length + batches.reduce((sum, batch) => sum + batch.length, 0);
 
   const undeliver = (entries: typeof queue) => {
@@ -125,7 +133,9 @@ export function createCallReporter(opts: {
     }
     for (let i = 0; i < queue.length; i += maxBatch) batches.push(queue.slice(i, i + maxBatch));
     queue = [];
-    sending ??= (async () => {
+    // Nothing to send: a sender that finished at once would clear `sending` before it is assigned.
+    if (sending || batches.length === 0) return;
+    sending = (async () => {
       for (let batch = batches.shift(); batch; batch = batches.shift()) await post(batch);
       sending = undefined;
     })();
@@ -149,30 +159,40 @@ export function createCallReporter(opts: {
         timer.unref?.();
       }
     },
-    async drain() {
-      const deadline = AbortSignal.timeout(CALL_JOURNAL_DRAIN_DEADLINE_MS);
-      drainDeadline = deadline;
-      flush();
-      const settled = sending;
-      if (settled) {
-        await new Promise<void>((resolve) => {
-          deadline.addEventListener("abort", () => resolve(), { once: true });
-          void settled.then(() => resolve());
+    drain() {
+      if (draining) {
+        flush();
+        return draining;
+      }
+      const run = async () => {
+        const deadline = AbortSignal.timeout(drainDeadlineMs);
+        drainDeadline = deadline;
+        flush();
+        const settled = sending;
+        if (settled) {
+          await new Promise<void>((resolve) => {
+            deadline.addEventListener("abort", () => resolve(), { once: true });
+            void settled.then(() => resolve());
+          });
+        }
+        drainDeadline = undefined;
+        if (!deadline.aborted) return;
+        // Out of time: what no POST has taken yet is dropped, and counted.
+        const unsent = batches.splice(0);
+        let lost = 0;
+        for (const batch of unsent) {
+          lost += batch.length;
+          undeliver(batch);
+        }
+        logger.warn("integration call journal drain hit its deadline, records dropped", {
+          records: lost,
+          deadline_ms: drainDeadlineMs,
         });
-      }
-      drainDeadline = undefined;
-      if (!deadline.aborted) return;
-      // Out of time: what no POST has taken yet is dropped, and counted.
-      const unsent = batches.splice(0);
-      let lost = 0;
-      for (const batch of unsent) {
-        lost += batch.length;
-        undeliver(batch);
-      }
-      logger.warn("integration call journal drain hit its deadline, records dropped", {
-        records: lost,
-        deadline_ms: CALL_JOURNAL_DRAIN_DEADLINE_MS,
+      };
+      draining = run().finally(() => {
+        draining = undefined;
       });
+      return draining;
     },
   };
 }

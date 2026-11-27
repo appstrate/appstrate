@@ -539,7 +539,7 @@ export interface MeConnectionEntry {
   scopes_granted: string[];
   connected_at: string;
   needs_reconnection: boolean;
-  /** Why the credential died; null while healthy, or when it was flagged before causes were recorded. */
+  /** Why the credential died; null while healthy, or when the cause is not recorded. */
   needs_reconnection_cause: CredentialDeathCause | null;
   /** When it died (RFC 3339); null under the same conditions as the cause. */
   needs_reconnection_at: string | null;

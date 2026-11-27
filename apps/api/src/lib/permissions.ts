@@ -227,18 +227,6 @@ const SPACE_PRESET_PERMISSIONS: Record<SpaceRolePreset, ReadonlySet<SpaceLevelPe
 };
 
 /**
- * Whether a preset's holders see the Studio's screens: a display attribute of the role (a custom
- * role carries it as `space_roles.shows_studio`), never a permission. Every preset shows it.
- */
-export const SPACE_PRESET_SHOWS_STUDIO: Record<SpaceRolePreset, boolean> = {
-  admin: true,
-  builder: true,
-  operator: true,
-  runner: true,
-  viewer: true,
-};
-
-/**
  * Core exceptions to "`R:a` needs `R:read`" ({@link readGrantsFor}); the first
  * read is the canonical one (the editor ticks it, `0020` adds it).
  */

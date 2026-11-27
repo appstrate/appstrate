@@ -44,3 +44,8 @@ export function missingScopingHeaders(
 export function spaceHeader(spaceId?: string | null): { headers?: { "X-Space-Id": string } } {
   return spaceId ? { headers: { "X-Space-Id": spaceId } } : {};
 }
+
+/** The org/space header params of a typed-client query: scope is part of its React Query key. */
+export function scopeHeader(orgId: string | null, spaceId: string | null) {
+  return { "X-Org-Id": orgId ?? undefined, "X-Space-Id": spaceId ?? undefined };
+}

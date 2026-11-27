@@ -76,9 +76,11 @@ const CLIENT_REJECTED_ERRORS: ReadonlySet<string> = new Set([
   "unauthorized_client",
 ]);
 
-/** The other RFC 6749 §5.2 codes: the request, scope or grant type is wrong, whatever the grant's state. */
+/**
+ * The scope or the grant type is wrong, whatever the grant's state. `invalid_request` is not here:
+ * providers also answer it for a dead refresh token, so it stays transient and is counted.
+ */
 const MISCONFIGURED_ERRORS: ReadonlySet<string> = new Set([
-  "invalid_request",
   "invalid_scope",
   "unsupported_grant_type",
 ]);

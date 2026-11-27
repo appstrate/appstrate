@@ -36,8 +36,7 @@ export const INFRA_ENV_KEYS: Readonly<Record<string, string>> = {
 /**
  * The namespaces the platform owns: a present key under one of them that nothing
  * reads is reported. Declared, not derived from the keys read today, so removing
- * the last key of a namespace (`OAUTH_REFRESH_WORKER_ENABLED`) does not silence an
- * operator who still sets it. A prefix names no old variable, only a family.
+ * the last key of a namespace does not silence an operator who still sets it.
  *
  * Adding a key whose namespace is not listed fails `env-key-inventory.test.ts`:
  * declare the namespace here, and never delete one because its keys went away.

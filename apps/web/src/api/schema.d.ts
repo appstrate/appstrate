@@ -3231,7 +3231,7 @@ export interface paths {
         };
         /**
          * List the integrations a chat session reached
-         * @description Each integration the conversation reached, once, in order of its first call, read from the integration call journal: its own calls (through the credential proxy) and those of the runs it launched (reported by each run's sidecar). A call reached an integration when it was sent to it, whatever its outcome, a catalog listing included. Calls made before the journal recorded their conversation are not counted. Empty when it reached none. The conversation's author only (404 otherwise, as `GET …/sessions/{id}`).
+         * @description Each integration the conversation reached, once, in order of its first call, read from the integration call journal: its own calls (through the credential proxy) and those of the runs it launched (reported by each run's sidecar). A call reached an integration when it was sent to it, whatever its outcome, a catalog listing included. Only calls the journal recorded with their conversation count. Empty when it reached none. The conversation's author only (404 otherwise, as `GET …/sessions/{id}`).
          */
         get: operations["listChatSessionIntegrations"];
         put?: never;
@@ -7863,7 +7863,7 @@ export interface components {
             /** @description On `model_scheduled`: the enabled schedules the write would leave on that model. */
             schedule_ids?: string[];
         };
-        /** @description Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only. A person is not a target either: `kind: "user"` is a 400. */
+        /** @description Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only. */
         ShareTarget: {
             /** @enum {string} */
             kind: "space";
@@ -13925,9 +13925,9 @@ export interface operations {
                 actor_id?: string;
                 /** @description Only the calls that declared this run. */
                 runId?: string;
-                /** @description Only the calls that started at or after this instant (`called_at`, else `created_at` for a call recorded before 0118; ISO 8601 with an offset). */
+                /** @description Only the calls recorded at or after this instant (`createdAt`; ISO 8601 with an offset). */
                 start_date?: string;
-                /** @description Only the calls that started at or before this instant (`called_at`, else `created_at` for a call recorded before 0118; ISO 8601 with an offset). */
+                /** @description Only the calls recorded at or before this instant (`createdAt`; ISO 8601 with an offset). */
                 end_date?: string;
                 limit?: number;
                 /** @description Cursor: the `id` of the last call of the previous page. Follow the RFC 5988 `Link: <…>; rel="next"` response header instead of building it by hand. */
@@ -17633,9 +17633,9 @@ export interface operations {
                 actor_id?: string;
                 /** @description Only the calls that declared this run. */
                 runId?: string;
-                /** @description Only the calls that started at or after this instant (`called_at`, else `created_at` for a call recorded before 0118; ISO 8601 with an offset). */
+                /** @description Only the calls recorded at or after this instant (`createdAt`; ISO 8601 with an offset). */
                 start_date?: string;
-                /** @description Only the calls that started at or before this instant (`called_at`, else `created_at` for a call recorded before 0118; ISO 8601 with an offset). */
+                /** @description Only the calls recorded at or before this instant (`createdAt`; ISO 8601 with an offset). */
                 end_date?: string;
                 limit?: number;
                 /** @description Cursor: the `id` of the last call of the previous page. Follow the RFC 5988 `Link: <…>; rel="next"` response header instead of building it by hand. */
@@ -25400,7 +25400,7 @@ export interface operations {
                     /** @description Destination space id (`spc_…`). Required and non-nullable — a package always has a home space. */
                     home_space_id: string;
                     /**
-                     * @description Does the space being LEFT keep the package? `true` (the default) leaves its `space_packages` row in place, so it goes on reading and running the package and nothing it had scheduled stops. `false` completes the move: that row is removed, settings and all, and every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed), in the same transaction. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. An old home that held no row is left behind whatever the flag says: nothing places the package there once the home has moved, so its schedules there are disabled all the same. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`.
+                     * @description Does the space being LEFT keep the package? `true` (the default) leaves its `space_packages` row in place, so it goes on reading and running the package and nothing it had scheduled stops. `false` completes the move: that row is removed, settings and all, and every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed), in the same transaction. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. A personal space is left whatever the flag says (outside its home it takes the organization's offer only: the row goes, or stays as a decision about the offer when the package is offered). An old home that held no row is left behind too: nothing places the package there once the home has moved, so its schedules there are disabled all the same. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`.
                      * @default true
                      */
                     keep_in_previous_home?: boolean;

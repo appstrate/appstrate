@@ -246,15 +246,9 @@ async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<
         await markCredentialNeedsReconnection(state.orgId, credentialId, "refresh_token_revoked");
         throw needsReconnection(credentialId, "refresh_token_revoked");
       case "client_rejected":
-        logger.error("oauth model provider: token endpoint rejected the OAuth client", {
-          credentialId,
-          providerId: state.config.providerId,
-          error: err.message,
-        });
-        throw notRefreshed(credentialId, "oauth_client_rejected", err);
       case "misconfigured":
         // A client or provider-config defect (RFC 6749 §5.2): a reconnect cannot fix it, never counted.
-        logger.error("oauth model provider: token endpoint rejected the OAuth request", {
+        logger.error("oauth model provider: token endpoint rejected the OAuth client or request", {
           credentialId,
           providerId: state.config.providerId,
           oauthError: err.oauthError,

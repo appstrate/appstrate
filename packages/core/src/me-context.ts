@@ -90,8 +90,6 @@ export const meContextSchema = obj({
   }
 });
 
-export type MeContext = z.infer<typeof meContextSchema>;
-
 /** One space `get_me` names with its acts, in an organization-wide connection. */
 const spaceReach = obj({
   id: z.string(),
@@ -108,5 +106,3 @@ export const getMeResultSchema = obj({
   body: meContextSchema,
   spaces: z.array(spaceReach).optional(),
 });
-
-export type GetMeResult = z.infer<typeof getMeResultSchema>;

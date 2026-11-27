@@ -3411,7 +3411,7 @@ export const schemas = {
   ShareTarget: {
     type: "object",
     description:
-      'Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only. A person is not a target either: `kind: "user"` is a 400.',
+      "Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only.",
     required: ["kind", "spaceId"],
     properties: {
       kind: { type: "string", enum: ["space"] },

@@ -75,9 +75,9 @@ function isTextPart(value: unknown): value is { type: "text"; text: string } {
  * for an array: the first text part that parses on its own wins — producers put
  * the payload in one block, anything after it is prose. When no part parses, the
  * joined text is returned, so a plain-text result still reads verbatim. Without
- * this the
- * payload reads as a string, and every consumer reading a record out of it (run
- * id/status, error shapes) silently degrades — a failed call would read as a success.
+ * this the payload reads as a string, and every consumer reading a record out of
+ * it (run id/status, error shapes) silently degrades: a failed call would read as
+ * a success.
  */
 export function unwrapMcpResult(value: unknown, depth = 0): unknown {
   if (depth > 8 || value == null) return value;
@@ -97,9 +97,8 @@ export function unwrapMcpResult(value: unknown, depth = 0): unknown {
   if (Array.isArray(value)) {
     // MCP content array of text parts → the first part that is a payload on its
     // own, else the joined text (no payload here, just prose).
-    const parts = value.filter(isTextPart);
-    if (parts.length > 0) {
-      const texts = parts.map((p) => p.text);
+    const texts = value.filter(isTextPart).map((p) => p.text);
+    if (texts.length > 0) {
       for (const text of texts) {
         const part = unwrapMcpResult(text, depth + 1);
         if (typeof part === "object" && part !== null) return part;

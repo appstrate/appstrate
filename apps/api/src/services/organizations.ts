@@ -265,11 +265,8 @@ function toOrgSettings(
       }
     | undefined,
 ): OrgSettings {
-  const { personal_space_role: _unread, ...stored } = orgSettingsReadSchema.parse(
-    row?.orgSettings ?? {},
-  );
   return {
-    ...stored,
+    ...orgSettingsReadSchema.parse(row?.orgSettings ?? {}),
     personal_space_role:
       row?.personalSpaceRoleId != null
         ? { custom_role_id: row.personalSpaceRoleId }

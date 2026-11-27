@@ -2,11 +2,6 @@
 
 import { afterEach, describe, expect, it } from "bun:test";
 import {
-  CALL_JOURNAL_DRAIN_DEADLINE_MS,
-  CALL_JOURNAL_FLUSH_TIMEOUT_MS,
-  SIDECAR_SIGTERM_GRACE_SECONDS,
-} from "@appstrate/core/sidecar-types";
-import {
   connectionCallJournal,
   createCallReporter,
   type CallReporter,
@@ -169,6 +164,22 @@ describe("createCallReporter", () => {
     expect(posts).toHaveLength(1);
   });
 
+  it("still sends after a drain or flush found nothing queued", async () => {
+    const { posts, fetchFn } = platform();
+    const reporter = createCallReporter({
+      platformApiUrl: "http://platform",
+      runToken: "t",
+      fetchFn,
+      flushIntervalMs: 60_000,
+    });
+    await reporter.drain();
+    reporter.report(record({ credential_revision: "0123456789abcdef" }));
+    expect(posts).toHaveLength(1);
+    reporter.report(record({ outcome: "404" }));
+    await reporter.drain();
+    expect(posts.map((p) => p.calls.map((c) => c.outcome))).toEqual([["200"], ["404"]]);
+  });
+
   it("logs and drops a refused or failed batch, never throwing", async () => {
     process.env.LOG_LEVEL = "warn";
     _setLogSinkForTesting((_level, line) => logs.push(line));
@@ -245,19 +256,21 @@ describe("createCallReporter — retry and drain deadline", () => {
     expect(undelivered).toEqual([]);
   });
 
+  const hangingFetch = ((_url: string, init: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    })) as unknown as typeof fetch;
+
   it("gives up at the drain deadline, aborting the POST in flight and counting what it drops", async () => {
     process.env.LOG_LEVEL = "warn";
     _setLogSinkForTesting((_level, line) => logs.push(line));
-    const fetchFn = ((_url: string, init: RequestInit) =>
-      new Promise<Response>((_resolve, reject) => {
-        init.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-      })) as unknown as typeof fetch;
     const reporter = createCallReporter({
       platformApiUrl: "http://platform",
       runToken: "t",
-      fetchFn,
+      fetchFn: hangingFetch,
       flushIntervalMs: 60_000,
       maxBatch: 1,
+      drainDeadlineMs: 80,
     });
     const undelivered: string[] = [];
     for (const outcome of ["200", "201", "202"]) {
@@ -267,15 +280,52 @@ describe("createCallReporter — retry and drain deadline", () => {
     await reporter.drain();
     const elapsed = Date.now() - started;
 
-    expect(elapsed).toBeGreaterThanOrEqual(CALL_JOURNAL_DRAIN_DEADLINE_MS - 50);
-    expect(elapsed).toBeLessThan(CALL_JOURNAL_DRAIN_DEADLINE_MS + 1_000);
+    expect(elapsed).toBeGreaterThanOrEqual(70);
+    expect(elapsed).toBeLessThan(1_000);
     expect(undelivered.sort()).toEqual(["200", "201", "202"]);
     expect(logs.join("\n")).toContain("drain hit its deadline, records dropped");
-  }, 10_000);
+  });
 
-  it("keeps the shutdown waits nested: drain deadline < flush timeout < SIGTERM grace", () => {
-    expect(CALL_JOURNAL_DRAIN_DEADLINE_MS).toBeLessThan(CALL_JOURNAL_FLUSH_TIMEOUT_MS);
-    expect(CALL_JOURNAL_FLUSH_TIMEOUT_MS).toBeLessThan(SIDECAR_SIGTERM_GRACE_SECONDS * 1000);
+  it("waits for a POST that lands within the deadline, and gives up on none", async () => {
+    process.env.LOG_LEVEL = "warn";
+    _setLogSinkForTesting((_level, line) => logs.push(line));
+    const { fetchFn } = platform(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+      return new Response(null, { status: 204 });
+    });
+    const reporter = createCallReporter({
+      platformApiUrl: "http://platform",
+      runToken: "t",
+      fetchFn,
+      flushIntervalMs: 60_000,
+      drainDeadlineMs: 2_000,
+    });
+    const undelivered: string[] = [];
+    reporter.report(record(), () => undelivered.push("lost"));
+    const started = Date.now();
+    await reporter.drain();
+    expect(Date.now() - started).toBeGreaterThanOrEqual(50);
+    expect(undelivered).toEqual([]);
+    expect(logs.join("\n")).not.toContain("deadline");
+  });
+
+  it("overlapping drains share one deadline: the first to return does not unbound the other", async () => {
+    const reporter = createCallReporter({
+      platformApiUrl: "http://platform",
+      runToken: "t",
+      fetchFn: hangingFetch,
+      flushIntervalMs: 60_000,
+      maxBatch: 1,
+      drainDeadlineMs: 80,
+    });
+    reporter.report(record({ outcome: "200" }));
+    const first = reporter.drain();
+    await new Promise((r) => setTimeout(r, 30));
+    reporter.report(record({ outcome: "201" }));
+    const started = Date.now();
+    await Promise.all([first, reporter.drain()]);
+    // The second joined the first's deadline (80 ms from its start), not a fresh one.
+    expect(Date.now() - started).toBeLessThan(75);
   });
 });
 

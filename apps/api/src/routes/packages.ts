@@ -1930,7 +1930,7 @@ export function createPackagesRouter() {
         // `keptInPreviousHome: false` is a withdrawal of access; it rides on this event (one act, one entry).
         after: {
           homeSpaceId: target,
-          keptInPreviousHome: body.keep_in_previous_home,
+          keptInPreviousHome: body.keep_in_previous_home && previousHomeOwnerId === null,
           ...(activation.disabledScheduleIds.length > 0
             ? { disabledScheduleIds: activation.disabledScheduleIds }
             : {}),

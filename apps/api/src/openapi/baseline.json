@@ -25204,7 +25204,7 @@
                   "keep_in_previous_home": {
                     "type": "boolean",
                     "default": true,
-                    "description": "Does the space being LEFT keep the package? `true` (the default) leaves its `space_packages` row in place, so it goes on reading and running the package and nothing it had scheduled stops. `false` completes the move: that row is removed, settings and all, and every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed), in the same transaction. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. An old home that held no row is left behind whatever the flag says: nothing places the package there once the home has moved, so its schedules there are disabled all the same. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`."
+                    "description": "Does the space being LEFT keep the package? `true` (the default) leaves its `space_packages` row in place, so it goes on reading and running the package and nothing it had scheduled stops. `false` completes the move: that row is removed, settings and all, and every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed), in the same transaction. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. A personal space is left whatever the flag says (outside its home it takes the organization's offer only: the row goes, or stays as a decision about the offer when the package is offered). An old home that held no row is left behind too: nothing places the package there once the home has moved, so its schedules there are disabled all the same. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`."
                   }
                 },
                 "additionalProperties": false
@@ -33319,7 +33319,7 @@
               "type": "string",
               "format": "date-time"
             },
-            "description": "Only the calls that started at or after this instant (`called_at`, else `created_at` for a call recorded before 0118; ISO 8601 with an offset)."
+            "description": "Only the calls recorded at or after this instant (`createdAt`; ISO 8601 with an offset)."
           },
           {
             "name": "end_date",
@@ -33329,7 +33329,7 @@
               "type": "string",
               "format": "date-time"
             },
-            "description": "Only the calls that started at or before this instant (`called_at`, else `created_at` for a call recorded before 0118; ISO 8601 with an offset)."
+            "description": "Only the calls recorded at or before this instant (`createdAt`; ISO 8601 with an offset)."
           },
           {
             "name": "limit",
@@ -33583,7 +33583,7 @@
               "type": "string",
               "format": "date-time"
             },
-            "description": "Only the calls that started at or after this instant (`called_at`, else `created_at` for a call recorded before 0118; ISO 8601 with an offset)."
+            "description": "Only the calls recorded at or after this instant (`createdAt`; ISO 8601 with an offset)."
           },
           {
             "name": "end_date",
@@ -33593,7 +33593,7 @@
               "type": "string",
               "format": "date-time"
             },
-            "description": "Only the calls that started at or before this instant (`called_at`, else `created_at` for a call recorded before 0118; ISO 8601 with an offset)."
+            "description": "Only the calls recorded at or before this instant (`createdAt`; ISO 8601 with an offset)."
           },
           {
             "name": "limit",
@@ -41101,7 +41101,7 @@
       },
       "ShareTarget": {
         "type": "object",
-        "description": "Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only. A person is not a target either: `kind: \"user\"` is a 400.",
+        "description": "Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only.",
         "required": ["kind", "spaceId"],
         "properties": {
           "kind": {

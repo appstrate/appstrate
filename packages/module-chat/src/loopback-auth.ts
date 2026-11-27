@@ -254,15 +254,15 @@ export const chatLoopbackStrategy: AuthStrategy = {
       allowed && typeof sessionId === "string"
         ? async (spaceId: string) => {
             if (!allowed.includes(spaceId)) throw new Error("Space outside the turn");
-            const { touchSessionSpace } = await import("./persistence.ts");
-            await touchSessionSpace(
+            const { touchSessionSpaces } = await import("./persistence.ts");
+            await touchSessionSpaces(
               {
                 id: sessionId,
                 userId: claims.userId,
                 orgId: claims.orgId,
                 originSpaceId: originSpaceId ?? null,
               },
-              spaceId,
+              [spaceId],
             );
           }
         : undefined;

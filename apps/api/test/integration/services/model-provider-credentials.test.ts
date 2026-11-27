@@ -132,7 +132,6 @@ describe("model-provider-credentials service — api_key path", () => {
     expect(creds!.baseUrl).toBe("https://api.anthropic.com");
     expect(creds!.apiKey).toBe(PLAINTEXT);
     expect(creds!.accountId).toBeUndefined();
-    expect(creds!.needsReconnection).toBeUndefined();
   });
 
   it("rejects an unknown providerId at create time", async () => {
@@ -359,7 +358,6 @@ describe("model-provider-credentials service — oauth path", () => {
     expect(creds!.baseUrl).toBe("https://example.test/v1");
     expect(creds!.apiKey).toBe("access-1");
     expect(creds!.accountId).toBe("acct-abc");
-    expect(creds!.needsReconnection).toBe(false);
     expect(creds!.expiresAt).toBe(1_700_000_000_000);
   });
 

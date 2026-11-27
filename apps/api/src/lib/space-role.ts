@@ -16,12 +16,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { organizations, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
-import {
-  partitionSpacePermissions,
-  presetPermissions,
-  SPACE_PRESET_SHOWS_STUDIO,
-  type Permission,
-} from "./permissions.ts";
+import { partitionSpacePermissions, presetPermissions, type Permission } from "./permissions.ts";
 
 export interface SpaceAccessRow {
   id: string;
@@ -67,12 +62,16 @@ function withPersonalSpaceFloor(ref: SpaceRoleRef): SpaceRoleRef {
   return { ...ref, plus: PERSONAL_CAP_DELETE_PERMISSIONS };
 }
 
-/** A guest's share of `chosen`: within `operator` (a guest USES, never authors), then the floor. */
+/**
+ * A guest's share of `chosen`: within `operator` (a guest USES, never authors), then the floor. A
+ * preset reaching all of `operator` is `operator` itself; a custom role stays itself (restricted
+ * by `within`) so its `showsStudio` flag survives the cap.
+ */
 function guestPersonalRole(chosen: SpaceRoleRef): SpaceRoleRef {
   const operator = presetPermissions("operator");
   const granted = spacePermissions(chosen);
   const within = [...granted].filter((permission) => operator.has(permission));
-  if (within.length === operator.size) {
+  if (chosen.kind === "preset" && within.length === operator.size) {
     return withPersonalSpaceFloor({ kind: "preset", preset: "operator" });
   }
   if (within.length === granted.size) return withPersonalSpaceFloor(chosen);
@@ -212,10 +211,13 @@ export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   return granted;
 }
 
-/** Whether the holder of `ref` sees the Studio in that space; no role, no Studio. */
+/**
+ * Whether the holder of `ref` sees the Studio in that space: every preset does, a custom role says
+ * (`space_roles.shows_studio`, a display attribute, never a permission); no role, no Studio.
+ */
 export function spaceShowsStudio(ref: SpaceRoleRef | null): boolean {
   if (!ref) return false;
-  return ref.kind === "preset" ? SPACE_PRESET_SHOWS_STUDIO[ref.preset] : ref.role.showsStudio;
+  return ref.kind === "preset" || ref.role.showsStudio;
 }
 
 /** One org custom role, share-locked until commit against `deleteSpaceRole`; 404 when none. */

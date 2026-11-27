@@ -104,7 +104,7 @@ export function formatBudgetDuration(ms: number): string {
 }
 
 /** `_meta` key marking the text block that carries the chat's budget note. */
-export const TURN_BUDGET_NOTE_META_KEY = "dev.appstrate/turn-budget";
+const TURN_BUDGET_NOTE_META_KEY = "dev.appstrate/turn-budget";
 
 /** The note's text block: marked structurally, and for the model alone (MCP `audience`). */
 export function turnBudgetNoteBlock(text: string) {

@@ -789,12 +789,14 @@ export async function connectRemoteHttpIntegration(
       if (operation) journal(call);
       else if (!connected) unconnectedExchange = call;
     };
-    const sendRecorded = async () => {
+    // `earlier`: the 401 a replay follows. A replay that fails before dispatch leaves it as the record.
+    const sendRecorded = async (earlier?: Awaited<ReturnType<typeof send>>) => {
       try {
         return await send();
       } catch (err) {
         const outcome = remoteExchangeFailureOutcome(err);
         if (outcome !== null) record(outcome, null);
+        else if (earlier) record(String(earlier.response.status), earlier);
         throw err;
       }
     };
@@ -808,7 +810,7 @@ export async function connectRemoteHttpIntegration(
           handshake ? "handshake" : undefined,
         )
         .catch(() => false);
-      if (refreshed) attempt = await sendRecorded();
+      if (refreshed) attempt = await sendRecorded(attempt);
       else if (handshake && credential.source.needsReconnection()) {
         record(String(attempt.response.status), attempt);
         // The connection's name and the reconnect step, rather than the server's 401 body.

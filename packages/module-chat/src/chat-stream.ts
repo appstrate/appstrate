@@ -58,7 +58,6 @@ import {
   persistUserMessage,
   persistAssistantMessage,
   storedHistory,
-  touchSessionSpace,
   touchSessionSpaces,
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
@@ -435,7 +434,7 @@ export async function handleChatStream(
     });
     const capabilities = turnCapabilities((permission) => permissions.includes(permission), spaces);
     // A conversation acts in the spaces of its turn alone and records each one it acts in
-    // (see `touchSessionSpace`; the origin space is touched by definition): a space a call names,
+    // (see `touchSessionSpaces`; the origin space is touched by definition): a space a call names,
     // or the space of a file `read_resource` reads, before the call, refused outside the set;
     // search records the spaces that contributed an entry to its result (`searched_spaces`), and
     // a launch refusal records the spaces whose activation state it discloses, before any result
@@ -450,9 +449,9 @@ export async function handleChatStream(
       originSpaceId: originSpace?.id,
       touch: async (touchedSpaceId) => {
         if (!chatSessionId) return;
-        await touchSessionSpace(
+        await touchSessionSpaces(
           { id: chatSessionId, orgId, userId: user.id, originSpaceId: conv.spaceId },
-          touchedSpaceId,
+          [touchedSpaceId],
         );
       },
       fileSpace: async (uri) => {

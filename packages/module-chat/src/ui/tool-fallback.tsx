@@ -22,7 +22,7 @@ export function ToolFallback(props: ToolCardProps) {
       result={props.result}
       isError={props.isError}
       toolCallId={props.toolCallId}
-      timing={props.timing}
+      stored={props.stored}
       spaceId={cardSpaceOf(props)}
     />
   );

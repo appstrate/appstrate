@@ -2,7 +2,7 @@
 
 /**
  * `src/ui/tool-presentation.ts` (how a call is named, in the thread and the context panel),
- * and what counts as a lookup (`conversation-tools.ts`): `isLookupCall`, `activityGroupOf`,
+ * and what counts as a lookup (`conversation-tools.ts`): `isPanelLookup`, `activityGroupOf`,
  * `endsFolded`.
  */
 
@@ -10,7 +10,7 @@ import { describe, it, expect } from "bun:test";
 import { BookOpenIcon, EyeIcon, FileTextIcon, PlugIcon, Trash2Icon, ZapIcon } from "lucide-react";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { callPresentation, showCall } from "../src/ui/tool-presentation.ts";
-import { activityGroupOf, endsFolded, isLookupCall } from "../src/ui/conversation-tools.ts";
+import { activityGroupOf, endsFolded, isPanelLookup } from "../src/ui/conversation-tools.ts";
 
 /** The FR bundle's verbs and tags; a key it lacks shows its default value, else the key. */
 const FR: Record<string, string> = {
@@ -294,34 +294,34 @@ describe("showCall — any other tool", () => {
   });
 });
 
-describe("isLookupCall", () => {
+describe("isPanelLookup", () => {
   const stamped = { appstrate: { lookup: true } };
   const presented = (method: string): ToolPresentation => ({ call: "operation", method });
 
   it("is a call stamped a lookup that has not failed", () => {
     for (const standing of ["running", "success"] as const) {
-      expect(isLookupCall(stamped, undefined, standing)).toBe(true);
+      expect(isPanelLookup(stamped, undefined, standing)).toBe(true);
     }
-    expect(isLookupCall(stamped, undefined, "error")).toBe(false);
-    expect(isLookupCall(stamped, undefined, "denied")).toBe(false);
+    expect(isPanelLookup(stamped, undefined, "error")).toBe(false);
+    expect(isPanelLookup(stamped, undefined, "denied")).toBe(false);
   });
 
   it("is a call presented as a read (GET, HEAD), unless it failed or was denied", () => {
-    expect(isLookupCall(undefined, presented("GET"), "success")).toBe(true);
-    expect(isLookupCall(undefined, presented("head"), "success")).toBe(true);
-    expect(isLookupCall(undefined, presented("GET"), "error")).toBe(false);
-    expect(isLookupCall(undefined, presented("GET"), "denied")).toBe(false);
+    expect(isPanelLookup(undefined, presented("GET"), "success")).toBe(true);
+    expect(isPanelLookup(undefined, presented("head"), "success")).toBe(true);
+    expect(isPanelLookup(undefined, presented("GET"), "error")).toBe(false);
+    expect(isPanelLookup(undefined, presented("GET"), "denied")).toBe(false);
     for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
-      expect(isLookupCall(undefined, presented(method), "success")).toBe(false);
+      expect(isPanelLookup(undefined, presented(method), "success")).toBe(false);
     }
   });
 
   it("is never an unstamped call presented without a read", () => {
-    expect(isLookupCall(undefined, undefined, "success")).toBe(false);
-    expect(isLookupCall({ appstrate: { lookup: false } }, presented("POST"), "success")).toBe(
+    expect(isPanelLookup(undefined, undefined, "success")).toBe(false);
+    expect(isPanelLookup({ appstrate: { lookup: false } }, presented("POST"), "success")).toBe(
       false,
     );
-    expect(isLookupCall({ appstrate: { spaceId: "spc_a" } }, undefined, "success")).toBe(false);
+    expect(isPanelLookup({ appstrate: { spaceId: "spc_a" } }, undefined, "success")).toBe(false);
   });
 });
 

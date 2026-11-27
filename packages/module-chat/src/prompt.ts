@@ -376,7 +376,7 @@ type CallerContextOpts = {
   /** Limited to the origin space, which is then the only space the turn reaches. */
   restricted: boolean;
   /** The spaces of the turn, each with the acts the turn holds there. */
-  spaces?: readonly ContextSpace[];
+  spaces: readonly ContextSpace[];
   /** The TURN's set (post-`turnPermissions`): the authoring toggle narrows it. */
   permissions: readonly string[];
   skills: ChatSkillSelection;
@@ -387,7 +387,7 @@ type CallerContextOpts = {
   /** The catalogue of the turn's skills, listed by {@link buildCallerContextBlock} with discovery on. */
   skillCatalogue?: readonly CatalogueSkill[];
   /** What the engaged spaces hold (`formatSpaceDetails`), rendered after the spaces. */
-  spaceDetails?: string;
+  spaceDetails: string;
 };
 
 /** Render the caller context into a system-prompt block, with the skills it injected. */
@@ -461,7 +461,7 @@ export function formatCallerContext(
     `Reply in the user's language (${normalizeChatLocale(opts.locale)}) unless they switch.`,
   );
   // Facts about the caller, not data of a space: naming them records no space on the conversation.
-  const spaces = formatSpaces(opts.spaces ?? []);
+  const spaces = formatSpaces(opts.spaces);
   if (spaces) lines.push("", spaces);
   // What the spaces it depends on hold (`buildCallerContextBlock`): the conversation's recorded spaces,
   // the caller's personal space, and every space once the user asked for them all.
@@ -766,11 +766,7 @@ export async function buildCallerContextBlock(
     },
     detailSpaces,
   );
-  const details = formatSpaceDetails(
-    turnSkills.details,
-    undefined,
-    readable.length - detailSpaces.length,
-  );
+  const details = formatSpaceDetails(turnSkills.details, readable.length - detailSpaces.length);
   const { injected, ...rendered } = formatCallerContext(identity, {
     locale,
     capabilities,
