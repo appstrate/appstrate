@@ -50,7 +50,7 @@ describe("AppearancePicker", () => {
   it("opens on the form of the stored icon", () => {
     const html = picker(["lucide", "emoji"], { icon: "emoji:🚜", color: null });
     expect(html).toMatch(
-      /role="tab"[^>]*aria-selected="true"[^>]*data-state="active"[^>]*>(?:<svg[^>]*>.*?<\/svg>)?Emoji</,
+      /role="tab"[^>]*aria-selected="true"[^>]*>(?:<svg[^>]*>.*?<\/svg>)?Emoji</,
     );
     expect(html).toMatch(
       /role="tab"[^>]*aria-selected="false"[^>]*>(?:<svg[^>]*>.*?<\/svg>)?Icône</,

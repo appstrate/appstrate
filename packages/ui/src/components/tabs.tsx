@@ -1,55 +1,91 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as React from "react";
-import * as TabsPrimitive from "@radix-ui/react-tabs";
+import { Tabs as TabsPrimitive } from "@base-ui/react/tabs";
 
 import { cn } from "../cn.ts";
 
-const Tabs = TabsPrimitive.Root;
+type TabsListVariant = "default" | "line";
 
-const TabsList = React.forwardRef<
-  React.ElementRef<typeof TabsPrimitive.List>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
->(({ className, ...props }, ref) => (
-  <TabsPrimitive.List
-    ref={ref}
-    className={cn(
-      "bg-muted text-muted-foreground inline-flex h-10 items-center justify-center rounded-md p-1",
-      className,
-    )}
-    {...props}
-  />
-));
-TabsList.displayName = TabsPrimitive.List.displayName;
+/** Base UI also takes a `(state) => string` class; these wrappers merge theirs, so a string only. */
+type WithClassName<P> = Omit<P, "className"> & { className?: string };
 
-const TabsTrigger = React.forwardRef<
-  React.ElementRef<typeof TabsPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
->(({ className, ...props }, ref) => (
-  <TabsPrimitive.Trigger
-    ref={ref}
-    className={cn(
-      "ring-offset-background focus-visible:ring-ring data-[state=active]:bg-background data-[state=active]:text-foreground inline-flex items-center justify-center rounded-sm px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 data-[state=active]:shadow-sm",
-      className,
-    )}
-    {...props}
-  />
-));
-TabsTrigger.displayName = TabsPrimitive.Trigger.displayName;
+function Tabs(props: React.ComponentProps<typeof TabsPrimitive.Root>) {
+  return <TabsPrimitive.Root data-slot="tabs" {...props} />;
+}
 
-const TabsContent = React.forwardRef<
-  React.ElementRef<typeof TabsPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
->(({ className, ...props }, ref) => (
-  <TabsPrimitive.Content
-    ref={ref}
-    className={cn(
-      "ring-offset-background focus-visible:ring-ring mt-2 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
-      className,
-    )}
-    {...props}
-  />
-));
-TabsContent.displayName = TabsPrimitive.Content.displayName;
+/**
+ * The active tab is marked by ONE indicator that slides between tabs (Base UI measures the active
+ * tab into `--active-tab-*`): a raised pill on the muted track (`default`), or a rule under the
+ * tab (`line`). The list is its own stacking context, so the indicator paints over the track and
+ * under the labels.
+ *
+ * Arrow keys select as they move, like a native tab list: a tab whose selection navigates relies
+ * on it (`CollectionTabs`).
+ */
+function TabsList({
+  className,
+  variant = "default",
+  activateOnFocus = true,
+  children,
+  ...props
+}: WithClassName<React.ComponentProps<typeof TabsPrimitive.List>> & { variant?: TabsListVariant }) {
+  return (
+    <TabsPrimitive.List
+      data-slot="tabs-list"
+      data-variant={variant}
+      activateOnFocus={activateOnFocus}
+      className={cn(
+        "group/tabs-list text-muted-foreground relative isolate inline-flex items-center justify-center",
+        variant === "default" && "bg-muted h-10 rounded-md p-1",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      <TabsPrimitive.Indicator
+        data-slot="tabs-indicator"
+        className={cn(
+          "absolute left-0 -z-10 w-(--active-tab-width) translate-x-(--active-tab-left) transition-[translate,width,height] duration-200 ease-out motion-reduce:transition-none",
+          variant === "default" &&
+            "bg-background top-0 h-(--active-tab-height) translate-y-(--active-tab-top) rounded-sm shadow-sm",
+          variant === "line" && "bg-primary bottom-0 h-0.5",
+        )}
+      />
+    </TabsPrimitive.List>
+  );
+}
+
+function TabsTrigger({
+  className,
+  ...props
+}: WithClassName<React.ComponentProps<typeof TabsPrimitive.Tab>>) {
+  return (
+    <TabsPrimitive.Tab
+      data-slot="tabs-trigger"
+      className={cn(
+        "ring-offset-background focus-visible:ring-ring hover:text-foreground data-active:text-foreground inline-flex items-center justify-center rounded-sm px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors group-data-[variant=line]/tabs-list:rounded-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none data-disabled:pointer-events-none data-disabled:opacity-50",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+function TabsContent({
+  className,
+  ...props
+}: WithClassName<React.ComponentProps<typeof TabsPrimitive.Panel>>) {
+  return (
+    <TabsPrimitive.Panel
+      data-slot="tabs-content"
+      className={cn(
+        "ring-offset-background focus-visible:ring-ring mt-2 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
 
 export { Tabs, TabsList, TabsTrigger, TabsContent };

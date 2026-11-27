@@ -89,14 +89,31 @@ export function ProductTabs() {
   // A toggle with one choice is noise; a slot still being decided keeps the row.
   const chatDeciding = chatPending && !chatShown;
   const studioDeciding = !ready && !studio;
-  if (products.length + Number(chatDeciding) + Number(studioDeciding) < 2) return null;
+  const slots = products.length + Number(chatDeciding) + Number(studioDeciding);
+  if (slots < 2) return null;
+  const activeProduct = products.findIndex((p) => p.active);
+  // The slot of the active product, counting a reserved slot before it.
+  const activeIndex = activeProduct + Number(chatDeciding);
 
   return (
     <div className="px-2 pt-4 pb-1">
       <nav
         aria-label={t("products.ariaLabel")}
-        className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5"
+        className="bg-sidebar-accent/40 relative isolate flex gap-0.5 rounded-lg p-0.5"
       >
+        {/* The tabs share the row equally, so one pill marks the active one and slides
+            between them, like the indicator of `TabsList`. A slot is the row less its padding
+            (`p-0.5`, twice) and gaps (`gap-0.5`, n − 1), over n; the pill moves by a slot and a gap. */}
+        {activeProduct >= 0 ? (
+          <span
+            aria-hidden="true"
+            className="bg-card absolute inset-y-0.5 left-0.5 -z-10 rounded-md shadow-sm transition-[translate] duration-200 ease-out motion-reduce:transition-none"
+            style={{
+              width: `calc((100% - var(--spacing) * ${(slots + 1) * 0.5}) / ${slots})`,
+              translate: `calc(${activeIndex} * (100% + var(--spacing) * 0.5))`,
+            }}
+          />
+        ) : null}
         {chatDeciding && <Skeleton className="desktop-pointer:h-7 h-10 flex-1 rounded-md" />}
         {products.map((p) => (
           <Link
@@ -106,9 +123,7 @@ export function ProductTabs() {
             aria-current={p.active ? "page" : undefined}
             className={cn(
               "desktop-pointer:h-7 flex h-10 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
-              p.active
-                ? "bg-card text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
+              p.active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
             )}
           >
             <span className="flex shrink-0 items-center justify-center">{p.icon}</span>
