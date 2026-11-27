@@ -696,6 +696,7 @@ async function assertBundleAgentsExposeCallableTools(
       orgId,
       toolPolicySpaceId: spaceId,
       requireCallableTools: true,
+      approvalsFollow: true,
       extraManifests: carried,
     });
     // `field` stays the agent-manifest key; a bundle carries MANY manifests,

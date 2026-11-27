@@ -135,6 +135,7 @@ import {
   displayAccountId,
   allowsUndeclaredTools,
   isUnauthenticatedIntegration,
+  partitionScopesByAuthCatalog,
   readDefaultTools,
   type ConnectionCandidate,
   type ConnectionOverrides,
@@ -2723,6 +2724,8 @@ export async function recordRequestedScopes(
   scopes: readonly string[],
   run?: { orgId: string; id: string },
 ): Promise<string[] | null> {
+  const asked = await scopesTheConnectCanRequest(connectionId, integrationId, reach, scopes);
+  if (asked.length === 0) return null;
   // Read and written under the row's lock: two concurrent demands merge, never overwrite each other.
   const outcome = await db.transaction(async (tx) => {
     const [row] = await tx
@@ -2742,11 +2745,10 @@ export async function recordRequestedScopes(
       .for("update");
     if (!row) return null;
     const granted = new Set(row.granted);
-    const next = [
-      ...new Set(
-        [...row.requested, ...sanitiseRequiredScopes(scopes)].filter((s) => !granted.has(s)),
-      ),
-    ].slice(0, MAX_REQUIRED_SCOPES);
+    // At the cap the oldest demands give way: the latest refusal is the one the owner can act on.
+    const next = [...new Set([...row.requested, ...asked].filter((s) => !granted.has(s)))].slice(
+      -MAX_REQUIRED_SCOPES,
+    );
     if (next.length === row.requested.length && next.every((s, i) => s === row.requested[i]))
       return { next, announce: null };
     await tx
@@ -2769,6 +2771,33 @@ export async function recordRequestedScopes(
     await recordRunScopeRequest(run.orgId, run.id, { integrationId, connectionId, scopes: next });
   }
   return next;
+}
+
+/**
+ * The valid scope tokens of `scopes` that a reconnect of this connection may request: the connect
+ * kickoffs refuse a scope outside the auth's `scope_catalog` (`scope_not_in_catalog`), so a demand
+ * the catalog does not carry could never be granted, hence never cleared. No catalog: all of them.
+ */
+async function scopesTheConnectCanRequest(
+  connectionId: string,
+  integrationId: string,
+  reach: { spaceId: string; actor: Actor },
+  scopes: readonly string[],
+): Promise<string[]> {
+  const valid = sanitiseRequiredScopes(scopes);
+  if (valid.length === 0) return [];
+  const [row] = await db
+    .select({ orgId: integrationConnections.orgId, authKey: integrationConnections.authKey })
+    .from(integrationConnections)
+    .where(reachableConnection(connectionId, integrationId, reach))
+    .limit(1);
+  if (!row) return [];
+  const read = await readIntegrationManifestForConnect(
+    { orgId: row.orgId, spaceId: reach.spaceId },
+    integrationId,
+  );
+  if (!read.ok) return [];
+  return partitionScopesByAuthCatalog(read.manifest.auths?.[row.authKey], valid).declared;
 }
 
 /** The rejection streak a connection carries into a call: its count, for a non-OAuth2 auth only. */

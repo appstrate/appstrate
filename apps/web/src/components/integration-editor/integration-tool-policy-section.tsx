@@ -11,7 +11,7 @@
  */
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Ban, Check, ChevronRight, ListPlus, Undo2, Unlock, FilePlus2 } from "lucide-react";
+import { Ban, ChevronRight, ListPlus, Undo2, Unlock, FilePlus2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import {
@@ -177,7 +177,7 @@ export function ToolPolicyView({
   const { t } = useTranslation("agents");
   // Blocking, withdrawing an approval and approving many at once change what every agent of the
   // space may call, like deactivating a package there (which asks): they ask too. Approving one
-  // tool, whose definition sits beside the button, and unblocking give back and do not.
+  // tool from its review card, whose definition sits beside the button, and unblocking do not.
   // The target outlives the dialog's close, so its title keeps the name while it fades out.
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -209,18 +209,8 @@ export function ToolPolicyView({
         testId: `tool-declare-${name}`,
       });
     }
+    // Approving lives on the review card only, beside the definition it makes callable.
     if (!decided) return out;
-    const waiting = items.filter((item) => item.name === name);
-    if (waiting.length === 1 && waiting[0]!.fingerprint !== null) {
-      const fingerprint = waiting[0]!.fingerprint;
-      out.push({
-        id: "approve",
-        label: t("integrationTools.policy.approve"),
-        icon: Check,
-        disabled,
-        onSelect: () => onApprove([{ name, fingerprint }]),
-      });
-    }
     if (blocked.has(name)) {
       out.push({
         id: "unblock",

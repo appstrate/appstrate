@@ -1650,9 +1650,17 @@ function zeroToolReason(spec: IntegrationSpawnSpec): string {
  * Throwing routes the spec through the per-spec catch in
  * {@link bootIntegrations}, which records it in `failed[]` — the SAME abort
  * path a spawn/connect failure takes. No second failure mechanism.
+ *
+ * `unavailable` is the exception: a surface emptied because each selected tool is unavailable
+ * (blocked or unapproved in the space, no longer listed) is a degraded run, reported as such,
+ * not a misconfigured one — the run goes on without this integration's tools.
  */
-export function assertIntegrationExposesTools(spec: IntegrationSpawnSpec, toolCount: number): void {
-  if (toolCount > 0) return;
+export function assertIntegrationExposesTools(
+  spec: IntegrationSpawnSpec,
+  toolCount: number,
+  unavailable: readonly UnavailableTool[] = [],
+): void {
+  if (toolCount > 0 || unavailable.length > 0) return;
   throw new Error(zeroToolReason(spec));
 }
 
@@ -2194,7 +2202,7 @@ export async function bootIntegrations(
         reports.push(reportToolsObserved(spec, listed, unavailableTools, bundleFetchOpts));
         // Attach the in-process api_call tool alongside the remote MCP's tools.
         const apiCallAdded = await attachApiCall(spec, connection, source, allocatedNs);
-        assertIntegrationExposesTools(spec, added + apiCallAdded);
+        assertIntegrationExposesTools(spec, added + apiCallAdded, unavailableTools);
         spawned.push({
           integrationId: spec.integrationId,
           namespace: allocatedNs,
@@ -2280,7 +2288,7 @@ export async function bootIntegrations(
       // native tools, under the same (allocated) namespace.
       const apiCallAdded = await attachApiCall(spec, connection, source, allocatedNs);
 
-      assertIntegrationExposesTools(spec, added + apiCallAdded);
+      assertIntegrationExposesTools(spec, added + apiCallAdded, unavailable);
       spawned.push({
         integrationId: spec.integrationId,
         namespace: allocatedNs,

@@ -244,8 +244,8 @@ describe("ToolPolicyView row actions", () => {
 
   it("offers each tool the deeds its state allows", () => {
     const { ids } = view(policy, tools);
-    expect(ids("waiting")).toEqual(["approve", "block"]);
-    // Two listed definitions: approving one blind is ambiguous, the cards carry the diff.
+    // Approving is the review card's, beside the definition: never a blind row deed.
+    expect(ids("waiting")).toEqual(["block"]);
     expect(ids("twice")).toEqual(["block"]);
     expect(ids("approved")).toEqual(["revoke", "block"]);
     expect(ids("shut")).toEqual(["unblock"]);
@@ -269,16 +269,10 @@ describe("ToolPolicyView row actions", () => {
     expect(ids("gone")).toEqual(["unblock"]);
   });
 
-  it("approves the one definition a row waits on, and unblocks by name", () => {
-    const approved: unknown[] = [];
+  it("unblocks by name", () => {
     const unblocked: string[] = [];
-    const { controls } = view(policy, tools, {
-      onApprove: (items) => approved.push(items),
-      onUnblock: (name) => unblocked.push(name),
-    });
-    controls.rowActions({ name: "waiting" })[0]!.onSelect?.();
+    const { controls } = view(policy, tools, { onUnblock: (name) => unblocked.push(name) });
     controls.rowActions({ name: "shut" })[0]!.onSelect?.();
-    expect(approved).toEqual([[{ name: "waiting", fingerprint: "w" }]]);
     expect(unblocked).toEqual(["shut"]);
   });
 

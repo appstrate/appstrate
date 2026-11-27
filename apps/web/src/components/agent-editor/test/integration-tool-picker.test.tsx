@@ -263,3 +263,54 @@ describe("IntegrationToolPicker — unknown permissions", () => {
     expect(renderWith("oauth2", "declared")).toContain(flag);
   });
 });
+
+describe("IntegrationToolPicker — a blocked api_call", () => {
+  const key = $api.queryOptions("get", "/api/integrations/{packageId}", {
+    params: { path: { packageId: ID }, header: { "X-Org-Id": "org_1", "X-Space-Id": "spc_a" } },
+  }).queryKey;
+
+  function renderOver(tools: string[]): string {
+    const qc = memberSpaceClient([testSpace("spc_a", ["integrations:read"])]);
+    qc.setQueryData(key, {
+      manifest: {
+        auths: { primary: { type: "api_key" } },
+        _meta: { "dev.appstrate/api": { auths: { primary: {} } } },
+      },
+      auths: [],
+      active: true,
+      allow_undeclared_tools: false,
+      tool_catalog: [
+        {
+          name: "api_call",
+          status: "blocked",
+          origin: "declared",
+          modified: false,
+          fingerprint: null,
+        },
+      ],
+    });
+    return renderInSpace(
+      <IntegrationToolPicker
+        packageId={ID}
+        entry={{ id: ID, version: "*", tools }}
+        onChange={() => {}}
+      />,
+      { queryClient: qc, overview: false },
+    );
+  }
+
+  /** The api_call checkbox's own tag (its classes name `disabled:` variants, not the attribute). */
+  const apiCallTag = (html: string) =>
+    /<button[^>]*data-testid="integ-apicall-@acme\/gmail"[^>]*>/.exec(html)?.[0] ?? "";
+
+  it("says the space blocks it and cannot be added, but a kept selection stays", () => {
+    const fresh = renderOver([]);
+    expect(fresh).toContain('data-testid="tool-reason-api_call"');
+    expect(fresh).toContain("Bloqué dans cet espace");
+    expect(apiCallTag(fresh)).toContain(' disabled=""');
+    const kept = renderOver(["api_call"]);
+    expect(kept).toContain("Bloqué dans cet espace");
+    expect(apiCallTag(kept)).not.toBe("");
+    expect(apiCallTag(kept)).not.toContain(' disabled=""');
+  });
+});

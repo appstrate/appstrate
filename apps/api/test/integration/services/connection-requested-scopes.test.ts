@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { notifications } from "@appstrate/db/schema";
+import { notifications, packages } from "@appstrate/db/schema";
 import type { Actor } from "@appstrate/connect";
 import { MAX_REQUIRED_SCOPES } from "@appstrate/core/www-authenticate";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -22,6 +22,57 @@ import {
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 
 const INTEGRATION = "@orga/mail";
+
+/** A valid integration manifest whose `oauth` auth carries `scopeCatalog` (none: no catalog). */
+const manifestWith = (scopeCatalog?: string[]) => ({
+  type: "integration",
+  schema_version: "0.1",
+  name: INTEGRATION,
+  version: "0.1.0",
+  display_name: "Mail",
+  description: "Mail integration",
+  source: {
+    kind: "local",
+    server: {
+      type: "node",
+      entry_point: "server/index.js",
+      mcp_config: { command: "node", args: ["server/index.js"] },
+    },
+  },
+  auths: {
+    oauth: {
+      type: "oauth2",
+      authorization_endpoint: "https://mail.example.com/authorize",
+      token_endpoint: "https://mail.example.com/token",
+      ...(scopeCatalog
+        ? { scope_catalog: scopeCatalog.map((value) => ({ value, label: value })) }
+        : {}),
+      authorized_uris: ["https://mail.example.com/**"],
+      delivery: {
+        http: {
+          in: "header",
+          name: "Authorization",
+          prefix: "Bearer ",
+          value: "{$credential.access_token}",
+        },
+      },
+    },
+    key: {
+      type: "api_key",
+      credentials: {
+        schema: {
+          type: "object",
+          properties: { api_key: { type: "string" } },
+          required: ["api_key"],
+        },
+      },
+      authorized_uris: ["https://mail.example.com/**"],
+      delivery: {
+        http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" },
+      },
+    },
+  },
+});
 
 describe("connection requested scopes", () => {
   let ctx: TestContext;
@@ -51,7 +102,13 @@ describe("connection requested scopes", () => {
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     actor = { type: "user", id: ctx.user.id };
     reach = { spaceId: ctx.defaultSpaceId, actor };
-    await seedPackage({ id: INTEGRATION, orgId: ctx.orgId, type: "integration", source: "local" });
+    await seedPackage({
+      id: INTEGRATION,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifestWith(),
+    });
     connectionId = (await save(["read"])).id;
   });
 
@@ -71,7 +128,21 @@ describe("connection requested scopes", () => {
         Array.from({ length: MAX_REQUIRED_SCOPES }, (_, j) => `s${i}_${j}`),
       );
     }
-    expect((await requested()).length).toBe(MAX_REQUIRED_SCOPES);
+    // The latest demand survives the cap: the one a reconnect now would answer.
+    expect(await requested()).toEqual(
+      Array.from({ length: MAX_REQUIRED_SCOPES }, (_, j) => `s3_${j}`),
+    );
+  });
+
+  it("keeps only the scopes the auth's scope_catalog lets a reconnect request", async () => {
+    await db
+      .update(packages)
+      .set({ draftManifest: manifestWith(["read", "write"]) })
+      .where(eq(packages.id, INTEGRATION));
+    await recordRequestedScopes(connectionId, INTEGRATION, reach, ["write", "admin"]);
+    expect(await requested()).toEqual(["write"]);
+    expect(await recordRequestedScopes(connectionId, INTEGRATION, reach, ["admin"])).toBeNull();
+    expect(await requested()).toEqual(["write"]);
   });
 
   it("records nothing for a caller that does not reach the connection", async () => {
@@ -127,7 +198,7 @@ describe("connection requested scopes", () => {
           spaceId: ctx.defaultSpaceId,
           payload: {
             packageId: INTEGRATION,
-            integration_name: INTEGRATION,
+            integration_name: "Mail",
             connection_id: connectionId,
             label: expect.any(String),
           },

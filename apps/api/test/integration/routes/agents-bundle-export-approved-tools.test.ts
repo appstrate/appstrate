@@ -111,4 +111,24 @@ describe("bundle export: space-approved tools header", () => {
     expect(res.status, await res.clone().text()).toBe(200);
     expect(res.headers.has(HEADER)).toBe(false);
   });
+
+  it("imports into an organization that has approved nothing yet: the approvals follow the agent", async () => {
+    await insertToolApprovals(policyTarget(ctx, INTEG), [
+      { toolName: "write_file", fingerprint: toolFingerprint("write_file") },
+    ]);
+    const exported = await exportBundle(["read_file", "write_file"]);
+    expect(exported.status, await exported.clone().text()).toBe(200);
+    const bytes = await exported.arrayBuffer();
+
+    await truncateAll();
+    const dest = await createTestContext({ orgSlug: "acme" });
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "bundle.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(dest),
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+  });
 });

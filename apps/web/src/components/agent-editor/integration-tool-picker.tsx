@@ -357,10 +357,13 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
             tool.name,
             visibleSyntheticApiUploadNames,
           );
+          // Blocked by the space: the run goes without it. Not addable; a kept selection can be removed.
+          const blocked = tool.status === "blocked";
           return (
             <label key={tool.name} className="flex cursor-pointer items-start gap-2">
               <Checkbox
                 checked={pairSelected}
+                disabled={blocked && !pairSelected}
                 onCheckedChange={() => toggleApiCallTool(tool.name)}
                 data-testid={
                   apiCallEntries.length > 1
@@ -384,6 +387,16 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
                       : "agentEditor.integrations.apiCall.description",
                   )}
                 </span>
+                {blocked && (
+                  <span
+                    className="text-muted-foreground text-[11px]"
+                    data-testid={`tool-reason-${tool.name}`}
+                  >
+                    {t("agents:packageTools.reason.blocked", {
+                      space: spaceName ?? t("agents:packageTools.thisSpace"),
+                    })}
+                  </span>
+                )}
               </span>
             </label>
           );

@@ -112,7 +112,7 @@ A run that selects no usable tool at all still fails at boot, as described in [H
 
 ## Reaching the server directly is refused
 
-An integration's own MCP endpoint cannot be called as plain HTTP through the credential proxy or an in-run `api_call`: the call is refused with `403 remote_mcp_endpoint_not_proxied`. Tools are the way in, because they are where the policy applies.
+An integration's own MCP endpoint cannot be called as plain HTTP through the credential proxy or an in-run `api_call`: the proxy refuses it with `403 remote_mcp_endpoint_not_proxied`, an in-run `api_call` as `not_authorized`. Tools are the way in, because they are where the policy applies.
 
 A server's `401` or `403 insufficient_scope` challenge is surfaced with the scopes it asks for: see [When a server asks for more scopes](/integrations/how-integrations-work#when-a-server-asks-for-more-scopes).
 

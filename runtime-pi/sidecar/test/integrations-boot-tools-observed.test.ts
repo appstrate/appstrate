@@ -132,6 +132,29 @@ describe("bootIntegrations — the space policy reaches the host", () => {
     });
   });
 
+  it("keeps the run going, degraded, when the space withholds every selected tool", async () => {
+    const spec = {
+      ...baseSpec,
+      toolAllowlist: ["blocked", "secret"],
+      blockedTools: ["blocked"],
+      approvedToolFingerprints: { secret: ["not-the-fingerprint"] },
+    } as unknown as IntegrationSpawnSpec;
+    const { toolNames, report } = await bootWith(
+      spec,
+      remoteServer([tool("blocked"), tool("secret")]),
+    );
+    expect(toolNames.filter((name) => name.startsWith("remote__"))).toEqual([]);
+    expect(report.ok).toBe(true);
+    expect(report.failed).toEqual([]);
+    expect(report.spawned[0]).toMatchObject({
+      toolCount: 0,
+      unavailableTools: expect.arrayContaining([
+        { name: "blocked", reason: "blocked_in_space" },
+        { name: "secret", reason: "definition_not_approved" },
+      ]),
+    });
+  });
+
   it("leaves a blocked tool out of a local integration and reports it without tools", async () => {
     const fixtureDir = path.join(import.meta.dir, "fixtures/bun-toolkit");
     const bundle = zipArtifact({

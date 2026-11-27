@@ -44,6 +44,7 @@ import type { ManifestIntegrationEntry } from "@appstrate/core/dependencies";
 import { planCreateVersionOutcome } from "@appstrate/core/version-policy";
 import {
   getLocalServerTools,
+  hiddenToolNames,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
   validateAgentIntegrationScopes,
@@ -51,7 +52,11 @@ import {
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { ValidationFieldError } from "@appstrate/core/api-errors";
 import { db } from "@appstrate/db/client";
-import { allApprovedToolNames, loadToolSpacePolicy } from "./integration-tool-catalog.ts";
+import {
+  allApprovedToolNames,
+  isClosedRemoteCatalog,
+  loadToolSpacePolicy,
+} from "./integration-tool-catalog.ts";
 import { packageDistTags, packageVersions, packages } from "@appstrate/db/schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 
@@ -181,6 +186,12 @@ interface ValidateAgentIntegrationSelectionsInput {
    * — publishing a version, and ZIP/GitHub/`.afps-bundle` import.
    */
   requireCallableTools?: boolean;
+  /**
+   * Count every name the space COULD approve as approved: a bundle import carries an agent into a
+   * space whose approvals do not exist yet (they cannot, before the integration is there to read).
+   * Until they are given, its runs go without those tools (`definition_not_approved`).
+   */
+  approvalsFollow?: boolean;
   /** Per-run integration pins, used by the pre-deploy schedule audit. */
   dependencyOverrides?: Record<string, string>;
   /**
@@ -218,6 +229,18 @@ interface ValidateAgentIntegrationSelectionsInput {
    * since dropped it from their working copy). See `inline-run-preflight.ts`.
    */
   manifestCache?: IntegrationManifestCache;
+}
+
+/** The names of `tools` a space could approve on `manifest`: undeclared, not hidden, closed remote catalog. */
+function approvableSelection(
+  tools: ManifestIntegrationEntry["tools"],
+  manifest: IntegrationManifest,
+  catalog: ReadonlyArray<{ name: string }>,
+): string[] {
+  if (!Array.isArray(tools) || !isClosedRemoteCatalog(manifest)) return [];
+  const declared = new Set(catalog.map((e) => e.name));
+  const hidden = hiddenToolNames(manifest);
+  return tools.filter((name) => !declared.has(name) && !hidden.has(name));
 }
 
 /**
@@ -337,6 +360,7 @@ export async function validateAgentIntegrationSelections(
     orgId,
     toolPolicySpaceId,
     requireCallableTools = false,
+    approvalsFollow = false,
     dependencyOverrides,
     extraManifests,
     manifestCache,
@@ -449,6 +473,8 @@ export async function validateAgentIntegrationSelections(
         ]
       : [];
     const catalog = resolveIntegrationToolCatalog({ integration: judgedManifest });
+    if (approvalsFollow)
+      approvedTools.push(...approvableSelection(entry.tools, judgedManifest, catalog));
 
     // The integration told us its tool surface when it declares `tools_policy`,
     // or when its local server enumerates `tools`. Absent both, the surface is

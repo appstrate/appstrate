@@ -420,6 +420,16 @@ async function resolveOne(
       } satisfies ApiCallSpec;
     });
   const apiCallAuthKeys = new Set(selectedApiCalls.map((cfg) => cfg.authKey));
+  // A selection the space's blocks empty entirely: nothing to start, and the run goes without it
+  // (degraded, `blocked_in_space`) instead of booting an integration that exposes nothing.
+  const blockedNames = new Set(unavailableTools.map((t) => t.name));
+  if (
+    Array.isArray(effectiveSelection) &&
+    blockedNames.size > 0 &&
+    effectiveSelection.every((name) => blockedNames.has(name))
+  ) {
+    return { specs: [], drops: [], unavailable: unavailableTools };
+  }
 
   // ── Resolve the sidecar server spec from the AFPS `source`
   // discriminant. ──

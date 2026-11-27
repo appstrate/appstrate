@@ -197,7 +197,7 @@ describe("resolveIntegrationSpawns — a blocked api_call", () => {
       resolvedConnections: await bindAllConnections(API),
     });
     unavailable = result.unavailable;
-    return result.specs[0]!;
+    return result.specs[0];
   }
 
   beforeEach(async () => {
@@ -205,17 +205,15 @@ describe("resolveIntegrationSpawns — a blocked api_call", () => {
     ctx = await createTestContext({ orgSlug: "orga" });
   });
 
-  it("is not granted to the run, upload companion included", async () => {
-    const spec = await spawnApi(["api_call"]);
-    expect(spec.apiCalls).toBeUndefined();
-    expect(spec.blockedTools).toBeUndefined();
+  it("is not granted to the run, upload companion included: a selection it empties starts nothing", async () => {
+    expect(await spawnApi(["api_call"])).toBeUndefined();
     expect(unavailable).toEqual([
       { integrationId: API, name: "api_call", reason: "blocked_in_space" },
     ]);
   });
 
   it("keeps the call when only its upload companion is blocked", async () => {
-    const spec = await spawnApi(["api_upload"]);
+    const spec = (await spawnApi(["api_upload"]))!;
     expect(spec.apiCalls).toHaveLength(1);
     expect(spec.apiCalls![0]!.uploadProtocols).toBeUndefined();
     expect(unavailable.map((t) => t.name)).toEqual(["api_upload"]);

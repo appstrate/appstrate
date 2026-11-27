@@ -1184,8 +1184,9 @@ export const credentialProxyPaths = {
         },
         "422": {
           description:
-            "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP " +
-            "server; `remote_url_unrenderable` — its server URL is built from the connection's " +
+            "`integration_not_remote` — the integration is not backed by a remote MCP server; " +
+            "`sync_transport_unsupported` — its server uses the SSE transport, only Streamable " +
+            "HTTP is called; `remote_url_unrenderable` — its server URL is built from the connection's " +
             "variables and they do not render it; `upstream_invalid_params` — the server answered " +
             "the `tools/call` JSON-RPC error -32602 (Invalid params): it refused the arguments or " +
             "the tool name (`mcp_error: { code, message }`, its message untrusted text; " +

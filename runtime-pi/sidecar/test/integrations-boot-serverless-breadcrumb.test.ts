@@ -107,6 +107,12 @@ describe("assertIntegrationExposesTools", () => {
     expect(() => assertIntegrationExposesTools(localSpec(), 0)).toThrow("nothing callable");
   });
 
+  it("does not throw when each selected tool is unavailable: the run is degraded, not misconfigured", () => {
+    expect(() =>
+      assertIntegrationExposesTools(localSpec(), 0, [{ name: "x", reason: "blocked_in_space" }]),
+    ).not.toThrow();
+  });
+
   it("does not throw when at least one tool was registered", () => {
     expect(() => assertIntegrationExposesTools(serverlessSpec(), 1)).not.toThrow();
     expect(() => assertIntegrationExposesTools(localSpec(), 3)).not.toThrow();

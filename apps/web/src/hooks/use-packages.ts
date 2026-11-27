@@ -485,6 +485,8 @@ export function useCreateVersion(type: PackageType, packageId: string) {
     },
     onSuccess: () => {
       invalidateVersionCaches(qc);
+      // An integration's tool catalog and approvals are judged on its published version.
+      if (type === "integration") void invalidateIntegrationQueries(qc);
     },
     // A refusal that moved or settled the draft (`precondition_failed`: someone
     // wrote it; `no_changes`: the server cleared its dirty marker) leaves the page stale.

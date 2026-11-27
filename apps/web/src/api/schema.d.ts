@@ -13061,7 +13061,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it; `upstream_invalid_params` — the server answered the `tools/call` JSON-RPC error -32602 (Invalid params): it refused the arguments or the tool name (`mcp_error: { code, message }`, its message untrusted text; `Proxy-Status: appstrate; error=http_request_error; received-status=<status>`, the HTTP status it came in). */
+            /** @description `integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport, only Streamable HTTP is called; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it; `upstream_invalid_params` — the server answered the `tools/call` JSON-RPC error -32602 (Invalid params): it refused the arguments or the tool name (`mcp_error: { code, message }`, its message untrusted text; `Proxy-Status: appstrate; error=http_request_error; received-status=<status>`, the HTTP status it came in). */
             422: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
