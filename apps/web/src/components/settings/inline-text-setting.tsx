@@ -3,7 +3,7 @@
 /**
  * A text setting saved by Save or Enter, cancelled by Cancel or Escape; blur never saves.
  * An empty value cannot be saved. `data-inline-editing` keeps Escape from closing the
- * surrounding dialog (`keepOpenWhileRenaming`).
+ * surrounding dialog (`isRenameEscape`).
  */
 import { inlineEditingAttributes } from "../../lib/keep-open-while-renaming";
 import { Input } from "@appstrate/ui/components/input";

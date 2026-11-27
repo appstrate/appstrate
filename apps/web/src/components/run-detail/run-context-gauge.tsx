@@ -71,11 +71,11 @@ export function ContextGaugeReadout({
         </span>
       ) : (
         <Popover>
-          <PopoverTrigger asChild>
-            <button type="button" className="cursor-pointer underline decoration-dotted">
-              {counts}
-              {share}
-            </button>
+          <PopoverTrigger
+            render={<button type="button" className="cursor-pointer underline decoration-dotted" />}
+          >
+            {counts}
+            {share}
           </PopoverTrigger>
           <PopoverContent side="bottom" className="flex w-auto max-w-xs flex-col gap-1 p-3">
             {isActive ? null : <ContextGaugePeakHint />}

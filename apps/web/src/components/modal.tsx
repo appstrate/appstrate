@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@appstrate/ui/components/dialog";
-import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
+import { isRenameEscape } from "../lib/keep-open-while-renaming";
 import { useDialogFocus } from "../hooks/use-dialog-focus";
 import { INTEGRATED_TABLE_SURFACE } from "../lib/table-surface";
 import { WorkingSpaceName } from "./space-name";
@@ -42,14 +42,11 @@ export function Modal({
 }: ModalProps) {
   const focus = useDialogFocus();
   return (
-    <Dialog open onOpenChange={(v) => !v && !preventClose && onClose()}>
-      <DialogContent
-        {...focus}
-        {...INTEGRATED_TABLE_SURFACE}
-        className={className}
-        onEscapeKeyDown={keepOpenWhileRenaming}
-        {...(description ? {} : { "aria-describedby": undefined })}
-      >
+    <Dialog
+      open
+      onOpenChange={(v, details) => !v && !preventClose && !isRenameEscape(details) && onClose()}
+    >
+      <DialogContent {...focus} {...INTEGRATED_TABLE_SURFACE} className={className}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}

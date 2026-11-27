@@ -333,24 +333,26 @@ function LucideIconField({
   return (
     <div className="flex flex-col gap-2">
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            role="combobox"
-            aria-label={`${t("appearance.icon")} ${picked ? iconLabel(picked) : t("appearance.iconPick")}`}
-            aria-expanded={open}
-            disabled={disabled}
-            className="w-full justify-between font-normal"
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              {picked && <DynamicIcon name={picked} className="size-4 shrink-0" />}
-              <span className={cn("truncate", !picked && "text-muted-foreground")}>
-                {picked ? iconLabel(picked) : t("appearance.iconPick")}
-              </span>
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              variant="outline"
+              role="combobox"
+              aria-label={`${t("appearance.icon")} ${picked ? iconLabel(picked) : t("appearance.iconPick")}`}
+              aria-expanded={open}
+              disabled={disabled}
+              className="w-full justify-between font-normal"
+            />
+          }
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            {picked && <DynamicIcon name={picked} className="size-4 shrink-0" />}
+            <span className={cn("truncate", !picked && "text-muted-foreground")}>
+              {picked ? iconLabel(picked) : t("appearance.iconPick")}
             </span>
-            <ChevronsUpDown className="text-muted-foreground shrink-0" />
-          </Button>
+          </span>
+          <ChevronsUpDown className="text-muted-foreground shrink-0" />
         </PopoverTrigger>
         <PopoverContent align="start" className="w-[32rem] max-w-[calc(100vw-2rem)] p-0">
           <Command shouldFilter={false}>
@@ -424,24 +426,26 @@ function EmojiField({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          aria-expanded={open}
-          disabled={disabled}
-          className="w-full justify-between font-normal"
-        >
-          {/* The emoji is read, not hidden: it is the field's current value, as the
+      <PopoverTrigger
+        render={
+          <Button
+            type="button"
+            variant="outline"
+            aria-expanded={open}
+            disabled={disabled}
+            className="w-full justify-between font-normal"
+          />
+        }
+      >
+        {/* The emoji is read, not hidden: it is the field's current value, as the
               Lucide trigger names its icon. */}
-          <span className="flex min-w-0 items-center gap-2">
-            {picked && <span className="text-base leading-none">{picked}</span>}
-            <span className={cn("truncate", !picked && "text-muted-foreground")}>
-              {t(picked ? "appearance.emojiChange" : "appearance.emojiPick")}
-            </span>
+        <span className="flex min-w-0 items-center gap-2">
+          {picked && <span className="text-base leading-none">{picked}</span>}
+          <span className={cn("truncate", !picked && "text-muted-foreground")}>
+            {t(picked ? "appearance.emojiChange" : "appearance.emojiPick")}
           </span>
-          <ChevronsUpDown className="text-muted-foreground shrink-0" />
-        </Button>
+        </span>
+        <ChevronsUpDown className="text-muted-foreground shrink-0" />
       </PopoverTrigger>
       <PopoverContent align="start" className="w-fit p-0">
         <EmojiPanel

@@ -389,12 +389,8 @@ function ConversationRow({
   // Closing a dialog opened from a row hands the focus back to what opened it.
   const dialogTrigger = useRef<HTMLButtonElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
-  const restoreDialogFocus = (event: Event) => {
-    if (dialogTrigger.current?.isConnected) {
-      event.preventDefault();
-      dialogTrigger.current.focus();
-    }
-  };
+  const restoreDialogFocus = () =>
+    dialogTrigger.current?.isConnected ? dialogTrigger.current : true;
   const [deleting, setDeleting] = useState(false);
   const [deleteFailed, setDeleteFailed] = useState(false);
   // The « … »'s two items; selecting one closes the menu.
@@ -541,7 +537,7 @@ function ConversationRow({
         open={confirmingDelete}
         onOpenChange={(open) => !deleting && setConfirmingDelete(open)}
       >
-        <AlertDialogContent data-testid="chat-delete-confirm" onCloseAutoFocus={restoreDialogFocus}>
+        <AlertDialogContent data-testid="chat-delete-confirm" finalFocus={restoreDialogFocus}>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("threads.delete.title")}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -571,7 +567,7 @@ function ConversationRow({
         <ConversationRenameDialog
           session={session}
           t={t}
-          onCloseAutoFocus={restoreDialogFocus}
+          finalFocus={restoreDialogFocus}
           onClose={() => setRenaming(false)}
         />
       )}
@@ -630,12 +626,12 @@ function ConversationRenameDialog({
   session,
   t,
   onClose,
-  onCloseAutoFocus,
+  finalFocus,
 }: {
   session: SessionSummary;
   t: ChatTranslate;
   onClose: () => void;
-  onCloseAutoFocus?: (event: Event) => void;
+  finalFocus?: () => HTMLElement | boolean;
 }) {
   const transport = useChatTransport();
   const queryClient = useQueryClient();
@@ -665,7 +661,7 @@ function ConversationRenameDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && !saving && onClose()}>
-      <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
+      <DialogContent finalFocus={finalFocus}>
         <DialogHeader>
           <DialogTitle>{t("threads.renameDialog.title")}</DialogTitle>
           <DialogDescription>{t("threads.renameDialog.description")}</DialogDescription>

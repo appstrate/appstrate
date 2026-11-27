@@ -101,13 +101,11 @@ describe("Popover", () => {
     viewport(375);
     const out = renderToStaticMarkup(
       <Popover>
-        <PopoverAnchor asChild>
-          <div className="row">
-            <PopoverTrigger>Settings</PopoverTrigger>
-          </div>
+        <PopoverAnchor render={<div className="row" />}>
+          <PopoverTrigger>Settings</PopoverTrigger>
         </PopoverAnchor>
       </Popover>,
     );
-    expect(out).toContain('<div class="row"><button type="button" aria-haspopup="dialog"');
+    expect(out).toMatch(/<div class="row"><button type="button"[^>]*aria-haspopup="dialog"/);
   });
 });

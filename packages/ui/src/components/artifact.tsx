@@ -65,20 +65,22 @@ function ArtifactAction({
 }: Omit<React.ComponentProps<typeof Button>, "children"> & { label: string; icon: LucideIcon }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className={cn("text-muted-foreground hover:text-foreground", className)}
-          aria-label={label}
-          onFocus={(event) => {
-            if (!event.currentTarget.matches(":focus-visible")) event.preventDefault();
-          }}
-          {...props}
-        >
-          <Icon className="size-4" />
-        </Button>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className={cn("text-muted-foreground hover:text-foreground", className)}
+            aria-label={label}
+            onFocus={(event) => {
+              if (!event.currentTarget.matches(":focus-visible")) event.preventDefault();
+            }}
+            {...props}
+          />
+        }
+      >
+        <Icon className="size-4" />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>

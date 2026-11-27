@@ -33,14 +33,14 @@ export function RunCostReadout({ cost, pricingStatus }: RunCostReadoutProps) {
       {/* Focusable trigger: the readout is otherwise plain text, so keyboard
             users would have no way to reach the explanation — which is the only
             place the caveat is stated. */}
-      <TooltipTrigger asChild>
-        <span tabIndex={0} className="cursor-default underline decoration-dotted">
-          {text}
-          {/* Visible marker so the caveat survives without hover/focus — a
+      <TooltipTrigger
+        render={<span tabIndex={0} className="cursor-default underline decoration-dotted" />}
+      >
+        {text}
+        {/* Visible marker so the caveat survives without hover/focus — a
                 tooltip alone would let a floor figure read as exact. The
                 placeholder is already its own signal and takes no marker. */}
-          {text !== COST_UNAVAILABLE && <span aria-hidden>*</span>}
-        </span>
+        {text !== COST_UNAVAILABLE && <span aria-hidden>*</span>}
       </TooltipTrigger>
       <TooltipContent side="bottom" className="max-w-xs">
         <span className="block text-xs">{t(tooltipKey)}</span>

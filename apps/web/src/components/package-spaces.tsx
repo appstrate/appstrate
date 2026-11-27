@@ -20,15 +20,17 @@ function SpacesBadge({ names, text }: { names: readonly string[]; text: string }
   if (names.length === 0) return null;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          tabIndex={0}
-          role="img"
-          aria-label={text}
-          className="text-muted-foreground relative z-10 shrink-0 tabular-nums"
-        >
-          {`+${names.length}`}
-        </span>
+      <TooltipTrigger
+        render={
+          <span
+            tabIndex={0}
+            role="img"
+            aria-label={text}
+            className="text-muted-foreground relative z-10 shrink-0 tabular-nums"
+          />
+        }
+      >
+        {`+${names.length}`}
       </TooltipTrigger>
       <TooltipContent>{text}</TooltipContent>
     </Tooltip>

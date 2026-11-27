@@ -30,15 +30,17 @@ export function PhoneNavigation({
   const { pathname, search, hash } = useLocation();
   return (
     <Sheet key={`${pathname}${search}${hash}`}>
-      <SheetTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          className={cn("mb-6 h-11 w-full justify-between bg-transparent px-3", className)}
-        >
-          <span className="truncate">{t("panelDialog.menu")}</span>
-          <ChevronDown className="shrink-0" />
-        </Button>
+      <SheetTrigger
+        render={
+          <Button
+            type="button"
+            variant="outline"
+            className={cn("mb-6 h-11 w-full justify-between bg-transparent px-3", className)}
+          />
+        }
+      >
+        <span className="truncate">{t("panelDialog.menu")}</span>
+        <ChevronDown className="shrink-0" />
       </SheetTrigger>
       <SheetContent
         side="left"

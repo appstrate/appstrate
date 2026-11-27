@@ -236,7 +236,7 @@ export function NotificationBell({ className }: { className?: string }) {
   // A popover from `md` up, a panel from the bottom below: the primitive decides.
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
+      <PopoverTrigger render={triggerButton} />
       <PopoverContent align="end" className="w-96 p-0">
         <NotificationContent {...contentProps} />
       </PopoverContent>

@@ -1,32 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** What the responsive menus (`DropdownMenu`, `Popover`) do to a call site's props on a sheet. */
+/** What the responsive menus (`DropdownMenu`, `Popover`) do to a call site's props. */
 
-/**
- * The positioning props of a popover's or a dropdown's content: a bottom sheet has no anchor to
- * place itself against, so they are dropped there (and `loop`, the menu's arrow-key wrap).
- */
+/** The props of an anchored popup's positioner: where it sits against its anchor. */
 const ANCHORED_PROPS = [
   "side",
   "sideOffset",
   "align",
   "alignOffset",
-  "avoidCollisions",
+  "anchor",
+  "collisionAvoidance",
   "collisionBoundary",
   "collisionPadding",
   "arrowPadding",
   "sticky",
-  "hideWhenDetached",
-  "updatePositionStrategy",
-  "loop",
+  "positionMethod",
+  "disableAnchorTracking",
 ] as const;
 
-export function withoutAnchoring<P extends object>(
+type AnchoredKey = (typeof ANCHORED_PROPS)[number];
+
+/**
+ * A popup's props split in two: what its positioner takes, and the rest for the popup itself
+ * (the Base UI parts are separate elements, where Radix's content took both).
+ */
+export function splitAnchoring<P extends object>(
   props: P,
-): Omit<P, (typeof ANCHORED_PROPS)[number]> {
+): [Pick<P, Extract<keyof P, AnchoredKey>>, Omit<P, AnchoredKey>] {
+  const anchoring: Record<string, unknown> = {};
   const rest = { ...props } as Record<string, unknown>;
-  for (const key of ANCHORED_PROPS) delete rest[key];
-  return rest as Omit<P, (typeof ANCHORED_PROPS)[number]>;
+  for (const key of ANCHORED_PROPS) {
+    if (key in rest) {
+      anchoring[key] = rest[key];
+      delete rest[key];
+    }
+  }
+  return [anchoring as Pick<P, Extract<keyof P, AnchoredKey>>, rest as Omit<P, AnchoredKey>];
+}
+
+/** A bottom sheet has no anchor to place itself against: the positioning props are dropped. */
+export function withoutAnchoring<P extends object>(props: P): Omit<P, AnchoredKey> {
+  return splitAnchoring(props)[1];
 }
 
 /**

@@ -416,7 +416,7 @@ describe("the pin form, editing", () => {
     // Unticked, it stays listed and cannot be ticked again.
     expect(fixed.html).toMatch(
       new RegExp(
-        `aria-checked="false"[^>]*disabled=""[^>]*data-testid="pin-form-connection-${GONE}"`,
+        `disabled=""[^>]*aria-checked="false"[^>]*data-testid="pin-form-connection-${GONE}"`,
       ),
     );
     expect(fixed.verdict).toMatchObject({

@@ -13,7 +13,7 @@ import {
   AlertDialogTitle,
 } from "@appstrate/ui/components/alert-dialog";
 import { Button } from "@appstrate/ui/components/button";
-import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
+import { isRenameEscape } from "../lib/keep-open-while-renaming";
 import { createConfirmer } from "../lib/confirm-settle";
 import { useDialogFocus } from "../hooks/use-dialog-focus";
 
@@ -64,8 +64,11 @@ export function ConfirmModal({
     });
 
   return (
-    <AlertDialog open={open} onOpenChange={(v) => !v && !isPending && onClose()}>
-      <AlertDialogContent {...focus} onEscapeKeyDown={keepOpenWhileRenaming}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(v, details) => !v && !isPending && !isRenameEscape(details) && onClose()}
+    >
+      <AlertDialogContent {...focus}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
