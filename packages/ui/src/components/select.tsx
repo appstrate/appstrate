@@ -95,7 +95,7 @@ function SelectScrollDownButton({
 type SelectContentProps = WithClassName<SelectPrimitive.Popup.Props> &
   Omit<SelectPrimitive.Positioner.Props, "className" | "render" | "style" | "children">;
 
-/** Below its trigger, at least as wide (Radix's "popper" position), not over it. */
+/** Below its trigger and at least as wide, not over it (Base UI lines the chosen item up with the trigger by default). */
 function SelectContent({
   className,
   children,

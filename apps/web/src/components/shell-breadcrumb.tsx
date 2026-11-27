@@ -69,8 +69,8 @@ export function ShellBreadcrumb() {
               {crumb.slot ? (
                 <span ref={registerTrailSlot} className="flex min-w-0" />
               ) : crumb.href && canReach(crumb.href) ? (
-                <BreadcrumbLink asChild className="truncate">
-                  <Link to={crumb.href}>{crumb.label}</Link>
+                <BreadcrumbLink className="truncate" render={<Link to={crumb.href} />}>
+                  {crumb.label}
                 </BreadcrumbLink>
               ) : crumb.href ? (
                 // A parent the caller may not open: named, not linked.

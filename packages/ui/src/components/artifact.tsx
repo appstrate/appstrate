@@ -52,10 +52,9 @@ function ArtifactActions({ className, ...props }: React.HTMLAttributes<HTMLDivEl
 
 /**
  * An icon button whose label is also its tooltip: the header has no room for
- * words. The tooltip opens on hover and on KEYBOARD focus only: a dialog that
- * autofocuses its first control would otherwise greet every pointer user with a
- * tooltip nobody asked for (Radix skips its own open when the event is
- * default-prevented).
+ * words. The tooltip opens on hover and on KEYBOARD focus only (Base UI's trigger
+ * ignores a focus that is not `:focus-visible`): a dialog that autofocuses its
+ * first control does not greet every pointer user with a tooltip.
  */
 function ArtifactAction({
   label,
@@ -73,9 +72,6 @@ function ArtifactAction({
             size="icon-sm"
             className={cn("text-muted-foreground hover:text-foreground", className)}
             aria-label={label}
-            onFocus={(event) => {
-              if (!event.currentTarget.matches(":focus-visible")) event.preventDefault();
-            }}
             {...props}
           />
         }

@@ -69,15 +69,18 @@ function OverlayEntry({
   );
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild isActive={active}>
-        {active ? (
-          <span aria-current="page">{content}</span>
-        ) : (
-          <Link to={to} {...overlayIntent(to)}>
-            {content}
-          </Link>
-        )}
-      </SidebarMenuButton>
+      <SidebarMenuButton
+        isActive={active}
+        render={
+          active ? (
+            <span aria-current="page">{content}</span>
+          ) : (
+            <Link to={to} {...overlayIntent(to)}>
+              {content}
+            </Link>
+          )
+        }
+      />
     </SidebarMenuItem>
   );
 }

@@ -22,7 +22,7 @@ type AnchoredKey = (typeof ANCHORED_PROPS)[number];
 
 /**
  * A popup's props split in two: what its positioner takes, and the rest for the popup itself
- * (the Base UI parts are separate elements, where Radix's content took both).
+ * (Base UI draws them as separate elements).
  */
 export function splitAnchoring<P extends object>(
   props: P,

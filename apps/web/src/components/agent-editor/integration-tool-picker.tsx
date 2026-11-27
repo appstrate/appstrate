@@ -57,7 +57,7 @@ interface IntegrationToolPickerProps {
   onChange: (next: ResourceEntry) => void;
 }
 
-/** Radix `Select` refuses an empty item value: this stands for "the integration's default auth". */
+/** An empty value reads as no choice in a `Select`: this stands for "the integration's default auth". */
 const DEFAULT_AUTH_KEY = "__default__";
 
 export function IntegrationToolPicker(props: IntegrationToolPickerProps) {
