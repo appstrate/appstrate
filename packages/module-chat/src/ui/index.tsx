@@ -52,6 +52,7 @@ import type {
   ChatTranslate,
   ChatTransport,
   OpenFile,
+  OpenThreadItem,
   SelectConversation,
   UploadFile,
   UseFileImageSrc,
@@ -65,8 +66,10 @@ export type {
   GetHeaders,
   OpenFile,
   OpenFileTarget,
+  OpenThreadItem,
   RenderSpaces,
   SelectConversation,
+  ThreadItem,
 } from "./runtime-context.ts";
 export { ChatConversationList, ChatConversationMenu } from "./thread-list.tsx";
 export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
@@ -190,6 +193,8 @@ export interface ChatPageProps {
    * to deep tool UIs via context, not props.
    */
   onOpenFile: OpenFile;
+  /** Shows a call or a run in the host's panel (see `OpenThreadItem`). Pass a stable function. */
+  onOpenThreadItem: OpenThreadItem;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
    * `runtime-context.ts`): the authenticated image
@@ -233,6 +238,7 @@ export function ChatPage({
   initialComposerDraft,
   onConversationChange,
   onOpenFile,
+  onOpenThreadItem,
   useFileImageSrc,
   uploadFile,
   t,
@@ -348,6 +354,7 @@ export function ChatPage({
   const host = useMemo<ChatHost>(
     () => ({
       openFile: onOpenFile,
+      openThreadItem: onOpenThreadItem,
       useFileImageSrc,
       t,
       can,
@@ -369,6 +376,7 @@ export function ChatPage({
     }),
     [
       onOpenFile,
+      onOpenThreadItem,
       useFileImageSrc,
       t,
       can,

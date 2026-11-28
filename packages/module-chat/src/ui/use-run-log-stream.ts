@@ -2,7 +2,7 @@
 
 /**
  * Follow a launched run's logs in the chat: fetch the persisted history once,
- * then tail new lines live over the run's SSE stream. Drives `ChatRunProgressCard`.
+ * then tail new lines live over the run's SSE stream. Drives `ThreadRunLine`.
  *
  * Three sources, merged (they overlap):
  *  1. `GET /api/runs/:id/logs` — the persisted history, so a panel that mounts
@@ -28,7 +28,7 @@
 import { useEffect, useState } from "react";
 import { runProducedFilesPath } from "@appstrate/core/run-and-wait-client";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { useCanIn, useChatTransport } from "./runtime-context.ts";
+import { useChatTransport } from "./runtime-context.ts";
 import {
   requestInSpace,
   buildRunSseUrl,
@@ -64,6 +64,8 @@ interface RunLogStream {
    * runner supplied its own execution-window `durationMs` at finalize.
    */
   duration: number | undefined;
+  /** The run's own failure message (`runs.error`), once reported. */
+  error: string | undefined;
   /**
    * Files this run PRODUCED, read from `/api/files` (see source 3 above).
    * Empty until that read lands — the caller unions it with the log-derived
@@ -118,6 +120,20 @@ interface RunLogStream {
 }
 
 /**
+ * What the reader may read of a run, judged where the run ran (the call's space, not the working
+ * one): `chat:read` implies neither the run reads nor the produced-file read.
+ */
+export interface RunReadAccess {
+  runs: boolean;
+  files: boolean;
+}
+
+/** {@link RunReadAccess} from the reader's grants in the run's space. */
+export function runReadAccess(has: (permission: string) => boolean): RunReadAccess {
+  return { runs: canReadRuns(has), files: has("files:read") };
+}
+
+/**
  * @param runId       the launched run id (`run_…`), or undefined to stay idle.
  * @param initialStatus status already known from the launch result (e.g.
  *                      `run_and_wait` returns a terminal run) — seeds the badge
@@ -126,19 +142,17 @@ interface RunLogStream {
  * @param spaceId      the space the run ran in (the space of the conversation's call
  *                      that launched it): its reads and its stream name that
  *                      space, whether or not it is the working one.
+ * @param access       what the reader may read there ({@link runReadAccess}).
  */
 export function useRunLogStream(
   runId: string | undefined,
-  initialStatus?: string,
-  initialPackageId?: string,
-  spaceId?: string,
+  initialStatus: string | undefined,
+  initialPackageId: string | undefined,
+  spaceId: string | undefined,
+  access: RunReadAccess,
 ): RunLogStream {
   const transport = useChatTransport();
-  // `chat:read` implies neither the run reads nor the file read below, and they are judged where
-  // the run ran: the call's space, not the working one.
-  const canIn = useCanIn();
-  const readsRuns = canReadRuns((permission) => canIn(spaceId, permission));
-  const readsFiles = canIn(spaceId, "files:read");
+  const { runs: readsRuns, files: readsFiles } = access;
   const [logs, setLogs] = useState<RunLogLine[]>([]);
   const [status, setStatus] = useState<RunStatus | undefined>(
     isTerminalStatus(initialStatus) ? initialStatus : undefined,
@@ -147,6 +161,7 @@ export function useRunLogStream(
   const [startedAt, setStartedAt] = useState<string | undefined>(undefined);
   const [completedAt, setCompletedAt] = useState<string | undefined>(undefined);
   const [duration, setDuration] = useState<number | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
   const [producedFiles, setProducedFiles] = useState<ChatRunFile[]>([]);
   const [producedFilesTruncated, setProducedFilesTruncated] = useState(false);
   const [sweepDone, setSweepDone] = useState(false);
@@ -169,6 +184,7 @@ export function useRunLogStream(
     setStartedAt(undefined);
     setCompletedAt(undefined);
     setDuration(undefined);
+    setError(undefined);
     setProducedFiles([]);
     setProducedFilesTruncated(false);
     setSweepDone(false);
@@ -263,6 +279,7 @@ export function useRunLogStream(
         if (run.completedAt) setCompletedAt((prev) => prev ?? run.completedAt ?? undefined);
         if (typeof run.duration === "number")
           setDuration((prev) => prev ?? run.duration ?? undefined);
+        if (run.error) setError((prev) => prev ?? run.error ?? undefined);
         // No live tail will ever open (missing org/space context, no
         // EventSource, or the card mounted on an already-terminal status):
         // this read is the last word on a terminal run, so it also owns the
@@ -322,6 +339,7 @@ export function useRunLogStream(
       if (update.startedAt) setStartedAt(update.startedAt);
       if (update.completedAt) setCompletedAt(update.completedAt);
       if (typeof update.duration === "number") setDuration(update.duration);
+      if (update.error) setError(update.error);
       if (isTerminalStatus(update.status) && !swept) {
         swept = true;
         // One final full history sweep catches log lines the trigger may have
@@ -379,7 +397,7 @@ export function useRunLogStream(
     // `transport` is a dependency, not a convenience: the host rebuilds it when
     // its scoping context (organization, space, role preview) changes, and this
     // stream reads its URL once at connect. Without it a preview entered while
-    // a run card is open keeps tailing under the previous authority. The host
+    // a run's line is mounted keeps tailing under the previous authority. The host
     // also rebuilds it on a list-filter change, which reconnects the stream.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, transport, readsRuns, readsFiles, spaceId]);
@@ -391,6 +409,7 @@ export function useRunLogStream(
     startedAt,
     completedAt,
     duration,
+    error,
     producedFiles,
     producedFilesTruncated,
     sweepDone,

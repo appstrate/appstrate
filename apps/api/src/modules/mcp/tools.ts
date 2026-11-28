@@ -832,7 +832,7 @@ async function searchAgentKind({ ctx, spaces, tokens, limit, signal }: SearchCal
   }));
   const items = matches.slice(0, limit).map(({ item: { hit, spaceIds } }) => {
     // The appearance is the launch prompts' business, not part of what a search answers.
-    const { icon: _icon, color: _color, ...listed } = hit;
+    const { icon: _icon, color: _color, integrations: _integrations, ...listed } = hit;
     return { ...listed, ...(spaces ? { granted_in: spaceIds } : {}) };
   });
   return {

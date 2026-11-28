@@ -3,7 +3,7 @@
 // The skills and agents the composer offers; the panel, the pill and the `/` menu share one entry.
 
 import { useQuery } from "@tanstack/react-query";
-import { chatCommandsSchema, type ChatCommands } from "../commands.ts";
+import { chatCommandsSchema, type ChatAgentCommand, type ChatCommands } from "../commands.ts";
 import { chatPath } from "./chat-route.ts";
 import {
   limitedSpaceOf,
@@ -47,4 +47,20 @@ export function useChatCommands(wanted: boolean) {
     enabled: wanted && !!transport && can("chat:write"),
     staleTime: 5_000,
   });
+}
+
+/** How an agent is looked up in the commands data: by its prompt name or its package id. */
+export type AgentRef = { promptName: string } | { packageId: string };
+
+/**
+ * The commands entry of an agent (its key is shared with the `/` menu); none for `undefined`. An
+ * agent installed in several spaces is read from its first entry, so its integrations may be those
+ * of another space's install than the one a run used.
+ */
+export function useKnownAgent(agentRef: AgentRef | undefined): ChatAgentCommand | undefined {
+  const { data } = useChatCommands(agentRef !== undefined);
+  if (!agentRef) return undefined;
+  return data?.agents.find((a) =>
+    "packageId" in agentRef ? a.packageId === agentRef.packageId : a.name === agentRef.promptName,
+  );
 }

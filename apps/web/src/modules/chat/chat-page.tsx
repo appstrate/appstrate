@@ -22,6 +22,7 @@ import {
   SelectConversationProvider,
   type AttachTarget,
   type OpenFile,
+  type OpenThreadItem,
 } from "@appstrate/module-chat/ui";
 import { bindChatPreferencesUser } from "@appstrate/module-chat/preferences";
 import { useAuth } from "../../hooks/use-auth";
@@ -143,6 +144,11 @@ export function ChatModulePage() {
       }),
     [],
   );
+  // A call or a run the thread opens shows on its line of its tab: Tools or Runs.
+  const presentThreadItem = useCallback<OpenThreadItem>(
+    (item) => dispatchSidebar({ type: "show-item", item }),
+    [],
+  );
   // A picked file's object URL lives while the panel holds it. The panel starts empty, so
   // Strict Mode's replay of the first run has nothing to revoke.
   const localUrl = heldLocalUrl(sidebarState);
@@ -209,6 +215,7 @@ export function ChatModulePage() {
             initialComposerDraft={initialComposerDraft}
             onConversationChange={onConversationChange}
             onOpenFile={presentFile}
+            onOpenThreadItem={presentThreadItem}
             useFileImageSrc={useFileImageSrc}
             uploadFile={uploadFile}
             t={translate}

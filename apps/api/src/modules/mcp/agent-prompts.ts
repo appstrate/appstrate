@@ -18,6 +18,7 @@
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import {
   AGENT_PROMPT_META_KEY,
+  type AgentPromptIntegration,
   type AgentPromptMeta,
   type AppstratePromptProvider,
   type GetPromptResult,
@@ -61,6 +62,7 @@ interface NamedAgent {
   spaceId: string;
   icon: string | null;
   color: string | null;
+  integrations: AgentPromptIntegration[];
 }
 
 const REQUEST_ARGUMENT = {
@@ -94,7 +96,7 @@ async function nameAgents(ctx: AgentPromptContext): Promise<NamedAgent[]> {
     const published = value.agents
       .filter((agent) => agent.published)
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    for (const { id, display_name: title, description, icon, color } of published) {
+    for (const { id, display_name: title, description, icon, color, integrations } of published) {
       const segment = parseScopedName(id)!.name;
       const preferred = agentPromptName(segment);
       const name = !taken.has(preferred)
@@ -103,7 +105,16 @@ async function nameAgents(ctx: AgentPromptContext): Promise<NamedAgent[]> {
           ? spaceCollisionPromptName(segment, space.name, taken)
           : scopeCollisionPromptName(id, taken);
       taken.add(name);
-      named.push({ packageId: id, title, description, name, spaceId: space.id, icon, color });
+      named.push({
+        packageId: id,
+        title,
+        description,
+        name,
+        spaceId: space.id,
+        icon,
+        color,
+        integrations,
+      });
     }
   }
   return named;
@@ -171,6 +182,7 @@ function toPrompt(agent: NamedAgent): Prompt {
         packageId: agent.packageId,
         icon: agent.icon,
         color: agent.color,
+        integrations: agent.integrations,
       } satisfies AgentPromptMeta,
     },
   };

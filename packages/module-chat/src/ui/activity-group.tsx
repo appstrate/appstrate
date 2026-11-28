@@ -2,11 +2,13 @@
 
 /**
  * What the assistant did between two texts, on one line: its reasoning and its tool calls, one
- * step or twenty. The line is the same from the first step on, so nothing changes shape when a
- * second one joins (`activityGroupOf`). Opened, it is a rail of steps, each one click from its
- * own detail; a group of one step opens straight on that step's content, the line naming it. A
- * call the context panel reveals (`reveal-tool-call.ts`) opens its group: a folded one does not
- * mount its steps.
+ * step or twenty (`activityGroupOf`). While the turn runs, the line is the same disclosure from the
+ * first step on, so a second step joining changes only its label. Opened, it is a rail of steps: a
+ * reasoning reads in place, a call is a line opening it in the context panel (`ThreadCallLine`). A
+ * group of one reasoning opens straight on its text, the line naming it; a settled group of one
+ * call is that call's line, nothing to unfold, what follows its name and its failure on the line
+ * itself. A call the context panel reveals (`reveal-tool-call.ts`) opens its group: a folded one
+ * does not mount its steps.
  *
  * Ending the running message, the line is the turn's status: the spark (the status region, beside
  * the trigger), the step in progress, the turn's clock. Settled, it names its one call, or counts
@@ -42,6 +44,7 @@ import { deriveToolPhase } from "./tool-result.ts";
 import type { StoredResults } from "./use-call-presentation.ts";
 import { presentationSubject } from "./tool-presentation.ts";
 import { forgetRevealedToolCalls, useRevealedToolCalls } from "./reveal-tool-call.ts";
+import { ThreadCallLine } from "./tool-uis.tsx";
 import {
   ACTIVITY_BLOCK_CLASS,
   ACTIVITY_CONTENT_CLASS,
@@ -204,6 +207,24 @@ export function ActivityGroup({
   ) : (
     <ListTreeIcon aria-hidden />
   );
+
+  // A settled lone call is the group's line itself: nothing to unfold, a click opens it in the
+  // panel. While the turn runs the group stays its disclosure, so a second step changes no shape.
+  const soloCallId = solo && !running ? onlyCall?.toolCallId : undefined;
+  if (onlyCall && soloCallId) {
+    return (
+      <div className={ACTIVITY_BLOCK_CLASS}>
+        <ThreadCallLine
+          call={{ ...onlyCall, toolCallId: soloCallId, stored: stored.get(soloCallId) }}
+          lead={lead}
+          label={only?.label ?? ""}
+          idText={only?.idText}
+          running={false}
+        />
+        <ActivityModeContext value={BREAKOUT_MODE}>{children}</ActivityModeContext>
+      </div>
+    );
+  }
 
   if (plain) {
     // The disclosure's line without its trigger: the trigger adds no padding, the label stays put.

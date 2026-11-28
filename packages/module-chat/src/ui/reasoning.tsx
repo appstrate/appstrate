@@ -79,7 +79,7 @@ export function ThinkingStatus() {
   );
 }
 
-/** The call a message ends on while it runs (a run's card), named as the turn's step; "" otherwise. */
+/** The call a message ends on while it runs (a run's line), named as the turn's step; "" otherwise. */
 function runningCallLabel(parts: readonly ThreadPart[], t: ChatTranslate): string {
   const last = parts[parts.length - 1];
   if (last?.type !== "tool-call" || deriveToolPhase(last) !== "running") return "";

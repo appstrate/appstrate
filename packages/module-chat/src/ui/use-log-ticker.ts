@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Paces the run card's single-line log display. Logs can arrive in bursts (an
- * agent emits several lines in one tick), which would flash through the card
+ * Paces the run line's single-line log display. Logs can arrive in bursts (an
+ * agent emits several lines in one tick), which would flash through the line
  * faster than the eye can read. This hook walks the visible-log queue one entry
  * at a time, holding each for at least `dwellMs` before advancing, so a burst
  * plays back as a readable sequence instead of an instant jump to the last line.

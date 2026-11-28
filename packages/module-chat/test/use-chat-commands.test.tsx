@@ -31,6 +31,7 @@ const commands = {
       packageId: "@acme/report",
       icon: null,
       color: null,
+      integrations: [],
     },
   ],
 };

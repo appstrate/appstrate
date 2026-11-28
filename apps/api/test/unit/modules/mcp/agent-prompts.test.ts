@@ -27,6 +27,7 @@ interface FakeAgent {
   description?: string;
   icon?: string;
   color?: string;
+  integrations?: { id: string; name: string; icon: string | null; required: boolean }[];
   input?: Record<string, unknown>;
 }
 
@@ -50,6 +51,7 @@ function fakeDispatch(agentsBySpace: Record<string, FakeAgent[]>) {
           description: agent.description ?? "",
           icon: agent.icon ?? null,
           color: agent.color ?? null,
+          integrations: agent.integrations ?? [],
           // The draft manifest's version: present whether or not anything is published.
           version: "0.0.1",
           published: agent.version !== undefined,
@@ -129,20 +131,41 @@ describe("agent prompts — prompts/list", () => {
         title: "Writer",
         description: 'Launches a metered run of the Appstrate agent "Writer": Writes.',
         arguments: [expect.objectContaining({ name: "request", required: false })],
-        _meta: { [AGENT_PROMPT_META_KEY]: { packageId: "@acme/writer", icon: null, color: null } },
+        _meta: {
+          [AGENT_PROMPT_META_KEY]: {
+            packageId: "@acme/writer",
+            icon: null,
+            color: null,
+            integrations: [],
+          },
+        },
       },
     ]);
     // One listing read for the one space with `run_and_wait`: no agent detail, no other space.
     expect(requests).toEqual([{ spaceId: "spc_a", path: "/api/agents" }]);
   });
 
-  it("carries the agent's icon and colour in the prompt's _meta", async () => {
+  it("carries the agent's icon, colour and integrations in the prompt's _meta", async () => {
     const { prompts } = provider([space("spc_a", "Alpha")], {
-      spc_a: [{ id: "@acme/writer", version: "1.0.0", icon: "lucide:bot", color: "teal" }],
+      spc_a: [
+        {
+          id: "@acme/writer",
+          version: "1.0.0",
+          icon: "lucide:bot",
+          color: "teal",
+          integrations: [{ id: "@acme/gmail", name: "Gmail", icon: "logos:gmail", required: true }],
+        },
+      ],
     });
     const [listed] = await prompts.list(noExtra);
+    // The index's entry as the tile stack draws it: its `required` stays the index's business.
     expect(listed!._meta).toEqual({
-      [AGENT_PROMPT_META_KEY]: { packageId: "@acme/writer", icon: "lucide:bot", color: "teal" },
+      [AGENT_PROMPT_META_KEY]: {
+        packageId: "@acme/writer",
+        icon: "lucide:bot",
+        color: "teal",
+        integrations: [{ id: "@acme/gmail", name: "Gmail", icon: "logos:gmail" }],
+      },
     });
   });
 

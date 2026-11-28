@@ -25,6 +25,7 @@ import {
   invalidatePackageFiles,
   invalidatePackageCaches,
   invalidateVersionInfo,
+  invalidatePaths,
 } from "../lib/query-keys";
 import {
   launchFlight,
@@ -250,18 +251,21 @@ export function useImportFromGithub() {
   });
 }
 
+/** Cancels a run, in `spaceId` when it is not the working space's (a conversation's run). */
 export function useCancelRun() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (runId: string) => {
+    mutationFn: async (run: { id: string; spaceId?: string }) => {
       const { data } = await client.POST("/api/runs/{id}/cancel", {
-        params: { path: { id: runId } },
+        params: { path: { id: run.id } },
+        ...spaceHeader(run.spaceId),
       });
       return data!;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: runKeys.all });
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
+      void invalidatePaths(qc, ["/api/orgs/{orgId}/runs"]);
     },
   });
 }

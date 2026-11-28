@@ -43,7 +43,7 @@ export function featuredRunFile<T extends Pick<FileLike, "purpose" | "runId">>(
   return produced.length === 1 ? produced[0] : undefined;
 }
 
-/** Whether a run-log `event` tag announces a published file; the one tag (`@appstrate/core/file-uri`) is shared with the chat run card, and a miss means a list that silently never refreshes. */
+/** Whether a run-log `event` tag announces a published file; the one tag (`@appstrate/core/file-uri`) is shared with the chat's run line, and a miss means a list that silently never refreshes. */
 export function isPublishedFileLogEvent(event: string | null | undefined): boolean {
   return event === PUBLISHED_FILE_LOG_EVENT;
 }

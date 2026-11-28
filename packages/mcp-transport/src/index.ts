@@ -505,9 +505,10 @@ export {
   type ApiUploadToolMeta,
 } from "./tool-meta.ts";
 
-// Agent launch prompt `_meta` — the agent's package id, icon and colour on `prompts/list`.
+// Agent launch prompt `_meta` — the agent's package id, icon, colour and integrations on `prompts/list`.
 export {
   AGENT_PROMPT_META_KEY,
   readAgentPromptMeta,
+  type AgentPromptIntegration,
   type AgentPromptMeta,
 } from "./agent-prompt-meta.ts";

@@ -27,7 +27,7 @@ import { Thread } from "../src/ui/thread.tsx";
 import { ReasoningStep } from "../src/ui/reasoning.tsx";
 import { ActivityModeContext } from "../src/ui/activity-mode.ts";
 import { createMessageQueue } from "../src/ui/message-queue.ts";
-import { forgetRevealedToolCalls, revealToolCall } from "../src/ui/reveal-tool-call.ts";
+import { forgetRevealedToolCalls, revealThreadItem } from "../src/ui/reveal-tool-call.ts";
 
 type ChatHelpers = Parameters<typeof useAISDKRuntime>[0];
 type Parts = ChatHelpers["messages"][number]["parts"];
@@ -126,6 +126,13 @@ const openDisclosures = (html: string) => count(html, 'aria-expanded="true"');
 /** The first group's line: what sits inside its trigger. */
 const groupTrigger = (html: string) =>
   html.match(/<button[^>]*aria-expanded[^>]*>.*?<\/button>/s)?.[0] ?? "";
+/** The first call's line: its button, opening it in the context panel, no disclosure. */
+const callButton = (html: string) =>
+  html.match(
+    /data-tool-call-id="[^"]*"[^>]*>.*?(<button(?![^>]*aria-expanded)[^>]*>.*?<\/button>)/s,
+  )?.[1] ?? "";
+/** The calls' lines the panel locates by their anchor. */
+const callLines = (html: string) => count(html, "data-tool-call-id=");
 
 const reasoning = (text: string, state: "streaming" | "done") =>
   ({ type: "reasoning", text, state }) as const;
@@ -162,7 +169,7 @@ const reveal = (toolCallId: string) => {
       selector === "[data-chat-thread]" ? { querySelector: () => null } : null,
   };
   globals.CSS = { escape: (value: string) => value };
-  revealToolCall({ toolCallId });
+  revealThreadItem({ kind: "call", id: toolCallId });
 };
 const REVEALED = ["s1", "call_failed"];
 afterEach(() => {
@@ -324,8 +331,7 @@ describe("the reasoning of an assistant turn", () => {
     expect(html).toContain("reasoning.done");
   });
 
-  it("opens straight on its content when it is the group's one call: named once, by the line", () => {
-    reveal("s1");
+  it("is the call's own line when it is the group's one call: a button, nothing to unfold", () => {
     const counted = {
       ...lookup("s1", "issues"),
       resultProviderMetadata: {
@@ -333,15 +339,18 @@ describe("the reasoning of an assistant turn", () => {
       },
     };
     const html = render([counted, answer], "ready");
-    // The group's line alone is a disclosure: the step draws no line of its own.
-    expect(disclosures(html)).toBe(1);
-    expect(openDisclosures(html)).toBe(1);
+    // No disclosure: a click opens the call in the context panel.
+    expect(disclosures(html)).toBe(0);
+    expect(html).not.toContain("lucide-chevron-right");
+    const button = callButton(html);
+    expect(button.indexOf(">issues<")).toBeGreaterThan(button.indexOf("tool.name.search"));
     expect(count(html, "tool.name.search")).toBe(1);
-    expect(count(html, ">issues<")).toBe(1);
-    // What followed the step's label stays: the result count, then the detail.
-    expect(html).toContain("tool.search.count");
-    expect(html).toContain("tool.detail.input");
-    // The anchor the context panel reveals by is still drawn.
+    // What follows the call's name is on the line itself, after the button; no detail in the thread.
+    expect(html.indexOf("tool.search.count")).toBeGreaterThan(html.indexOf(button));
+    expect(button).not.toContain("tool.search.count");
+    expect(html).not.toContain("tool.detail.input");
+    // The anchor the context panel reveals by is the line.
+    expect(callLines(html)).toBe(1);
     expect(html).toContain('data-tool-call-id="s1"');
   });
 
@@ -354,10 +363,12 @@ describe("the reasoning of an assistant turn", () => {
 });
 
 describe("a running turn's one status region, whatever its tail", () => {
-  it("is the group's line from its first call, naming the call that runs", () => {
+  it("is the group's disclosure from its first call, naming the call that runs", () => {
     const html = render([lookup("s1", "issues", false)]);
     expect(statusRegions(html)).toBe(1);
+    // A lone call while the turn runs: the group's disclosure, the shape a second step keeps.
     expect(disclosures(html)).toBe(1);
+    expect(callLines(html)).toBe(0);
     const trigger = groupTrigger(html);
     expect(trigger).not.toContain('role="status"');
     // The step in progress as `showCall` names it, then its target; no count while it runs.
@@ -393,9 +404,11 @@ describe("a running turn's one status region, whatever its tail", () => {
       lookup("s2", "agents"),
       reasoning(REASONING, "streaming"),
     ]);
-    // Open: the line, two call steps, and the reasoning step, open while it streams.
-    expect(disclosures(html)).toBe(4);
+    // Open: the line and the reasoning step, open while it streams, are disclosures; the two call
+    // steps are lines opening their call in the panel.
+    expect(disclosures(html)).toBe(2);
     expect(openDisclosures(html)).toBe(2);
+    expect(callLines(html)).toBe(2);
     expect(count(html, "lucide-brain")).toBe(1);
     expect(statusRegions(html)).toBe(1);
   });
@@ -412,7 +425,7 @@ describe("a running turn's one status region, whatever its tail", () => {
 
 describe("a settled group's line", () => {
   it("names its one call, with its target, rather than counting it", () => {
-    const trigger = groupTrigger(render([lookup("s1", "issues"), answer], "ready"));
+    const trigger = callButton(render([lookup("s1", "issues"), answer], "ready"));
     expect(trigger.indexOf("issues")).toBeGreaterThan(trigger.indexOf("tool.name.search"));
     expect(trigger).not.toContain("tool.reads.done");
   });
@@ -427,7 +440,19 @@ describe("a settled group's line", () => {
 
   it("starts a new line after a text", () => {
     const html = render([lookup("s1", "issues"), answer, lookup("s2", "agents"), answer], "ready");
-    expect(disclosures(html)).toBe(2);
+    expect(callLines(html)).toBe(2);
+    expect(disclosures(html)).toBe(0);
+  });
+
+  it("opened, lists its calls as lines opening them in the panel, their detail not in the thread", () => {
+    reveal("s1");
+    const html = render([lookup("s1", "issues"), lookup("s2", "agents"), answer], "ready");
+    // The group's line is the one disclosure, open; each call is a button of its own.
+    expect(disclosures(html)).toBe(1);
+    expect(openDisclosures(html)).toBe(1);
+    expect(callLines(html)).toBe(2);
+    expect(count(html, "<button")).toBeGreaterThanOrEqual(3);
+    expect(html).not.toContain("tool.detail.input");
   });
 });
 
@@ -443,9 +468,10 @@ const failedCall = (output: unknown) =>
 
 describe("a failed tool call, softened and never hidden", () => {
   const failed = [failedCall({ status: 404, error: "Agent introuvable" }), answer];
+  const amongOthers = [lookup("s1", "issues"), ...failed];
 
-  it("marks its folded line with a decorative cross and a muted count", () => {
-    const trigger = groupTrigger(render(failed, "ready"));
+  it("marks its folded group's line with a decorative cross and a muted count", () => {
+    const trigger = groupTrigger(render(amongOthers, "ready"));
     // The cross is decorative beside the count that says the failure: said once.
     expect(trigger).toContain('aria-hidden="true" class="text-destructive shrink-0"');
     expect(trigger).not.toContain('aria-label="tool.failed');
@@ -455,17 +481,26 @@ describe("a failed tool call, softened and never hidden", () => {
 
   it("keeps its error under its step, muted, the cross naming the failure and its HTTP status", () => {
     reveal("call_failed");
-    const html = render(failed, "ready");
+    const html = render(amongOthers, "ready");
     expect(html).not.toContain("border-destructive");
     expect(html).toMatch(/<p class="text-muted-foreground[^"]*"[^>]*>Agent introuvable</);
     expect(html).toContain('aria-label="tool.failedHttp:404"');
     expect(html).not.toContain('title="tool.failed');
-    // The group's one call: its name said once, by the group's line.
+  });
+
+  it("alone in its group, says its failure on the line, its message under it, without a click", () => {
+    const html = render(failed, "ready");
+    expect(disclosures(html)).toBe(0);
+    // The cross ends the line, named; the message stays in view under it, muted.
+    expect(html).toContain('aria-label="tool.failedHttp:404"');
+    expect(html).not.toContain("tool.reads.failed");
+    expect(html).toMatch(/<p class="text-muted-foreground[^"]*"[^>]*>Agent introuvable</);
+    expect(html.indexOf("Agent introuvable")).toBeGreaterThan(html.indexOf("tool.failedHttp"));
+    // Its name said once, by its line.
     expect(count(html, "tool.name.list_agents")).toBe(1);
   });
 
   it("shows no HTTP badge, failed or not", () => {
-    reveal("call_failed");
     const ok = render([failedCall({ status: 200, results: [] }), answer], "ready");
     expect(ok).not.toContain("tool.failed");
     expect(ok).not.toContain("text-destructive");

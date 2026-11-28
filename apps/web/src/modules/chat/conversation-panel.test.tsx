@@ -22,8 +22,11 @@ const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { formatDuration } = await import("../../lib/format-duration.ts");
 const { ConversationSummary } = await import("./conversation-summary.tsx");
 const { ConversationInfo } = await import("./conversation-info.tsx");
-const { ConversationFiles, ConversationRuns } = await import("./conversation-sidebar.tsx");
+const { ConversationFiles } = await import("./conversation-sidebar.tsx");
+const { ConversationRuns } = await import("./conversation-runs-tab.tsx");
 const { ConversationToolsList } = await import("./conversation-tools-tab.tsx");
+const { INITIAL_CONVERSATION_SIDEBAR_STATE, conversationSidebarReducer, openToolCallId } =
+  await import("./conversation-sidebar-state.ts");
 const { publishLiveConversation, withdrawLiveConversation } =
   await import("@appstrate/module-chat/live-conversation");
 const { ChatTransportProvider } = await import("@appstrate/module-chat/ui");
@@ -51,6 +54,15 @@ const TOOLS_PROPS = {
   missing: false,
   onOpenChange: noop,
   onShowInThread: noop,
+};
+
+/** The Runs list's props past its conversation: every line folded. */
+const RUNS_PROPS = {
+  openRunId: null,
+  missing: false,
+  onOpenChange: noop,
+  onShowInThread: noop,
+  onSelectFile: noop,
 };
 
 /** The conversation as the server stores it, its assistant turns holding `turns`' parts. */
@@ -181,7 +193,11 @@ describe("the context panel, closed", () => {
   const panes: [string, React.ReactElement<{ active: boolean }>][] = [
     ["Résumé", <ConversationSummary conversationId="chs_1" active={false} dispatch={noop} />],
     ["Infos", <ConversationInfo conversationId="chs_1" active={false} />],
-    ["Runs", <ConversationRuns conversationId="chs_1" active={false} />],
+    ["Runs", <ConversationRuns conversationId="chs_1" active={false} {...RUNS_PROPS} />],
+    [
+      "Runs, un run ouvert",
+      <ConversationRuns conversationId="chs_1" active={false} {...RUNS_PROPS} openRunId="run_1" />,
+    ],
     ["Fichiers", <ConversationFiles conversationId="chs_1" active={false} onSelect={noop} />],
     ["Outils", <ConversationToolsList conversationId="chs_1" active={false} {...TOOLS_PROPS} />],
     [
@@ -212,7 +228,12 @@ describe("the context panel, closed", () => {
       <ChatTransportProvider value={TRANSPORT}>
         <ConversationSummary conversationId="chs_1" active={active} dispatch={noop} />
         <ConversationInfo conversationId="chs_1" active={active} />
-        <ConversationRuns conversationId="chs_1" active={active} />
+        <ConversationRuns
+          conversationId="chs_1"
+          active={active}
+          {...RUNS_PROPS}
+          openRunId="run_1"
+        />
         <ConversationFiles conversationId="chs_1" active={active} onSelect={noop} />
         <ConversationToolsList
           conversationId="chs_1"
@@ -313,6 +334,16 @@ describe("the summary, open", () => {
     const html = summary([failedCall], [failed]);
     expect(html).toContain("#7");
     expect(html).toContain(i18n.t("chat:context.tools.status.error"));
+  });
+
+  it("draws a run as a button opening it in the panel, led by its agent's tile", () => {
+    const html = summary([], [makeRun({ id: "run_4", runNumber: 4, package_ephemeral: false })]);
+    const line = html.slice(html.indexOf("<button"), html.indexOf("</button>"));
+    expect(line).toContain("#4");
+    expect(line).toContain('type="button"');
+    expect(line).not.toContain("lucide-activity");
+    // The run's page is one click away in the open run, not from the line.
+    expect(html).not.toContain("<a ");
   });
 
   it("keeps what the cache holds while the panel closes: no skeleton, no read lost", () => {
@@ -471,6 +502,20 @@ describe("the Tools tab, open", () => {
     expect(html).toContain('aria-expanded="true"');
   });
 
+  it("lists and opens a hidden lookup the thread opened, as one opened from the summary", () => {
+    // The thread's line opens its call through the host, mapped to the reducer's one action.
+    const state = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-item",
+      item: { kind: "call", id: "call_l1" },
+    });
+    expect(state).toMatchObject({ expanded: true, activeTab: "tools", showLookups: false });
+    const html = tools([[toolPart("call_a"), toolPart("call_l1", { lookup: true })]], {
+      openToolCallId: openToolCallId(state),
+    });
+    expect(rowsOf(html)).toBe(2);
+    expect(html.split('aria-expanded="true"').length - 1).toBe(1);
+  });
+
   it("lists the calls under their turn", () => {
     const html = tools([[toolPart("call_a")], [toolPart("call_b"), toolPart("call_c")]]);
     const first = html.indexOf(i18n.t("chat:context.tools.turn", { turn: 1 }));
@@ -531,7 +576,7 @@ describe("the Tools tab, open", () => {
     expect(html.split('aria-expanded="false"').length - 1).toBe(1);
     expect(html).toContain(formatDuration(2500));
     expect(html).toContain(i18n.t("chat:tool.detail.input"));
-    expect(html).toContain(i18n.t("chat:context.tools.showInThread"));
+    expect(html).toContain(i18n.t("chat:context.showInThread"));
     expect(html).not.toContain(i18n.t("chat:context.tools.notInThread"));
   });
 
@@ -603,7 +648,7 @@ describe("the Runs and Files tabs, open", () => {
     );
     const html = render(
       <>
-        <ConversationRuns conversationId="chs_1" active />
+        <ConversationRuns conversationId="chs_1" active {...RUNS_PROPS} />
         <ConversationFiles conversationId="chs_1" active onSelect={noop} />
       </>,
       queryClient,
@@ -611,5 +656,103 @@ describe("the Runs and Files tabs, open", () => {
     expect(html).toContain("#12");
     expect(html).toContain("rapport.pdf");
     expect(html).not.toContain(i18n.t("common:error.generic"));
+  });
+});
+
+describe("the Runs tab, open", () => {
+  const AGENT = {
+    id: "@acme/reporter",
+    display_name: "Reporter",
+    icon: null,
+    color: null,
+    integrations: [{ id: "@acme/gmail", name: "Gmail", icon: null }],
+  };
+
+  /** The Runs tab once its runs read answered with `runs`, `openRunId` open. */
+  function runsTab(
+    runs: unknown[],
+    { openRunId = null, missing = false }: { openRunId?: string | null; missing?: boolean } = {},
+  ): string {
+    const queryClient = memberSpaceClient(spaces);
+    queryClient.setQueryData(runsKey, list(runs));
+    return render(
+      <ConversationRuns
+        conversationId="chs_1"
+        active
+        {...RUNS_PROPS}
+        openRunId={openRunId}
+        missing={missing}
+      />,
+      queryClient,
+    );
+  }
+
+  it("draws a run as the thread's run line does: its agent, its number, its outcome, folded", () => {
+    const html = runsTab([makeRun({ runNumber: 7, package_ephemeral: false })]);
+    expect(rowsOf(html)).toBe(1);
+    expect(html).not.toContain('aria-expanded="true"');
+    expect(html).toContain("#7");
+    expect(html).toContain(i18n.t("chat:run.status.success"));
+    expect(html).toContain(formatDuration(4200));
+    expect(html).not.toContain(i18n.t("chat:context.showInThread"));
+  });
+
+  it("follows its agent's name with its integrations once the agents' index answers", () => {
+    const queryClient = memberSpaceClient(spaces);
+    queryClient.setQueryData(runsKey, list([makeRun({ package_ephemeral: false })]));
+    const tab = <ConversationRuns conversationId="chs_1" active {...RUNS_PROPS} />;
+    // The first render builds the index's read; its answer is seeded under the key it built.
+    render(tab, queryClient);
+    const agents = queryClient.getQueryCache().findAll({ queryKey: ["agents"] });
+    expect(agents.length).toBe(1);
+    queryClient.setQueryData(agents[0]!.queryKey, [AGENT]);
+    const html = render(tab, queryClient);
+    expect(html).toContain("Reporter");
+    expect(html).toContain('data-testid="integration-logo-stack"');
+    expect(html.indexOf("integration-logo-stack")).toBeGreaterThan(html.indexOf("Reporter"));
+  });
+
+  it("says a failed run's own error on its line and in its detail", () => {
+    const run = makeRun({ id: "run_x", status: "failed", error: "quota exceeded" });
+    expect(runsTab([run])).toContain("quota exceeded");
+    const open = runsTab([run], { openRunId: "run_x" });
+    expect(open).toContain(i18n.t("chat:context.runs.error"));
+  });
+
+  it("holds the run it opens open on its line: its way to the thread, its result", () => {
+    const html = runsTab(
+      [
+        makeRun({ id: "run_a", result: { output: { total: 3 } } }),
+        makeRun({ id: "run_b", runNumber: 43 }),
+      ],
+      { openRunId: "run_a" },
+    );
+    expect(html.split('aria-expanded="true"').length - 1).toBe(1);
+    expect(html.split('aria-expanded="false"').length - 1).toBe(1);
+    expect(html).toContain(i18n.t("chat:context.showInThread"));
+    expect(html).toContain(i18n.t("chat:context.runs.result"));
+    expect(html).toContain("total");
+    expect(html).not.toContain(i18n.t("chat:context.runs.notInThread"));
+  });
+
+  it("says under the open run that the last reveal found no card", () => {
+    const html = runsTab([makeRun()], { openRunId: "run_1", missing: true });
+    expect(html.split(i18n.t("chat:context.runs.notInThread")).length - 1).toBe(1);
+  });
+
+  it("offers to cancel a running run only where the reader may cancel runs", () => {
+    const running = makeRun({ status: "running", runOrigin: "platform" });
+    expect(runsTab([running], { openRunId: "run_1" })).not.toContain(
+      `>${i18n.t("chat:context.runs.cancel")}<`,
+    );
+    const queryClient = memberSpaceClient([
+      testSpace("spc_a", ["chat:read", "runs:read", "runs:cancel"]),
+    ]);
+    queryClient.setQueryData(runsKey, list([{ ...running, spaceId: "spc_a" }]));
+    const html = render(
+      <ConversationRuns conversationId="chs_1" active {...RUNS_PROPS} openRunId="run_1" />,
+      queryClient,
+    );
+    expect(html).toContain(i18n.t("chat:context.runs.cancel"));
   });
 });

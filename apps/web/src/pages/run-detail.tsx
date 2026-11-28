@@ -338,7 +338,7 @@ function RunDetailBody() {
                   version: replayVersion(run.version_ref, agent?.home_writable),
                 });
             }}
-            onCancel={() => cancelRun.mutate(runId!)}
+            onCancel={() => cancelRun.mutate({ id: runId! })}
           />
         }
       />

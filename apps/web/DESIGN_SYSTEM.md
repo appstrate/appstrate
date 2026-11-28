@@ -733,7 +733,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   `OverviewCardAction` as its quiet footer action; a label and value fact grid is
   not a collection. Entity cards in lists: `PackageCard` (every package
   type, the dashboard's agents included), a run as
-  a dense list row is `RunRow` (the dashboard, the chat's context panel).
+  a dense list row is `RunRow` (the dashboard); the chat's context panel draws its
+  runs with `RunLine` (section 13).
 - Cards are `bg-card` with a `border` on the canvas; a clickable card is one
   stretched link (`absolute inset-0`), never a link around a button.
 
@@ -923,20 +924,37 @@ the spark (`ThinkingStatus`, `reasoning.tsx`: four coral balls swapping diagonal
 (`.shimmer-text`, plain under reduced motion) and the turn's clock from 1 s. Settled, it names its
 one call or counts them (« 3 consultations · 1 action »), failures apart; reasoning alone reads its
 first line. A running turn holds one spark: on that line, or on the loading line
-(« Réflexion en cours… ») of the same shape before any step exists. Opened, the group is a rail
-of steps (`ToolStep` in `tool-uis.tsx`, `ReasoningStep`), each a line of the same height whose
-detail (a call's raw input / output, a reasoning's text) opens under it: no dialog. A group of one
-step draws no second line: its header names the step, so opening it shows the step's content
-directly under the header's label (a reasoning's text; a call's count, space, duration and cross
-on one muted line, then its detail). A settled reasoning that says nothing past its first line is
-a plain line: the same lead and label, no chevron, nothing to open. A failed call
-is softened, never hidden: no red border or lead icon, its message stays under its step in muted
-text, and a small red cross (`FailedGlyph`, named « Échec · HTTP 404 » for assistive tech) ends
-the step; the same cross, decorative, precedes the muted failed count on the group's line; only
-what ends the turn stays red. The HTTP status is no badge: it is in the call's detail. What needs
+(« Réflexion en cours… ») of the same shape before any step exists. The thread names, the context
+panel details: a reasoning reads in place, a call never unfolds in the thread. Opened, the group is
+a rail of steps of the same height: a reasoning (`ReasoningStep`) opens its text under its line, a
+call (`ToolStep`, drawn by `ThreadCallLine` in `tool-uis.tsx`) is a button, darkening under the
+pointer like the group's trigger, that opens it on its line of the panel's Tools tab, its raw
+input / output there. A group of one reasoning draws no second line: its header names it, and
+opening it shows its text directly under the header's label. A settled group of one call is that
+call's line, nothing to unfold: no chevron, a click opens the call in the panel, and its count, space
+and duration and its cross end the line; while the turn runs it stays the group's disclosure. A settled reasoning that
+says nothing past its first line is a plain line: the same lead and label, no chevron, nothing to
+open. A failed call is softened, never hidden: no red border or lead icon, its message stays under
+its line in muted text, and a small red cross (`FailedGlyph`, named « Échec · HTTP 404 » for
+assistive tech) ends the line; the same cross, decorative, precedes the muted failed count on a
+group's line; only what ends the turn stays red. The HTTP status is no badge: the cross names it,
+and the call's detail in the panel holds it. The panel locates a call or a run back in the thread
+(« Voir dans le fil », `revealThreadItem`): a call's group opens and its line is ringed. What needs
 the reader stays in view under the line whatever the fold: a connect card, a launched run, a
 created package's link, a read skill's chip. A run started from the chat is a
-`ChatRunProgressCard`, the model picker `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
+line like every other activity of the thread, so the thread reads as one rhythm (`ThreadRunLine`,
+`thread-run-line.tsx`, drawn with the call's own `CallLine`): no border, no background, no tint.
+The agent's 16px identity tile leads (a neutral bot tile for an inline run or an unknown agent);
+the agent's name is the line's control, shimmering while the run goes, a button that opens its run
+in the context panel (`ChatHost.openThreadItem`, the one way the thread opens a call or a run
+there), on its line of Runs; a launch that failed before any run existed, or a run the reader
+cannot read, names it in plain text. After it, muted: the run's state (its status icon, then the
+paced live log, truncated in the room left, or the outcome's short label), its duration, the
+agent's integration logos, its space and the run page's link; the line's height is fixed, so
+nothing that arrives moves it. What the short state cannot say goes under the line in full, muted,
+aligned on the name, as a failed call's message does: a failed or timed-out run's own error, a
+launch failure's message, the notice that the reader's role cannot read the run; the run's files
+follow on the same indent. The model picker is `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
 The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that
 canvas and floats beside the thread: its cards and its previewed file are `Card` /
@@ -944,7 +962,8 @@ canvas and floats beside the thread: its cards and its previewed file are `Card`
 takes a shadow outside what floats over the page. It opens on the Summary, which reads
 without scrolling: the title and its gist, then the activity in one view (its runs, its
 files and its integration calls, lookups included, the latest of each on one line, a
-failure on its own line, each group leading to its tab); with nothing yet, an `EmptyState`
+failure on its own line, each group leading to its tab; a run line leads with its agent's tile and
+opens the run on its line of Runs, as a call opens on its line of Tools); with nothing yet, an `EmptyState`
 saying what will show there, and an unsaved conversation's `EmptyState` as on the other tabs.
 Beside it, Runs, Files, Tools and Info. Each tab is an icon, named by its accessible name and a
 tooltip, so the tabs fit any width of the panel. Each group of the
@@ -955,13 +974,21 @@ unsaved conversation, the access alone. Tools lists the
 calls as the open chat holds them, the turn in flight included, else as stored
 (`@appstrate/module-chat/conversation-tools`, `live-conversation`), named as their cards
 name them (`tool-presentation.ts`), lookups behind a switch the panel keeps. Each call is
-drawn with the thread's own step line (`CallStep`, `@appstrate/module-chat/call-step`, the
-component `ToolStep` adapts): the bare 16px icon in the line's muted tone, label, id, chevron,
-a failure said by the small red cross named by its outcome and its muted message under the line,
-and the call's detail
-(`tool-call-detail`) opening inline under it, led by « Voir dans le fil ». Each turn's
-heading counts its calls with the group line's own words (`activityCounts`); a call opened
-from the Summary opens on its line of Tools, in view. A file opened from the Summary leads
+drawn with the thread's own step line (`CallLine`, `@appstrate/module-chat/call-step`, which
+the thread's `ThreadCallLine` draws too), here a disclosure (`CallStep`): the bare 16px icon in
+the line's muted tone, label, id, chevron, a failure said by the small red cross named by its
+outcome and its muted message under the line, and the call's detail (`tool-call-detail`) opening
+inline under it, led by « Voir dans le fil ». Each turn's heading counts its calls with the group
+line's own words (`activityCounts`); a call opened from the thread or the Summary opens on its line
+of Tools, in view, listed even when it is a lookup the switch hides. Runs draws each run on two
+lines with `RunLine` (`@appstrate/module-chat/run-line`, `modules/chat/conversation-runs-tab.tsx`): the agent's tile and state badge, name
+and number, integrations, its space when the list spans several, its duration, then its start
+and outcome. The line is a disclosure, one item open at a time, a call or a run (`selectedItem` in the panel's
+reducer): open, it follows the run live over its own stream and shows, each only when it has
+something to say, « Voir dans le fil », « Ouvrir la page » and « Annuler » (40px on touch),
+its error, its result (the run page's `StructuredOutputBody`), its files (the Files tab's row,
+opening the file over Files), its journal (height capped, following its last line), then its
+model and cost. A file opened from the Summary leads
 back to it. Its height follows its content (the conversation's whole height for a previewed file); its
 width is one for every tab (400 px by default, from 300 px to 60% of the chat area), remembered
 per browser (`appstrate-chat-context-width`), so switching tabs never changes it. Both widths, the sidebar's

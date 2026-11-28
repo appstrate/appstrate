@@ -126,6 +126,23 @@ export type OpenFile = (file: OpenFileTarget) => void;
 export type OpenFileTarget = { id: string; name: string; spaceId?: string } | { local: File };
 
 /**
+ * What the thread names and the host's context panel details: a tool call, by its call id, or a
+ * run a conversation launched, by its run id. The panel locates it back in the thread by the same
+ * shape (`reveal-tool-call.ts`).
+ */
+export interface ThreadItem {
+  kind: "call" | "run";
+  id: string;
+}
+
+/**
+ * Shows a thread item in the host's context panel, open on its line: a call's input and output, a
+ * run's result, files and log, followed live. The thread's call lines and run lines open theirs on
+ * a click: the module owns no detail of its own, as it owns no file viewer.
+ */
+export type OpenThreadItem = (item: ThreadItem) => void;
+
+/**
  * The host's authenticated image-preview hook: a stored file id → an object
  * URL for an `<img src>`, `undefined` while loading, `null` when there is none (callers fall
  * back to the file type's icon). A HOOK is injected — not a fetcher — so the shell keeps
@@ -166,6 +183,7 @@ export type ChatTranslate = (key: string, params?: Record<string, string | numbe
  */
 export interface ChatHost {
   openFile: OpenFile;
+  openThreadItem: OpenThreadItem;
   useFileImageSrc: UseFileImageSrc;
   t: ChatTranslate;
   can: ChatCan;

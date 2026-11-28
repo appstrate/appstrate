@@ -47,6 +47,7 @@ const commands: ChatCommands = {
       packageId: "@acme/report",
       icon: "lucide:chart-bar",
       color: "blue",
+      integrations: [],
     },
   ],
 };

@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, type Dispatch, type ReactNode } from "react";
-import { ActivityIcon, FilesIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
+import { FilesIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { ConversationToolCall } from "@appstrate/module-chat/conversation-tools";
-import { revealToolCall } from "@appstrate/module-chat/reveal-tool-call";
+import { revealThreadItem } from "@appstrate/module-chat/reveal-tool-call";
+import type { ThreadItem } from "@appstrate/module-chat/ui";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import { AgentDetailPaneHeader } from "../../components/agent-detail/agent-detail-split";
 import { EmptyState, ErrorState } from "../../components/page-states";
 import { FileArtifact } from "../../components/file-artifact";
-import { RowSpaceName, RunRow } from "../../components/run-row";
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { useFile } from "../../hooks/use-files";
 import { useCurrentOrgId } from "../../hooks/use-org";
@@ -22,13 +20,14 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useConversationTabs } from "./use-conversation-tabs";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { localViewableFile } from "../../lib/files";
-import { formatBytes } from "../../lib/format-bytes";
-import { formatDateField } from "../../lib/format-date";
-import { readShown, useConversationFiles, useConversationRuns } from "./use-conversation-lists";
+import { readShown, useConversationFiles } from "./use-conversation-lists";
 import { ConversationInfo } from "./conversation-info";
 import { ConversationSummary } from "./conversation-summary";
 import { ConversationToolsList } from "./conversation-tools-tab";
+import { ConversationRuns } from "./conversation-runs-tab";
+import { ConversationFileRow } from "./conversation-file-row";
 import {
+  openRunId,
   openToolCallId,
   revealMissed,
   shownFile,
@@ -94,6 +93,7 @@ const FILE_CLOSE_LABEL: Record<SidebarOrigin, string> = {
   thread: "context.collapse",
   list: "context.backToFiles",
   summary: "context.backToSummary",
+  runs: "context.backToRuns",
 };
 
 /**
@@ -167,47 +167,6 @@ function ShownLocalFile({
   );
 }
 
-export function ConversationRuns({
-  conversationId,
-  active,
-}: {
-  conversationId: string | null;
-  active: boolean;
-}) {
-  const { t } = useTranslation("chat");
-  const { query, runs, agentName, agentById, spanning } = useConversationRuns(
-    conversationId,
-    active,
-  );
-
-  if (!conversationId) {
-    return <EmptyState message={t("context.unsaved")} icon={ActivityIcon} compact />;
-  }
-  const read = readShown(query);
-  if (read === "error") return <ErrorState error={query.error} compact />;
-  // Pending covers a read not yet answered and one held while the panel is closed.
-  if (read === "pending") return <TextSkeleton className="p-4" />;
-  if (runs.length === 0) {
-    return <EmptyState message={t("context.runs.empty")} icon={ActivityIcon} compact />;
-  }
-
-  return (
-    <div className="divide-y">
-      {runs.map((run) => (
-        <RunRow
-          key={run.id}
-          run={run}
-          agentName={agentName(run)}
-          agent={run.packageId ? agentById.get(run.packageId) : undefined}
-          dense
-          spanning={spanning}
-          className="px-3"
-        />
-      ))}
-    </div>
-  );
-}
-
 export function ConversationFiles({
   conversationId,
   active,
@@ -234,29 +193,7 @@ export function ConversationFiles({
   return (
     <div className="divide-y">
       {files.map((file) => (
-        <button
-          key={file.id}
-          type="button"
-          className="hover:bg-muted/50 flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors"
-          onClick={() => onSelect({ id: file.id, name: file.name, spaceId: file.spaceId })}
-        >
-          <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
-            <MimeIcon mime={file.mime} name={file.name} className="text-muted-foreground size-4" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{file.name}</span>
-            <span className="text-muted-foreground block truncate text-xs">
-              {[
-                file.purpose === "user_upload"
-                  ? t("context.files.attachment")
-                  : t("context.files.output"),
-                formatBytes(file.size),
-                formatDateField(file.createdAt, "date"),
-              ].join(" · ")}
-            </span>
-          </span>
-          {named && <RowSpaceName spaceId={file.spaceId} />}
-        </button>
+        <ConversationFileRow key={file.id} file={file} named={named} onSelect={onSelect} />
       ))}
     </div>
   );
@@ -280,8 +217,8 @@ function ConversationContext({
   dispatch: Dispatch<ConversationSidebarAction>;
   /** The phone's sheet has no header toggle beside it: it carries its own close. */
   closable: boolean;
-  /** "See in the thread": bring the call's card into view, where the panel leaves room for it. */
-  onShowInThread: (call: ConversationToolCall) => void;
+  /** "See in the thread": bring a call's or a run's line into view, where the panel leaves room for it. */
+  onShowInThread: (item: ThreadItem) => void;
 }) {
   // The desktop column stays mounted while closed (for its transition): its
   // reads wait until it is open. The phone's sheet unmounts its content when closed.
@@ -352,7 +289,21 @@ function ConversationContext({
         {tabs.map(({ id }) => (
           <TabsContent key={id} value={id} className="mt-0 min-h-0 overflow-auto">
             {id === "runs" ? (
-              <ConversationRuns conversationId={conversationId} active={active} />
+              <ConversationRuns
+                conversationId={conversationId}
+                active={active}
+                openRunId={openRunId(state)}
+                missing={revealMissed(state)}
+                onOpenChange={(run, open) =>
+                  dispatch(
+                    open
+                      ? { type: "show-item", item: { kind: "run", id: run.id } }
+                      : { type: "close-item" },
+                  )
+                }
+                onShowInThread={(run) => onShowInThread({ kind: "run", id: run.id })}
+                onSelectFile={(file) => dispatch({ type: "show-file", file, from: "runs" })}
+              />
             ) : null}
             {id === "files" ? (
               <ConversationFiles
@@ -372,11 +323,11 @@ function ConversationContext({
                 onOpenChange={(call, open) =>
                   dispatch(
                     open
-                      ? { type: "show-tool-call", toolCallId: call.toolCallId }
-                      : { type: "close-tool-call" },
+                      ? { type: "show-item", item: { kind: "call", id: call.toolCallId } }
+                      : { type: "close-item" },
                   )
                 }
-                onShowInThread={onShowInThread}
+                onShowInThread={(call) => onShowInThread({ kind: "call", id: call.toolCallId })}
               />
             ) : null}
             {id === "summary" ? (
@@ -411,20 +362,21 @@ export function ConversationSidebar({
   const { t } = useTranslation("chat");
   const desktop = useMediaQuery(LG_AND_UP);
   const panelRef = useRef<HTMLElement>(null);
-  // The call "See in the thread" waits to reveal until the phone's sheet has closed.
-  const pendingReveal = useRef<ConversationToolCall | null>(null);
-  const reveal = (call: ConversationToolCall) =>
-    // Missed, the panel opens again on the call to say so.
-    dispatch({ type: "revealed", toolCallId: call.toolCallId, found: revealToolCall(call) });
-  const showInThread = (call: ConversationToolCall) => {
+  // The card "See in the thread" waits to reveal until the phone's sheet has closed.
+  const pendingReveal = useRef<ThreadItem | null>(null);
+  const reveal = (item: ThreadItem) => {
+    // Missed, the panel opens again on the call or the run to say so.
+    dispatch({ type: "revealed", item, found: revealThreadItem(item) });
+  };
+  const showInThread = (item: ThreadItem) => {
     if (desktop) {
       // The panel floats beside the thread: the card is revealed in place.
-      reveal(call);
+      reveal(item);
       return;
     }
     // The phone's sheet covers the thread: it closes first, and the card is revealed once it has,
     // in place of the focus the sheet would give back to its trigger (`finalFocus`).
-    pendingReveal.current = call;
+    pendingReveal.current = item;
     dispatch({ type: "toggle" });
   };
   const size = useContextPanelWidth(panelRef);
@@ -495,11 +447,11 @@ export function ConversationSidebar({
             showCloseButton={false}
             className="bg-canvas flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
             finalFocus={() => {
-              const call = pendingReveal.current;
-              if (!call) return true;
+              const item = pendingReveal.current;
+              if (!item) return true;
               pendingReveal.current = null;
               // The revealed card takes the focus, not the toggle that opened the sheet.
-              reveal(call);
+              reveal(item);
               return false;
             }}
           >

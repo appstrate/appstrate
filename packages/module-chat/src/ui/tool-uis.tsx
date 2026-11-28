@@ -1,42 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The chat agent's MCP tool calls in the thread. A call is a step of its activity group
- * (`ToolStep`): a line with what it acted on, its name, its target, then its duration and, when
- * it failed, a small red cross. Its full (technical) input / output opens under the line as raw
- * JSON: parsing arbitrary API payloads into a field table reads worse than monospace JSON, and
- * JSON keeps every field intact.
+ * The chat agent's MCP tool calls in the thread. A call is a line (`ThreadCallLine`): what it
+ * acted on, its name, its target, then its duration and, when it failed, a small red cross. The
+ * thread names, the context panel details: clicking the line opens the call there, its input and
+ * output with it. The line is a step under its group's rail (`ToolStep`), or the group's own line
+ * when the call is its one step.
  *
  * A failure is softened, never hidden: its message stays under the line, muted, and the cross
- * ends the line; the HTTP status is in the call's detail. Tone is driven by the actual result
+ * ends the line, named with the HTTP status. Tone is driven by the actual result
  * (`deriveToolPhase`), not the verb.
  *
  * What a call must keep in view whatever its group's fold is drawn under the group's line
  * (the `…Breakout` components): the interactive `OAuthConnectCard` of a connect kickoff, a
- * launched run's `ChatRunProgressCard`, the link to a created package. `run_and_wait` is a card
- * of its own, outside any group.
+ * launched run's line (`ThreadRunLine`), the link to a created package. `run_and_wait` is a run's
+ * line of its own, outside any group.
  */
 
 import * as React from "react";
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
-import { ArrowUpRightIcon, BracesIcon, PlayIcon } from "lucide-react";
+import { ArrowUpRightIcon } from "lucide-react";
 import { formatDuration } from "@appstrate/core/format";
-import { Button } from "@appstrate/ui/components/button";
-import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { useChatHost } from "./runtime-context.ts";
-import { ToolCallDetail } from "./tool-call-detail.tsx";
 import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
-import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
+import { ThreadRunLine } from "./thread-run-line.tsx";
 import { CallSpace } from "./call-space.tsx";
-import { ActivityId, ActivityLine } from "./activity-line.tsx";
-import { CallStep } from "./call-step.tsx";
-import { useActivityMode } from "./activity-mode.ts";
+import {
+  ACTIVITY_BLOCK_CLASS,
+  ActivityId,
+  ActivityLine,
+  ActivityTrigger,
+} from "./activity-line.tsx";
+import { CallLine, CallName } from "./call-step.tsx";
 import {
   extractAgentLabel,
   extractRunFiles,
   extractRunId,
-  extractRunOutput,
   extractRunPackageId,
   extractRunStatus,
   isRunLaunchOp,
@@ -56,7 +56,6 @@ import { showCall } from "./tool-presentation.ts";
 import { cardSpaceOf, type StoredResult } from "./use-call-presentation.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
 import {
-  definedEntries,
   deriveToolPhase,
   extractErrorMessage,
   httpStatusOf,
@@ -77,83 +76,40 @@ export type ToolCardProps = ToolCallMessagePartProps<Record<string, unknown>, un
 };
 
 /**
- * A finished run's detail: its structured output as labelled facts, the raw
- * input/output/metadata JSON one toggle away. The chat has no output schema to
- * hand (inline runs declare an open one), so the labels are the field keys.
- */
-function RunOutputDetails({
-  output,
-  raw,
-}: {
-  output: Record<string, unknown>;
-  raw: React.ReactNode;
-}) {
-  const { t } = useChatHost();
-  const [showJson, setShowJson] = React.useState(false);
-  return (
-    <div className="space-y-4">
-      {showJson ? raw : <StructuredOutput value={output} />}
-      <Button variant="outline" size="sm" onClick={() => setShowJson((v) => !v)}>
-        <BracesIcon />
-        {showJson ? t("run.output.showFields") : t("run.output.showJson")}
-      </Button>
-    </div>
-  );
-}
-
-/**
- * Render run-launch tool calls as in-chat run progress while launch/run state is
- * available.
+ * Render run-launch tool calls as the run's line in the thread, from the launch to its terminal
+ * status.
  *
- * A real component, not a `build…()` helper called inline: `ChatRunProgressCard`
+ * A real component, not a `build…()` helper called inline: `ThreadRunLine`
  * memoizes its file set on the `initialFiles` prop, and this is where that array
  * is derived. Computed inline it was a fresh array every time THIS component
  * rendered — which assistant-ui does once per stream chunk while the tool part
  * is live — so the memo missed on each of those, the auto-present candidate was
  * a new object, and the effect that opens it re-ran (only a ref kept the result
- * correct). Note the card's own 500 ms log ticker is NOT the trigger: it is
+ * correct). Note the line's own 500 ms log ticker is NOT the trigger: it is
  * state inside the child, and a child's re-render never re-invokes this
  * extraction. Hooks need a component, and `InvokeOperationTool` reaches this
  * branch conditionally, so the `useMemo` cannot live in its body.
  */
-function RunLaunchCard({
+function RunLaunchLine({
   anchorsCall,
   ...props
 }: ToolCardProps & {
-  /** The card is the call's whole display, so the context panel reveals the call by it. */
+  /** The line is the call's whole display, so the context panel reveals the call by it. */
   anchorsCall: boolean;
 }): React.ReactNode {
-  const { t } = useChatHost();
   const runId = extractRunId(props.result);
   const initialFiles = React.useMemo(() => extractRunFiles(props.result), [props.result]);
-  // Same reason as `ToolCallCard` — see the note there.
-  const unwrapped = React.useMemo(() => unwrapToolResult(props.result), [props.result]);
-  const meta = definedEntries({
-    tool_call_id: props.toolCallId,
-    is_error: props.isError,
-    http_status: httpStatusOf(unwrapped),
-    duration_ms: props.stored?.durationMs,
-  });
   const agentLabel = extractAgentLabel(props.args);
   const phase = deriveToolPhase(props);
-  const modalTitle = (
-    <span className="flex items-center gap-2">
-      <PlayIcon className="size-4 shrink-0" />
-      {agentLabel ?? "Run"}
-    </span>
-  );
-  const output = React.useMemo(() => extractRunOutput(props.result), [props.result]);
-  const rawDetails = <ToolCallDetail t={t} input={props.args} output={unwrapped} metadata={meta} />;
-  const details = output ? <RunOutputDetails output={output} raw={rawDetails} /> : rawDetails;
   // Run-page link needs package id. The result normally carries it; for agent
   // runs the label is also the package id (`@scope/name`), so it is a safe fallback.
   // Inline labels are manifest names, not package ids, so they wait for result/fetch.
   const packageId =
     extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
-  // The call names the space the run ran in: the card reads and links there.
+  // The call names the space the run ran in: the line reads and links there.
   const spaceId = cardSpaceOf(props);
   return (
-    <ChatRunProgressCard
+    <ThreadRunLine
       toolCallId={anchorsCall ? props.toolCallId : undefined}
       runId={runId}
       initialStatus={extractRunStatus(props.result)}
@@ -162,9 +118,9 @@ function RunLaunchCard({
       spaceId={spaceId}
       initialFiles={initialFiles}
       phase={phase}
-      errorText={phase === "error" ? extractErrorMessage(unwrapped) : undefined}
-      modalTitle={modalTitle}
-      details={details}
+      errorText={
+        phase === "error" ? extractErrorMessage(unwrapToolResult(props.result)) : undefined
+      }
     />
   );
 }
@@ -172,41 +128,52 @@ function RunLaunchCard({
 /** `invoke_operation`'s arguments, as its cards read them. */
 type InvokeOperationArgs = { operation_id?: string; path_params?: { packageId?: string } };
 
+/** A call as its thread line reads it: the assistant-ui part, and what its stored part says. */
+type LineCall = Parameters<typeof deriveToolPhase>[0] & {
+  readonly toolCallId: string;
+  readonly providerMetadata?: unknown;
+  readonly stored?: StoredResult | undefined;
+};
+
 /**
- * A tool call as a step of its activity group: named as the context panel names it (`showCall`),
- * with what a search found beside it. Its label shimmers while it runs; its detail opens under
- * it. The group's one step has no line of its own (`bare`): the group's header names it, and
- * opening the group opens on what follows the label and the detail.
+ * A call's line in the thread: its name is a button opening the call in the context panel, which
+ * holds its input and output (the thread names, the panel details). What a search found, the space
+ * and the duration follow it; a failure ends it with its cross, its message under it.
  */
-export function ToolStep(props: ToolCardProps) {
-  const { t, lang } = useChatHost();
-  const anchor = useRevealAnchor(props.toolCallId);
-  const solo = useActivityMode()?.solo ?? false;
-  const [readerOpen, setReaderOpen] = React.useState(false);
-  const presentation = props.stored?.presentation;
-  const phase = deriveToolPhase(props);
-  const { Icon, subject, label, idText } = showCall({ ...props, presentation }, t);
+export function ThreadCallLine({
+  call,
+  lead,
+  label,
+  idText,
+  running,
+}: {
+  call: LineCall;
+  lead: React.ReactNode;
+  label: string;
+  idText?: string | undefined;
+  running: boolean;
+}) {
+  const { t, lang, openThreadItem } = useChatHost();
+  const anchor = useRevealAnchor(call.toolCallId);
+  const presentation = call.stored?.presentation;
   // `unwrapToolResult` JSON-parses the tool payload. Unmemoized it re-parsed on every render of
-  // this step, and during a stream the thread re-renders per chunk.
-  const unwrapped = React.useMemo(() => unwrapToolResult(props.result), [props.result]);
+  // this line, and during a stream the thread re-renders per chunk.
+  const unwrapped = React.useMemo(() => unwrapToolResult(call.result), [call.result]);
+  const failed = deriveToolPhase(call) === "error";
   const status = httpStatusOf(unwrapped);
-  const durationMs = props.stored?.durationMs;
-  const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
-  const spaceId = cardSpaceOf(props);
+  const durationMs = call.stored?.durationMs;
+  const spaceId = cardSpaceOf(call);
 
   return (
-    <CallStep
-      {...anchor}
-      bare={solo}
-      open={readerOpen}
-      onOpenChange={setReaderOpen}
-      className={`rounded-sm ${REVEAL_RING_CLASS}`}
-      lead={subject ? <SubjectGlyph subject={subject} /> : <Icon aria-hidden />}
-      label={label}
-      idText={idText}
-      running={phase === "running"}
-      trailing={
-        presentation?.call === "search" || spaceId || durationMs !== undefined ? (
+    <div {...anchor} className={`rounded-sm ${REVEAL_RING_CLASS}`}>
+      <CallLine
+        lead={lead}
+        control={
+          <ActivityTrigger onClick={() => openThreadItem({ kind: "call", id: call.toolCallId })}>
+            <CallName label={label} idText={idText} running={running} />
+          </ActivityTrigger>
+        }
+        trailing={
           <>
             {presentation?.call === "search" ? (
               <span className="flex shrink-0 items-center gap-1.5 text-xs">
@@ -221,27 +188,33 @@ export function ToolStep(props: ToolCardProps) {
               </span>
             ) : null}
           </>
-        ) : undefined
-      }
-      failure={
-        phase === "error"
-          ? { label: status === undefined ? t("tool.failed") : t("tool.failedHttp", { status }) }
-          : undefined
-      }
-      errorText={errorMsg}
-    >
-      <ToolCallDetail
-        t={t}
-        input={props.args}
-        output={unwrapped}
-        metadata={definedEntries({
-          tool_call_id: props.toolCallId,
-          is_error: props.isError,
-          http_status: status,
-          duration_ms: durationMs,
-        })}
+        }
+        failure={
+          failed
+            ? { label: status === undefined ? t("tool.failed") : t("tool.failedHttp", { status }) }
+            : undefined
+        }
+        errorText={failed ? extractErrorMessage(unwrapped) : undefined}
       />
-    </CallStep>
+    </div>
+  );
+}
+
+/** A tool call as a step under its activity group's rail, named as the context panel names it. */
+export function ToolStep(props: ToolCardProps) {
+  const { t } = useChatHost();
+  const { Icon, subject, label, idText } = showCall(
+    { ...props, presentation: props.stored?.presentation },
+    t,
+  );
+  return (
+    <ThreadCallLine
+      call={props}
+      lead={subject ? <SubjectGlyph subject={subject} /> : <Icon aria-hidden />}
+      label={label}
+      idText={idText}
+      running={deriveToolPhase(props) === "running"}
+    />
   );
 }
 
@@ -281,10 +254,10 @@ export function InvokeOperationBreakout(props: ToolCardProps) {
   }
 
   // Run launch (runAgent / runInline): the run's progress, from the launch to its terminal
-  // status. A launch refused started no run: its step says so, and no card stands for it.
+  // status. A launch refused started no run: its step says so, and no run's line stands for it.
   if (isRunLaunchOp(opId)) {
     if (phase === "error" && !extractRunId(result)) return null;
-    return <RunLaunchCard {...props} anchorsCall={false} />;
+    return <RunLaunchLine {...props} anchorsCall={false} />;
   }
 
   const created =
@@ -350,24 +323,26 @@ export function ImportPackageBreakout(props: ToolCardProps) {
   ) : null;
 }
 
-// `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its own
-// card — the same component the invoke-operation run-launch branch renders. Chat
-// emits the run id as a preliminary result; the progress panel is mounted for
-// the call's whole life (launch failures render inside it) — no generic-card
+// `run_and_wait` is its own MCP tool (not invoke_operation), outside any activity group, so it
+// draws its own block — the run's line the invoke-operation run-launch branch renders, in the room
+// a group takes (`ACTIVITY_BLOCK_CLASS`). Chat emits the run id as a preliminary result; the line is
+// mounted for the call's whole life (a launch failure's message goes under it) — no generic-card
 // fallback swap.
 //
 // A launch refused for a missing connection (409) carries a ready-to-open
 // `connect_url` per actionable integration, so the connect cards render
-// UNDER the run panel and the user clicks straight through — the model is never
+// UNDER the run's line and the user clicks straight through — the model is never
 // asked to kick a connect flow off, and never sees the link. A run that started
 // without an optional integration carries the same link on its warning, shown
 // once the call settles — by then it may have lapsed, so the card gets its expiry.
 // Zero offers adds nothing: unlike the invoke_operation connect branch there is
-// no placeholder card here, because the run panel already holds its geometry.
+// no placeholder card here, because the run's line already holds its geometry.
 export function RunAndWaitTool(props: ToolCardProps) {
   return (
     <>
-      <RunLaunchCard {...props} anchorsCall />
+      <div className={ACTIVITY_BLOCK_CLASS}>
+        <RunLaunchLine {...props} anchorsCall />
+      </div>
       {extractRunAndWaitAuthOffers(props).map((offer) => (
         <OAuthConnectCard
           key={offer.authUrl}

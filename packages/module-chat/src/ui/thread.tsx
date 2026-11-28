@@ -962,7 +962,7 @@ export function MessageError() {
  * its props, keep their identity.
  */
 const Step = React.memo(ToolStep);
-const RunAndWaitCard = React.memo(RunAndWaitTool);
+const RunAndWaitLine = React.memo(RunAndWaitTool);
 const SkillBreakout = React.memo(SkillReadBreakout);
 /** What a call keeps in view under its group's line, by tool name; most calls keep nothing. */
 const BREAKOUTS: Partial<Record<string, React.ComponentType<ToolCardProps>>> = {
@@ -972,14 +972,14 @@ const BREAKOUTS: Partial<Record<string, React.ComponentType<ToolCardProps>>> = {
   read: SkillBreakout,
 };
 
-/** A tool call: a step of its activity group and what it keeps in view, or a card of its own. */
+/** A tool call: a step of its activity group and what it keeps in view, or a block of its own. */
 function ToolPart(props: ToolCardProps) {
   const activity = useActivityMode();
   if (activity?.mode === "breakout") {
     const Breakout = BREAKOUTS[props.toolName];
     return Breakout ? <Breakout {...props} /> : null;
   }
-  if (activity === null && props.toolName === "run_and_wait") return <RunAndWaitCard {...props} />;
+  if (activity === null && props.toolName === "run_and_wait") return <RunAndWaitLine {...props} />;
   return <Step {...props} />;
 }
 

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ThreadItem } from "@appstrate/module-chat/ui";
+
 export type ConversationSidebarTab = "summary" | "runs" | "files" | "tools" | "info";
 
 export interface StoredSidebarFile {
@@ -19,9 +21,9 @@ export type SidebarFile = StoredSidebarFile | LocalSidebarFile;
 
 /**
  * Where a file shown over the Files tab was opened from, so closing it goes back there: the thread
- * (closing the file closes the panel), the tab's list, or the summary.
+ * (closing the file closes the panel), the tab's list, the summary, or a run open in the Runs tab.
  */
-export type SidebarOrigin = "thread" | "list" | "summary";
+export type SidebarOrigin = "thread" | "list" | "summary" | "runs";
 
 export interface ConversationSidebarState {
   expanded: boolean;
@@ -29,9 +31,9 @@ export interface ConversationSidebarState {
   /** The file shown over the Files tab, null when the tab shows its list. */
   selectedFile: SidebarFile | null;
   fileFrom: SidebarOrigin;
-  /** The call the Tools list holds open, null when every line is folded. */
-  selectedToolCallId: string | null;
-  /** "See in the thread" looked for the open call's card and did not find it. */
+  /** The call (Tools list) or the run (Runs list) held open, null when every line is folded. */
+  selectedItem: ThreadItem | null;
+  /** "See in the thread" looked for the open item in the thread and did not find it. */
   revealMissed: boolean;
   /** The Tools tab lists the lookups beside the actions. */
   showLookups: boolean;
@@ -42,9 +44,9 @@ export type ConversationSidebarAction =
   | { type: "select-tab"; tab: ConversationSidebarTab }
   | { type: "show-file"; file: SidebarFile; from?: SidebarOrigin }
   | { type: "close-file" }
-  | { type: "show-tool-call"; toolCallId: string }
-  | { type: "close-tool-call" }
-  | { type: "revealed"; toolCallId: string; found: boolean }
+  | { type: "show-item"; item: ThreadItem }
+  | { type: "close-item" }
+  | { type: "revealed"; item: ThreadItem; found: boolean }
   | { type: "show-lookups"; show: boolean }
   | { type: "conversation-change" };
 
@@ -53,23 +55,40 @@ export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
   activeTab: "summary",
   selectedFile: null,
   fileFrom: "thread",
-  selectedToolCallId: null,
+  selectedItem: null,
   revealMissed: false,
   showLookups: false,
 };
 
+/** Every line folded, no reveal pending: what opening the panel or a tab starts from. */
+const FOLDED = { selectedItem: null, revealMissed: false } as const;
+
+/** The tab whose list holds an item: a call's in the Tools tab, a run's in the Runs tab. */
+const TAB_OF: Record<ThreadItem["kind"], ConversationSidebarTab> = { call: "tools", run: "runs" };
+
+function showItem(state: ConversationSidebarState, item: ThreadItem): ConversationSidebarState {
+  return {
+    ...state,
+    expanded: true,
+    activeTab: TAB_OF[item.kind],
+    selectedItem: item,
+    revealMissed: false,
+  };
+}
+
 /**
  * State behind the chat's context panel. A file shows in the Files tab over its list; closing it
- * goes back where it was opened from (`SidebarOrigin`). A tool call opens on its line of the Tools
- * list, one at a time, from the list itself, the summary, or a reveal that missed; folding it
- * leaves the list as it is. Choosing a tab shows that tab's own content.
+ * goes back where it was opened from (`SidebarOrigin`). A thread item opens on its line of its
+ * tab's list, one at a time: a tool call in the Tools list, a run in the Runs list, from the list
+ * itself, the summary, the thread, or a reveal that missed; folding it leaves its list as it is.
+ * Choosing a tab shows that tab's own content.
  *
  * Opening the panel always shows its tabs: a file is shown by a "show-file",
  * never restored. Collapsing keeps it, so it stays drawn while the panel slides
  * out, and the next opening drops it.
  *
  * "See in the thread" may close the panel first (the phone's sheet covers the thread): when the
- * card is not there, the panel opens again on the Tools list, the call open, saying so.
+ * card is not there, the panel opens again on its list, the call or the run open, saying so.
  */
 export function conversationSidebarReducer(
   state: ConversationSidebarState,
@@ -79,22 +98,9 @@ export function conversationSidebarReducer(
     case "toggle":
       return state.expanded
         ? { ...state, expanded: false }
-        : {
-            ...state,
-            expanded: true,
-            selectedFile: null,
-            selectedToolCallId: null,
-            revealMissed: false,
-          };
+        : { ...state, ...FOLDED, expanded: true, selectedFile: null };
     case "select-tab":
-      return {
-        ...state,
-        expanded: true,
-        activeTab: action.tab,
-        selectedFile: null,
-        selectedToolCallId: null,
-        revealMissed: false,
-      };
+      return { ...state, ...FOLDED, expanded: true, activeTab: action.tab, selectedFile: null };
     case "show-file":
       return {
         ...state,
@@ -108,32 +114,22 @@ export function conversationSidebarReducer(
         ...state,
         selectedFile: null,
         ...(state.fileFrom === "thread" ? { expanded: false } : {}),
-        ...(state.fileFrom === "summary" ? { activeTab: "summary" as const } : {}),
+        ...(state.fileFrom === "summary" || state.fileFrom === "runs"
+          ? { activeTab: state.fileFrom }
+          : {}),
       };
-    case "show-tool-call":
-      return {
-        ...state,
-        expanded: true,
-        activeTab: "tools",
-        selectedToolCallId: action.toolCallId,
-        revealMissed: false,
-      };
-    case "close-tool-call":
-      return { ...state, selectedToolCallId: null, revealMissed: false };
+    case "show-item":
+      return showItem(state, action.item);
+    case "close-item":
+      return { ...state, ...FOLDED };
     case "revealed":
       return action.found
         ? { ...state, revealMissed: false }
-        : {
-            ...state,
-            expanded: true,
-            activeTab: "tools",
-            selectedToolCallId: action.toolCallId,
-            revealMissed: true,
-          };
+        : { ...showItem(state, action.item), revealMissed: true };
     case "show-lookups":
       return { ...state, showLookups: action.show };
     case "conversation-change":
-      return { ...state, selectedFile: null, selectedToolCallId: null, revealMissed: false };
+      return { ...state, ...FOLDED, selectedFile: null };
   }
 }
 
@@ -142,14 +138,41 @@ export function shownFile(state: ConversationSidebarState): SidebarFile | null {
   return state.activeTab === "files" ? state.selectedFile : null;
 }
 
-/** The call the Tools list holds open, null while another tab shows or every line is folded. */
-export function openToolCallId(state: ConversationSidebarState): string | null {
-  return state.activeTab === "tools" ? state.selectedToolCallId : null;
+/** The item its tab's list holds open, null while another tab shows or every line is folded. */
+function openItem(state: ConversationSidebarState): ThreadItem | null {
+  const item = state.selectedItem;
+  return item && state.activeTab === TAB_OF[item.kind] ? item : null;
 }
 
-/** Whether "See in the thread" missed the card of the call the Tools list holds open. */
+/** The call the Tools list holds open, null while another tab shows or every line is folded. */
+export function openToolCallId(state: ConversationSidebarState): string | null {
+  const item = openItem(state);
+  return item?.kind === "call" ? item.id : null;
+}
+
+/** The run the Runs list holds open, null while another tab shows or every line is folded. */
+export function openRunId(state: ConversationSidebarState): string | null {
+  const item = openItem(state);
+  return item?.kind === "run" ? item.id : null;
+}
+
+/**
+ * The open run the list must be read again for: one it does not hold (launched since its last
+ * poll), unless it was already read again for it (`asked`), so a run that is not the
+ * conversation's is not read for forever.
+ */
+export function openRunToRefetch(
+  runId: string | null,
+  runs: readonly { id: string }[],
+  asked: string | null,
+): string | null {
+  if (!runId || runId === asked || runs.some((run) => run.id === runId)) return null;
+  return runId;
+}
+
+/** Whether "See in the thread" missed the call's line or the run's line its list holds open. */
 export function revealMissed(state: ConversationSidebarState): boolean {
-  return openToolCallId(state) !== null && state.revealMissed;
+  return openItem(state) !== null && state.revealMissed;
 }
 
 /**

@@ -51,9 +51,9 @@ export function ToolCallIcon({ shown }: { shown: ShownCall }) {
 }
 
 /**
- * One call as the thread draws it, a step line (`CallStep`): its detail opens under it, led by
- * "See in the thread" (`missing`: the last ask found no card). Once open it scrolls into view, so
- * a call opened from the summary or by a reveal that missed is in sight; one the reader opened
+ * One call on the thread's step line (`CallStep`): its detail opens under it, led by "See in the
+ * thread" (`missing`: the last ask found no line). Once open it scrolls into view, so a call opened
+ * from the thread, the summary or by a reveal that missed is in sight; one the reader opened
  * already is, and does not move.
  */
 function ToolCallStep({
@@ -112,7 +112,7 @@ function ToolCallStep({
           onClick={onShowInThread}
         >
           <MessageSquareIcon />
-          {t("context.tools.showInThread")}
+          {t("context.showInThread")}
         </Button>
         {missing ? (
           <p className="text-muted-foreground text-xs">{t("context.tools.notInThread")}</p>
@@ -164,7 +164,8 @@ function ToolsListSkeleton() {
 /**
  * The conversation's calls by turn, each heading counting its turn's calls as the thread's group
  * does, its lookups behind a switch the panel keeps. A call is a step line holding its detail;
- * the one the panel holds open (`openToolCallId`) is listed even when it is a hidden lookup.
+ * the one the panel holds open (`openToolCallId`, from the thread too) is listed even when it is a
+ * hidden lookup.
  */
 export function ConversationToolsList({
   conversationId,

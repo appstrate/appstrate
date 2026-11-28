@@ -9,8 +9,9 @@
 
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
+import type { components } from "../../../apps/web/src/api/schema.d.ts";
 
-const commands = {
+const commands: components["schemas"]["ChatCommands"] = {
   skills: [
     {
       id: "@acme/tone",
@@ -29,6 +30,7 @@ const commands = {
       packageId: "@acme/report",
       icon: null,
       color: null,
+      integrations: [],
     },
   ],
 };

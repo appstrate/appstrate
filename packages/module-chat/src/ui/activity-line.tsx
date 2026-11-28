@@ -22,7 +22,10 @@ export const ACTIVITY_BLOCK_CLASS = "isolate my-1";
 const LINE_CLASS =
   "text-muted-foreground desktop-pointer:h-8 flex h-10 min-w-0 items-center gap-2 text-sm";
 
-/** A fixed slot: the spark, a glyph or an icon swap in it without moving the label. */
+/**
+ * A fixed slot: the spark, a glyph or an icon swap in it without moving the label. A bare icon is
+ * sized to the slot; a tile sizes what it draws itself (an identity tile's glyph is a share of it).
+ */
 export function ActivityLead({
   className,
   children,
@@ -32,7 +35,7 @@ export function ActivityLead({
 }) {
   return (
     <span
-      className={cn("flex size-4 shrink-0 items-center justify-center [&_svg]:size-4", className)}
+      className={cn("flex size-4 shrink-0 items-center justify-center [&>svg]:size-4", className)}
     >
       {children}
     </span>

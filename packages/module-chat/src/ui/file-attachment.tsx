@@ -2,8 +2,8 @@
 
 /**
  * THE unified renderer for a chat-surfaced file attachment — shared by the
- * sent user-message attachments (`thread.tsx`, input) and the run-card output
- * files (`chat-run-progress-card.tsx`, output) — and by the composer's staged
+ * sent user-message attachments (`thread.tsx`, input) and a run's output
+ * files (`thread-run-line.tsx`, output) — and by the composer's staged
  * uploads: every chat file is the one attachment chip, an image's thumbnail or
  * the file type's icon in its media square. The preview action and its label come from
  * `fileActivation`, so both surfaces behave identically.

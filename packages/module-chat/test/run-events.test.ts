@@ -12,7 +12,6 @@ import {
   extractAgentLabel,
   extractRunFiles,
   extractRunId,
-  extractRunOutput,
   extractRunPackageId,
   extractRunStatus,
   isRunAutoPresentEligible,
@@ -33,6 +32,8 @@ import {
   shouldRaiseSweepDone,
   resolveAttachmentContent,
   safeJsonParse,
+  runFailureMessage,
+  runOutcomeText,
   runStatusLineKey,
   visibleLogEntries,
   type RunLogLine,
@@ -85,6 +86,26 @@ describe("run-events helpers", () => {
     expect(runStatusLineKey(undefined)).toBe("run.status.done");
   });
 
+  it("settles a failed or timed-out run on its own error, any other end on its label", () => {
+    expect(runFailureMessage("failed", "Gmail refused the token")).toBe("Gmail refused the token");
+    expect(runFailureMessage("timeout", "No answer in 300 s")).toBe("No answer in 300 s");
+    expect(runFailureMessage("failed", undefined)).toBeUndefined();
+    expect(runFailureMessage("failed", "")).toBeUndefined();
+    expect(runFailureMessage("cancelled", "stopped")).toBeUndefined();
+    expect(runFailureMessage("success", "stale")).toBeUndefined();
+  });
+
+  it("reads a run's outcome: starting, running, then its failure or its status's label", () => {
+    const t = (key: string) => `<${key}>`;
+    expect(runOutcomeText(undefined, undefined, t)).toBe("<run.starting>");
+    expect(runOutcomeText("pending", undefined, t)).toBe("<run.starting>");
+    expect(runOutcomeText("running", "stale", t)).toBe("<run.running>");
+    expect(runOutcomeText("failed", "Gmail refused the token", t)).toBe("Gmail refused the token");
+    expect(runOutcomeText("failed", undefined, t)).toBe("<run.status.failed>");
+    expect(runOutcomeText("cancelled", "stopped", t)).toBe("<run.status.cancelled>");
+    expect(runOutcomeText("success", undefined, t)).toBe("<run.status.success>");
+  });
+
   it("extracts run id and status from invoke and run_and_wait results", () => {
     expect(extractRunId({ status: 201, body: { id: "run_body" } })).toBe("run_body");
     expect(extractRunId({ id: "run_top" })).toBe("run_top");
@@ -103,10 +124,6 @@ describe("run-events helpers", () => {
     expect(extractAgentLabel({ kind: "inline", manifest: {} })).toBe("Run inline");
     expect(extractAgentLabel({})).toBeUndefined();
 
-    expect(extractRunOutput({ result: { output: { total: 3 } } })).toEqual({ total: 3 });
-    expect(extractRunOutput({ body: { result: { output: { total: 3 } } } })).toEqual({ total: 3 });
-    expect(extractRunOutput({ result: { output: {} } })).toBeUndefined();
-    expect(extractRunOutput({ id: "run_1", status: "pending" })).toBeUndefined();
     expect(extractRunPackageId({ body: { packageId: "@acme/writer" } })).toBe("@acme/writer");
     expect(extractRunPackageId({ packageId: "@acme/writer" })).toBe("@acme/writer");
     expect(extractRunPackageId({ body: { package_id: "@acme/snake" } })).toBeUndefined();
@@ -161,6 +178,8 @@ describe("run-events helpers", () => {
       completedAt: "2026-06-30T00:00:42Z",
       duration: 42_000,
     });
+    // A failed run's own message is kept: the card settles on it.
+    expect(parseRunResource({ id: "run_2", status: "failed", error: "boom" })?.error).toBe("boom");
     // Malformed body (no status) → undefined, so the seed is skipped.
     expect(parseRunResource({ id: "run_1" })).toBeUndefined();
     expect(parseRunResource(null)).toBeUndefined();
@@ -448,7 +467,7 @@ describe("autoPresentFile", () => {
     ).toBeUndefined();
   });
 
-  it("leaves the card no reader of the retired agent-declared selection", () => {
+  it("leaves the run line no reader of the retired agent-declared selection", () => {
     // A source-text grep, and deliberately only the NEGATIVE half of one — the
     // same rule the `useRunLogStream source guards` block below states, for the
     // same reason. There is no DOM harness in this repo, so the card cannot be
@@ -468,7 +487,7 @@ describe("autoPresentFile", () => {
     //    authoritative `/api/files` read out of the counted set — the real
     //    defect it was there to catch — left the whole suite green.
     const card = readFileSync(
-      fileURLToPath(new URL("../src/ui/chat-run-progress-card.tsx", import.meta.url)),
+      fileURLToPath(new URL("../src/ui/thread-run-line.tsx", import.meta.url)),
       "utf8",
     );
     expect(card).not.toContain("primary");
