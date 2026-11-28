@@ -41,18 +41,21 @@ import {
   extractRunAndWaitAuthOffers,
   isStartedRunResult,
 } from "./auth-offer.ts";
-import { asRecordOrNull } from "@appstrate/core/safe-json";
 import {
   packageCreatedByImport,
   packageCreatedByOperation,
   packagePageHref,
   type CreatedPackage,
 } from "./package-created.ts";
-import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { showCall } from "./tool-presentation.ts";
 import { cardSpaceOf, type StoredResult } from "./use-call-presentation.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
-import { deriveToolPhase, extractErrorMessage, httpStatusOf } from "./tool-result.ts";
+import {
+  deriveToolPhase,
+  extractErrorMessage,
+  httpStatusOf,
+  unwrapToolResult,
+} from "./tool-result.ts";
 
 /**
  * `invoke_operation` operationId that kicks off an integration connect flow.
@@ -61,16 +64,6 @@ import { deriveToolPhase, extractErrorMessage, httpStatusOf } from "./tool-resul
  * card (button + auto-resume on completion — see oauth-connect-card).
  */
 const INITIATE_CONNECT_OP = "initiateIntegrationConnect";
-
-// assistant-stream ToolCallTiming = { startedAt, completedAt? } (epoch ms;
-// completedAt absent while running).
-function readDurationMs(timing: unknown): number | undefined {
-  const t = asRecordOrNull(timing);
-  if (t && typeof t.startedAt === "number" && typeof t.completedAt === "number") {
-    return t.completedAt - t.startedAt;
-  }
-  return undefined;
-}
 
 /** A card's props: its part, and what its stored part says (`useStoredResults`). */
 export type ToolCardProps = ToolCallMessagePartProps<Record<string, unknown>, unknown> & {
@@ -120,7 +113,9 @@ function RunLaunchCard({
       spaceId={spaceId}
       initialFiles={initialFiles}
       phase={phase}
-      errorText={phase === "error" ? extractErrorMessage(unwrapMcpResult(props.result)) : undefined}
+      errorText={
+        phase === "error" ? extractErrorMessage(unwrapToolResult(props.result)) : undefined
+      }
     />
   );
 }
@@ -131,7 +126,6 @@ type InvokeOperationArgs = { operation_id?: string; path_params?: { packageId?: 
 /** A call as its thread line reads it: the assistant-ui part, and what its stored part says. */
 type LineCall = Parameters<typeof deriveToolPhase>[0] & {
   readonly toolCallId: string;
-  readonly timing?: unknown;
   readonly providerMetadata?: unknown;
   readonly stored?: StoredResult | undefined;
 };
@@ -161,12 +155,12 @@ export function ThreadCallLine({
   const { t, lang, openThreadItem } = useChatHost();
   const anchor = useRevealAnchor(call.toolCallId);
   const presentation = call.stored?.presentation;
-  // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on every render of
+  // `unwrapToolResult` JSON-parses the tool payload. Unmemoized it re-parsed on every render of
   // this line, and during a stream the thread re-renders per chunk.
-  const unwrapped = React.useMemo(() => unwrapMcpResult(call.result), [call.result]);
+  const unwrapped = React.useMemo(() => unwrapToolResult(call.result), [call.result]);
   const failed = deriveToolPhase(call) === "error";
   const status = httpStatusOf(unwrapped);
-  const durationMs = readDurationMs(call.timing);
+  const durationMs = call.stored?.durationMs;
   const spaceId = cardSpaceOf(call);
 
   return (
@@ -185,9 +179,9 @@ export function ThreadCallLine({
             ) : null
           ) : (
             <>
-              {presentation?.count !== undefined ? (
+              {presentation?.call === "search" ? (
                 <span className="flex shrink-0 items-center gap-1.5 text-xs">
-                  <SubjectStack subjects={presentation.items ?? []} />
+                  <SubjectStack subjects={presentation.items} />
                   {t("tool.search.count", { count: presentation.count })}
                 </span>
               ) : null}
@@ -258,7 +252,7 @@ export function InvokeOperationBreakout(props: ToolCardProps) {
         packageId={args?.path_params?.packageId}
         toolCallId={props.toolCallId}
         errorText={
-          phase === "error" && !offer ? extractErrorMessage(unwrapMcpResult(result)) : undefined
+          phase === "error" && !offer ? extractErrorMessage(unwrapToolResult(result)) : undefined
         }
       />
     );
@@ -272,7 +266,7 @@ export function InvokeOperationBreakout(props: ToolCardProps) {
   }
 
   const created =
-    phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;
+    phase === "success" ? packageCreatedByOperation(opId, unwrapToolResult(result)) : null;
   return created ? (
     <CreatedPackageLink
       created={created}
@@ -323,7 +317,7 @@ function CreatedPackageLink({
 export function ImportPackageBreakout(props: ToolCardProps) {
   const created =
     deriveToolPhase(props) === "success"
-      ? packageCreatedByImport(unwrapMcpResult(props.result))
+      ? packageCreatedByImport(unwrapToolResult(props.result))
       : null;
   return created ? (
     <CreatedPackageLink

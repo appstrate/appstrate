@@ -181,6 +181,7 @@ import {
   readPublishedIntegrationManifests,
 } from "./integration-service.ts";
 import { assertSpaceInScope } from "./spaces.ts";
+import { recordAudit, trackAudit } from "./audit.ts";
 
 // ─────────────────────────────────────────────
 // Types
@@ -2074,7 +2075,6 @@ interface PersistCredentialInput {
   /** Bootstrap secrets (login password), stored non-injectable (v2 envelope `inputs`). */
   inputs?: Record<string, unknown>;
   expiresAt?: Date | null;
-  needsReconnection?: boolean;
   accountId?: string;
   identityClaims?: Record<string, unknown>;
   scopesGranted?: string[];
@@ -2312,7 +2312,7 @@ export async function persistCredentialBundle(
           credentialsEncrypted: ciphertext,
           identityClaims: input.identityClaims ?? {},
           scopesGranted: input.scopesGranted ?? [],
-          needsReconnection: input.needsReconnection ?? false,
+          needsReconnection: false,
           clientRef: input.clientRef ?? null,
           variables: input.variables ?? null,
           oauthResource: input.oauthResource ?? null,
@@ -2336,11 +2336,12 @@ export async function persistCredentialBundle(
   }
 
   // UPDATE — shared column set; WHERE differs by target.
-  const clearsReconnection = !(input.needsReconnection ?? false);
   const set: Partial<typeof integrationConnections.$inferInsert> = {
     credentialsEncrypted: ciphertext,
     expiresAt: input.expiresAt ?? null,
-    needsReconnection: input.needsReconnection ?? false,
+    needsReconnection: false,
+    needsReconnectionCause: null,
+    needsReconnectionAt: null,
     // A credential write proves the connection healthy: the escalation count restarts.
     refreshFailureCount: 0,
     // A fresh credential needs no sweep visit before the next day.
@@ -2449,8 +2450,8 @@ export async function persistCredentialBundle(
     });
   }
 
-  // update-by-id (system write-back), a no-op (`null`) on miss. A clearing write is gated on
-  // `needs_reconnection = false`, so a `true` set concurrently by
+  // update-by-id (system write-back), a no-op (`null`) on miss. The write clears the flag, so it
+  // is gated on `needs_reconnection = false`: a `true` set concurrently by
   // `markIntegrationConnectionNeedsReconnection` survives (that row's credentials are stale anyway).
   const { clientRef, credentialsEncrypted } = target.expect;
   const byIdWhere = and(
@@ -2459,7 +2460,7 @@ export async function persistCredentialBundle(
       ? isNull(integrationConnections.clientRef)
       : eq(integrationConnections.clientRef, clientRef),
     eq(integrationConnections.credentialsEncrypted, credentialsEncrypted),
-    clearsReconnection ? eq(integrationConnections.needsReconnection, false) : undefined,
+    eq(integrationConnections.needsReconnection, false),
   );
   const [row] = await db
     .update(integrationConnections)
@@ -2513,6 +2514,17 @@ function announceConnectionDeath(
   row: Pick<typeof integrationConnections.$inferSelect, keyof typeof deathColumns>,
   cause: CredentialDeathCause,
 ): void {
+  void trackAudit(
+    recordAudit({
+      orgId: row.orgId,
+      spaceId: row.spaceId,
+      actorType: "system",
+      action: "integration.connection.needs_reconnection",
+      resourceType: "integration_connection",
+      resourceId: connectionId,
+      after: { cause },
+    }),
+  );
   announceCredentialNeedsReconnection({
     kind: "integration_connection",
     orgId: row.orgId,
@@ -2532,7 +2544,12 @@ export async function markIntegrationConnectionNeedsReconnection(
 ): Promise<void> {
   const [flipped] = await db
     .update(integrationConnections)
-    .set({ needsReconnection: true, updatedAt: new Date() })
+    .set({
+      needsReconnection: true,
+      needsReconnectionCause: cause,
+      needsReconnectionAt: new Date(),
+      updatedAt: new Date(),
+    })
     .where(
       and(
         eq(integrationConnections.id, connectionId),
@@ -2563,6 +2580,8 @@ export async function recordIntegrationRefreshFailure(
   gate: RefreshFailureGate,
 ): Promise<{ failures: number; needsReconnection: boolean } | null> {
   const failures = sql`${integrationConnections.refreshFailureCount} + 1`;
+  const cause: CredentialDeathCause =
+    "reachable" in gate ? "unrefreshable" : "refresh_failures_exhausted";
   const escalates =
     "reachable" in gate
       ? sql`${failures} >= ${maxFailures}`
@@ -2588,6 +2607,8 @@ export async function recordIntegrationRefreshFailure(
     .set({
       refreshFailureCount: failures,
       needsReconnection: sql`${integrationConnections.needsReconnection} OR (${escalates})`,
+      needsReconnectionCause: sql`CASE WHEN NOT ${integrationConnections.needsReconnection} AND (${escalates}) THEN ${cause} ELSE ${integrationConnections.needsReconnectionCause} END`,
+      needsReconnectionAt: sql`CASE WHEN NOT ${integrationConnections.needsReconnection} AND (${escalates}) THEN now() ELSE ${integrationConnections.needsReconnectionAt} END`,
       updatedAt: sql`now()`,
     })
     .from(prev)
@@ -2600,11 +2621,7 @@ export async function recordIntegrationRefreshFailure(
     });
   if (!row) return null;
   if (row.needsReconnection && !row.wasFlagged) {
-    announceConnectionDeath(
-      connectionId,
-      row,
-      "reachable" in gate ? "unrefreshable" : "refresh_failures_exhausted",
-    );
+    announceConnectionDeath(connectionId, row, cause);
   }
   return { failures: row.failures, needsReconnection: row.needsReconnection };
 }
@@ -2689,7 +2706,6 @@ export async function saveIntegrationConnection(
     accountId: input.accountId,
     identityClaims: input.identityClaims ?? {},
     scopesGranted: input.scopesGranted ?? [],
-    needsReconnection: false,
     expiresAt: input.expiresAt ?? null,
     ...(input.labelHint ? { labelHint: input.labelHint } : {}),
     ...(input.clientRef !== undefined ? { clientRef: input.clientRef } : {}),
@@ -3416,6 +3432,8 @@ export function serializeIntegrationConnection(
       : null,
     scopes_granted: row.scopesGranted,
     needs_reconnection: row.needsReconnection,
+    needs_reconnection_cause: row.needsReconnectionCause,
+    needs_reconnection_at: row.needsReconnectionAt?.toISOString() ?? null,
     expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
     owner_type: row.userId ? "user" : "end_user",
     owner_id: (row.userId ?? row.endUserId)!,

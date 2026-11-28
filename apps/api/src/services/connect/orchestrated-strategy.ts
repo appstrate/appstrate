@@ -145,7 +145,6 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
       identityClaims: { ...(bundle.identityClaims ?? {}), ...identity.identityClaims },
       scopesGranted: bundle.scopesGranted ?? [],
       expiresAt: bundle.expiresAt ? new Date(bundle.expiresAt) : null,
-      needsReconnection: false,
       variables,
       ...(ctx.target ? {} : { packageId: ctx.integrationId, authKey: ctx.authKey }),
     });

@@ -20,7 +20,7 @@ import {
 import { FileAttachment } from "../../../../../packages/module-chat/src/ui/file-attachment.tsx";
 import { ChatRunProgressCard } from "../../../../../packages/module-chat/src/ui/chat-run-progress-card.tsx";
 import { render } from "../../test/render.tsx";
-import { ConversationUsage } from "../../modules/chat/conversation-summary.tsx";
+import { ConversationUsage } from "../../modules/chat/conversation-info.tsx";
 import { conversationStats } from "@appstrate/module-chat/conversation-stats";
 import { mergeTurnMetadata } from "@appstrate/core/chat-turn-metadata";
 import chatFr from "../../locales/fr/chat.json";

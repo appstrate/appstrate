@@ -30,13 +30,32 @@ import {
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
+import {
+  LOCAL_STORAGE_KEYS,
+  createLocalStore,
+  jsonCodec,
+  scalarCodec,
+} from "@appstrate/ui/local-storage";
 import { fileDelivery, type FileDelivery } from "../file-input.ts";
 
-const KEY = "appstrate.chat.modelPick";
-const GENERATION_KEY = "appstrate.chat.generation";
+const pickStore = createLocalStore<string | null>(
+  LOCAL_STORAGE_KEYS.chatModelPick,
+  scalarCodec((raw) => raw),
+);
+/** An empty preference is not stored; an unreadable or invalid one reads as empty. */
+const generationStore = createLocalStore<ModelGenerationSettings>(
+  LOCAL_STORAGE_KEYS.chatGeneration,
+  {
+    ...jsonCodec<ModelGenerationSettings>((value) => {
+      const parsed = modelGenerationSettingsSchema.safeParse(value);
+      return parsed.success ? parsed.data : {};
+    }),
+    serialize: (value) => (Object.keys(value).length === 0 ? null : JSON.stringify(value)),
+  },
+);
 
 /** The user's own pick; `null` = none. */
-let cache: string | null = typeof localStorage === "undefined" ? null : localStorage.getItem(KEY);
+let cache: string | null = pickStore.read();
 let orgDefaultModelId: string | null = null;
 const listeners = new Set<() => void>();
 const generationListeners = new Set<() => void>();
@@ -47,17 +66,7 @@ let inputModalities = new Map<string, readonly string[]>();
 let apiShapes = new Map<string, string>();
 /** Ids of the live catalog models; `null` until the catalog has loaded once. */
 let liveModelIds: ReadonlySet<string> | null = null;
-let generationCache: ModelGenerationSettings = (() => {
-  if (typeof localStorage === "undefined") return {};
-  try {
-    const parsed = modelGenerationSettingsSchema.safeParse(
-      JSON.parse(localStorage.getItem(GENERATION_KEY) ?? "{}"),
-    );
-    return parsed.success ? parsed.data : {};
-  } catch {
-    return {};
-  }
-})();
+let generationCache: ModelGenerationSettings = generationStore.read();
 
 export function subscribeModel(listener: () => void): () => void {
   listeners.add(listener);
@@ -116,12 +125,7 @@ export function setSelectedModel(id: string | null): void {
 function storePick(id: string | null): boolean {
   if (cache === id) return false;
   cache = id;
-  try {
-    if (id === null) localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, id);
-  } catch {
-    // ignore quota / unavailable storage — the selection just won't persist.
-  }
+  pickStore.write(id);
   return true;
 }
 
@@ -227,12 +231,7 @@ export function editGenerationSettings(value: ModelGenerationSettings): void {
 
 function setGenerationSettings(value: ModelGenerationSettings): void {
   generationCache = value;
-  try {
-    if (Object.keys(value).length === 0) localStorage.removeItem(GENERATION_KEY);
-    else localStorage.setItem(GENERATION_KEY, JSON.stringify(value));
-  } catch {
-    // The settings remain available for this page even if persistence is unavailable.
-  }
+  generationStore.write(value);
   recomputeCompatible();
   for (const listener of generationListeners) listener();
 }

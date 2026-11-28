@@ -334,7 +334,7 @@ describe("the reasoning of an assistant turn", () => {
   it("is the call's own line when it is the group's one call: a button, nothing to unfold", () => {
     const counted = {
       ...lookup("s1", "issues"),
-      resultProviderMetadata: { appstrate: { presentation: { count: 3, items: [] } } },
+      resultProviderMetadata: { appstrate: { presentation: { call: "search", count: 3, items: [] } } },
     };
     const html = render([counted, answer], "ready");
     // No disclosure: a click opens the call in the context panel.

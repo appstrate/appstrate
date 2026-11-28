@@ -168,8 +168,9 @@ export async function isPlacedElsewhere(
  * What a home move (`PUT …/home`) does to the placement it leaves; only the
  * home being left is a choice. Runs inside the caller's transaction.
  *
- * @returns the schedules {@link withdrawPlacement} disabled, whose jobs the
- *   caller removes once committed.
+ * @returns `kept`: the previous home keeps a placement row of its own, decided here (false when
+ *   `keep` is false, the home is a personal space, it held no row, or it is the new home); and the
+ *   schedules {@link withdrawPlacement} disabled, whose jobs the caller removes once committed.
  */
 export async function reconcilePlacementsAfterRehome(
   tx: Tx,
@@ -178,19 +179,20 @@ export async function reconcilePlacementsAfterRehome(
     newHomeSpaceId: string;
     /**
      * The home being left. `keep: true` keeps its row; `keep: false` withdraws
-     * it. A space with no row is withdrawn either way (its schedules go off).
+     * it. A space with no row is withdrawn either way (its schedules go off), and
+     * so is a personal space: outside its home it takes the offer only.
      */
     previousHome: { spaceId: string; keep: boolean };
   },
-): Promise<string[]> {
+): Promise<{ kept: boolean; disabledScheduleIds: string[] }> {
   const { packageId, newHomeSpaceId, previousHome } = params;
   // A row in the home is never an offer row: it is the home's own, whatever it was before the move.
   await tx
     .update(spacePackages)
     .set({ placedByOffer: false })
     .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, newHomeSpaceId)));
-  if (previousHome.spaceId === newHomeSpaceId) return [];
-  if (previousHome.keep) {
+  if (previousHome.spaceId === newHomeSpaceId) return { kept: false, disabledScheduleIds: [] };
+  if (previousHome.keep && !(await isPersonalSpace(tx, previousHome.spaceId))) {
     const [row] = await tx
       .select({ packageId: spacePackages.packageId })
       .from(spacePackages)
@@ -201,9 +203,20 @@ export async function reconcilePlacementsAfterRehome(
         ),
       )
       .limit(1);
-    if (row) return [];
+    if (row) return { kept: true, disabledScheduleIds: [] };
   }
-  return (await withdrawPlacement(tx, packageId, previousHome.spaceId)).disabledScheduleIds;
+  const { disabledScheduleIds } = await withdrawPlacement(tx, packageId, previousHome.spaceId);
+  return { kept: false, disabledScheduleIds };
+}
+
+/** Is `spaceId` a personal space (`spaces.owner_user_id` set)? Read inside the caller's transaction. */
+export async function isPersonalSpace(tx: Tx, spaceId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ ownerUserId: spaces.ownerUserId })
+    .from(spaces)
+    .where(eq(spaces.id, spaceId))
+    .limit(1);
+  return row?.ownerUserId != null;
 }
 
 /**

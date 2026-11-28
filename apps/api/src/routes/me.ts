@@ -530,7 +530,7 @@ router.get("/context", optionalSpaceContext(), async (c) => {
       homeWireForCaller(pkg, accessible).home_writable;
   };
   // What a connect flow would make usable here: only for a caller who may run one.
-  const noneConnectable = { integrations: [] as string[], truncated: false, total: 0 };
+  const noneConnectable = { data: [] as string[], truncated: false, total: 0 };
   const integrationsRead = mayReadIntegrations
     ? listUsableIntegrationsForActor(scope, actor).then(async (usable) => ({
         usable,
@@ -551,10 +551,10 @@ router.get("/context", optionalSpaceContext(), async (c) => {
       integrationsRead,
       canRun
         ? withHomeWritable().then((homeWritable) => listActiveAgentHints(scope, { homeWritable }))
-        : Promise.resolve({ agents: [], truncated: false, total: 0 }),
+        : Promise.resolve({ data: [], truncated: false, total: 0 }),
       canReadSkills
         ? withHomeWritable().then((homeWritable) => listActiveSkills(scope, { homeWritable }))
-        : Promise.resolve({ skills: [], truncated: false, total: 0 }),
+        : Promise.resolve({ data: [], truncated: false, total: 0 }),
       // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
       // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
       mayReadRuns
@@ -568,16 +568,10 @@ router.get("/context", optionalSpaceContext(), async (c) => {
     // `personal` as the spaces routes derive it (`spaceWireForCaller`).
     space: { id: space.id, name: space.name, personal: space.ownerUserId !== null },
     connections,
-    connectable_integrations: connectable.integrations,
-    connectable_integrations_truncated: connectable.truncated,
-    connectable_integrations_total: connectable.total,
+    connectable_integrations: connectable,
     recent_runs: recentRuns,
-    agents: runnable.agents,
-    agents_truncated: runnable.truncated,
-    agents_total: runnable.total,
-    skills: activeSkills.skills,
-    skills_truncated: activeSkills.truncated,
-    skills_total: activeSkills.total,
+    agents: runnable,
+    skills: activeSkills,
   });
 });
 

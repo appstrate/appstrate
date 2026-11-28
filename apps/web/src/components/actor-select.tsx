@@ -22,7 +22,7 @@ import { useEndUsers } from "../hooks/use-end-users";
 import { useScheduleCaller } from "../hooks/use-can-write-schedule";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
-import { useRoles } from "../hooks/use-roles";
+import { catalogRoleValue, spaceRoleValue, useRoles } from "../hooks/use-roles";
 import { useSpaceMembers } from "../hooks/use-space-members";
 import { endUserLabel, memberLabel } from "../lib/members";
 import { matchesSearch } from "../lib/strings";
@@ -88,11 +88,11 @@ export function ActorSelect({
   const mayRunIds = useMemo(() => {
     if (!spaceMembers || !roles) return null;
     const runRoles = new Set(
-      roles.filter((r) => r.permissions.includes("agents:run")).map((r) => `${r.kind}:${r.key}`),
+      roles.filter((r) => r.permissions.includes("agents:run")).map(catalogRoleValue),
     );
     return new Set(
       spaceMembers
-        .filter((m) => m.role && runRoles.has(`${m.role.kind}:${m.role.key}`))
+        .filter((m) => m.role && runRoles.has(spaceRoleValue(m.role)))
         .map((m) => m.userId),
     );
   }, [spaceMembers, roles]);

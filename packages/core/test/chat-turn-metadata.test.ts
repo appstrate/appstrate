@@ -11,6 +11,7 @@ import {
   computeTurnRunBudget,
   formatBudgetDuration,
   mergeTurnMetadata,
+  readAppstrateToolPartMetadata,
   turnLimitReached,
   turnMetadataFromMessage,
 } from "../src/chat-turn-metadata.ts";
@@ -192,5 +193,44 @@ describe("budget note ↔ gate consistency", () => {
     // The bare floor must NOT be advertised as the launch threshold: at
     // 1m30s remaining the gate refuses, because the safety margin comes first.
     expect(computeTurnRunBudget(CHAT_MIN_RUN_BUDGET_MS, 0).launchable).toBe(false);
+  });
+});
+
+describe("readAppstrateToolPartMetadata", () => {
+  it("reads the call and result stamps", () => {
+    expect(
+      readAppstrateToolPartMetadata({
+        appstrate: {
+          lookup: true,
+          spaceId: "spc_a",
+          durationMs: 12,
+          actedSpaceIds: ["spc_a", "spc_b"],
+          presentation: { call: "operation", method: "GET", tag: "Zebra" },
+        },
+      }),
+    ).toMatchObject({
+      lookup: true,
+      spaceId: "spc_a",
+      durationMs: 12,
+      actedSpaceIds: ["spc_a", "spc_b"],
+      presentation: { call: "operation", method: "GET", tag: "Zebra" },
+    });
+  });
+
+  it("is undefined without an appstrate object", () => {
+    expect(readAppstrateToolPartMetadata(undefined)).toBeUndefined();
+    expect(readAppstrateToolPartMetadata("x")).toBeUndefined();
+    expect(readAppstrateToolPartMetadata({})).toBeUndefined();
+    expect(readAppstrateToolPartMetadata({ appstrate: [] })).toBeUndefined();
+  });
+
+  it("drops a malformed field and keeps the rest", () => {
+    const read = readAppstrateToolPartMetadata({
+      appstrate: { presentation: { title: "no call" }, durationMs: 5, spaceId: "", lookup: false },
+    });
+    expect(read?.presentation).toBeUndefined();
+    expect(read?.spaceId).toBeUndefined();
+    expect(read?.lookup).toBeUndefined();
+    expect(read?.durationMs).toBe(5);
   });
 });

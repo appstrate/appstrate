@@ -38,11 +38,12 @@ import { effectivePermissions, orgPermissions, type Permission } from "./permiss
 import {
   resolveSpaceRole,
   spacePermissions,
-  toSpaceRoleWire,
+  toSpaceRoleReference,
   type SpaceMemberRow,
   type SpaceRoleRef,
 } from "./space-role.ts";
 import { canGrantSpaceRole } from "./space-role-policy.ts";
+import { auditSpaceRole } from "./space-role-assignment.ts";
 import {
   loadSpaceAccess,
   validateSpaceInOrg,
@@ -77,6 +78,7 @@ const viewAsSchema = z
     space: z.string().refine((v) => SPACE_ID_RE.test(v), {
       message: "space must be a `spc_` id followed by a canonical UUID",
     }),
+    // The textual form of a space-role reference: `preset:<preset_role>` | `custom:<custom_role_id>`.
     role: z
       .string()
       .refine(
@@ -572,7 +574,10 @@ export function viewAsAudit(persona: ViewAsPersona): Record<string, unknown> {
   return {
     orgRole: persona.orgRole,
     space: persona.space
-      ? { spaceId: persona.space.spaceId, role: toSpaceRoleWire(persona.space.role) }
+      ? {
+          spaceId: persona.space.spaceId,
+          role: auditSpaceRole(toSpaceRoleReference(persona.space.role)),
+        }
       : null,
   };
 }

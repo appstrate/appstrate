@@ -534,7 +534,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "List the integrations a chat session reached",
       description:
-        "Each integration the conversation reached, once, in order of its first call, read from the integration call journal: its own calls (through the credential proxy) and those of the runs it launched (reported by each run's sidecar). A call reached an integration when it was sent to it, whatever its outcome, a catalog listing included. Calls made before the journal recorded their conversation are not counted. Empty when it reached none. The conversation's author only (404 otherwise, as `GET …/sessions/{id}`).",
+        "Each integration the conversation reached, once, in order of its first call, read from the integration call journal: its own calls (through the credential proxy) and those of the runs it launched (reported by each run's sidecar). A call reached an integration when it was sent to it, whatever its outcome, a catalog listing included. Only calls the journal recorded with their conversation count. Empty when it reached none. The conversation's author only (404 otherwise, as `GET …/sessions/{id}`).",
       parameters: [
         { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

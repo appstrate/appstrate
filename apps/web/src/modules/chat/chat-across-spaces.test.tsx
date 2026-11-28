@@ -5,7 +5,8 @@
  * conversation panel keeps its lists live across spaces, and the grants the module reads.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
+import { Route, Routes } from "react-router-dom";
 import type { QueryClient } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -22,8 +23,9 @@ const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { ChatModulePage } = await import("./chat-page.tsx");
 const { SpaceTilesOf } = await import("../../components/space-name.tsx");
 const { renderSpaces } = await import("./render-spaces.tsx");
-const { ConversationSpacesControl } = await import("./conversation-spaces.tsx");
 const { ChatSidebar } = await import("./chat-sidebar.tsx");
+const crumbTitle = await import("./chat-crumb-title.ts");
+const { sessionsQueryKey } = await import("../../../../../packages/module-chat/src/ui/sessions.ts");
 const { ConversationFiles, ShownFile } = await import("./conversation-sidebar.tsx");
 const { ConversationRuns } = await import("./conversation-runs-tab.tsx");
 const { useConversationTabs } = await import("./use-conversation-tabs.ts");
@@ -70,10 +72,88 @@ describe("the chat while the mode is not known", () => {
     expect(html).toContain("Chargement");
   });
 
+  it("publishes the trail from the page, with no list mounted (a phone's closed drawer)", () => {
+    const trail = spyOn(crumbTitle, "chatTrailEntries");
+    try {
+      const queryClient = memberSpaceClient([]);
+      queryClient.removeQueries({ queryKey: ["get", "/api/spaces"] });
+      renderInSpace(
+        <SidebarProvider>
+          <Routes>
+            <Route path="/chat/:conversationId" element={<ChatModulePage />} />
+          </Routes>
+        </SidebarProvider>,
+        { queryClient, overview: true, initialEntries: ["/chat/chs_1"] },
+      );
+      // The conversation's name slot is held while the mode is not known.
+      expect(trail).toHaveBeenCalledWith("Chat", null, true);
+    } finally {
+      trail.mockRestore();
+    }
+  });
+
+  it("leaves the trail to the page: the list publishes none", () => {
+    const trail = spyOn(crumbTitle, "chatTrailEntries");
+    try {
+      renderOverview(<ChatSidebar />);
+      expect(trail).not.toHaveBeenCalled();
+    } finally {
+      trail.mockRestore();
+    }
+  });
+
   it("holds the list's shape, with the real « new conversation » row", () => {
     const { html } = renderOverview(<ChatSidebar />);
     expect(html).toContain("Nouvelle conversation");
     expect(html).toContain('data-sidebar="menu-skeleton"');
+  });
+});
+
+describe("the chat's trail once the mode is known", () => {
+  it("names the open conversation in the trail from the page once the mode is known", () => {
+    const trail = spyOn(crumbTitle, "chatTrailEntries");
+    // The thread reads the page's visibility: a document, no DOM or effects.
+    const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: { visibilityState: "visible" },
+    });
+    try {
+      const queryClient = memberSpaceClient([space("spc_a", ["chat:read", "chat:write"])]);
+      queryClient.setQueryData(sessionsQueryKey("spc_a"), {
+        pages: [
+          {
+            data: [
+              {
+                id: "chs_1",
+                title: "Budget",
+                unread: false,
+                generating: false,
+                updatedAt: "",
+                spaceId: "spc_a",
+                restricted: false,
+                space_ids: ["spc_a"],
+              },
+            ],
+            hasMore: false,
+          },
+        ],
+        pageParams: [undefined],
+      });
+      renderInSpace(
+        <SidebarProvider>
+          <Routes>
+            <Route path="/chat/:conversationId" element={<ChatModulePage />} />
+          </Routes>
+        </SidebarProvider>,
+        { queryClient, overview: true, initialEntries: ["/chat/chs_1"] },
+      );
+      expect(trail).toHaveBeenCalledWith("Chat", "Budget", false);
+    } finally {
+      trail.mockRestore();
+      if (previousDocument) Object.defineProperty(globalThis, "document", previousDocument);
+      else Reflect.deleteProperty(globalThis, "document");
+    }
   });
 });
 
@@ -154,12 +234,12 @@ describe("the conversation panel", () => {
     );
   }
 
-  it("lists the runs and files tabs where some space admits them, beside Summary and Tools", () => {
-    expect(renderOverview(<Tabs />, spaces).html).toContain("<p>summary,runs,tools</p>");
+  it("lists the runs and files tabs where some space admits them, beside Summary, Tools and Info", () => {
+    expect(renderOverview(<Tabs />, spaces).html).toContain("<p>summary,runs,tools,info</p>");
     const files = [space("spc_a", ["chat:read"]), space("spc_b", ["chat:read", "files:read"])];
-    expect(renderOverview(<Tabs />, files).html).toContain("<p>summary,files,tools</p>");
+    expect(renderOverview(<Tabs />, files).html).toContain("<p>summary,files,tools,info</p>");
     expect(renderOverview(<Tabs />, [space("spc_a", ["chat:read"])]).html).toContain(
-      "<p>summary,tools</p>",
+      "<p>summary,tools,info</p>",
     );
   });
 
@@ -167,7 +247,9 @@ describe("the conversation panel", () => {
     const chatOnly = [
       testSpace("spc_a", ["chat:read", "runs:read", "files:read"], "spc_a", { studio: false }),
     ];
-    expect(renderOverview(<Tabs />, chatOnly).html).toContain("<p>summary,runs,files,tools</p>");
+    expect(renderOverview(<Tabs />, chatOnly).html).toContain(
+      "<p>summary,runs,files,tools,info</p>",
+    );
   });
 
   it("opens a run of a space without the Studio with no way to its page: a Studio screen", () => {
@@ -350,31 +432,5 @@ describe("the spaces a conversation touched", () => {
   it("leaves the spaces the reader does not reach out", () => {
     const { html } = renderOverview(<SpaceTilesOf spaceIds={["spc_a", "spc_gone"]} />, spaces);
     expect(tiles(html)).toBe(1);
-  });
-
-  it("draws one tile per space in the top bar's trigger, named for assistive tech", () => {
-    const { html } = renderOverview(
-      <ConversationSpacesControl spaces={spaces.slice(0, 2)} />,
-      spaces,
-    );
-    expect(tiles(html)).toBe(2);
-    expect(html).toContain("Espaces de la conversation : ");
-    expect(html).not.toContain("+");
-  });
-
-  it("counts the spaces past the visible tiles", () => {
-    const many = ["a", "b", "c", "d", "e"].map((id) => ({
-      ...spaces[0]!,
-      id: `spc_${id}`,
-      name: id,
-    }));
-    const { html } = renderOverview(<ConversationSpacesControl spaces={many} />, spaces);
-    expect(tiles(html)).toBe(3);
-    expect(html).toContain("+2");
-  });
-
-  it("draws nothing for a conversation that touched no space", () => {
-    const { html } = renderOverview(<ConversationSpacesControl spaces={[]} />, spaces);
-    expect(html).not.toContain("conversation-spaces");
   });
 });

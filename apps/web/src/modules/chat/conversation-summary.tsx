@@ -1,40 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useId, type Dispatch, type ReactNode } from "react";
+import { LayoutListIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { AgentListItem } from "@appstrate/shared-types";
 import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
-import {
-  conversationStats,
-  type ConversationStats,
-} from "@appstrate/module-chat/conversation-stats";
 import type {
   ConversationToolCall,
   ConversationTools,
 } from "@appstrate/module-chat/conversation-tools";
-import {
-  ActivityChevron,
-  ActivityId,
-  ActivityLead,
-  FailedGlyph,
-} from "@appstrate/module-chat/activity-line";
+import { ActivityId, ActivityLead, FailedGlyph } from "@appstrate/module-chat/activity-line";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@appstrate/ui/components/collapsible";
-import { CopyButton } from "@appstrate/ui/components/copy-button";
-import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { MimeIcon } from "@appstrate/ui/components/mime-icon";
-import { formatCompactTokens, formatTokenFigure } from "@appstrate/ui/context-window";
 import {
   IntegrationLogoStack,
   IntegrationLogoStackSkeleton,
 } from "../../components/integration-logo-stack";
-import { ErrorState } from "../../components/page-states";
+import { EmptyState, ErrorState } from "../../components/page-states";
 import { PackageIcon } from "../../components/package-icon";
 import { RowSpaceName } from "../../components/run-row";
 import { RunStatusBadge } from "../../components/status-badge";
@@ -42,7 +26,6 @@ import { Waiting } from "../../components/loading-skeletons";
 import { SkeletonLine } from "../../components/skeleton-line";
 import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField, formatRelativeTime } from "../../lib/format-date";
-import { ChatAccessSummary } from "./chat-access-summary";
 import type {
   ConversationSidebarAction,
   ConversationSidebarTab,
@@ -55,39 +38,14 @@ import {
   useConversationRuns,
 } from "./use-conversation-lists";
 import { TOOL_STATUS_LABEL, useConversationTools, useToolLabel } from "./use-conversation-tools";
-import { useSummarySections, type SummarySectionId } from "./use-summary-sections";
 import { useConversationTabs } from "./use-conversation-tabs";
-
-function InfoDate({ iso }: { iso: string }) {
-  const now = useNowTick();
-  return (
-    <>
-      <span>{formatRelativeTime(iso, now, "long")}</span>
-      <span className="text-muted-foreground block text-xs">{formatDateField(iso)}</span>
-    </>
-  );
-}
-
-function ConversationId({ id }: { id: string }) {
-  const { t } = useTranslation(["chat", "common"]);
-  return (
-    <div className="text-muted-foreground flex items-center gap-1 text-xs">
-      <code className="min-w-0 flex-1 truncate font-mono">{id}</code>
-      <CopyButton
-        value={id}
-        className="desktop-pointer:size-6 shrink-0"
-        aria-label={`${t("common:btn.copy")} (${t("chat:context.summary.id")})`}
-      />
-    </div>
-  );
-}
 
 /** The latest lines each group of the activity draws before its "See all". */
 const SUMMARY_ROWS = 3;
 
 /**
- * Whether a call reached a connected integration, read off its tool: a call still running, one
- * refused before it resolved, or one stored before presentations existed carries no subject.
+ * Whether a call reached a connected integration, read off its tool: a call still running or one
+ * refused before it resolved carries no subject.
  */
 function reachedIntegration({ toolName }: ConversationToolCall): boolean {
   return toolName === "call_integration_tool";
@@ -101,14 +59,6 @@ const BUTTON_LINE_CLASS = cn(LINE_CLASS, "hover:bg-muted/50 transition-colors");
 
 /** A group's heading line: as tall as its "See all" on touch, denser under a mouse. */
 const GROUP_HEAD_CLASS = "desktop-pointer:min-h-7 flex min-h-10 items-center gap-1.5 px-4";
-
-const DISCLOSURE_LINE_CLASS = "flex min-h-10 w-full items-center justify-start gap-2 px-4 py-2";
-
-const SECTIONS: readonly { id: SummarySectionId; width: string }[] = [
-  { id: "usage", width: "w-28" },
-  { id: "access", width: "w-24" },
-  { id: "details", width: "w-16" },
-];
 
 /**
  * One group of the activity on its way, in its shape: its heading and its lines. Hidden from
@@ -130,11 +80,8 @@ function GroupSkeleton() {
   );
 }
 
-/**
- * The summary while the conversation loads: its header lines, its activity, its sections as the
- * reader left them, folded to their line or open on their content.
- */
-function SummarySkeleton({ sections }: { sections: ReturnType<typeof useSummarySections> }) {
+/** The summary while the conversation loads: its header lines, then its activity. */
+function SummarySkeleton() {
   return (
     <Waiting>
       <div className="divide-y">
@@ -145,157 +92,9 @@ function SummarySkeleton({ sections }: { sections: ReturnType<typeof useSummaryS
         <div className="py-2">
           <GroupSkeleton />
         </div>
-        {SECTIONS.map(({ id, width }) => (
-          <div key={id}>
-            <div className={DISCLOSURE_LINE_CLASS}>
-              <span className="size-4 shrink-0" />
-              <SkeletonLine className={cn("text-sm font-medium", width)} />
-            </div>
-            {sections.isOpen(id) ? (
-              <div className="flex flex-col gap-1 px-4 pt-1 pb-3">
-                {["w-1/3", "w-2/3", "w-1/2"].map((line) => (
-                  <SkeletonLine key={line} className={cn("text-sm", line)} />
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ))}
       </div>
     </Waiting>
   );
-}
-
-/**
- * The models that closed the conversation's turns and the context it carries, from the turns' own
- * metadata, beside the tokens every metered call consumed, from the server's ledger sum.
- */
-export function ConversationUsage({
-  session,
-  stats: { models, context },
-}: {
-  session: NonNullable<ReturnType<typeof useSessionDetail>["data"]>;
-  stats: ConversationStats;
-}) {
-  const { t, i18n } = useTranslation("chat");
-  const { usage } = session;
-  const read =
-    (usage.input_tokens ?? 0) +
-    (usage.cache_read_input_tokens ?? 0) +
-    (usage.cache_creation_input_tokens ?? 0);
-  const generated = usage.output_tokens ?? 0;
-  const metered = read + generated > 0;
-
-  return (
-    <div className="flex flex-col gap-2">
-      {models.length === 0 && !context && !metered ? (
-        <p className="text-muted-foreground text-sm">{t("context.summary.noTurn")}</p>
-      ) : (
-        <>
-          <FactGrid columns={1}>
-            {context ? (
-              <Fact label={t("context.summary.currentContext")}>
-                <span className="whitespace-nowrap tabular-nums">
-                  {t("contextUsage.counts", {
-                    used: formatCompactTokens(context.tokens, i18n.language),
-                    max: formatTokenFigure(
-                      context.window,
-                      context.windowAssumed === true,
-                      i18n.language,
-                    ),
-                  })}
-                </span>
-                {context.windowAssumed === true ? (
-                  <span className="text-muted-foreground block text-xs">
-                    {t("contextUsage.windowAssumed", {
-                      window: formatCompactTokens(context.window, i18n.language),
-                    })}
-                  </span>
-                ) : null}
-              </Fact>
-            ) : null}
-            {models.length > 0 ? (
-              <Fact label={t("context.summary.models", { count: models.length })}>
-                <ul className="flex flex-col gap-0.5">
-                  {models.map((model) => (
-                    <li key={model.modelId}>
-                      {model.failed > 0
-                        ? t("context.summary.modelTurnsFailed", {
-                            model: model.label,
-                            count: model.turns,
-                            failed: model.failed,
-                          })
-                        : t("context.summary.modelTurns", {
-                            model: model.label,
-                            count: model.turns,
-                          })}
-                    </li>
-                  ))}
-                </ul>
-              </Fact>
-            ) : null}
-            {metered ? (
-              <Fact label={t("context.summary.tokens")}>
-                {t("context.summary.tokensReadGenerated", {
-                  read: formatCompactTokens(read, i18n.language),
-                  generated: formatCompactTokens(generated, i18n.language),
-                })}
-              </Fact>
-            ) : null}
-          </FactGrid>
-          {metered ? (
-            <p className="text-muted-foreground text-xs">{t("context.summary.tokensScope")}</p>
-          ) : null}
-        </>
-      )}
-    </div>
-  );
-}
-
-/**
- * A folding section: one line naming it and its gist, so the folded summary reads at a glance;
- * unfolded, its content in place.
- */
-function SummaryDisclosure({
-  title,
-  preview,
-  open,
-  onOpenChange,
-  children,
-}: {
-  title: string;
-  /** The section's gist, on the folded line. */
-  preview?: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  children: ReactNode;
-}) {
-  return (
-    <Collapsible open={open} onOpenChange={onOpenChange} render={<section />}>
-      <h3>
-        <CollapsibleTrigger
-          className={cn(
-            DISCLOSURE_LINE_CLASS,
-            "group hover:bg-muted/50 focus-visible:ring-ring text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset",
-          )}
-        >
-          <span className="text-muted-foreground">
-            <ActivityChevron />
-          </span>
-          <span className="shrink-0 text-sm font-medium">{title}</span>
-          {preview ? (
-            <span className="text-muted-foreground ml-auto min-w-0 truncate pl-2 text-xs font-normal">
-              {preview}
-            </span>
-          ) : null}
-        </CollapsibleTrigger>
-      </h3>
-      <CollapsibleContent className="px-4 pt-1 pb-3">{children}</CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-function folding(sections: ReturnType<typeof useSummarySections>, id: SummarySectionId) {
-  return { open: sections.isOpen(id), onOpenChange: () => sections.toggle(id) };
 }
 
 /**
@@ -550,7 +349,12 @@ function SummaryActivity({
         </span>
       ) : null}
       {nothing ? (
-        <p className="text-muted-foreground px-4 py-3 text-sm">{t("context.summary.noActivity")}</p>
+        <EmptyState
+          message={t("context.summary.noActivity")}
+          hint={t("context.summary.noActivityHint")}
+          icon={LayoutListIcon}
+          compact
+        />
       ) : (
         <div className="flex flex-col gap-1 py-2">
           {runsRead === "pending" ? <GroupSkeleton /> : null}
@@ -612,7 +416,16 @@ function SummaryActivity({
                   />
                 )
               }
-              onSeeAll={calls.length > SUMMARY_ROWS ? seeAll("tools") : undefined}
+              onSeeAll={
+                calls.length > SUMMARY_ROWS
+                  ? () => {
+                      if (calls.some((call) => call.lookup)) {
+                        dispatch({ type: "show-lookups", show: true });
+                      }
+                      dispatch({ type: "select-tab", tab: "tools" });
+                    }
+                  : undefined
+              }
             >
               {reachedRead === "error" ? <ErrorState error={reached.query.error} compact /> : null}
               {callRows.map((call) => (
@@ -628,8 +441,7 @@ function SummaryActivity({
 
 /**
  * The conversation in one view: its title and gist, then all it did (runs, files, integration
- * calls) on one line each, each group leading to its tab; its models, the reader's access and its
- * details fold to one line each.
+ * calls) on one line each, each group leading to its tab.
  */
 export function ConversationSummary({
   conversationId,
@@ -642,39 +454,24 @@ export function ConversationSummary({
 }) {
   const { t } = useTranslation("chat");
   const now = useNowTick();
-  const sections = useSummarySections();
   const query = useSessionDetail(conversationId, { enabled: active });
   const { tools } = useConversationTools(conversationId, active);
   const { tabs } = useConversationTabs("summary");
   const shows = (tab: ConversationSidebarTab) => tabs.some(({ id }) => id === tab);
   const seeAll = (tab: ConversationSidebarTab) => () => dispatch({ type: "select-tab", tab });
-  // The access judges the conversation's own scope: the same query as the header's.
-  const access = (conversation: Parameters<typeof ChatAccessSummary>[0]["conversation"]) => (
-    <SummaryDisclosure title={t("context.summary.access")} {...folding(sections, "access")}>
-      <ChatAccessSummary conversation={conversation} />
-    </SummaryDisclosure>
-  );
 
   if (!conversationId) {
-    return (
-      <div className="divide-y">
-        <p className="text-muted-foreground p-4 text-sm">{t("context.unsaved")}</p>
-        {access(null)}
-      </div>
-    );
+    return <EmptyState message={t("context.unsaved")} icon={LayoutListIcon} compact />;
   }
   // A refetch that fails keeps the conversation already read.
   if (query.data === undefined && query.error) return <ErrorState error={query.error} compact />;
   // Not read yet, or held while the panel is closed: never an error.
-  if (query.data === undefined || tools === undefined) {
-    return <SummarySkeleton sections={sections} />;
-  }
+  if (query.data === undefined || tools === undefined) return <SummarySkeleton />;
   // The server holds no such conversation.
   if (query.data === null || tools === null) return <ErrorState compact />;
 
   const session = query.data;
   const title = session.title || t("context.summary.untitled");
-  const stats = conversationStats(session.messages);
   const gist = [
     t("context.summary.messages", { count: session.messages.length }),
     session.generating ? t("context.summary.generating") : null,
@@ -700,24 +497,6 @@ export function ConversationSummary({
         seeAll={seeAll}
         dispatch={dispatch}
       />
-      <SummaryDisclosure
-        title={t("context.summary.usageTitle")}
-        preview={stats.models.map((model) => model.label).join(", ") || undefined}
-        {...folding(sections, "usage")}
-      >
-        <ConversationUsage session={session} stats={stats} />
-      </SummaryDisclosure>
-      {access(session)}
-      <SummaryDisclosure title={t("context.summary.details")} {...folding(sections, "details")}>
-        <div className="flex flex-col gap-3">
-          <FactGrid columns={1}>
-            <Fact label={t("context.summary.created")}>
-              <InfoDate iso={session.createdAt} />
-            </Fact>
-          </FactGrid>
-          <ConversationId id={conversationId} />
-        </div>
-      </SummaryDisclosure>
     </div>
   );
 }

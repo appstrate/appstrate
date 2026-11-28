@@ -3,23 +3,24 @@
 import { createStore } from "zustand/vanilla";
 import { isPlainObject } from "@appstrate/core/safe-json";
 import { authStore } from "./auth-store";
-import { persistedJson } from "./local-storage";
+import { LOCAL_STORAGE_KEYS, createLocalStore, jsonCodec } from "@appstrate/ui/local-storage";
 import { getCurrentOrgId } from "./org-store";
-
-const STORAGE_KEY = "appstrate_last_space";
 
 /** By user as well as org: the map outlives the session, and the next account must not inherit it. */
 export function rememberedSpaceKey(userId: string, orgId: string): string {
   return `${userId}:${orgId}`;
 }
 
-const persistedRemembered = persistedJson<Record<string, string>>(STORAGE_KEY, (value) =>
-  isPlainObject(value) ? (value as Record<string, string>) : {},
+const persistedRemembered = createLocalStore(
+  LOCAL_STORAGE_KEYS.lastSpace,
+  jsonCodec((value): Record<string, string> =>
+    isPlainObject(value) ? (value as Record<string, string>) : {},
+  ),
 );
 
 /** Applies `change` to the PERSISTED map, not this tab's copy: another tab may have written since. */
 function writeRemembered(change: (map: Record<string, string>) => void): Record<string, string> {
-  const remembered = persistedRemembered.read();
+  const remembered = { ...persistedRemembered.read() };
   change(remembered);
   persistedRemembered.write(remembered);
   return remembered;

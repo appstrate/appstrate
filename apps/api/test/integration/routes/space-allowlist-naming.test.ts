@@ -157,12 +157,12 @@ describe("POST …/shares with a confined credential", () => {
     const outside = await app.request(`/api/packages/${AGENT}/shares`, {
       method: "POST",
       headers: { ...allowlisted([homeId]), "Content-Type": "application/json" },
-      body: JSON.stringify({ target: { kind: "space", spaceId: otherId } }),
+      body: JSON.stringify({ spaceId: otherId }),
     });
     const missing = await app.request(`/api/packages/${AGENT}/shares`, {
       method: "POST",
       headers: { ...allowlisted([homeId]), "Content-Type": "application/json" },
-      body: JSON.stringify({ target: { kind: "space", spaceId: MISSING_SPACE } }),
+      body: JSON.stringify({ spaceId: MISSING_SPACE }),
     });
     expect(outside.status).toBe(404);
     expect(missing.status).toBe(404);

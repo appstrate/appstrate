@@ -116,7 +116,8 @@ What happens under the hood:
 > archive unavailable there, is named in its section's `unsearched`. When the
 > request names a space or its context designates one, `search` takes its `space_id` too. The argument's schema lists your
 > spaces (name, `spc_…` id, your role there), since clients may truncate the
-> server instructions. Space names are not unique, so every machine field names
+> server instructions; above 12 reachable spaces it gives their count instead and
+> points to `get_me`, a refusal's `accepted` still holding every id. Space names are not unique, so every machine field names
 > a space by its id: `granted_in` in results, and the bracketed ids in the
 > operation index (`createAgent [spc_…]`). Names appear in prose only, such as
 > `Available in: …` on a tool. A `resources/read` of an `appfile://` link needs
@@ -700,28 +701,39 @@ result's `content`; the schema is `toolPresentationSchema` in
 - **Icons.** Every tool in `tools/list` carries `icons` (MCP `Tool.icons`): two
   inline `data:image/svg+xml` icons, `theme: "light"` and `theme: "dark"`.
   Nothing is fetched.
-- **Lookups.** `search` and `describe` declaring the `integration_tool` kind
-  withhold `readOnlyHint` (they may read a third-party catalog) and carry
-  `_meta["dev.appstrate/lookup"]: true` instead: their calls only look things
-  up. `isLookupTool` reads either.
+- **Lookups.** A tool whose calls only look things up declares the standard
+  `readOnlyHint: true`; `search` and `describe` declaring the `integration_tool`
+  kind add `openWorldHint: true` (they may read a third-party catalog).
+  `isLookupTool` reads `readOnlyHint` alone.
 - **Presentation.** A result carries `_meta["dev.appstrate/presentation"]`
   when the server knows more of the call than its tool's descriptor, a failed
   call's included (a tool that fails unexpectedly answers `isError` with the
-  error's message, not a JSON-RPC error):
-  - `title` (`call_integration_tool` of a remote server's tool): the server's
-    title for it, else its name there, never the call's arguments;
-  - `tag`: an operation's first OpenAPI tag; `method`: its HTTP method, or the
-    method of an `{ns}__api_call` holding one request (none for a batch of
-    several);
-  - `subject` (`{ kind, id, display_name?, icon? }`, `kind` one of `agent`,
-    `skill`, `integration`, `user`): the package an operation's path names by
-    its `agents`, `skills` or `integrations` segment (so a run or schedule
-    operation under `/api/agents/{scope}/{name}` names that agent), whether
-    the operation succeeds or fails: it is what the call aimed at; the
-    integration `call_integration_tool` reached, its refusal of the arguments
-    included; the caller `get_me` answered for;
-  - `count` and `items` (`search`): `count` is the sum of its sections'
-    `total`, what each kind matched before `limit` (an agent or an integration
-    tool once, an operation you may invoke once, a skill once per space it is
-    listed in); `items` the distinct agents, skills and integrations its shown
-    items name, at most 8.
+  error's message, not a JSON-RPC error). It always has a `call` field naming
+  the kind of call, and carries only that kind's fields; a client switches on
+  `call`, never on a tool's name. A result from another server has no such
+  entry, and one without `call` is malformed (`readToolPresentation` answers
+  `undefined`):
+  - `operation` (`invoke_operation`): `method`, its HTTP method; `tag`, its
+    first OpenAPI tag; `subject`, the package its path names by its `agents`,
+    `skills` or `integrations` segment (so a run or schedule operation under
+    `/api/agents/{scope}/{name}` names that agent), whether the operation
+    succeeds or fails: it is what the call aimed at;
+  - `proxied_request` (`call_integration_tool` of an `{ns}__api_call`):
+    `subject`, the integration it reached, its refusal of the arguments
+    included; `method`, that of its one request (none for a batch of several);
+    `requests`, the number of requests its arguments hold (absent when they
+    carry no readable `requests` array);
+  - `remote_tool` (`call_integration_tool` of a remote server's tool): `title`,
+    the server's title for it, else its name there, never the call's
+    arguments; `subject`, the integration;
+  - `search`: `count`, the sum of its sections' `total`, what each kind matched
+    before `limit` (an agent or an integration tool once, an operation you may
+    invoke once, a skill once per space it is listed in); `items`, the distinct
+    agents, skills and integrations its shown items name, at most 8;
+  - `caller` (`get_me`): `subject`, the caller it answered for.
+
+  A `subject` is `{ kind, id, display_name?, icons? }`, `kind` one of `agent`,
+  `skill`, `integration`, `user`. An integration's `icons` are MCP `Icon`s
+  (`{ src, mimeType?, sizes?, theme? }`) a client draws from `src` alone: its
+  manifest image URL or data URI as it is, an Iconify id as its SVG on
+  `api.iconify.design`, an emoji as an inline SVG.

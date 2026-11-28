@@ -17,7 +17,6 @@ import {
   OVERLAY_PREFIXES,
   ROUTE_ACCESS,
   routeVerdict,
-  STUDIO_PERMISSION,
   type RoutePath,
 } from "../route-access.ts";
 import { routeOf } from "../route-match.ts";
@@ -89,7 +88,7 @@ describe("route declarations", () => {
     const unguarded = SHELL.flatMap(({ file, text }) =>
       links(text)
         .filter((t) => declared.has(t))
-        .filter((t) => routeVerdict(t as RoutePath, () => false, allOn, false) !== "granted")
+        .filter((t) => routeVerdict(t as RoutePath, () => false, true, allOn, false) !== "granted")
         .filter((t) => !reached(text).includes(t))
         .map((t) => `${file} → ${t}`),
     );
@@ -120,35 +119,37 @@ describe("routeVerdict", () => {
   const studio =
     (...held: string[]) =>
     (p: string) =>
-      p === STUDIO_PERMISSION || held.includes(p);
+      held.includes(p);
 
   it("opens a gated route on any one of its permissions", () => {
-    expect(routeVerdict("/runs", studio("runs:read-all"), {}, false)).toBe("granted");
-    expect(routeVerdict("/runs", studio(), {}, false)).toBe("denied");
+    expect(routeVerdict("/runs", studio("runs:read-all"), true, {}, false)).toBe("granted");
+    expect(routeVerdict("/runs", studio(), true, {}, false)).toBe("denied");
   });
 
   it("opens none of the Studio's screens without the Studio, whatever else is granted", () => {
-    const withoutStudio = (p: string) => p !== STUDIO_PERMISSION;
-    expect(routeVerdict("/runs", withoutStudio, {}, false)).toBe("denied");
-    expect(routeVerdict("/agents/:scope/:name", withoutStudio, {}, false)).toBe("denied");
+    const withoutStudio = () => true;
+    expect(routeVerdict("/runs", withoutStudio, false, {}, false)).toBe("denied");
+    expect(routeVerdict("/agents/:scope/:name", withoutStudio, false, {}, false)).toBe("denied");
   });
 
   it("keeps the chat, the overlays and the reader pages without the Studio", () => {
-    const withoutStudio = (p: string) => p !== STUDIO_PERMISSION;
-    expect(routeVerdict("/chat", withoutStudio, { chat: true }, false)).toBe("granted");
-    expect(routeVerdict("/workspace-settings/general", withoutStudio, {}, false)).toBe("granted");
-    expect(routeVerdict("/org-settings/members", withoutStudio, {}, false)).toBe("granted");
-    expect(routeVerdict("/catalogue/:type", withoutStudio, {}, false)).toBe("granted");
-    expect(routeVerdict("/files/:fileId", none, {}, false)).toBe("granted");
-    expect(routeVerdict("/notifications/:id", none, {}, false)).toBe("granted");
-    expect(routeVerdict("/", none, {}, false)).toBe("granted");
+    const withoutStudio = () => true;
+    expect(routeVerdict("/chat", withoutStudio, false, { chat: true }, false)).toBe("granted");
+    expect(routeVerdict("/workspace-settings/general", withoutStudio, false, {}, false)).toBe(
+      "granted",
+    );
+    expect(routeVerdict("/org-settings/members", withoutStudio, false, {}, false)).toBe("granted");
+    expect(routeVerdict("/catalogue/:type", withoutStudio, false, {}, false)).toBe("granted");
+    expect(routeVerdict("/files/:fileId", none, true, {}, false)).toBe("granted");
+    expect(routeVerdict("/notifications/:id", none, true, {}, false)).toBe("granted");
+    expect(routeVerdict("/", none, true, {}, false)).toBe("granted");
   });
 
   it("treats a route whose module is off as absent, whatever the grants", () => {
     const all = () => true;
-    expect(routeVerdict("/chat", all, {}, false)).toBe("absent");
-    expect(routeVerdict("/chat", all, { chat: true }, false)).toBe("granted");
-    expect(routeVerdict("/chat", none, { chat: true }, false)).toBe("denied");
+    expect(routeVerdict("/chat", all, true, {}, false)).toBe("absent");
+    expect(routeVerdict("/chat", all, true, { chat: true }, false)).toBe("granted");
+    expect(routeVerdict("/chat", none, true, { chat: true }, false)).toBe("denied");
   });
 
   it("treats a team-space route as absent in a personal space, whatever the grants", () => {
@@ -162,18 +163,20 @@ describe("routeVerdict", () => {
       "/workspace-settings/end-users",
     ];
     for (const path of teamSpaceOnly) {
-      expect(routeVerdict(path, all, { oidc: true }, true)).toBe("absent");
-      expect(routeVerdict(path, all, { oidc: true }, false)).toBe("granted");
+      expect(routeVerdict(path, all, true, { oidc: true }, true)).toBe("absent");
+      expect(routeVerdict(path, all, true, { oidc: true }, false)).toBe("granted");
     }
-    expect(routeVerdict("/workspace-settings/general", all, {}, true)).toBe("granted");
+    expect(routeVerdict("/workspace-settings/general", all, true, {}, true)).toBe("granted");
     // Its deletes stay open there, so a row the space holds can always be removed.
-    expect(routeVerdict("/workspace-settings/auth", all, { oidc: true }, true)).toBe("granted");
-    expect(routeVerdict("/agents", all, {}, true)).toBe("granted");
+    expect(routeVerdict("/workspace-settings/auth", all, true, { oidc: true }, true)).toBe(
+      "granted",
+    );
+    expect(routeVerdict("/agents", all, true, {}, true)).toBe("granted");
   });
 
   it("opens an ungated route to a caller holding nothing", () => {
     const open: RoutePath[] = ["/", "/org-settings", "/preferences/general"];
-    for (const path of open) expect(routeVerdict(path, none, {}, false)).toBe("granted");
+    for (const path of open) expect(routeVerdict(path, none, true, {}, false)).toBe("granted");
   });
 });
 
@@ -182,8 +185,8 @@ describe("file reader route", () => {
     const none = () => false;
     const reader = routeOf("/files/file_1?org=org_1&space=spc_1");
     expect(reader).toBe("/files/:fileId");
-    expect(routeVerdict(reader!, none, {}, false)).toBe("granted");
-    expect(routeVerdict("/files", none, {}, false)).toBe("denied");
+    expect(routeVerdict(reader!, none, true, {}, false)).toBe("granted");
+    expect(routeVerdict("/files", none, true, {}, false)).toBe("denied");
   });
 });
 
@@ -250,8 +253,8 @@ describe("routeOf", () => {
   });
 
   it("feeds routeVerdict, so a concrete link is judged by its route's gate", () => {
-    const runsOnly = (p: string) => p === STUDIO_PERMISSION || p === "runs:read";
-    const verdict = (url: string) => routeVerdict(routeOf(url)!, runsOnly, {}, false);
+    const runsOnly = (p: string) => p === "runs:read";
+    const verdict = (url: string) => routeVerdict(routeOf(url)!, runsOnly, true, {}, false);
     expect(verdict("/agents/@acme/triage/runs/run_1")).toBe("granted");
     expect(verdict("/agents/@acme/triage")).toBe("denied");
   });

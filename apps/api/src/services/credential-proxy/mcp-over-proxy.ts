@@ -126,6 +126,7 @@ interface JournaledExchange {
   host: string;
   outcome: string;
   durationMs: number;
+  calledAt: Date;
 }
 
 interface JournalEntry {
@@ -186,6 +187,7 @@ function operationJournal(input: McpOperationInput) {
             host: templateHost(target),
             outcome,
             durationMs: Date.now() - started,
+            calledAt: new Date(started),
           };
         },
         ended: end,

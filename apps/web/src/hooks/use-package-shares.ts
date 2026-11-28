@@ -39,7 +39,7 @@ export function useSharePackage() {
 }
 
 function useRevokePackageShare() {
-  return $api.useMutation("delete", "/api/packages/{scope}/{name}/shares/{target}");
+  return $api.useMutation("delete", "/api/packages/{scope}/{name}/shares/{spaceId}");
 }
 
 /** Removes a package from one target (the sharer withdrawing an audience, or the recipient leaving a placement): the server drops the row, its settings, and disables its schedules there. `target` is the space id. */
@@ -54,7 +54,7 @@ export function useRemovePackageFromSpace() {
       options?: { onSuccess?: () => void; leavesPage?: boolean },
     ) =>
       revoke.mutate(
-        { params: { path: { ...splitPackageRef(removal.packageId), target: removal.target } } },
+        { params: { path: { ...splitPackageRef(removal.packageId), spaceId: removal.target } } },
         {
           onSuccess: () => {
             // A caller leaving the removed package's page only marks queries stale: refetching

@@ -3,7 +3,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { auditEvents } from "@appstrate/db/schema";
+import { auditEvents, modelProviderCredentials } from "@appstrate/db/schema";
+import { corruptCredentialBlob, seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -209,6 +210,53 @@ describe("Model Provider Keys API", () => {
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/model-provider-credentials");
       expect(res.status).toBe(401);
+    });
+
+    it("serves the recorded death cause and its date, or null/null for a live credential", async () => {
+      const flagged = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        label: "Flagged",
+        needsReconnection: true,
+        needsReconnectionCause: "refresh_token_revoked",
+      });
+      const live = await seedOrgModelProviderOAuth({ orgId: ctx.orgId, label: "Live" });
+      const [stored] = await db
+        .select({ at: modelProviderCredentials.needsReconnectionAt })
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, flagged.id));
+
+      const res = await app.request("/api/model-provider-credentials", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const { data } = (await res.json()) as { data: any[] };
+      const byId = (id: string) => data.find((c) => c.id === id);
+      expect(byId(flagged.id)).toMatchObject({
+        needs_reconnection: true,
+        needs_reconnection_cause: "refresh_token_revoked",
+        needs_reconnection_at: stored!.at!.toISOString(),
+      });
+      expect(byId(live.id)).toMatchObject({
+        needs_reconnection: false,
+        needs_reconnection_cause: null,
+        needs_reconnection_at: null,
+      });
+    });
+
+    it("derives credentials_undecryptable, with no date, for an unreadable blob", async () => {
+      const broken = await seedOrgModelProviderOAuth({ orgId: ctx.orgId, label: "Broken" });
+      await corruptCredentialBlob(broken.id);
+
+      const res = await app.request("/api/model-provider-credentials", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const { data } = (await res.json()) as { data: any[] };
+      expect(data.find((c) => c.id === broken.id)).toMatchObject({
+        needs_reconnection: true,
+        needs_reconnection_cause: "credentials_undecryptable",
+        needs_reconnection_at: null,
+      });
     });
   });
 

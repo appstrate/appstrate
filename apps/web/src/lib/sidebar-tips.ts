@@ -24,10 +24,7 @@ export const SIDEBAR_TIP_TARGET: Record<SidebarTipId, string> = {
 
 /** The pages a card says nothing new on: the one its button opens, or a whole overlay of it. */
 const SIDEBAR_TIP_PAGE: Record<SidebarTipId, string> = {
-  connect: "/integrations",
-  chat: "/chat",
-  invite: "/org-settings/members",
-  schedule: "/schedules",
+  ...SIDEBAR_TIP_TARGET,
   catalogue: "/catalogue",
 };
 

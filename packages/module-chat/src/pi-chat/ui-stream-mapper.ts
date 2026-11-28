@@ -25,7 +25,10 @@
  */
 
 import type { ProviderMetadata, UIMessageChunk } from "ai";
-import { isTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
+import {
+  omitTurnBudgetNote,
+  type AppstrateToolPartMetadata,
+} from "@appstrate/core/chat-turn-metadata";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import type {
   AgentSessionEvent,
@@ -296,7 +299,7 @@ export class PiChatUiStreamMapper {
             type: "tool-input-start",
             toolCallId,
             toolName,
-            ...(lookup && { providerMetadata: { appstrate: { lookup } } }),
+            ...(lookup && { providerMetadata: toolPartMetadata({ lookup }) }),
           },
         ];
       }
@@ -317,14 +320,19 @@ export class PiChatUiStreamMapper {
         const named = dispatchSpace(input);
         const spaceId = named !== undefined && this.turnSpaces.has(named) ? named : undefined;
         const lookup = this.lookupTools.has(toolName);
-        const appstrate = { ...(spaceId && { spaceId }), ...(lookup && { lookup }) };
+        const appstrate: AppstrateToolPartMetadata = {
+          ...(spaceId && { spaceId }),
+          ...(lookup && { lookup }),
+        };
         return [
           {
             type: "tool-input-available",
             toolCallId,
             toolName,
             input,
-            ...(Object.keys(appstrate).length > 0 && { providerMetadata: { appstrate } }),
+            ...(Object.keys(appstrate).length > 0 && {
+              providerMetadata: toolPartMetadata(appstrate),
+            }),
           },
         ];
       }
@@ -343,15 +351,14 @@ export class PiChatUiStreamMapper {
     isError: boolean;
     durationMs?: number;
   }): UIMessageChunk[] {
-    const { output, presentation } = persistedToolOutput(ev.result);
-    const acted = ev.isError ? actedSpacesOf(output) : undefined;
-    const appstrate: ToolOutcomeMetadata = {
+    const { output, presentation, actedSpaceIds } = persistedToolOutput(ev.result);
+    const appstrate: AppstrateToolPartMetadata = {
       ...(presentation && { presentation }),
-      ...(acted && { actedSpaceIds: acted }),
+      ...(actedSpaceIds && { actedSpaceIds }),
       ...(ev.durationMs !== undefined && { durationMs: ev.durationMs }),
     };
     const meta = Object.keys(appstrate).length > 0 && {
-      providerMetadata: { appstrate } as ProviderMetadata,
+      providerMetadata: toolPartMetadata(appstrate),
     };
     if (ev.isError) {
       return [
@@ -482,8 +489,9 @@ function toolCallAt(partial: unknown, index: number): PiToolCallBlock | undefine
 }
 
 /**
- * The tool output that crosses the wire and gets persisted: the Pi result
- * WITHOUT `details`.
+ * The tool output that crosses the wire and gets persisted: the Pi result without `details`,
+ * `persistedContent` (which replaces `content` when present), `presentation` and `actedSpaceIds`
+ * (the last two returned beside the output, for the call's metadata stamp).
  *
  * A Pi `AgentToolResult` carries its payload twice — `content[0].text` is the
  * JSON string the MODEL reads, `details` the same object for Pi's own in-memory
@@ -492,12 +500,13 @@ function toolCallAt(partial: unknown, index: number): PiToolCallBlock | undefine
  * and every tool output is persisted, served by the history GET and re-uploaded
  * by the client on every later turn — so the wire/persisted shape is the model
  * channel plus the typed offers: `content`, `connectOffers`, `isError` and
- * whatever else the result carries, minus `details`. The in-memory Pi result
- * itself is untouched (`mcp-tools.ts` builds it with `details`).
+ * whatever else the result carries. The in-memory Pi result itself is untouched
+ * (`mcp-tools.ts` builds it with `details`).
  */
 function persistedToolOutput(result: unknown): {
   output: unknown;
   presentation?: ToolPresentation;
+  actedSpaceIds?: string[];
 } {
   if (result == null) return { output: null };
   if (typeof result !== "object" || Array.isArray(result)) return { output: result };
@@ -505,25 +514,23 @@ function persistedToolOutput(result: unknown): {
     details: _details,
     persistedContent,
     presentation,
+    actedSpaceIds,
     ...rest
   } = result as Record<string, unknown> & { presentation?: ToolPresentation };
   return {
     output: Array.isArray(persistedContent) ? { ...rest, content: persistedContent } : rest,
     ...(presentation && { presentation }),
+    ...(isStringArray(actedSpaceIds) && { actedSpaceIds }),
   };
 }
 
-/** `actedSpaceIds`: a failure's, which keeps no output to carry them. */
-type ToolOutcomeMetadata = {
-  presentation?: ToolPresentation;
-  durationMs?: number;
-  actedSpaceIds?: readonly unknown[];
-};
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === "string");
+}
 
-/** The spaces a tool's result says the call acted in. */
-function actedSpacesOf(output: unknown): readonly unknown[] | undefined {
-  const acted = (output as { actedSpaceIds?: unknown } | null | undefined)?.actedSpaceIds;
-  return Array.isArray(acted) ? acted : undefined;
+/** The AI SDK's provider metadata for a tool part: ours under `appstrate`. */
+function toolPartMetadata(appstrate: AppstrateToolPartMetadata): ProviderMetadata {
+  return { appstrate } as ProviderMetadata;
 }
 
 /** Flatten a Pi tool result (`AgentToolResult` content blocks) to text for error output. */
@@ -532,11 +539,10 @@ function stringifyToolResult(result: unknown): string {
   if (result && typeof result === "object") {
     const content = (result as { content?: unknown }).content;
     if (Array.isArray(content)) {
-      const texts = content.map((c) =>
+      // The model's turn-budget note is marked: it is not the reader's.
+      const texts = omitTurnBudgetNote(content).map((c) =>
         c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : "",
       );
-      // The model's turn-budget note, always the last block: a block earlier is a server's text.
-      if (isTurnBudgetNote(texts.at(-1) ?? "")) texts.pop();
       return texts.join("");
     }
     return JSON.stringify(result);

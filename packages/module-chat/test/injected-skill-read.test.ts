@@ -409,7 +409,7 @@ describe("what a space holds, read with `get_me` over the caller's own connectio
     );
     expect(details).toHaveLength(1);
     expect(details[0]!.agents?.map((agent) => agent.id)).toEqual([agentId]);
-    const { text, shown } = formatSpaceDetails(details);
+    const { text, shown } = formatSpaceDetails(details, 0);
     expect(shown).toEqual([owner.defaultSpaceId]);
     expect(text).toContain(`- \`${agentId}\``);
     // Reading over the caller's connection carries no session: it records nothing.

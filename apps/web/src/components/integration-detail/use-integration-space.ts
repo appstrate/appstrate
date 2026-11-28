@@ -4,6 +4,7 @@ import { $api } from "../../api/client";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { packageDetailQueryOptions } from "../../hooks/use-packages";
 import { spaceRead, useSpaceEntry } from "../../hooks/use-space-entry";
+import { scopeHeader } from "../../lib/scoping-headers";
 
 /**
  * The space an integration's per-space tab is shown from, in « Tous les espaces »: one of
@@ -21,7 +22,7 @@ export function useIntegrationSpaceAction(
       $api.queryOptions("get", "/api/integrations/{packageId}", {
         params: {
           path: { packageId },
-          header: { "X-Org-Id": orgId ?? undefined, "X-Space-Id": spaceId },
+          header: scopeHeader(orgId, spaceId),
         },
       }),
     ),

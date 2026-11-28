@@ -6,7 +6,6 @@ import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import type { components } from "../../api/client.ts";
 import { NavOrg } from "../nav-org.tsx";
 import { memberSpaceClient, renderInSpace, testSpace } from "../../test/space-context.ts";
-import { STUDIO_PERMISSION } from "../../lib/route-access.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
@@ -20,12 +19,12 @@ await i18n.changeLanguage("fr");
 
 function navFor(
   permissions: string[],
-  spaces: ReturnType<typeof testSpace>[] = [],
+  spaces: ReturnType<typeof testSpace>[] = [testSpace("spc_a", permissions)],
   overview = false,
   url = "/",
   onClient: (queryClient: QueryClient) => void = () => {},
 ): string {
-  // No space to enter: the permission set is the org's, and the navigation answers at once.
+  // The working space grants `permissions` unless the test lists its own.
   const queryClient = memberSpaceClient(spaces);
   onClient(queryClient);
   const org: components["schemas"]["Organization"] = {
@@ -36,8 +35,8 @@ function navFor(
     color: null,
     role: "owner",
     deleting_at: null,
-    // Synthetic: the set stands for a space's, which every preset opens the Studio in.
-    permissions: [STUDIO_PERMISSION, ...permissions],
+    // Synthetic: the set stands for a space's.
+    permissions,
     createdAt: "2026-09-05T00:00:00Z",
   };
   queryClient.setQueryData(["orgs"], [org]);

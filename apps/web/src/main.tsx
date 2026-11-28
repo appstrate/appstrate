@@ -38,7 +38,7 @@ window.addEventListener("vite:preloadError", (event) => {
 // starts once the org list confirms the persisted org (every space-scoped read waits on
 // it, `useSpaceResolver`).
 startAuthBootstrap();
-if (sessionExpected(localStorage)) primeSpaceList(primeOrgList());
+if (sessionExpected()) primeSpaceList(primeOrgList());
 
 // Warm the lazy chat chunk (assistant-ui, AI SDK, react-markdown) in parallel with the
 // fetches above. Gated on the same flag as the route in `app.tsx`; the config is injected

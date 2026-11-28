@@ -16,6 +16,7 @@
  * identifiers themselves are anonymised).
  */
 
+import { isTurnBudgetNoteBlock } from "@appstrate/core/chat-turn-metadata";
 import { describe, expect, it } from "bun:test";
 import {
   mcpResultToPi,
@@ -47,6 +48,7 @@ describe("Pi tool result → chat UI (producer/consumer boundary)", () => {
     // part of the model channel.
     expect(result.content).toHaveLength(2);
     expect(result.content[1]?.text).toStartWith("[turn budget]");
+    expect(isTurnBudgetNoteBlock(result.content[1])).toBe(true);
   });
 
   it("reads a succeeded run_and_wait result", () => {

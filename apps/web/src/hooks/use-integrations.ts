@@ -21,7 +21,7 @@ import type {
 } from "@appstrate/shared-types";
 import { $api, client, type paths } from "../api/client";
 import { invalidatePaths } from "../lib/query-keys";
-import { spaceHeader } from "../lib/scoping-headers";
+import { scopeHeader, spaceHeader } from "../lib/scoping-headers";
 import { splitPackageRef } from "../lib/package-paths";
 
 // Spec-pinned: the generated response shape verbatim (a rename/removal of any non-`manifest`
@@ -235,7 +235,7 @@ export function useIntegrationDetailsIn(
       ...$api.queryOptions("get", "/api/integrations/{packageId}", {
         params: {
           path: { packageId: packageId ?? "" },
-          header: { "X-Org-Id": orgId ?? undefined, "X-Space-Id": spaceId },
+          header: scopeHeader(orgId, spaceId),
         },
       }),
       enabled: !!orgId && !!packageId,

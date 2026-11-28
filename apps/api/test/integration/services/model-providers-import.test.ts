@@ -90,7 +90,8 @@ describe("importOAuthModelProviderConnection", () => {
     expect(blob.accessToken).toBe("access-1");
     expect(blob.refreshToken).toBe("refresh-1");
     expect(blob.email).toBe("user@example.com");
-    expect(blob.needsReconnection).toBe(false);
+    expect(row!.needsReconnection).toBe(false);
+    expect("needsReconnection" in blob).toBe(false);
   });
 
   it("unknown providerId → notFound (404)", async () => {

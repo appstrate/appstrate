@@ -54,7 +54,12 @@ import {
   personaFor,
   personaMemberships,
 } from "../lib/view-as.ts";
-import { resolveSpaceRole, toSpaceRoleWire, type SpaceRoleRef } from "../lib/space-role.ts";
+import {
+  resolveSpaceRole,
+  spaceShowsStudio,
+  toSpaceRoleReference,
+  type SpaceRoleRef,
+} from "../lib/space-role.ts";
 import { enterSpaceById } from "../middleware/space-context.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
@@ -85,6 +90,7 @@ import {
   spaceRoleAssignmentShape,
   toAssignment,
 } from "../lib/space-role-assignment.ts";
+import { spaceRoleReferenceSchema } from "@appstrate/core/permissions";
 import type { PackageType } from "@appstrate/core/validation";
 import type { SpaceSweepResult } from "@appstrate/shared-types";
 import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
@@ -135,8 +141,9 @@ function spaceWireForCaller(
     personal: space.ownerUserId !== null,
     ...(administers ? { orphaned_at: toISO(space.orphanedAt) } : {}),
     access: role ? ("member" as const) : ("none" as const),
-    role: toSpaceRoleWire(role),
+    role: role && toSpaceRoleReference(role),
     permissions: [...effectiveInSpace(c, role)].sort(),
+    shows_studio: spaceShowsStudio(role),
   };
 }
 
@@ -225,8 +232,6 @@ export const addSpaceMemberSchema = exactlyOneRole(
 ).refine((data) => (data.userId !== undefined) !== (data.email !== undefined), {
   message: "Provide exactly one of userId or email",
 });
-
-export const updateSpaceMemberSchema = exactlyOneRole(z.object({ ...spaceRoleAssignmentShape }));
 
 // Neither body carries the agent's stored input values: `PUT
 // /api/agents/{scope}/{name}/input-settings` is their single write path,
@@ -726,7 +731,7 @@ export function createSpacesRouter() {
       const orgId = c.get("orgId");
       const spaceId = c.req.param("id")!;
       const userId = c.req.param("userId")!;
-      const data = await readJsonBody(c, updateSpaceMemberSchema);
+      const data = await readJsonBody(c, spaceRoleReferenceSchema);
       const assignment = toAssignment(data);
 
       await saveSpaceMember({
@@ -850,7 +855,7 @@ export function createSpacesRouter() {
         action: "package.shared",
         resourceType: "package",
         resourceId: data.packageId,
-        after: { spaceId, targetKind: "space" },
+        after: { spaceId },
       });
     }
     // A repeat is not audited.

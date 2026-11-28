@@ -6,6 +6,8 @@
  * caller's identity; `buildCallerContextBlock` reads the skills over a platform connection.
  */
 
+import { MAX_DETAIL_SPACES } from "../src/space-details.ts";
+import { fullAgent, meBody } from "./me-context-body.ts";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "bun:test";
 import {
@@ -81,6 +83,8 @@ const BASE_OPTS = {
   restricted: false,
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
+  spaces: [],
+  spaceDetails: "",
 } as const;
 
 /** A line of the catalogue: the published entry of `@<scope>/<name>`, or its draft. */
@@ -722,13 +726,11 @@ describe("buildCallerContextBlock", () => {
       published: [skillEntry(A, "1.0.0")],
       texts: { [A]: "a body" },
       getMe: {
-        spc_p: {
+        spc_p: meBody({
           space: { id: "spc_p" },
-          connections: [],
-          connectable_integrations: ["@appstrate/slack"],
-          agents: [{ packageId: "@acme/digest", display_name: "Digest", published: true }],
-          agents_total: 1,
-        },
+          connectable_integrations: { data: ["@appstrate/slack"], truncated: false, total: 1 },
+          agents: { data: [fullAgent("@acme/digest", "Digest")], truncated: false, total: 1 },
+        }),
         // `spc_v` is absent: its get_me fails and it is left out.
       },
     });
@@ -774,10 +776,7 @@ describe("buildCallerContextBlock", () => {
       published: [skillEntry(A, "1.0.0")],
       texts: { [A]: "a body" },
       getMe: Object.fromEntries(
-        many.map((space) => [
-          space.id,
-          { space: { id: space.id }, connections: [], connectable_integrations: [], agents: [] },
-        ]),
+        many.map((space) => [space.id, meBody({ space: { id: space.id } })]),
       ),
     });
     let inFlight = 0;
@@ -810,7 +809,11 @@ describe("buildCallerContextBlock", () => {
     expect(Object.keys(injected.skills)).toEqual(["@acme/a"]);
     expect(text).toContain("a body");
     expect(peak).toBeLessThanOrEqual(4);
-    expect(caller.calls.filter((call) => call.startsWith("get_me"))).toHaveLength(24);
+    // The reads stop at the cap; the spaces left are counted in the block.
+    expect(caller.calls.filter((call) => call.startsWith("get_me"))).toHaveLength(
+      MAX_DETAIL_SPACES,
+    );
+    expect(text).toContain(`${24 - MAX_DETAIL_SPACES} spaces not read; call \`get_me\``);
   });
 
   it("opens no connection when there are neither skills nor details to read", async () => {

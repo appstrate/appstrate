@@ -97,6 +97,18 @@ For `run.connection_missing`, `data.object` has `object: "run_attempt"`, the `pa
 
 For `credential.needs_reconnection`, `data.object` has `object: "credential"`, a `kind` and the `cause`. `kind: "integration_connection"` adds `connectionId`, `packageId` (the integration), `authKey`, `spaceId` (`null` for an org-level connection) and `owner` (`type` and `id`). It reaches the webhooks of its space and the org-level ones, a package filter matching `packageId`. `kind: "model_provider_credential"` adds `credentialId` and `providerId`; it has no space and no package, so it reaches org-level webhooks without a package filter only.
 
+`cause` is one of:
+
+| `cause`                      | Meaning                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------- |
+| `refresh_token_revoked`      | The provider revoked the refresh token (`invalid_grant`).                             |
+| `refresh_token_missing`      | No refresh token is stored, so nothing can refresh the access token once it expires.  |
+| `refresh_failures_exhausted` | The token refresh failed too many consecutive times, and the token has expired.       |
+| `unrefreshable`              | The provider kept rejecting the credential, and its kind of auth cannot be refreshed. |
+| `credentials_undecryptable`  | The stored credentials can no longer be decrypted (an encryption key was retired).    |
+
+The same value is returned as `needs_reconnection_cause` on the connection or credential, with `needs_reconnection_at`, until it is reconnected.
+
 ### Payload modes
 
 - `full` includes `result`. If the run object would exceed 256 KiB of serialized JSON, `result` is dropped and `resultTruncated: true` is added.

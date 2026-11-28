@@ -8,6 +8,7 @@ import {
   CREDENTIAL_PROXY_OPEN_DESCRIPTION,
   EMOJI_ICON_WRITE_RULE,
   SPACE_ROLE_ID_PATTERN,
+  SPACE_ROLE_REFERENCE_ONE_OF,
 } from "../schemas.ts";
 
 export const spacesPaths = {
@@ -78,8 +79,9 @@ export const spacesPaths = {
                 credential_proxy_open: true,
                 personal: false,
                 access: "member",
-                role: { kind: "preset", key: "admin", name: "admin" },
+                role: { preset_role: "admin", name: "admin" },
                 permissions: ["agents:read", "agents:run"],
+                shows_studio: true,
                 created_by: "usr_k7x9m2p4q1",
                 createdAt: "2026-01-15T10:30:00Z",
                 updatedAt: "2026-01-15T10:30:00Z",
@@ -141,8 +143,9 @@ export const spacesPaths = {
                     credential_proxy_open: true,
                     personal: false,
                     access: "member",
-                    role: { kind: "preset", key: "operator", name: "operator" },
+                    role: { preset_role: "operator", name: "operator" },
                     permissions: ["agents:read", "agents:run"],
+                    shows_studio: true,
                     created_by: null,
                     createdAt: "2026-01-10T08:00:00Z",
                     updatedAt: "2026-01-10T08:00:00Z",
@@ -163,6 +166,7 @@ export const spacesPaths = {
                     access: "none",
                     role: null,
                     permissions: ["org:read", "spaces:read"],
+                    shows_studio: false,
                     created_by: "usr_k7x9m2p4q1",
                     createdAt: "2026-01-15T10:30:00Z",
                     updatedAt: "2026-01-15T10:30:00Z",
@@ -630,7 +634,7 @@ export const spacesPaths = {
       tags: ["Space Packages"],
       summary: "Deactivate a package in this space",
       description:
-        "Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off. `400` for a system integration bound to the runtime (it serves the run's own tools and stays active in every space).",
+        "Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{spaceId}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off. `400` for a system integration bound to the runtime (it serves the run's own tools and stays active in every space).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -857,13 +861,7 @@ export const spacesPaths = {
         content: {
           "application/json": {
             schema: {
-              type: "object",
-              allOf: [{ oneOf: [{ required: ["preset_role"] }, { required: ["custom_role_id"] }] }],
-              properties: {
-                preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
-                custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
-              },
-              additionalProperties: false,
+              oneOf: SPACE_ROLE_REFERENCE_ONE_OF,
             },
           },
         },

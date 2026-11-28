@@ -15,7 +15,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { packageTypeEnum, packageSourceEnum } from "./enums.ts";
+import { packageTypeEnum, packageSourceEnum, orgOfferModeValues } from "./enums.ts";
 import type { OrgOfferMode } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
@@ -135,7 +135,10 @@ export const orgPackageOffers = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.orgId, table.packageId] }),
-    check("org_package_offers_mode_known", sql`mode IN ('available', 'on_by_default')`),
+    check(
+      "org_package_offers_mode_known",
+      sql`mode IN (${sql.raw(orgOfferModeValues.map((v) => `'${v}'`).join(", "))})`,
+    ),
     index("idx_org_package_offers_package_id").on(table.packageId),
     // Referencing-side index for the `user` SET NULL action.
     index("idx_org_package_offers_offered_by").on(table.offeredBy),

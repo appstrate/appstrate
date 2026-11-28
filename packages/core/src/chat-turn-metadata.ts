@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { z } from "zod";
+import { toolPresentationSchema } from "./mcp-presentation.ts";
 import type { ModelErrorCategory, ModelErrorReason } from "./model-error.ts";
 
 /**
@@ -101,11 +103,35 @@ export function formatBudgetDuration(ms: number): string {
   return minutes > 0 ? `${minutes}m${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
 }
 
-const TURN_BUDGET_NOTE_PREFIX = "[turn budget]";
+/** `_meta` key marking the text block that carries the chat's budget note. */
+const TURN_BUDGET_NOTE_META_KEY = "dev.appstrate/turn-budget";
 
-/** Whether a tool result's text part is the budget note, which is the model's, not the reader's. */
-export function isTurnBudgetNote(text: string): boolean {
-  return text.startsWith(`${TURN_BUDGET_NOTE_PREFIX} `);
+/** The note's text block: marked structurally, and for the model alone (MCP `audience`). */
+export function turnBudgetNoteBlock(text: string) {
+  return {
+    type: "text" as const,
+    text,
+    annotations: { audience: ["assistant" as const] },
+    _meta: { [TURN_BUDGET_NOTE_META_KEY]: true as const },
+  };
+}
+
+/** Whether a content block is the budget note, which is the model's, not the reader's. */
+export function isTurnBudgetNoteBlock(block: unknown): boolean {
+  const meta = (block as { _meta?: Record<string, unknown> } | null | undefined)?._meta;
+  return meta?.[TURN_BUDGET_NOTE_META_KEY] === true;
+}
+
+/** A tool result (or its bare content array) without the budget note block. */
+export function omitTurnBudgetNote(blocks: unknown[]): unknown[];
+export function omitTurnBudgetNote(value: unknown): unknown;
+export function omitTurnBudgetNote(value: unknown): unknown {
+  if (Array.isArray(value)) return value.filter((b) => !isTurnBudgetNoteBlock(b));
+  const content = (value as { content?: unknown } | null | undefined)?.content;
+  if (Array.isArray(content) && content.some(isTurnBudgetNoteBlock)) {
+    return { ...(value as object), content: omitTurnBudgetNote(content) };
+  }
+  return value;
 }
 
 /**
@@ -127,7 +153,7 @@ export function isTurnBudgetNote(text: string): boolean {
 export function formatTurnBudgetNote(input: { remainingMs: number; stepsUsed: number }): string {
   const launchThreshold = formatBudgetDuration(CHAT_LAUNCH_THRESHOLD_MS);
   return (
-    `${TURN_BUDGET_NOTE_PREFIX} ${formatBudgetDuration(input.remainingMs)} left in this turn, ` +
+    `[turn budget] ${formatBudgetDuration(input.remainingMs)} left in this turn, ` +
     `step ${input.stepsUsed}/${CHAT_MAX_STEPS}. ` +
     `A run_and_wait launch needs at least ${launchThreshold} left or it is refused; ` +
     `anything not written into your reply before the turn ends is lost.`
@@ -217,6 +243,39 @@ export interface ChatMessageMetadata {
     turn?: AppstrateTurnMetadata;
   };
   [key: string]: unknown;
+}
+
+/**
+ * What the chat stamps on an AI SDK tool part under `providerMetadata.appstrate`, persisted in
+ * `chat_messages.content` (`callProviderMetadata` on the call, `resultProviderMetadata` on the
+ * outcome, a failure's included). One shape, each side filling its own fields; camelCase like
+ * `appstrate.turn` (CASING_CONVENTIONS 4o), but `presentation` is the MCP wire object, carried as is.
+ */
+const appstrateToolPartMetadataSchema = z.object({
+  /** Call side: the call is a lookup (a tool that only reads). */
+  lookup: z.literal(true).optional().catch(undefined),
+  /** Call side: the space the call's input named, when the turn can act in it. */
+  spaceId: z.string().min(1).optional().catch(undefined),
+  /** Result side: how a client shows the call. */
+  presentation: toolPresentationSchema.optional().catch(undefined),
+  /** Result side: how long the call ran. */
+  durationMs: z.number().optional().catch(undefined),
+  /**
+   * Result side: the spaces the platform says the call acted in, the last being the target (empty:
+   * organization-wide). The one copy: the stored output does not carry it.
+   */
+  actedSpaceIds: z.array(z.string()).optional().catch(undefined),
+});
+
+export type AppstrateToolPartMetadata = z.infer<typeof appstrateToolPartMetadataSchema>;
+
+/** The `appstrate` entry of a tool part's provider metadata; `undefined` when absent or not an object. */
+export function readAppstrateToolPartMetadata(
+  providerMetadata: unknown,
+): AppstrateToolPartMetadata | undefined {
+  if (!isRecord(providerMetadata)) return undefined;
+  const parsed = appstrateToolPartMetadataSchema.safeParse(providerMetadata.appstrate);
+  return parsed.success ? parsed.data : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

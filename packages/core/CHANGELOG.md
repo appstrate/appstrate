@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Type `AppstrateToolPartMetadata`** and
+  `readAppstrateToolPartMetadata` (`@appstrate/core/chat-turn-metadata`): the shape the chat stamps
+  on an AI SDK tool part under `providerMetadata.appstrate` (`lookup`, `spaceId`, `presentation`,
+  `durationMs`, `actedSpaceIds`). The reader returns `undefined` for a missing or non-object entry
+  and drops a malformed field instead of the whole stamp.
 - **`onCredentialNeedsReconnection`** (`@appstrate/core/module`, `ModuleEvents`) and its
   `CredentialNeedsReconnectionParams` payload, discriminated by `kind`
   (`integration_connection` | `model_provider_credential`). One best-effort announcement per
@@ -16,40 +21,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`CREDENTIAL_DEATH_CAUSES`, `@appstrate/core/sidecar-types`).
 - **`@appstrate/core/mcp-presentation`**: how a client shows one MCP tool call.
   `TOOL_PRESENTATION_META_KEY` (`dev.appstrate/presentation`) names the `_meta` entry the platform
-  stamps on a tool result, `toolPresentationSchema` describes it (types `ToolPresentation`,
-  `PresentationSubject`; a search lists at most `MAX_PRESENTED_ITEMS`) and `readToolPresentation`
-  reads it. `TOOL_LOOKUP_META_KEY` (`dev.appstrate/lookup`) marks, on a tool descriptor, a tool
-  whose calls only look things up although `readOnlyHint` is withheld; `isLookupTool` reads either.
-- **`isTurnBudgetNote`** (`@appstrate/core/chat-turn-metadata`): whether a tool result's text part
-  is the chat's model-facing turn-budget line (`formatTurnBudgetNote`).
+  stamps on a tool result and `toolPresentationSchema` describes it: a union discriminated by the
+  required `call` (`operation`, `proxied_request`, `remote_tool`, `search`, `caller`), each variant
+  with only its own fields (`proxied_request` carries the `requests` batch size; a search lists at
+  most `MAX_PRESENTED_ITEMS`). A subject's `icons` are MCP `Icon`s (`PresentationIcon`). Types
+  `ToolPresentation`, `PresentationSubject`. `readToolPresentation` reads it, `undefined` when the
+  entry is absent or malformed (a result without `call` included). `isLookupTool` tells a tool
+  whose calls only look things up: it declares the standard `annotations.readOnlyHint: true`.
+- **`turnBudgetNoteBlock`, `isTurnBudgetNoteBlock`,
+  `omitTurnBudgetNote`** (`@appstrate/core/chat-turn-metadata`): the chat's model-facing
+  turn-budget line (`formatTurnBudgetNote`) is a text block marked
+  `_meta["dev.appstrate/turn-budget"]` (audience `assistant`); readers recognise it by the marker,
+  never by its text.
 - `SPACE_ROLE_ID_REGEX` and `isSpaceRolePreset` in `@appstrate/core/permissions`.
-- `personalSpaceRoleSettingSchema` (a preset key or a custom space role id: the wire value of
-  `personal_space_role`) and `orgSettingsWireSchema` (`orgSettingsReadSchema` with
-  `personal_space_role` read through it) in `@appstrate/core/permissions`.
+- `spaceRoleReferenceSchema` (`{ preset_role }` | `{ custom_role_id }`, the one wire shape of a
+  space-role reference, `personal_space_role` included) and `orgSettingsWireSchema`
+  (`orgSettingsReadSchema` with `personal_space_role` read through it) in
+  `@appstrate/core/permissions`.
 - **`spaceActs`, `SpaceAct`** (`@appstrate/core/mcp-spaces`).
   The acts a caller holds in one space (`invoke_operations`, `run_agents`, `inline_runs`,
   `call_integration_tools`, `create_packages`), in one vocabulary for the MCP `get_me` tool's
-  `spaces[].can` and the chat's context block.
-
-### Changed
-
-- **`unwrapMcpResult`** (`@appstrate/core/mcp-result`) leaves the turn-budget line, the last
-  block, out of a plain-text result: a failed call's message no longer ends with the model's `[turn budget] …`.
-- **New core resource `studio`, permission `studio:read`** — BREAKING. The `CoreResource` and
-  `Permission` unions widen (`CoreResources.studio`; the `Permission` type gains `studio:read`), and
-  a module that declares a `studio` permission resource is refused at load
-  (`cannot redefine core resource`). The permission is space-level, opens the Studio's screens in the dashboard and gates
-  no API route.
-- **`orgSettingsReadSchema.personal_space_role`** — BREAKING. The output type widens from
-  `"admin" | "operator"` to a space-role preset key (`admin`, `builder`, `operator`, `runner`,
-  `viewer`), and `orgSettingsSchema` accepts the same values on input. The stored key holds a
-  preset only: a custom default lives in a column of the organization, outside the JSON. The read
-  default stays `admin`; stored `admin` and `operator` remain valid. The org settings as served
-  (`OrgSettings` in `@appstrate/shared-types`) follow `orgSettingsWireSchema`, which also accepts a
-  custom space role id.
+  `spaces[].can` and the chat's context block. `SPACE_ACTS` lists them.
+- **`@appstrate/core/me-context`**: `meContextSchema` (the body of `GET /api/me/context`, each
+  capped list one `{ data, truncated, total }` envelope), `getMeResultSchema` (the MCP `get_me`
+  result, which declares it as its `outputSchema`). Objects are
+  loose: a field the server adds does not fail a reader.
+- **`flattenName`** (`@appstrate/core/mcp-spaces`): a name made one bounded line (control and
+  format characters removed, whitespace runs collapsed). `describeSpace` flattens the space name
+  with it, so a name holding a line break cannot forge a heading in a prompt.
+- **`SPACE_LIST_INLINE_MAX`, `describeSpaceList`** (`@appstrate/core/mcp-spaces`): above
+  `SPACE_LIST_INLINE_MAX` (12) reachable spaces, an MCP `space_id` description and a refusal's text
+  give the count and point to `get_me` instead of describing each space, and the `space_id` `enum`
+  is dropped; a refusal's `accepted` still lists every space.
+- **`CALL_JOURNAL_DRAIN_DEADLINE_MS`, `CALL_JOURNAL_FLUSH_TIMEOUT_MS`,
+  `SIDECAR_SIGTERM_GRACE_SECONDS`** (`@appstrate/core/sidecar-types`): the three bounds of a run's
+  call-journal drain, derived one from another (drain deadline < flush timeout < SIGTERM grace).
 
 ### Removed
 
+- **`personal_space_role` in `orgSettingsSchema` and `orgSettingsReadSchema`** — BREAKING. The
+  personal-space default role is no longer stored in the settings document but in two columns of
+  the organization; the key is part of neither schema, and a stored `personal_space_role` key is
+  ignored on read (`toOrgSettings` serves the role from the columns), and script 0060 removes it. The org settings as
+  served (`OrgSettings` in `@appstrate/shared-types`) follow `orgSettingsWireSchema`, where
+  `personal_space_role` is a role reference object, never a bare string.
 - **`SPACE_CHOICE_META_KEY`** — BREAKING (`@appstrate/core/mcp-spaces`). An MCP call that needs a
   space and names none is refused with the eligible spaces in the refusal alone (`accepted`, and
   by name in `error`): the chat no longer renders a picker from result metadata, its model asks

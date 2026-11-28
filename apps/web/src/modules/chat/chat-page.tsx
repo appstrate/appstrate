@@ -8,14 +8,15 @@
 // Lazy-loaded behind `features.chat`. The shell around it is the app's layout,
 // shared with Studio and kept mounted across a product switch; the chat's own
 // part of it, the conversation list, is `chat-sidebar.tsx` (the only other
-// importer of the module's UI).
+// importer of the module's UI). The page publishes the trail (`ChatTitleCrumb`): it is
+// mounted on every format, while the list sits in a drawer unmounted on a phone.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
-  ChatConversationRenameButton,
+  ChatConversationMenu,
   ChatPage,
   ChatTransportProvider,
   SelectConversationProvider,
@@ -40,7 +41,7 @@ import {
 } from "./conversation-sidebar-state";
 import { ConversationContextToggle, ConversationSidebar } from "./conversation-sidebar";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
-import { ConversationSpaces } from "./conversation-spaces";
+import { ChatTitleCrumb } from "./chat-title-crumb";
 import { renderSpaces } from "./render-spaces";
 import {
   useChatActingSpaceIds,
@@ -170,7 +171,15 @@ export function ChatModulePage() {
   // The assistant creates and imports packages: the lists show them as the editor's would.
   const onPackagesChanged = useCallback(() => refreshPackageLists(queryClient), [queryClient]);
   // The mode decides which conversations the list holds: until it is known the page holds its shape.
-  if (!known) return conversationId ? <ChatConversationSkeleton /> : <ChatPanelSkeleton />;
+  // The trail's slot holds meanwhile too.
+  if (!known) {
+    return (
+      <>
+        <ChatTitleCrumb conversationId={conversationId ?? null} pending />
+        {conversationId ? <ChatConversationSkeleton /> : <ChatPanelSkeleton />}
+      </>
+    );
+  }
   // The chat's tools (run agents, inspect runs, search…) are served by the
   // `mcp` module, which is a hard peer requirement of `chat` (enforced at
   // boot) — so tools are always available when the chat is reachable.
@@ -179,14 +188,19 @@ export function ChatModulePage() {
   // the thread scrolls internally and the composer stays pinned at the bottom.
   // The context panel opens over the thread's right side, INSIDE the shell's
   // content area: it belongs to the conversation, and it opens in a sheet on narrow screens.
-  // One toggle sits in the shell's header, portaled there for the page's lifetime;
-  // the tabs live in the panel's own header.
+  // The open conversation's « … » and the context toggle sit in the shell's header, portaled
+  // there for the page's lifetime; the tabs live in the panel's own header.
   return (
     <ChatTransportProvider value={transport ?? null}>
       <SelectConversationProvider value={onConversationChange}>
+        <ChatTitleCrumb conversationId={conversationId ?? null} transport={transport} />
         <ShellHeaderActions>
-          <ConversationSpaces conversationId={conversationId ?? null} transport={transport} />
-          <ChatConversationRenameButton activeId={conversationId ?? null} t={translate} can={can} />
+          <ChatConversationMenu
+            activeId={conversationId ?? null}
+            t={translate}
+            can={can}
+            renderSpaces={renderSpaces}
+          />
           <ConversationContextToggle expanded={sidebarState.expanded} dispatch={dispatchSidebar} />
         </ShellHeaderActions>
         <ConversationSidebar

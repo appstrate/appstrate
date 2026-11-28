@@ -2,7 +2,7 @@
 
 /**
  * "What can this assistant do for me": the caller's role and a verdict per chat
- * act, as a folding section of the conversation's Summary, which names it. Lives in the SHELL
+ * act, as a section of the conversation's Info tab, which names it. Lives in the SHELL
  * (everything it reads is host state). A role preview (`X-View-As`) needs no
  * logic here: `/api/orgs` and `/api/spaces` already answer AS the persona; the
  * summary only marks it. The verdicts judge the spaces the conversation acts in, not the working

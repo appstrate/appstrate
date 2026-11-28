@@ -1,5 +1,5 @@
 -- Two shapes every existing row already satisfies, so nothing is rewritten (RBAC spec §3.3, §3.6):
--- `space_roles.shows_studio` resolves `studio:read` for a custom role (constant default true = as
+-- `space_roles.shows_studio` is a display attribute of a custom role (constant default true = as
 -- before), and a CUSTOM personal-space default gets a column under an FK beside the preset one in
 -- `org_settings.personal_space_role` (NULL on every existing row: none is custom on main; the key
 -- holds `admin` or `operator` there, both presets).

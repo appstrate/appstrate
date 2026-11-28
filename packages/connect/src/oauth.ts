@@ -18,7 +18,11 @@ import { type TokenErrorKind } from "./token-utils.ts";
  * - `"client_rejected"`: the token endpoint refused the client itself
  *   (`invalid_client` / `unauthorized_client`); only fixing its registration helps.
  *
- * - `"transient"`: anything else (network, 5xx, non-JSON, other 4xx, other
+ * - `"misconfigured"`: the token endpoint refused the request itself
+ *   (`invalid_scope` / `unsupported_grant_type`); only fixing the
+ *   integration manifest or client helps.
+ *
+ * - `"transient"`: anything else (network, 5xx, non-JSON, other 4xx, unknown
  *   OAuth error codes, a 2xx with neither `access_token` nor `error`). The
  *   authorization code might still be valid on retry for some classes of
  *   failure; the user should be told to retry the request, not the entire

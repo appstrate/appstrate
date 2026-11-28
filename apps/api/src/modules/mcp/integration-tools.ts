@@ -36,6 +36,7 @@ import {
   type CallableTool,
 } from "./integration-tool-catalog.ts";
 import { withPresentation } from "./presentation.ts";
+import { manifestIcons } from "./tool-icons.ts";
 import { MAX_SEARCH_LIMIT, rankByKeywords, searchScore } from "./search.ts";
 import {
   asRecord,
@@ -168,13 +169,13 @@ function describedTool(tool: Merged<CallableTool>): Record<string, unknown> {
 }
 
 /**
- * What `search` and `describe` do when they declare the kind: they may query third-party servers
- * with a connection's credential, which journals a call and can rotate its OAuth tokens.
+ * What `search` and `describe` do when they declare the kind: they only read, but reach third-party
+ * servers with a connection's credential. Journaling the call and rotating an OAuth token are the
+ * platform's own bookkeeping, not a change to the caller's environment.
  */
 export const INTEGRATION_KIND_ANNOTATIONS = {
-  readOnlyHint: false,
-  destructiveHint: false,
-  idempotentHint: false,
+  readOnlyHint: true,
+  idempotentHint: true,
   openWorldHint: true,
 } as const;
 
@@ -408,27 +409,38 @@ export async function searchIntegrationTools(
   };
 }
 
+/** The integration `id` as a presentation names and draws it. */
+function integrationSubject(
+  identities: CallableListing["integrations"],
+  id: string,
+): PresentationSubject {
+  const identity = identities.find((entry) => entry.integration_package_id === id);
+  const icons = manifestIcons(identity?.icon);
+  return {
+    kind: "integration",
+    id,
+    ...(identity && { display_name: identity.display_name }),
+    ...(icons ? { icons } : {}),
+  };
+}
+
 /** The integrations of `ids` (in order, each once) as a presentation names and draws them. */
 function integrationSubjects(
   identities: CallableListing["integrations"],
   ids: readonly string[],
 ): PresentationSubject[] {
-  const byId = new Map(identities.map((entry) => [entry.integration_package_id, entry]));
-  return [...new Set(ids)].map((id) => {
-    const identity = byId.get(id);
-    return {
-      kind: "integration",
-      id,
-      ...(identity && { display_name: identity.display_name }),
-      ...(identity?.icon ? { icon: identity.icon } : {}),
-    };
-  });
+  return [...new Set(ids)].map((id) => integrationSubject(identities, id));
+}
+
+/** The requests an `api_call` holds; none read when its arguments carry no non-empty `requests` array. */
+function requestsOf(args: unknown): unknown[] | undefined {
+  const requests = asRecord(args)?.requests;
+  return Array.isArray(requests) && requests.length > 0 ? requests : undefined;
 }
 
 /** The method of an `api_call` holding one request, upper-cased; none for a batch, or none read. */
-function singleRequestMethod(args: unknown): string | undefined {
-  const requests = asRecord(args)?.requests;
-  if (!Array.isArray(requests) || requests.length !== 1) return undefined;
+function singleRequestMethod(requests: unknown[] | undefined): string | undefined {
+  if (requests?.length !== 1) return undefined;
   const method = asRecord(requests[0])?.method;
   return typeof method === "string" && method ? method.toUpperCase() : undefined;
 }
@@ -439,12 +451,18 @@ function toolCallPresentation(
   tool: CallableTool,
   args: unknown,
 ): ToolPresentation {
-  const [subject] = integrationSubjects(read.integrations, [tool.integration_package_id]);
+  const subject = integrationSubject(read.integrations, tool.integration_package_id);
   if (tool.kind === "remote") {
-    return { title: tool.title || tool.remote_name, ...(subject ? { subject } : {}) };
+    return { call: "remote_tool", title: tool.title || tool.remote_name, subject };
   }
-  const method = singleRequestMethod(args);
-  return { ...(method ? { method } : {}), ...(subject ? { subject } : {}) };
+  const requests = requestsOf(args);
+  const method = singleRequestMethod(requests);
+  return {
+    call: "proxied_request",
+    ...(method ? { method } : {}),
+    ...(requests ? { requests: requests.length } : {}),
+    subject,
+  };
 }
 
 /**

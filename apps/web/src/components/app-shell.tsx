@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useSyncExternalStore } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { LibraryBig, Menu, PanelLeft, Settings, X, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -28,6 +28,13 @@ import { settingsSurfaceFromPath } from "@/lib/settings-surface";
 import { keepsDrawerOpen } from "@/lib/drawer-navigation";
 import { KEYBOARD_VIEWPORT_CLASS } from "@appstrate/ui/use-keyboard-viewport";
 import { cn } from "@appstrate/ui/cn";
+import { PanelResizeHandle } from "@/components/panel-resize";
+import {
+  SIDEBAR_WIDTH,
+  clampSidebarWidth,
+  sidebarMaxWidth,
+  useSidebarWidthStore,
+} from "@/stores/sidebar-store";
 import {
   Sidebar,
   SidebarContent,
@@ -39,6 +46,9 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@appstrate/ui/components/sidebar";
+
+/** The sidebar's frame, which its resize handle controls. */
+const APP_SIDEBAR_ID = "app-sidebar";
 
 /** Where the sidebar's settings entry lands: the organization scope's index. */
 const SETTINGS_ENTRY = SETTINGS_INDEX.organization;
@@ -107,79 +117,131 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   );
 
   return (
-    <Sidebar className={`overflow-y-auto ${KEYBOARD_VIEWPORT_CLASS}`}>
-      {/* The brand cell sits at the header's height so the two rules meet across the shell. The
+    <Sidebar id={APP_SIDEBAR_ID} className={KEYBOARD_VIEWPORT_CLASS}>
+      {/* The frame never scrolls: it is the resize handle's containing block, so the handle spans
+          its whole height whatever the column below it scrolls to. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {/* The brand cell sits at the header's height so the two rules meet across the shell. The
           collapse shows while the pointer is on the sidebar or on focus (`group` is its root).
           On a phone the switcher takes its own width, its chevrons right after the names, and
           the bell and the close button stand at the row's end. */}
-      <SidebarHeader className="border-sidebar-border h-header flex-row items-center gap-1 border-b px-2 py-0">
-        <div className="min-w-0 flex-1">
-          <OrgSwitcher />
-        </div>
-        {/* Below `md` the header has no room left for it: the bell is the drawer's. */}
-        <NotificationBell className="md:hidden" />
-        <SidebarTrigger className="text-muted-foreground hidden size-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 md:inline-flex">
-          <PanelLeft className="size-4" />
-        </SidebarTrigger>
-        {/* The drawer is the whole screen on a phone: it closes from its own corner. */}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="shrink-0 md:hidden"
-          aria-label={t("btn.close")}
-          data-testid="sidebar-close"
-          onClick={() => setOpenMobile(false)}
-        >
-          <X className="size-5" aria-hidden="true" />
-        </Button>
-      </SidebarHeader>
-      <ProductTabs />
-      {/* Leave room for a search field and its results. In a short viewport the whole sidebar
+        <SidebarHeader className="border-sidebar-border h-header flex-row items-center gap-1 border-b px-2 py-0">
+          <div className="min-w-0 flex-1">
+            <OrgSwitcher />
+          </div>
+          {/* Below `md` the header has no room left for it: the bell is the drawer's. */}
+          <NotificationBell className="md:hidden" />
+          <SidebarTrigger className="text-muted-foreground hidden size-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 md:inline-flex">
+            <PanelLeft className="size-4" />
+          </SidebarTrigger>
+          {/* The drawer is the whole screen on a phone: it closes from its own corner. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="shrink-0 md:hidden"
+            aria-label={t("btn.close")}
+            data-testid="sidebar-close"
+            onClick={() => setOpenMobile(false)}
+          >
+            <X className="size-5" aria-hidden="true" />
+          </Button>
+        </SidebarHeader>
+        <ProductTabs />
+        {/* Leave room for a search field and its results. In a short viewport the whole sidebar
           can scroll to the navigation below the list. */}
-      <SidebarContent className={cn("gap-0", product === "chat" && "min-h-64 overflow-hidden")}>
-        {product === "chat" ? (
-          // A refused chat route says so in the page; the list would only fetch what the caller cannot read.
-          !ready ? (
-            <ChatSidebarSkeleton />
-          ) : (
-            canReach("/chat") && (
-              <Suspense fallback={<ChatSidebarSkeleton />}>
-                <ChatSidebar />
-              </Suspense>
+        <SidebarContent className={cn("gap-0", product === "chat" && "min-h-64 overflow-hidden")}>
+          {product === "chat" ? (
+            // A refused chat route says so in the page; the list would only fetch what the caller cannot read.
+            !ready ? (
+              <ChatSidebarSkeleton />
+            ) : (
+              canReach("/chat") && (
+                <Suspense fallback={<ChatSidebarSkeleton />}>
+                  <ChatSidebar />
+                </Suspense>
+              )
             )
-          )
-        ) : (
-          <>
-            <NavOrg />
-            <SidebarCredits />
-          </>
-        )}
-      </SidebarContent>
-      <SidebarFooter className="gap-0 p-0">
-        {/* Desktop only: a phone's drawer keeps its whole height for the navigation. */}
-        {!isMobile && <SidebarTips />}
-        <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
-          <OverlayEntry
-            to={catalogueHref("agent")}
-            active={catalogueActive}
-            icon={LibraryBig}
-            label={t("nav.catalogue")}
-          />
-        </SidebarMenu>
-        <SidebarMenu className="px-2 pb-2">
-          <OverlayEntry
-            to={SETTINGS_ENTRY}
-            active={settingsActive}
-            icon={Settings}
-            label={t("nav.settings")}
-          />
-        </SidebarMenu>
-        <div className="border-sidebar-border border-t p-2">
-          <NavUser variant="row" />
-        </div>
-      </SidebarFooter>
+          ) : (
+            <>
+              <NavOrg />
+              <SidebarCredits />
+            </>
+          )}
+        </SidebarContent>
+        <SidebarFooter className="gap-0 p-0">
+          {/* Desktop only: a phone's drawer keeps its whole height for the navigation. */}
+          {!isMobile && <SidebarTips />}
+          <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
+            <OverlayEntry
+              to={catalogueHref("agent")}
+              active={catalogueActive}
+              icon={LibraryBig}
+              label={t("nav.catalogue")}
+            />
+          </SidebarMenu>
+          <SidebarMenu className="px-2 pb-2">
+            <OverlayEntry
+              to={SETTINGS_ENTRY}
+              active={settingsActive}
+              icon={Settings}
+              label={t("nav.settings")}
+            />
+          </SidebarMenu>
+          <div className="border-sidebar-border border-t p-2">
+            <NavUser variant="row" />
+          </div>
+        </SidebarFooter>
+      </div>
+      {/* After the scroll wrapper so the separator is not the first tab stop (it is absolute). */}
+      <SidebarResizeHandle />
     </Sidebar>
+  );
+}
+
+function subscribeToResize(onChange: () => void) {
+  window.addEventListener("resize", onChange);
+  return () => window.removeEventListener("resize", onChange);
+}
+
+const readWindowWidth = () => window.innerWidth;
+
+/** The window's width, live. */
+function useWindowWidth(): number {
+  // Also the server snapshot: the shell's tests render it to a string.
+  return useSyncExternalStore(subscribeToResize, readWindowWidth, readWindowWidth);
+}
+
+/**
+ * The sidebar's edge, dragged to widen or narrow it on desktop, in both products: conversation
+ * titles and space names are worth the room. Remembered per browser; double-click resets it. A
+ * phone's drawer is the whole screen and a collapsed sidebar is off screen: neither has an edge to
+ * drag, nor does a touch screen (the handle shows under a fine pointer only). It straddles the
+ * border.
+ */
+function SidebarResizeHandle() {
+  const { t } = useTranslation();
+  const { isMobile, state } = useSidebar();
+  const width = useSidebarWidthStore((store) => store.width);
+  const setLive = useSidebarWidthStore((store) => store.setLive);
+  const commit = useSidebarWidthStore((store) => store.commit);
+  const setDragging = useSidebarWidthStore((store) => store.setDragging);
+  const max = sidebarMaxWidth(useWindowWidth());
+  if (isMobile || state === "collapsed") return null;
+  return (
+    <PanelResizeHandle
+      edge="right"
+      controls={APP_SIDEBAR_ID}
+      label={t("nav.resizeSidebar")}
+      width={Math.min(width ?? SIDEBAR_WIDTH.default, max)}
+      min={SIDEBAR_WIDTH.min}
+      max={max}
+      clamp={(next) => clampSidebarWidth(next, max)}
+      onLive={setLive}
+      onCommit={commit}
+      onDraggingChange={setDragging}
+      className="desktop-pointer:block -right-0.5 hidden"
+    />
   );
 }
 

@@ -115,7 +115,7 @@ function renderFor(permissions: string[], settingsLoaded = true): string {
   if (settingsLoaded) {
     queryClient.setQueryData(
       ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
-      { personal_model_credentials: true, personal_space_role: "admin" },
+      { personal_model_credentials: true, personal_space_role: { preset_role: "admin" } },
     );
   }
   const orgSnapshot = spyOn(orgStore, "getInitialState").mockReturnValue({

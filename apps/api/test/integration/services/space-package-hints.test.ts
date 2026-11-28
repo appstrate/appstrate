@@ -90,7 +90,7 @@ describe("listActivePackageHints — bounded in SQL", () => {
     await seedSpacePackage(ctx.defaultSpaceId, "@hintorg/a0-skill");
 
     const page = await listActiveAgentHints(scope, { limit: 3 });
-    expect(page.agents).toEqual([]);
+    expect(page.data).toEqual([]);
     expect(page.truncated).toBe(true);
     // 1 system + 5 active placements. Not 7: the deactivated one is filtered
     // before the count, not after it.
@@ -98,7 +98,7 @@ describe("listActivePackageHints — bounded in SQL", () => {
 
     // Control: a cap above the catalog returns it whole, with the same count.
     const whole = await listActiveAgentHints(scope, { limit: 10 });
-    expect(whole.agents.map((a) => a.packageId)).toEqual([
+    expect(whole.data.map((a) => a.packageId)).toEqual([
       "@hintorg/a1",
       "@hintorg/a2",
       "@hintorg/a3",
@@ -110,7 +110,7 @@ describe("listActivePackageHints — bounded in SQL", () => {
     expect(whole.total).toBe(6);
 
     // A cap equal to the catalog is not past it.
-    expect((await listActiveAgentHints(scope, { limit: 6 })).agents).toHaveLength(6);
+    expect((await listActiveAgentHints(scope, { limit: 6 })).data).toHaveLength(6);
   });
 
   it("bounds skills the same way", async () => {
@@ -127,10 +127,10 @@ describe("listActivePackageHints — bounded in SQL", () => {
     await seedSpacePackage(ctx.defaultSpaceId, "@hintorg/s3", { enabled: false });
 
     const page = await listActiveSkills(scope, { limit: 1 });
-    expect(page).toEqual({ skills: [], truncated: true, total: 2 });
+    expect(page).toEqual({ data: [], truncated: true, total: 2 });
 
     const whole = await listActiveSkills(scope, { limit: 2 });
-    expect(whole.skills.map((s) => [s.packageId, s.version])).toEqual([
+    expect(whole.data.map((s) => [s.packageId, s.version])).toEqual([
       ["@hintorg/s1", "1.0.0"],
       ["@hintorg/s2", "1.0.0"],
     ]);
@@ -138,7 +138,7 @@ describe("listActivePackageHints — bounded in SQL", () => {
 
   it("reports an empty catalog as zero, not truncated", async () => {
     const page = await listActiveAgentHints(scope);
-    expect(page).toEqual({ agents: [], truncated: false, total: 0 });
+    expect(page).toEqual({ data: [], truncated: false, total: 0 });
   });
 });
 
@@ -208,9 +208,7 @@ describe("the hints and the type index render one set", () => {
 
     const expected = ["@asys/system-agent", "@twoviews/local-on", "@twoviews/placed-on"];
 
-    const hinted = (await listActiveAgentHints(scope, { limit: 50 })).agents.map(
-      (a) => a.packageId,
-    );
+    const hinted = (await listActiveAgentHints(scope, { limit: 50 })).data.map((a) => a.packageId);
     const indexed = await indexIds("/api/packages/agents");
     expect(hinted.slice().sort()).toEqual(expected);
     expect(indexed.slice().sort()).toEqual(expected);

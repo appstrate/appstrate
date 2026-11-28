@@ -71,7 +71,7 @@ export type {
   SelectConversation,
   ThreadItem,
 } from "./runtime-context.ts";
-export { ChatConversationList, ChatConversationRenameButton } from "./thread-list.tsx";
+export { ChatConversationList, ChatConversationMenu } from "./thread-list.tsx";
 export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
 import { ModelPickerProvider, type ModelPickerProps } from "./model-picker.ts";
 import { modelSizing } from "./model-fit.ts";
@@ -431,10 +431,10 @@ export function ChatPage({
       <SelectConversationProvider value={onConversationChange ?? null}>
         <ChatHostProvider value={host}>
           <ModelPickerProvider value={modelPicker}>
-            {/* The conversation list and the conversation settings are NOT here:
+            {/* The conversation list and the conversation's « … » are NOT here:
               they are the shell's navigation and header actions, mounted by
-              the host from `ChatConversationList` /
-              `ChatConversationRenameButton`. What is left is the thread itself. */}
+              the host from `ChatConversationList` / `ChatConversationMenu`.
+              What is left is the thread itself. */}
             {/* A plain div, not a `main`: the host shell's inset already IS the
               page's `main` landmark, and two nested ones name two pages. */}
             <div className="bg-canvas flex size-full min-h-0 min-w-0 flex-col overflow-hidden">

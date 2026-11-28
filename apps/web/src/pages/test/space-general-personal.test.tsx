@@ -37,6 +37,7 @@ const ORG: components["schemas"]["Organization"] = {
 function spaceFixture(personal: boolean, domains: string[] = []): Space {
   return {
     object: "space",
+    shows_studio: true,
     id: "spc_general",
     orgId: ORG.id,
     name: personal ? "Mon espace" : "Equipe",
@@ -258,6 +259,6 @@ describe("the direct access switch of a workspace", () => {
     // The route itself is refused to that caller.
     expect(ROUTE_ACCESS["/workspace-settings/general"].anyOf).toEqual(["space-settings:write"]);
     const can = (permission: string) => ORG.permissions.includes(permission);
-    expect(routeVerdict("/workspace-settings/general", can, {}, false)).toBe("denied");
+    expect(routeVerdict("/workspace-settings/general", can, true, {}, false)).toBe("denied");
   });
 });

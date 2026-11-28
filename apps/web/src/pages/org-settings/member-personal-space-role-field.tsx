@@ -62,7 +62,7 @@ function EditableField({
         <SpaceRoleSelect
           id="member-personal-space-role"
           ariaLabelledBy={labelId}
-          className="w-full sm:w-56"
+          className="w-full sm:w-auto sm:max-w-full sm:min-w-56"
           value={value}
           options={[
             {

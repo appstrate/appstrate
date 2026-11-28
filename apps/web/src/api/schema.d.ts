@@ -1439,7 +1439,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made in the current space
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`), and every direct MCP operation toward an unauthenticated integration's server, made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call or MCP operation dispatched to an upstream (and so may have reached it), with or without a credential (`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`), and every direct MCP operation toward an unauthenticated integration's server, made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call or MCP operation dispatched to an upstream (and so may have reached it), with or without a credential (`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first by `id`, the order rows were recorded in (a run's sidecar reports its calls in batches, so it can differ slightly from `called_at`), keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listConnectionCalls"];
         put?: never;
@@ -2141,7 +2141,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made with one of the caller's connections
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call or MCP operation dispatched to the upstream, and so may have sent the credential, successful or not; `connection_id` is never null here. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call or MCP operation dispatched to the upstream, and so may have sent the credential, successful or not; `connection_id` is never null here. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first by `id`, the order rows were recorded in (a run's sidecar reports its calls in batches, so it can differ slightly from `called_at`), keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listMyConnectionCalls"];
         put?: never;
@@ -3231,7 +3231,7 @@ export interface paths {
         };
         /**
          * List the integrations a chat session reached
-         * @description Each integration the conversation reached, once, in order of its first call, read from the integration call journal: its own calls (through the credential proxy) and those of the runs it launched (reported by each run's sidecar). A call reached an integration when it was sent to it, whatever its outcome, a catalog listing included. Calls made before the journal recorded their conversation are not counted. Empty when it reached none. The conversation's author only (404 otherwise, as `GET …/sessions/{id}`).
+         * @description Each integration the conversation reached, once, in order of its first call, read from the integration call journal: its own calls (through the credential proxy) and those of the runs it launched (reported by each run's sidecar). A call reached an integration when it was sent to it, whatever its outcome, a catalog listing included. Only calls the journal recorded with their conversation count. Empty when it reached none. The conversation's author only (404 otherwise, as `GET …/sessions/{id}`).
          */
         get: operations["listChatSessionIntegrations"];
         put?: never;
@@ -3583,7 +3583,7 @@ export interface paths {
         };
         /**
          * Preview what a personal-space default would stop
-         * @description What setting the organization's `personal_space_role` to `role` would stop, without writing anything. `schedules` counts the ENABLED schedules in live personal spaces whose actor is the space's owner, a member or guest who follows the default (no override of their own, see `setMemberPersonalSpaceRole`) and would hold, under `role`, a resolved role without `agents:run` (guest cap and delete floor applied, as the resolver applies them). Each such schedule disables itself at its next fire (`disabled_reason: actor_invalid`), and restoring the role does not re-enable it. `members` counts the distinct owners of those schedules. Owners and admins always hold `admin` in their own personal space and are never counted; a `role` that grants `agents:run` answers `{ schedules: 0, members: 0 }`. A snapshot, which a later change can make stale. It discloses only counts, to a caller who may already rewrite the setting: same guard as `updateOrgSettings` (`org:settings`).
+         * @description What setting the organization's `personal_space_role` to the candidate role would stop, without writing anything (the candidate is the `preset_role` or `custom_role_id` query parameter, exactly one). `schedules` counts the ENABLED schedules in live personal spaces whose actor is the space's owner, a member or guest who follows the default (no override of their own, see `setMemberPersonalSpaceRole`) and would hold, under the candidate, a resolved role without `agents:run` (guest cap and delete floor applied, as the resolver applies them). Each such schedule disables itself at its next fire (`disabled_reason: actor_invalid`), and restoring the role does not re-enable it. `members` counts the distinct owners of those schedules. Owners and admins always hold `admin` in their own personal space and are never counted; a candidate that grants `agents:run` answers `{ schedules: 0, members: 0 }`. A snapshot, which a later change can make stale. It discloses only counts, to a caller who may already rewrite the setting: same guard as `updateOrgSettings` (`org:settings`).
          */
         get: operations["getPersonalSpaceRoleImpact"];
         put?: never;
@@ -4292,7 +4292,7 @@ export interface paths {
         get?: never;
         /**
          * Offer a package to the organization
-         * @description Offer the package to its organization in a `mode`: it is then PLACED in every space of the organization that holds no `space_packages` row of its own, personal spaces included. Each mode is described on `mode`. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Idempotent: offering again in the same mode answers 200 and leaves the offer as it is; offering in the other mode rewrites it. `warnings[]` follows `ActivationWarnings` and answers for both modes: for an AGENT, one item per integration it declares that is neither offered to the organization nor active by default (`code: integration_not_offered`, `required` saying whether a launch in a personal space is refused until it is offered, or proceeds without it); `[]` for any other type. Nothing is offered in their place: offering the integrations is a decision of its own, one `PUT …/org-offer` each. Audited as `package.offered_to_org` when the offer is created and as `package.offer_mode_changed` (with the previous mode) when its mode changes.
+         * @description Offer the package to its organization with the `org_offer` mode in the body: it is then PLACED in every space of the organization that holds no `space_packages` row of its own, personal spaces included. Each mode is described on `org_offer`. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Answers 201 when the offer is created; offering again in the same mode answers 200 and leaves the offer as it is, and offering in the other mode rewrites it (200). `warnings[]` follows `ActivationWarnings` and answers for both modes: for an AGENT, one item per integration it declares that is neither offered to the organization nor active by default (`code: integration_not_offered`, `required` saying whether a launch in a personal space is refused until it is offered, or proceeds without it); `[]` for any other type. Nothing is offered in their place: offering the integrations is a decision of its own, one `PUT …/org-offer` each. Audited as `package.offered_to_org` when the offer is created and as `package.offer_mode_changed` (with the previous mode) when its mode changes.
          */
         put: operations["offerPackageToOrg"];
         post?: never;
@@ -4321,7 +4321,7 @@ export interface paths {
         put?: never;
         /**
          * Share a package with a team space
-         * @description Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller holds the type's activation grant in the target and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. The target is a team space the caller can reach (`target: {kind: "space", spaceId}`); a `user` target is a 400. A PERSONAL space is never a target: `409 personal_space_takes_offers_only` (a personal space receives packages only through the organization offer, `PUT …/org-offer`; another member's personal space still answers 404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.
+         * @description Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller holds the type's activation grant in the target and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. The target is a team space the caller can reach (`spaceId`). A PERSONAL space is never a target: `409 personal_space_takes_offers_only` (a personal space receives packages only through the organization offer, `PUT …/org-offer`; another member's personal space still answers 404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.
          */
         post: operations["sharePackage"];
         delete?: never;
@@ -4330,7 +4330,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/packages/{scope}/{name}/shares/{target}": {
+    "/api/packages/{scope}/{name}/shares/{spaceId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -4619,13 +4619,13 @@ export interface paths {
         };
         /**
          * List space roles
-         * @description Every role assignable in a space of this organization: the four platform presets (`kind: "preset"`, read-only, `id: null`) followed by the organization's own bundles (`kind: "custom"`).
+         * @description Every role assignable in a space of this organization: the platform presets (`kind: "preset"`, read-only, `id: null`) followed by the organization's own bundles (`kind: "custom"`).
          */
         get: operations["listRoles"];
         put?: never;
         /**
          * Create a custom space role
-         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop, and so is `studio:read`, which a custom role holds through `shows_studio` instead. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.
+         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.
          */
         post: operations["createRole"];
         delete?: never;
@@ -4643,7 +4643,7 @@ export interface paths {
         };
         /**
          * List the permissions a custom role may hold
-         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold. `studio:read` is not listed: a custom role holds it through `shows_studio`.
+         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold. Whether a role shows the Studio is not a permission: it is the role's `shows_studio`.
          */
         get: operations["listRoleVocabulary"];
         put?: never;
@@ -5286,7 +5286,7 @@ export interface paths {
         post?: never;
         /**
          * Deactivate a package in this space
-         * @description Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off. `400` for a system integration bound to the runtime (it serves the run's own tools and stays active in every space).
+         * @description Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{spaceId}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off. `400` for a system integration bound to the runtime (it serves the run's own tools and stays active in every space).
          */
         delete: operations["deactivatePackage"];
         options?: never;
@@ -5657,7 +5657,7 @@ export interface paths {
         put?: never;
         /**
          * Journal the upstream calls a run's sidecar dispatched
-         * @description Sidecar-only. Auth via Bearer run token. A batch of the upstream calls the run's sidecar dispatched for its integrations (the `api_call` tool, the MITM listener, a remote MCP server's operations, a local MCP server's `tools/call` when no MITM listener sees its upstream requests), one record per call that may have reached the upstream, taken from its final attempt. Each is written to the connection-call journal (`connection_calls`) with the run's organization, space, actor and API key, `auth_method` `run_token`, `run_id` set and the batch's request id; the sidecar sends none of those. Every record is checked before any is written, against the run's frozen kickoff snapshot alone — never the live agent or the space's activation, so a call that left stays journaled when its integration is switched off or the agent edited or deleted mid-run: a non-null `connection_id` is one the run bound to that integration (else `400 connection_not_in_run`), and a record with a null `connection_id` names an integration the run resolved (else `400 invalid_request`); one record that fails refuses the whole batch. The text of a record is bounded at 2048 characters and stored truncated to the journal's own caps. A run with no actor writes nothing and answers `204`. A record carrying `credential_revision` (a 2xx answered with that credential) also ends the connection's rejection streak: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0, unless the connection no longer holds that credential, the run's actor can no longer reach it (deleted, unshared, moved to another space), or it is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. A token whose run is no longer `running` is refused (`403`).
+         * @description Sidecar-only. Auth via Bearer run token. A batch of the upstream calls the run's sidecar dispatched for its integrations (the `api_call` tool, the MITM listener, a remote MCP server's operations, a local MCP server's `tools/call` when no MITM listener sees its upstream requests), one record per call that may have reached the upstream, taken from its final attempt. Each is written to the connection-call journal (`connection_calls`) with the run's organization, space, actor and API key, `auth_method` `run_token`, `run_id` set and a null `request_id` (the batch's request is not the call's); the sidecar sends none of those. A record carries its `call_id` and `called_at`, stored as the row's `call_id` and `called_at`: `(run_id, call_id)` is unique, so a batch sent twice is stored once and the second answers `204` as well. Every record is checked before any is written, against the run's frozen kickoff snapshot alone — never the live agent or the space's activation, so a call that left stays journaled when its integration is switched off or the agent edited or deleted mid-run: a non-null `connection_id` is one the run bound to that integration (else `400 connection_not_in_run`), and a record with a null `connection_id` names an integration the run resolved (else `400 invalid_request`); one record that fails refuses the whole batch. The text of a record is bounded at 2048 characters and stored truncated to the journal's own caps. A run with no actor writes nothing and answers `204`. A record carrying `credential_revision` (a 2xx answered with that credential) also ends the connection's rejection streak: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0, unless the connection no longer holds that credential, the run's actor can no longer reach it (deleted, unshared, moved to another space), or it is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. A token whose run is no longer `running` is refused (`403`).
          */
         post: operations["reportIntegrationCalls"];
         delete?: never;
@@ -6067,7 +6067,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
@@ -6698,7 +6698,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** Format: date-time */
             createdAt: string;
@@ -6755,7 +6755,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /**
              * @description The offer to the organization, or `null` when there is none. An offer in either mode PLACES the package in every space of it that holds no `space_packages` row of its own. `on_by_default`: it is also ACTIVE there (a row always wins; `enabled = false` keeps it off). `available`: it is placed and listed but off until the space switches it on (`POST /api/spaces/{id}/packages`).
@@ -6843,6 +6843,16 @@ export interface components {
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;
+            /**
+             * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded. A credential whose stored secret cannot be decrypted reads `credentials_undecryptable`, derived rather than stored, with `needs_reconnection_at` `null`.
+             * @enum {string|null}
+             */
+            needs_reconnection_cause?: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+            /**
+             * Format: date-time
+             * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
+             */
+            needs_reconnection_at?: string | null;
             /**
              * @description `user` for a personal credential, usable and editable by `owner_id` only; `org` for an organization or built-in credential.
              * @enum {string}
@@ -7008,20 +7018,22 @@ export interface components {
             joinedAt: string;
             /** @description The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them. */
             spaces: components["schemas"]["OrgMemberSpace"][];
-            /** @description The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null`: they follow the organization default. Always `null` for an owner or admin, who hold `admin` there, and for every member when the caller lacks `members:change-role`: only a caller who may change it reads it. */
-            personal_space_role: null | {
+            /** @description The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null` means only "no override": the member follows the organization default (`personal_space_default_role`). An owner or admin cannot have one (`null`): they hold `admin` there. Omitted when the caller lacks `members:change-role`: only a caller who may change it reads it. */
+            personal_space_role?: null | {
                 /** @enum {string} */
                 preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
             } | {
                 custom_role_id: string;
             };
-            /** @description The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it. */
-            personal_space_default_role: {
+            /** @description The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. A role reference (`preset_role` or `custom_role_id`) plus its display `name`. Omitted when the caller lacks `members:change-role`, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it. */
+            personal_space_default_role?: {
                 /** @enum {string} */
-                kind: "preset" | "custom";
-                key: string;
+                preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
                 name: string;
-            } | null;
+            } | {
+                custom_role_id: string;
+                name: string;
+            };
         };
         OrgMemberSpace: {
             id: string;
@@ -7031,12 +7043,14 @@ export interface components {
              * @enum {string}
              */
             source: "explicit" | "org_role" | "open_space";
-            role: {
+            role: null | {
                 /** @enum {string} */
-                kind: "preset" | "custom";
-                key: string;
+                preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
                 name: string;
-            } | null;
+            } | {
+                custom_role_id: string;
+                name: string;
+            };
         };
         OrgModel: {
             id: string;
@@ -7127,7 +7141,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** Format: date-time */
             createdAt: string;
@@ -7173,7 +7187,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** @description The reached spaces where the caller can open this package detail, including inactive placements. */
             read_space_ids: string[];
@@ -7213,8 +7227,13 @@ export interface components {
             dashboard_sso_enabled?: boolean;
             /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
             personal_model_credentials: boolean;
-            /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
-            personal_space_role: string & (("admin" | "builder" | "operator" | "runner" | "viewer") | string);
+            /** @description The role an organization member or guest holds by default in their own personal space, as a role reference: `{ preset_role }` (`admin`, `builder`, `operator`, `runner`, `viewer`) or `{ custom_role_id }` (the id of one of this organization's custom space roles, `srl_…`). Defaults to `{ preset_role: "admin" }`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
+            personal_space_role: {
+                /** @enum {string} */
+                preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+            } | {
+                custom_role_id: string;
+            };
         };
         Organization: {
             id: string;
@@ -7333,7 +7352,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** @description Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space holding a `space_packages` row for it; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404. */
             read_space_ids: string[];
@@ -7374,7 +7393,10 @@ export interface components {
         PackageShare: {
             /** @enum {string} */
             object: "package_share";
-            target: components["schemas"]["ShareTargetView"];
+            /** @description The team space (`spc_…`) the package is placed in. */
+            spaceId: string;
+            /** @description That space's name. */
+            space_name: string;
             /** @description Who placed it there. `null` once that account is gone, once they have left this organization, and on a row a home move left behind. */
             shared_by: {
                 user_id: string;
@@ -7511,7 +7533,7 @@ export interface components {
             /** @description Integration package id `connect_url` connects (`@scope/name`). */
             packageId?: string;
         };
-        /** @description A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle. */
+        /** @description A space role: one of the platform presets (read-only, `id: null`) or an organization-defined bundle. */
         RoleObject: {
             /** @enum {string} */
             object: "role";
@@ -7522,9 +7544,9 @@ export interface components {
             key: string;
             name: string;
             description: string | null;
-            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back: never `studio:read`, which `shows_studio` carries. */
+            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back. */
             permissions: string[];
-            /** @description Whether holders of the role see the Studio (they resolve `studio:read`). A display setting, not a boundary: the REST API and an MCP client answer the role's other permissions either way. Always `true` for a preset. */
+            /** @description Whether holders of the role see the Studio's screens in the interface. A display attribute, not a permission and not a boundary: the REST API and an MCP client answer the role's permissions either way. Always `true` for a preset. */
             shows_studio: boolean;
             /** @description Entries stored on the bundle that this deployment cannot name — their module is no longer loaded — sorted. They grant nothing and are never part of `permissions`; sending a `permissions` array without them is what drops them from the row. Always empty for a preset. */
             unavailable_permissions: string[];
@@ -7808,7 +7830,7 @@ export interface components {
             name: string | null;
             enabled: boolean;
             /**
-             * @description The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more — or an imposed set (an admin pin, an enforced org default, or that enforcement) was removed while the schedule's own `connection_overrides` set strictly narrowed it (only connections of it, fewer than it holds, `[]` included), which added nothing under it and would bind fewer connections as written without it; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin closed to additions or an enforced org default (`override_outranked`), binding a floor plus additions above the per-integration cap (`connection_set_too_large`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. `package_removed`: the agent's placement in the space was withdrawn (`DELETE /api/packages/{scope}/{name}/shares/{target}`, or a home move leaving the space); re-enabling it fails every fire until the agent is placed there again. Cleared by re-enabling.
+             * @description The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more — or an imposed set (an admin pin, an enforced org default, or that enforcement) was removed while the schedule's own `connection_overrides` set strictly narrowed it (only connections of it, fewer than it holds, `[]` included), which added nothing under it and would bind fewer connections as written without it; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin closed to additions or an enforced org default (`override_outranked`), binding a floor plus additions above the per-integration cap (`connection_set_too_large`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. `package_removed`: the agent's placement in the space was withdrawn (`DELETE /api/packages/{scope}/{name}/shares/{spaceId}`, or a home move leaving the space); re-enabling it fails every fire until the agent is placed there again. Cleared by re-enabling.
              * @enum {string|null}
              */
             disabled_reason: "actor_invalid" | "actor_left_org" | "connection_deleted" | "connection_unshared" | "connection_set_unnamed" | "connection_choice_invalid" | "package_removed" | null;
@@ -7854,22 +7876,6 @@ export interface components {
         ScheduleIdsProblem: components["schemas"]["ProblemDetail"] & {
             /** @description On `model_scheduled`: the enabled schedules the write would leave on that model. */
             schedule_ids?: string[];
-        };
-        /** @description Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only. A person is not a target either: `kind: "user"` is a 400. */
-        ShareTarget: {
-            /** @enum {string} */
-            kind: "space";
-            /** @description Team space id (`spc_…`) the caller can reach. */
-            spaceId: string;
-        };
-        /** @description A share's subject as the server renders it back: a team space. */
-        ShareTargetView: {
-            /** @enum {string} */
-            kind: "space";
-            /** @description Space id (`spc_…`). */
-            spaceId: string;
-            /** @description The space's name. */
-            name: string;
         };
         SmtpConfigView: {
             spaceId: string;
@@ -7925,12 +7931,14 @@ export interface components {
              * @enum {string}
              */
             source: "explicit" | "org_role" | "open_space";
-            role: {
+            role: null | {
                 /** @enum {string} */
-                kind: "preset" | "custom";
-                key: string;
+                preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
                 name: string;
-            } | null;
+            } | {
+                custom_role_id: string;
+                name: string;
+            };
             /**
              * Format: date-time
              * @description When the explicit row was written; null for an implicit member
@@ -7991,14 +7999,18 @@ export interface components {
              */
             access: "member" | "none";
             /** @description The caller's role in this space, or null when they have none */
-            role: {
+            role: null | {
                 /** @enum {string} */
-                kind: "preset" | "custom";
-                key: string;
+                preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
                 name: string;
-            } | null;
+            } | {
+                custom_role_id: string;
+                name: string;
+            };
             /** @description The caller's effective permission set in this space, ceiling applied */
             permissions: string[];
+            /** @description Whether the caller's role in this space shows the Studio's screens in the interface (`false` when they have no role). A display attribute of the role, not a permission and not a boundary: the REST API and an MCP client answer the role's permissions either way. */
+            shows_studio: boolean;
             /** @description ID of the user who created the space */
             created_by: string | null;
             /** Format: date-time */
@@ -8006,7 +8018,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        /** @description A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the placement behind it is withdrawn: the share is revoked (`DELETE /api/packages/{scope}/{name}/shares/{target}`), or the package's home moves out of the space with `keep_in_previous_home: false`. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it. */
+        /** @description A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the placement behind it is withdrawn: the share is revoked (`DELETE /api/packages/{scope}/{name}/shares/{spaceId}`), or the package's home moves out of the space with `keep_in_previous_home: false`. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it. */
         SpacePackage: {
             /** @enum {string} */
             object?: "space_package";
@@ -8469,7 +8481,7 @@ export interface components {
          *
          *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
          *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-         *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+         *     - `role` (optional) — the textual form of a space-role reference: `preset:<preset_role>` (`<admin|builder|operator|runner|viewer>`) or `custom:<custom_role_id>` (a `srl_` id). Must be paired with `space`.
          *
          *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
          *
@@ -13915,9 +13927,9 @@ export interface operations {
                 actor_id?: string;
                 /** @description Only the calls that declared this run. */
                 runId?: string;
-                /** @description Only the calls made at or after this instant (ISO 8601 with an offset). */
+                /** @description Only the calls recorded at or after this instant (`createdAt`; ISO 8601 with an offset). */
                 start_date?: string;
-                /** @description Only the calls made at or before this instant (ISO 8601 with an offset). */
+                /** @description Only the calls recorded at or before this instant (`createdAt`; ISO 8601 with an offset). */
                 end_date?: string;
                 limit?: number;
                 /** @description Cursor: the `id` of the last call of the previous page. Follow the RFC 5988 `Link: <…>; rel="next"` response header instead of building it by hand. */
@@ -13949,7 +13961,10 @@ export interface operations {
                         data: {
                             /** @description Monotonic row id; the pagination cursor. */
                             id: number;
-                            /** Format: date-time */
+                            /**
+                             * Format: date-time
+                             * @description When the row was written. For a call a run's sidecar reported this is later than the call: read `called_at`.
+                             */
                             createdAt: string;
                             /** @description The space the call was made in. */
                             spaceId: string;
@@ -13974,7 +13989,7 @@ export interface operations {
                             actor_id: string;
                             /** @description The API key the actor acted through, if any. */
                             apiKeyId: string | null;
-                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …); `run_token` for a call a platform run's sidecar made. */
+                            /** @description How the caller authenticated, as the platform's authentication strategies name it: `api_key`, `session`, an OAuth token kind (`oauth2-instance`, `oauth2-dashboard`, `oauth2-end-user`), `chat-loopback` for the chat's own calls; `run_token` for a call a platform run's sidecar made. An open set: a module may add strategies, so a client treats an unknown value as opaque. */
                             auth_method: string;
                             /** @description The run whose sidecar made the call, or the run the call declared (`X-Run-Id`), if any. */
                             runId: string | null;
@@ -13987,8 +14002,18 @@ export interface operations {
                             /** @description The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …). */
                             outcome: string;
                             duration_ms: number;
-                            /** @description The call's `Request-Id`. */
-                            request_id: string;
+                            /** @description The `Request-Id` of the platform request that made the call; null for a call reported by a run's sidecar. */
+                            request_id: string | null;
+                            /**
+                             * Format: date-time
+                             * @description When the call started. Null when not recorded.
+                             */
+                            called_at: string | null;
+                            /**
+                             * Format: uuid
+                             * @description The call's identity (UUID). Null when not recorded.
+                             */
+                            call_id: string | null;
                         }[];
                         hasMore: boolean;
                     };
@@ -14165,6 +14190,16 @@ export interface operations {
                             } | null;
                             scopes_granted: string[];
                             needs_reconnection: boolean;
+                            /**
+                             * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
+                             * @enum {string|null}
+                             */
+                            needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                            /**
+                             * Format: date-time
+                             * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
+                             */
+                            needs_reconnection_at: string | null;
                             /** Format: date-time */
                             expiresAt: string | null;
                             /** @enum {string} */
@@ -14477,6 +14512,16 @@ export interface operations {
                                 } | null;
                                 scopes_granted: string[];
                                 needs_reconnection: boolean;
+                                /**
+                                 * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
+                                 * @enum {string|null}
+                                 */
+                                needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                                /**
+                                 * Format: date-time
+                                 * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
+                                 */
+                                needs_reconnection_at: string | null;
                                 /** Format: date-time */
                                 expiresAt: string | null;
                                 /** @enum {string} */
@@ -14689,6 +14734,16 @@ export interface operations {
                         } | null;
                         scopes_granted: string[];
                         needs_reconnection: boolean;
+                        /**
+                         * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
+                         * @enum {string|null}
+                         */
+                        needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                        /**
+                         * Format: date-time
+                         * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
+                         */
+                        needs_reconnection_at: string | null;
                         /** Format: date-time */
                         expiresAt: string | null;
                         /** @enum {string} */
@@ -15109,6 +15164,16 @@ export interface operations {
                             } | null;
                             scopes_granted: string[];
                             needs_reconnection: boolean;
+                            /**
+                             * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
+                             * @enum {string|null}
+                             */
+                            needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                            /**
+                             * Format: date-time
+                             * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
+                             */
+                            needs_reconnection_at: string | null;
                             /** Format: date-time */
                             expiresAt: string | null;
                             /** @enum {string} */
@@ -15208,6 +15273,16 @@ export interface operations {
                         } | null;
                         scopes_granted: string[];
                         needs_reconnection: boolean;
+                        /**
+                         * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
+                         * @enum {string|null}
+                         */
+                        needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                        /**
+                         * Format: date-time
+                         * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
+                         */
+                        needs_reconnection_at: string | null;
                         /** Format: date-time */
                         expiresAt: string | null;
                         /** @enum {string} */
@@ -16125,6 +16200,16 @@ export interface operations {
                                 } | null;
                                 scopes_granted: string[];
                                 needs_reconnection: boolean;
+                                /**
+                                 * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
+                                 * @enum {string|null}
+                                 */
+                                needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                                /**
+                                 * Format: date-time
+                                 * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
+                                 */
+                                needs_reconnection_at: string | null;
                                 /** Format: date-time */
                                 expiresAt: string | null;
                                 /** @enum {string} */
@@ -17328,6 +17413,16 @@ export interface operations {
                                 /** Format: date-time */
                                 connected_at: string;
                                 needs_reconnection: boolean;
+                                /**
+                                 * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
+                                 * @enum {string|null}
+                                 */
+                                needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                                /**
+                                 * Format: date-time
+                                 * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
+                                 */
+                                needs_reconnection_at: string | null;
                                 expiresAt: string | null;
                                 /** @description First identity claim (`account_email`, `email`, `sub`), else the account id, else the label. */
                                 identity: string;
@@ -17454,6 +17549,16 @@ export interface operations {
                         } | null;
                         scopes_granted: string[];
                         needs_reconnection: boolean;
+                        /**
+                         * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and when not recorded.
+                         * @enum {string|null}
+                         */
+                        needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                        /**
+                         * Format: date-time
+                         * @description When the credential died (RFC 3339). `null` while healthy, and when not recorded.
+                         */
+                        needs_reconnection_at: string | null;
                         /** Format: date-time */
                         expiresAt: string | null;
                         /** @enum {string} */
@@ -17530,9 +17635,9 @@ export interface operations {
                 actor_id?: string;
                 /** @description Only the calls that declared this run. */
                 runId?: string;
-                /** @description Only the calls made at or after this instant (ISO 8601 with an offset). */
+                /** @description Only the calls recorded at or after this instant (`createdAt`; ISO 8601 with an offset). */
                 start_date?: string;
-                /** @description Only the calls made at or before this instant (ISO 8601 with an offset). */
+                /** @description Only the calls recorded at or before this instant (`createdAt`; ISO 8601 with an offset). */
                 end_date?: string;
                 limit?: number;
                 /** @description Cursor: the `id` of the last call of the previous page. Follow the RFC 5988 `Link: <…>; rel="next"` response header instead of building it by hand. */
@@ -17561,7 +17666,10 @@ export interface operations {
                         data: ({
                             /** @description Monotonic row id; the pagination cursor. */
                             id: number;
-                            /** Format: date-time */
+                            /**
+                             * Format: date-time
+                             * @description When the row was written. For a call a run's sidecar reported this is later than the call: read `called_at`.
+                             */
                             createdAt: string;
                             /** @description The space the call was made in. */
                             spaceId: string;
@@ -17586,7 +17694,7 @@ export interface operations {
                             actor_id: string;
                             /** @description The API key the actor acted through, if any. */
                             apiKeyId: string | null;
-                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …); `run_token` for a call a platform run's sidecar made. */
+                            /** @description How the caller authenticated, as the platform's authentication strategies name it: `api_key`, `session`, an OAuth token kind (`oauth2-instance`, `oauth2-dashboard`, `oauth2-end-user`), `chat-loopback` for the chat's own calls; `run_token` for a call a platform run's sidecar made. An open set: a module may add strategies, so a client treats an unknown value as opaque. */
                             auth_method: string;
                             /** @description The run whose sidecar made the call, or the run the call declared (`X-Run-Id`), if any. */
                             runId: string | null;
@@ -17599,8 +17707,18 @@ export interface operations {
                             /** @description The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …). */
                             outcome: string;
                             duration_ms: number;
-                            /** @description The call's `Request-Id`. */
-                            request_id: string;
+                            /** @description The `Request-Id` of the platform request that made the call; null for a call reported by a run's sidecar. */
+                            request_id: string | null;
+                            /**
+                             * Format: date-time
+                             * @description When the call started. Null when not recorded.
+                             */
+                            called_at: string | null;
+                            /**
+                             * Format: uuid
+                             * @description The call's identity (UUID). Null when not recorded.
+                             */
+                            call_id: string | null;
                         } & {
                             /**
                              * Format: uuid
@@ -17711,7 +17829,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — the textual form of a space-role reference: `preset:<preset_role>` (`<admin|builder|operator|runner|viewer>`) or `custom:<custom_role_id>` (a `srl_` id). Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
@@ -17914,11 +18032,13 @@ export interface operations {
                      *           ]
                      *         }
                      *       ],
-                     *       "connectable_integrations": [
-                     *         "@appstrate/slack"
-                     *       ],
-                     *       "connectable_integrations_truncated": false,
-                     *       "connectable_integrations_total": 1,
+                     *       "connectable_integrations": {
+                     *         "data": [
+                     *           "@appstrate/slack"
+                     *         ],
+                     *         "truncated": false,
+                     *         "total": 1
+                     *       },
                      *       "recent_runs": [
                      *         {
                      *           "packageId": "@appstrate/triage",
@@ -17928,33 +18048,37 @@ export interface operations {
                      *           "error": "Gmail token expired"
                      *         }
                      *       ],
-                     *       "agents": [
-                     *         {
-                     *           "packageId": "@appstrate/triage",
-                     *           "display_name": "Inbox Triage",
-                     *           "description": "Sorts and labels incoming email.",
-                     *           "takes_input": false,
-                     *           "inactive_required_integrations": [],
-                     *           "published": true,
-                     *           "home_writable": false,
-                     *           "source": "system"
-                     *         }
-                     *       ],
-                     *       "agents_truncated": false,
-                     *       "agents_total": 1,
-                     *       "skills": [
-                     *         {
-                     *           "packageId": "@appstrate/web-research",
-                     *           "display_name": "Web Research",
-                     *           "description": "Multi-source web search and synthesis.",
-                     *           "version": "1.2.0",
-                     *           "published": true,
-                     *           "home_writable": false,
-                     *           "source": "system"
-                     *         }
-                     *       ],
-                     *       "skills_truncated": false,
-                     *       "skills_total": 1
+                     *       "agents": {
+                     *         "data": [
+                     *           {
+                     *             "packageId": "@appstrate/triage",
+                     *             "display_name": "Inbox Triage",
+                     *             "description": "Sorts and labels incoming email.",
+                     *             "takes_input": false,
+                     *             "inactive_required_integrations": [],
+                     *             "published": true,
+                     *             "home_writable": false,
+                     *             "source": "system"
+                     *           }
+                     *         ],
+                     *         "truncated": false,
+                     *         "total": 1
+                     *       },
+                     *       "skills": {
+                     *         "data": [
+                     *           {
+                     *             "packageId": "@appstrate/web-research",
+                     *             "display_name": "Web Research",
+                     *             "description": "Multi-source web search and synthesis.",
+                     *             "version": "1.2.0",
+                     *             "published": true,
+                     *             "home_writable": false,
+                     *             "source": "system"
+                     *           }
+                     *         ],
+                     *         "truncated": false,
+                     *         "total": 1
+                     *       }
                      *     }
                      */
                     "application/json": {
@@ -17980,12 +18104,15 @@ export interface operations {
                             /** @description Whether this space is one member's personal space (always `private`, no other members) rather than a team space. */
                             personal: boolean;
                         };
-                        /** @description Ids of the integrations active in the current space that the caller has not connected and for which a connect flow can start (an `oauth2` auth needs a usable client), sorted by id. One whose only connection needs reconnection is not listed: it stays in `connections`, flagged `needs_reconnection`. Whole or withheld: more than 15 and the list is empty (`connectable_integrations_truncated` true), never a prefix. Empty unless the caller holds `integrations:read` and `integrations:connect`; one whose member connections the space blocks is listed only under `integrations:configure`. */
-                        connectable_integrations?: string[];
-                        /** @description True when `connectable_integrations` was withheld for exceeding 15. */
-                        connectable_integrations_truncated?: boolean;
-                        /** @description How many connectable integrations there are, listed or withheld. */
-                        connectable_integrations_total?: number;
+                        /** @description Ids of the integrations active in the current space that the caller has not connected and for which a connect flow can start (an `oauth2` auth needs a usable client), sorted by id. One whose only connection needs reconnection is not listed: it stays in `connections`, flagged `needs_reconnection`. Empty unless the caller holds `integrations:read` and `integrations:connect`; one whose member connections the space blocks is listed only under `integrations:configure`. */
+                        connectable_integrations?: {
+                            /** @description The entries, whole; empty when `truncated` is true. */
+                            data: string[];
+                            /** @description True when more than 15 entries exist and `data` was withheld. */
+                            truncated: boolean;
+                            /** @description How many entries there are, listed or withheld. */
+                            total: number;
+                        };
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
                         recent_runs?: {
                             packageId: string;
@@ -18029,46 +18156,52 @@ export interface operations {
                             /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent or `[]` means an agent that declares this integration without its own selection ends up with nothing callable, which publish/import reject and the run aborts on — such an agent must select a tool explicitly. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
                             default_tools?: string[] | "*";
                         }[];
-                        /** @description Agents ACTIVE in the current space, ordered by id, each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. Listed whole or not at all: past 15 agents the list is empty, `agents_truncated` is true, and the agents are reachable via the `listAgents` operation (the MCP `search` tool finds them by keyword). */
+                        /** @description Agents ACTIVE in the current space, ordered by id, each with the required integrations that keep it from launching here. Empty unless the caller holds the `agents:run` permission. The full list is the `listAgents` operation (the MCP `search` tool finds them by keyword). */
                         agents?: {
-                            /** @description Invokable identifier, e.g. "@appstrate/triage". */
-                            packageId: string;
-                            display_name: string;
-                            description: string;
-                            /** @description Whether the agent declares an input schema with properties. */
-                            takes_input: boolean;
-                            /** @description Ids of the integrations the agent declares `required` that are not active in this space; `[]` when none. Non-empty: a launch here is refused (`409`, `errors[].code: integration_not_active`) until each is activated in this space (`POST /api/spaces/{id}/packages`). Empty does not mean the launch will succeed: connections are judged at launch and by `GET /api/agents/{scope}/{name}/connection-readiness`. Judged on the definition a launch with `version` omitted runs: the latest published version (the rest of the entry describes the draft), or, for an agent with no published version, the draft (`version=draft` is then its only launch), or a system agent's own definition. A launch naming another version may differ. */
-                            inactive_required_integrations: string[];
-                            /** @description True when the agent has a published version (or is a system agent) — run it via `runAgent` with `version` omitted. False means draft-only: omitting `version` answers 404 `no_published_version`. */
-                            published: boolean;
-                            /** @description Whether THIS caller may write the agent, i.e. whether its draft is theirs to run with `version=draft` (403 `draft_not_writable` otherwise). Read with `published`: false/false is an agent this caller cannot execute at all until its author publishes one. */
-                            home_writable: boolean;
-                            /** @enum {string} */
-                            source: "local" | "system";
-                        }[];
-                        /** @description True when more agents are active than the cap; `agents` is then empty (full list via `listAgents`). */
-                        agents_truncated?: boolean;
-                        /** @description Total active agents, listed or not. */
-                        agents_total?: number;
-                        /** @description Skills the caller could attach to an agent in the current space, ordered by id. A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. Listed whole or not at all: past 15 skills the list is empty, `skills_truncated` is true, and the skills are reachable via the `listSkills` operation (the MCP `search` tool finds them by keyword). */
+                            /** @description The entries, whole; empty when `truncated` is true. */
+                            data: {
+                                /** @description Invokable identifier, e.g. "@appstrate/triage". */
+                                packageId: string;
+                                display_name: string;
+                                description: string;
+                                /** @description Whether the agent declares an input schema with properties. */
+                                takes_input: boolean;
+                                /** @description Ids of the integrations the agent declares `required` that are not active in this space; `[]` when none. Non-empty: a launch here is refused (`409`, `errors[].code: integration_not_active`) until each is activated in this space (`POST /api/spaces/{id}/packages`). Empty does not mean the launch will succeed: connections are judged at launch and by `GET /api/agents/{scope}/{name}/connection-readiness`. Judged on the definition a launch with `version` omitted runs: the latest published version (the rest of the entry describes the draft), or, for an agent with no published version, the draft (`version=draft` is then its only launch), or a system agent's own definition. A launch naming another version may differ. */
+                                inactive_required_integrations: string[];
+                                /** @description True when the agent has a published version (or is a system agent) — run it via `runAgent` with `version` omitted. False means draft-only: omitting `version` answers 404 `no_published_version`. */
+                                published: boolean;
+                                /** @description Whether THIS caller may write the agent, i.e. whether its draft is theirs to run with `version=draft` (403 `draft_not_writable` otherwise). Read with `published`: false/false is an agent this caller cannot execute at all until its author publishes one. */
+                                home_writable: boolean;
+                                /** @enum {string} */
+                                source: "local" | "system";
+                            }[];
+                            /** @description True when more than 15 entries exist and `data` was withheld. */
+                            truncated: boolean;
+                            /** @description How many entries there are, listed or withheld. */
+                            total: number;
+                        };
+                        /** @description Skills the caller could attach to an agent in the current space, ordered by id. A catalogue read, not a runnable hint: empty unless the caller holds the `skills:read` permission. Skills are not run directly: declare them under an agent manifest's `dependencies.skills`. The full list is the `listSkills` operation (the MCP `search` tool finds them by keyword). */
                         skills?: {
-                            /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
-                            packageId: string;
-                            display_name: string;
-                            description: string;
-                            /** @description The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range. */
-                            version: string | null;
-                            /** @description True when the skill has a published version (or is a system skill). False means draft-only: a manifest range can select nothing, and only `dependency_overrides` with `draft` reaches its working copy. */
-                            published: boolean;
-                            /** @description Whether THIS caller may write the skill, i.e. whether its draft is theirs to run — `dependency_overrides` with `draft` answers 403 `draft_not_writable` otherwise. */
-                            home_writable: boolean;
-                            /** @enum {string} */
-                            source: "local" | "system";
-                        }[];
-                        /** @description True when more skills are active than the cap; `skills` is then empty (full list via `listSkills`). */
-                        skills_truncated?: boolean;
-                        /** @description Total active skills, listed or not. */
-                        skills_total?: number;
+                            /** @description The entries, whole; empty when `truncated` is true. */
+                            data: {
+                                /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
+                                packageId: string;
+                                display_name: string;
+                                description: string;
+                                /** @description The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range. */
+                                version: string | null;
+                                /** @description True when the skill has a published version (or is a system skill). False means draft-only: a manifest range can select nothing, and only `dependency_overrides` with `draft` reaches its working copy. */
+                                published: boolean;
+                                /** @description Whether THIS caller may write the skill, i.e. whether its draft is theirs to run — `dependency_overrides` with `draft` answers 403 `draft_not_writable` otherwise. */
+                                home_writable: boolean;
+                                /** @enum {string} */
+                                source: "local" | "system";
+                            }[];
+                            /** @description True when more than 15 entries exist and `data` was withheld. */
+                            truncated: boolean;
+                            /** @description How many entries there are, listed or withheld. */
+                            total: number;
+                        };
                     };
                 };
             };
@@ -18217,7 +18350,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — the textual form of a space-role reference: `preset:<preset_role>` (`<admin|builder|operator|runner|viewer>`) or `custom:<custom_role_id>` (a `srl_` id). Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
@@ -20734,7 +20867,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — the textual form of a space-role reference: `preset:<preset_role>` (`<admin|builder|operator|runner|viewer>`) or `custom:<custom_role_id>` (a `srl_` id). Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
@@ -20897,16 +21030,14 @@ export interface operations {
                      *               "name": "Default",
                      *               "source": "org_role",
                      *               "role": {
-                     *                 "kind": "preset",
-                     *                 "key": "admin",
+                     *                 "preset_role": "admin",
                      *                 "name": "admin"
                      *               }
                      *             }
                      *           ],
                      *           "personal_space_role": null,
                      *           "personal_space_default_role": {
-                     *             "kind": "preset",
-                     *             "key": "admin",
+                     *             "preset_role": "admin",
                      *             "name": "admin"
                      *           }
                      *         },
@@ -20922,8 +21053,7 @@ export interface operations {
                      *               "name": "Default",
                      *               "source": "open_space",
                      *               "role": {
-                     *                 "kind": "preset",
-                     *                 "key": "operator",
+                     *                 "preset_role": "operator",
                      *                 "name": "operator"
                      *               }
                      *             }
@@ -20932,8 +21062,7 @@ export interface operations {
                      *             "preset_role": "builder"
                      *           },
                      *           "personal_space_default_role": {
-                     *             "kind": "preset",
-                     *             "key": "admin",
+                     *             "preset_role": "admin",
                      *             "name": "admin"
                      *           }
                      *         }
@@ -22113,16 +22242,14 @@ export interface operations {
                      *           "name": "Default",
                      *           "source": "org_role",
                      *           "role": {
-                     *             "kind": "preset",
-                     *             "key": "admin",
+                     *             "preset_role": "admin",
                      *             "name": "admin"
                      *           }
                      *         }
                      *       ],
                      *       "personal_space_role": null,
                      *       "personal_space_default_role": {
-                     *         "kind": "preset",
-                     *         "key": "admin",
+                     *         "preset_role": "admin",
                      *         "name": "admin"
                      *       }
                      *     }
@@ -22259,9 +22386,10 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
-                    custom_role_id?: string;
-                } & (unknown | unknown);
+                    preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+                } | {
+                    custom_role_id: string;
+                };
             };
         };
         responses: {
@@ -22746,9 +22874,11 @@ export interface operations {
     };
     getPersonalSpaceRoleImpact: {
         parameters: {
-            query: {
-                /** @description The candidate default, as `updateOrgSettings` takes `personal_space_role`: a preset key or the id of one of this organization's custom space roles. */
-                role: ("admin" | "builder" | "operator" | "runner" | "viewer") | string;
+            query?: {
+                /** @description The candidate default as a preset key, the `preset_role` of `updateOrgSettings`' `personal_space_role`. Exactly one of `preset_role` / `custom_role_id`, else `400`. */
+                preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
+                /** @description The candidate default as the id of one of this organization's custom space roles. Exactly one of `preset_role` / `custom_role_id`, else `400`. */
+                custom_role_id?: string;
             };
             header?: never;
             path: {
@@ -22783,7 +22913,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description `role` names a custom role id that is not a role of this organization */
+            /** @description `custom_role_id` names a custom role id that is not a role of this organization */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -23049,7 +23179,9 @@ export interface operations {
                      * @example {
                      *       "api_version": "2026-03-21",
                      *       "personal_model_credentials": true,
-                     *       "personal_space_role": "admin"
+                     *       "personal_space_role": {
+                     *         "preset_role": "admin"
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["OrgSettings"];
@@ -23079,8 +23211,13 @@ export interface operations {
                     dashboard_sso_enabled?: boolean;
                     /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
                     personal_model_credentials?: boolean;
-                    /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
-                    personal_space_role?: string & (("admin" | "builder" | "operator" | "runner" | "viewer") | string);
+                    /** @description The role an organization member or guest holds by default in their own personal space, as a role reference: `{ preset_role }` (`admin`, `builder`, `operator`, `runner`, `viewer`) or `{ custom_role_id }` (the id of one of this organization's custom space roles, `srl_…`). Defaults to `{ preset_role: "admin" }`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
+                    personal_space_role?: {
+                        /** @enum {string} */
+                        preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+                    } | {
+                        custom_role_id: string;
+                    };
                 };
             };
         };
@@ -25263,7 +25400,7 @@ export interface operations {
                     /** @description Destination space id (`spc_…`). Required and non-nullable — a package always has a home space. */
                     home_space_id: string;
                     /**
-                     * @description Does the space being LEFT keep the package? `true` (the default) leaves its `space_packages` row in place, so it goes on reading and running the package and nothing it had scheduled stops. `false` completes the move: that row is removed, settings and all, and every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed), in the same transaction. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. An old home that held no row is left behind whatever the flag says: nothing places the package there once the home has moved, so its schedules there are disabled all the same. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`.
+                     * @description Does the space being LEFT keep the package? `true` (the default) leaves its `space_packages` row in place, so it goes on reading and running the package and nothing it had scheduled stops. `false` completes the move: that row is removed, settings and all, and every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed), in the same transaction. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. A personal space is left whatever the flag says (outside its home it takes the organization's offer only: the row goes, or stays as a decision about the offer when the package is offered). An old home that held no row is left behind too: nothing places the package there once the home has moved, so its schedules there are disabled all the same. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`.
                      * @default true
                      */
                     keep_in_previous_home?: boolean;
@@ -25322,13 +25459,24 @@ export interface operations {
                      * @description `on_by_default`: placed and active in every space holding no row of its own. `available`: placed in every such space and off until the space switches it on.
                      * @enum {string}
                      */
-                    mode: "available" | "on_by_default";
+                    org_offer: "available" | "on_by_default";
                 };
             };
         };
         responses: {
-            /** @description The package is offered to the organization in that mode (new, changed or already so). */
+            /** @description The package was already offered to the organization: the offer is re-asserted in that mode or its mode changed. */
             200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageOrgOffer"] & components["schemas"]["ActivationWarnings"];
+                };
+            };
+            /** @description The offer was created: the package is now offered in that mode. */
+            201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
@@ -25445,7 +25593,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    target: components["schemas"]["ShareTarget"];
+                    /** @description Team space id (`spc_…`) the caller can reach. A personal space is `409 personal_space_takes_offers_only`: it receives packages through the organization offer (`PUT …/org-offer`) only. */
+                    spaceId: string;
                 };
             };
         };
@@ -25490,8 +25639,8 @@ export interface operations {
                 scope: components["parameters"]["PackageScope"];
                 /** @description Package name */
                 name: components["parameters"]["PackageName"];
-                /** @description The team space id (`spc_…`) exactly as `GET …/shares` published it. A user id is a 400. */
-                target: string;
+                /** @description The team space id (`spc_…`), the `spaceId` of a `GET …/shares` entry. Anything else is a 400. */
+                spaceId: string;
             };
             cookie?: never;
         };
@@ -26215,10 +26364,10 @@ export interface operations {
                     key: string;
                     name: string;
                     description?: string | null;
-                    /** @description Space-level permission strings the role grants (at least one). Never `studio:read`: a 400, the role resolves it from `shows_studio`. */
+                    /** @description Space-level permission strings the role grants (at least one). */
                     permissions: string[];
                     /**
-                     * @description Whether holders see the Studio (they resolve `studio:read`). Default `true`. A display setting, not a boundary: the API answers the role's other permissions either way.
+                     * @description Whether holders see the Studio's screens in the interface. Default `true`. A display attribute, not a permission and not a boundary: the API answers the role's permissions either way.
                      * @default true
                      */
                     shows_studio?: boolean;
@@ -26351,7 +26500,7 @@ export interface operations {
                     name?: string;
                     description?: string | null;
                     permissions?: string[];
-                    /** @description Whether holders see the Studio (they resolve `studio:read`). Absent = unchanged. */
+                    /** @description Whether holders see the Studio's screens in the interface. Absent = unchanged. */
                     shows_studio?: boolean;
                 };
             };
@@ -28332,7 +28481,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — the textual form of a space-role reference: `preset:<preset_role>` (`<admin|builder|operator|runner|viewer>`) or `custom:<custom_role_id>` (a `srl_` id). Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
@@ -28382,14 +28531,14 @@ export interface operations {
                      *           "personal": false,
                      *           "access": "member",
                      *           "role": {
-                     *             "kind": "preset",
-                     *             "key": "operator",
+                     *             "preset_role": "operator",
                      *             "name": "operator"
                      *           },
                      *           "permissions": [
                      *             "agents:read",
                      *             "agents:run"
                      *           ],
+                     *           "shows_studio": true,
                      *           "created_by": null,
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
@@ -28417,6 +28566,7 @@ export interface operations {
                      *             "org:read",
                      *             "spaces:read"
                      *           ],
+                     *           "shows_studio": false,
                      *           "created_by": "usr_k7x9m2p4q1",
                      *           "createdAt": "2026-01-15T10:30:00Z",
                      *           "updatedAt": "2026-01-15T10:30:00Z"
@@ -28493,14 +28643,14 @@ export interface operations {
                      *       "personal": false,
                      *       "access": "member",
                      *       "role": {
-                     *         "kind": "preset",
-                     *         "key": "admin",
+                     *         "preset_role": "admin",
                      *         "name": "admin"
                      *       },
                      *       "permissions": [
                      *         "agents:read",
                      *         "agents:run"
                      *       ],
+                     *       "shows_studio": true,
                      *       "created_by": "usr_k7x9m2p4q1",
                      *       "createdAt": "2026-01-15T10:30:00Z",
                      *       "updatedAt": "2026-01-15T10:30:00Z"
@@ -28525,7 +28675,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — the textual form of a space-role reference: `preset:<preset_role>` (`<admin|builder|operator|runner|viewer>`) or `custom:<custom_role_id>` (a `srl_` id). Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
@@ -28875,7 +29025,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — the textual form of a space-role reference: `preset:<preset_role>` (`<admin|builder|operator|runner|viewer>`) or `custom:<custom_role_id>` (a `srl_` id). Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
@@ -29029,9 +29179,10 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
-                    custom_role_id?: string;
-                } & (unknown | unknown);
+                    preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+                } | {
+                    custom_role_id: string;
+                };
             };
         };
         responses: {
@@ -29332,7 +29483,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — the textual form of a space-role reference: `preset:<preset_role>` (`<admin|builder|operator|runner|viewer>`) or `custom:<custom_role_id>` (a `srl_` id). Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
@@ -30466,6 +30617,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     reportIntegrationCalls: {
@@ -30479,6 +30631,16 @@ export interface operations {
             content: {
                 "application/json": {
                     calls: {
+                        /**
+                         * Format: uuid
+                         * @description The call's identity (a UUIDv7 the sidecar mints); with the run, the key a retried batch is deduplicated on.
+                         */
+                        call_id: string;
+                        /**
+                         * Format: date-time
+                         * @description When the upstream call started (RFC 3339, with an offset).
+                         */
+                        called_at: string;
                         /** @description The integration's package id (`@scope/name`). */
                         integration_id: string;
                         /**
@@ -30519,6 +30681,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -30577,13 +30740,14 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
                     };
                 };
             };
+            429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
             /** @description A proactive OAuth refresh failed; the credential is not refreshed now and may still be valid. The sidecar's listener cooldown backs off and retries on the next 401. */
             502: {
@@ -30593,7 +30757,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -30662,13 +30826,14 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
                     };
                 };
             };
+            429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
             /** @description Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (journaled with its `credential_revision` on `POST /internal/integration-calls`) or a reconnect resets the count of its rejections. */
             502: {
@@ -30678,7 +30843,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -31359,13 +31524,14 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
                     };
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description Not refreshed now; the credential stays usable. */
             502: {
                 headers: {
@@ -31374,7 +31540,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -31415,13 +31581,14 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
                     };
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description Not refreshed now; the credential stays usable. */
             502: {
                 headers: {
@@ -31430,7 +31597,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client or its request (invalid_client, unauthorized_client, invalid_scope or unsupported_grant_type): its registration or the integration's manifest must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";

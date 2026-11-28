@@ -12,6 +12,8 @@ import { createTestApp } from "./helpers/authed-app.ts";
 import { recordingCallReporter } from "./helpers/call-journal.ts";
 
 const record = (overrides: Partial<IntegrationCallRecord> = {}): IntegrationCallRecord => ({
+  call_id: "01900000-0000-7000-8000-000000000000",
+  called_at: "2026-03-01T10:00:00.000Z",
   integration_id: "@test/integ",
   connection_id: "11111111-1111-4111-8111-111111111111",
   method: "GET",
@@ -162,11 +164,30 @@ describe("createCallReporter", () => {
     expect(posts).toHaveLength(1);
   });
 
+  it("still sends after a drain or flush found nothing queued", async () => {
+    const { posts, fetchFn } = platform();
+    const reporter = createCallReporter({
+      platformApiUrl: "http://platform",
+      runToken: "t",
+      fetchFn,
+      flushIntervalMs: 60_000,
+    });
+    await reporter.drain();
+    reporter.report(record({ credential_revision: "0123456789abcdef" }));
+    expect(posts).toHaveLength(1);
+    reporter.report(record({ outcome: "404" }));
+    await reporter.drain();
+    expect(posts.map((p) => p.calls.map((c) => c.outcome))).toEqual([["200"], ["404"]]);
+  });
+
   it("logs and drops a refused or failed batch, never throwing", async () => {
     process.env.LOG_LEVEL = "warn";
     _setLogSinkForTesting((_level, line) => logs.push(line));
     const answers: Array<() => Response> = [
       () => new Response(null, { status: 403 }),
+      () => {
+        throw new Error("connection refused");
+      },
       () => {
         throw new Error("connection refused");
       },
@@ -183,7 +204,8 @@ describe("createCallReporter", () => {
     reporter.report(record());
     await reporter.drain();
     await reporter.drain();
-    expect(posts).toHaveLength(2);
+    // A 4xx is final; a transport failure is attempted twice.
+    expect(posts).toHaveLength(3);
     expect(logs.join("\n")).toContain("integration call report refused, records dropped");
     expect(logs.join("\n")).toContain("integration call report failed, records dropped");
   });
@@ -193,9 +215,9 @@ describe("createCallReporter", () => {
       () => new Response(null, { status: 204 }),
       () => new Response(null, { status: 429 }),
       () => new Response(null, { status: 503 }),
-      () => {
-        throw new Error("connection refused");
-      },
+      () => new Response(null, { status: 503 }),
+      () => new Response(null, { status: 500 }),
+      () => new Response(null, { status: 500 }),
     ];
     const { fetchFn } = platform(() => answers.shift()!());
     const reporter = createCallReporter({
@@ -211,6 +233,99 @@ describe("createCallReporter", () => {
       await reporter.drain();
     }
     expect(undelivered).toEqual(["429", "503", "500"]);
+  });
+});
+
+describe("createCallReporter — retry and drain deadline", () => {
+  it("retries a failed POST once with the same records, then stops", async () => {
+    const answers: Array<() => Response> = [
+      () => new Response(null, { status: 502 }),
+      () => new Response(null, { status: 204 }),
+    ];
+    const { posts, fetchFn } = platform(() => answers.shift()!());
+    const reporter = createCallReporter({
+      platformApiUrl: "http://platform",
+      runToken: "t",
+      fetchFn,
+      flushIntervalMs: 60_000,
+    });
+    const undelivered: string[] = [];
+    reporter.report(record(), () => undelivered.push("lost"));
+    await reporter.drain();
+    expect(posts.map((p) => p.calls)).toEqual([[record()], [record()]]);
+    expect(undelivered).toEqual([]);
+  });
+
+  const hangingFetch = ((_url: string, init: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    })) as unknown as typeof fetch;
+
+  it("gives up at the drain deadline, aborting the POST in flight and counting what it drops", async () => {
+    process.env.LOG_LEVEL = "warn";
+    _setLogSinkForTesting((_level, line) => logs.push(line));
+    const reporter = createCallReporter({
+      platformApiUrl: "http://platform",
+      runToken: "t",
+      fetchFn: hangingFetch,
+      flushIntervalMs: 60_000,
+      maxBatch: 1,
+      drainDeadlineMs: 80,
+    });
+    const undelivered: string[] = [];
+    for (const outcome of ["200", "201", "202"]) {
+      reporter.report(record({ outcome }), () => undelivered.push(outcome));
+    }
+    const started = Date.now();
+    await reporter.drain();
+    const elapsed = Date.now() - started;
+
+    expect(elapsed).toBeGreaterThanOrEqual(70);
+    expect(elapsed).toBeLessThan(1_000);
+    expect(undelivered.sort()).toEqual(["200", "201", "202"]);
+    expect(logs.join("\n")).toContain("drain hit its deadline, records dropped");
+  });
+
+  it("waits for a POST that lands within the deadline, and gives up on none", async () => {
+    process.env.LOG_LEVEL = "warn";
+    _setLogSinkForTesting((_level, line) => logs.push(line));
+    const { fetchFn } = platform(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+      return new Response(null, { status: 204 });
+    });
+    const reporter = createCallReporter({
+      platformApiUrl: "http://platform",
+      runToken: "t",
+      fetchFn,
+      flushIntervalMs: 60_000,
+      drainDeadlineMs: 2_000,
+    });
+    const undelivered: string[] = [];
+    reporter.report(record(), () => undelivered.push("lost"));
+    const started = Date.now();
+    await reporter.drain();
+    expect(Date.now() - started).toBeGreaterThanOrEqual(50);
+    expect(undelivered).toEqual([]);
+    expect(logs.join("\n")).not.toContain("deadline");
+  });
+
+  it("overlapping drains share one deadline: the first to return does not unbound the other", async () => {
+    const reporter = createCallReporter({
+      platformApiUrl: "http://platform",
+      runToken: "t",
+      fetchFn: hangingFetch,
+      flushIntervalMs: 60_000,
+      maxBatch: 1,
+      drainDeadlineMs: 600,
+    });
+    reporter.report(record({ outcome: "200" }));
+    const started = Date.now();
+    const first = reporter.drain();
+    await new Promise((r) => setTimeout(r, 400));
+    reporter.report(record({ outcome: "201" }));
+    await Promise.all([first, reporter.drain()]);
+    // The second joined the first's deadline (600 ms from its start), not a fresh one (1000 ms).
+    expect(Date.now() - started).toBeLessThan(800);
   });
 });
 
@@ -245,10 +360,15 @@ describe("connectionCallJournal", () => {
       host: "h",
       outcome: "upstream_timeout",
       durationMs: 3.6,
+      startedAtMs: Date.parse("2026-03-01T10:00:00.000Z"),
       credential: null,
     });
     expect(records).toEqual([
       {
+        call_id: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+        ),
+        called_at: "2026-03-01T10:00:00.000Z",
         integration_id: "@test/integ",
         connection_id: null,
         method: "PATCH",
@@ -257,6 +377,36 @@ describe("connectionCallJournal", () => {
         duration_ms: 4,
       },
     ]);
+  });
+
+  it("stamps a call id of its own and the start the call carries", () => {
+    const { reporter, records } = recordingCallReporter();
+    const journal = connectionCallJournal(reporter, {
+      integrationId: "@test/integ",
+      connectionId: null,
+      source: null,
+    });
+    const startedAtMs = Date.parse("2026-03-01T10:00:00.000Z");
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "200",
+      durationMs: 1_500,
+      startedAtMs,
+      credential: null,
+    });
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "200",
+      durationMs: 0,
+      startedAtMs,
+      credential: null,
+    });
+
+    const [slow, quick] = records;
+    expect(slow!.call_id).not.toBe(quick!.call_id);
+    expect(slow!.called_at).toBe("2026-03-01T10:00:00.000Z");
   });
 
   it("asks the source for a streak only on a 2xx answered with the injected credential", () => {
@@ -268,9 +418,30 @@ describe("connectionCallJournal", () => {
       source,
     });
     const credential = { revision: "0123456789abcdef" };
-    journal({ method: "GET", host: "h", outcome: "401", durationMs: 1, credential });
-    journal({ method: "GET", host: "h", outcome: "200", durationMs: 1, credential: null });
-    journal({ method: "GET", host: "h", outcome: "204", durationMs: 1, credential });
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "401",
+      durationMs: 1,
+      startedAtMs: Date.now(),
+      credential,
+    });
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "200",
+      durationMs: 1,
+      startedAtMs: Date.now(),
+      credential: null,
+    });
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "204",
+      durationMs: 1,
+      startedAtMs: Date.now(),
+      credential,
+    });
     expect(asked).toEqual(["0123456789abcdef"]);
     expect(records.map((r) => r.credential_revision)).toEqual([
       undefined,
@@ -292,8 +463,22 @@ describe("connectionCallJournal", () => {
       source,
     });
     const credential = { revision: "0123456789abcdef" };
-    journal({ method: "GET", host: "h", outcome: "200", durationMs: 1, credential: null });
-    journal({ method: "GET", host: "h", outcome: "200", durationMs: 1, credential });
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "200",
+      durationMs: 1,
+      startedAtMs: Date.now(),
+      credential: null,
+    });
+    journal({
+      method: "GET",
+      host: "h",
+      outcome: "200",
+      durationMs: 1,
+      startedAtMs: Date.now(),
+      credential,
+    });
     expect(undelivered[0]).toBeUndefined();
     undelivered[1]!();
     expect(rearmed).toEqual(["0123456789abcdef"]);

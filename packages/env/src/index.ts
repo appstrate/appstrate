@@ -1072,4 +1072,9 @@ const { getEnv, resetCache } = createEnvGetter(envSchema);
 
 export { getEnv };
 export const _resetCacheForTesting = resetCache;
-export { INFRA_ENV_KEYS, findUnreadEnvKeys } from "./env-key-inventory.ts";
+export {
+  INFRA_ENV_KEYS,
+  PLATFORM_ENV_NAMESPACES,
+  envNamespace,
+  findUnreadEnvKeys,
+} from "./env-key-inventory.ts";

@@ -104,13 +104,16 @@ describe("a conversation row's « … »", () => {
   });
 });
 
-describe("a reader's right side", () => {
-  it("stays on hover: a reader has no « … » to take its place", () => {
+describe("a reader's row", () => {
+  it("has the same « … », named for its spaces, opening a popover", () => {
     const html = render(["chat:read"]);
-    const trailing = html.match(/<span[^>]*data-testid="chat-session-trailing"[^>]*>/)?.[0];
-    expect(trailing).toBeDefined();
-    expect(trailing).not.toContain("opacity-0");
+    const triggers = html.match(/<button[^>]*aria-label="threads\.actions\.spacesFor"[^>]*>/g);
+    expect(triggers).toHaveLength(html.match(/data-testid="chat-session-space-tiles"/g)!.length);
+    expect(triggers![0]).toContain('aria-haspopup="dialog"');
+    expect(triggers![0]).toContain("w-11");
     expect(html).not.toContain("threads.actions.openFor");
+    const trailing = html.match(/<span[^>]*data-testid="chat-session-trailing"[^>]*>/)?.[0];
+    expect(trailing).toContain("desktop-pointer:group-hover/menu-item:opacity-0");
   });
 });
 
@@ -208,13 +211,13 @@ describe("the list while it loads", () => {
       const html = loading([...granted]);
       expect(html).toContain('type="search"');
       expect(html).not.toContain("threads.title");
-      expect(html).toMatch(/data-sidebar="group-label"[^>]*class="[^"]*mt-1 h-6/);
+      expect(html).toMatch(/data-sidebar="group-label"[^>]*class="[^"]*mt-1 h-10 justify-start/);
       const skeleton = html.match(/<div data-sidebar="menu-skeleton"[^>]*>/)?.[0];
       const row = render([...granted]).match(
         /<button[^>]*data-sidebar="menu-button"[^>]*data-size="lg"[^>]*>/,
       )?.[0];
       expect(skeleton).toContain("desktop-pointer:h-8");
-      if (granted.includes("chat:write")) expect(padding(row)).toBe("desktop-pointer:pr-2 pr-11");
+      expect(padding(row)).toBe("desktop-pointer:pr-2 pr-11");
       expect(padding(skeleton)).toBe(padding(row));
     });
   }

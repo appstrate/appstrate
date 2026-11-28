@@ -2,7 +2,7 @@
 
 import type { ThreadItem } from "@appstrate/module-chat/ui";
 
-export type ConversationSidebarTab = "summary" | "runs" | "files" | "tools";
+export type ConversationSidebarTab = "summary" | "runs" | "files" | "tools" | "info";
 
 export interface StoredSidebarFile {
   id: string;

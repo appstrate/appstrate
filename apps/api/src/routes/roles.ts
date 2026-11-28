@@ -44,7 +44,7 @@ export const createSpaceRoleSchema = z
     name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
     description: z.string().max(500).nullable().optional(),
     permissions: z.array(z.string().min(1)),
-    // Whether holders see the Studio (`studio:read`, never listed in `permissions`). Default: yes.
+    // Whether holders see the Studio screens. Default: yes.
     shows_studio: z.boolean().optional(),
   })
   .strict();

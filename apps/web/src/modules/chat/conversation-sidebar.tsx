@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, useState, type Dispatch, type ReactNode } from "react";
+import { useRef, type Dispatch, type ReactNode } from "react";
 import { FilesIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { revealThreadItem } from "@appstrate/module-chat/reveal-tool-call";
@@ -21,6 +21,7 @@ import { useConversationTabs } from "./use-conversation-tabs";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { localViewableFile } from "../../lib/files";
 import { readShown, useConversationFiles } from "./use-conversation-lists";
+import { ConversationInfo } from "./conversation-info";
 import { ConversationSummary } from "./conversation-summary";
 import { ConversationToolsList } from "./conversation-tools-tab";
 import { ConversationRuns } from "./conversation-runs-tab";
@@ -38,8 +39,8 @@ import {
   type SidebarOrigin,
   type StoredSidebarFile,
 } from "./conversation-sidebar-state";
-import { PanelResizeHandle } from "./panel-resize";
-import { usePanelWidth, type PanelView } from "./use-panel-width";
+import { PanelResizeHandle } from "@/components/panel-resize";
+import { useContextPanelWidth } from "./use-context-panel-width";
 import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
@@ -252,24 +253,27 @@ function ConversationContext({
           FLOATING_FRAME,
         )}
       >
-        {/* Every tab keeps its name in words: a narrow panel drops the icons and tightens the
-            tabs (as a detail page's do below `sm`), and scrolls them sideways if they still do
-            not fit. 40 px tabs on touch, denser under a mouse. */}
-        <AgentDetailPaneHeader className="@container justify-end gap-2">
-          <div className="no-scrollbar scroll-fade-x min-w-0 overflow-x-auto">
-            <TabsList className="h-auto w-max p-1" aria-label={t("context.label")}>
-              {tabs.map(({ id, Icon, label }) => (
-                <TabsTrigger
-                  key={id}
-                  value={id}
-                  className="desktop-pointer:h-7 h-10 gap-1.5 px-2 @sm:px-3"
+        {/* One icon per tab, its name as the accessible name and in a tooltip: the tabs fit
+            any panel width. 40 px targets on touch, denser under a mouse. */}
+        <AgentDetailPaneHeader className="justify-between gap-2">
+          <TabsList className="h-auto p-1" aria-label={t("context.label")}>
+            {tabs.map(({ id, Icon, label }) => (
+              <Tooltip key={id}>
+                <TooltipTrigger
+                  render={
+                    <TabsTrigger
+                      value={id}
+                      aria-label={label}
+                      className="desktop-pointer:size-7 size-10 px-0"
+                    />
+                  }
                 >
-                  <Icon aria-hidden="true" className="hidden size-4 shrink-0 @sm:block" />
-                  {label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
+                  <Icon aria-hidden="true" className="size-4" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{label}</TooltipContent>
+              </Tooltip>
+            ))}
+          </TabsList>
           {closable ? (
             <Button
               variant="ghost"
@@ -333,6 +337,9 @@ function ConversationContext({
                 dispatch={dispatch}
               />
             ) : null}
+            {id === "info" ? (
+              <ConversationInfo conversationId={conversationId} active={active} />
+            ) : null}
           </TabsContent>
         ))}
       </Tabs>
@@ -355,10 +362,8 @@ export function ConversationSidebar({
   const { t } = useTranslation("chat");
   const desktop = useMediaQuery(LG_AND_UP);
   const panelRef = useRef<HTMLElement>(null);
-  const [dragging, setDragging] = useState(false);
   // The card "See in the thread" waits to reveal until the phone's sheet has closed.
   const pendingReveal = useRef<ThreadItem | null>(null);
-  const { activeTab } = useConversationTabs(state.activeTab);
   const reveal = (item: ThreadItem) => {
     // Missed, the panel opens again on the call or the run to say so.
     dispatch({ type: "revealed", item, found: revealThreadItem(item) });
@@ -374,13 +379,7 @@ export function ConversationSidebar({
     pendingReveal.current = item;
     dispatch({ type: "toggle" });
   };
-  // The summary takes a little more than a list; a call opening on its line resizes nothing.
-  const view: PanelView = shownFile(state)
-    ? "file"
-    : activeTab.id === "summary"
-      ? "detail"
-      : "list";
-  const size = usePanelWidth(panelRef, view);
+  const size = useContextPanelWidth(panelRef);
 
   // Desktop: the panel floats over the thread's right side, inside the conversation. The thread
   // keeps the whole width, so its scrollbar stays at the right edge, outside the panel (`right-4`,
@@ -398,7 +397,7 @@ export function ConversationSidebar({
     >
       {/* While the panel is resized, the thread's padding follows the pointer, not its transition.
           `isolate` keeps the thread's raised layers (a card's space name is `z-10`) under the panel. */}
-      <div className={cn("isolate min-w-0 flex-1", dragging && "[&_*]:transition-none")}>
+      <div className={cn("isolate min-w-0 flex-1", size.dragging && "[&_*]:transition-none")}>
         {children}
       </div>
       {desktop ? (
@@ -410,7 +409,7 @@ export function ConversationSidebar({
           className={cn(
             "ease-surface absolute top-0 right-4 flex max-h-full flex-col transition-[opacity,translate]",
             // A file takes the whole height; the tabs' block is as tall as its content.
-            view === "file" && "bottom-0",
+            shownFile(state) && "bottom-0",
             state.expanded
               ? "duration-base translate-x-0 opacity-100"
               : "duration-fast pointer-events-none translate-x-6 opacity-0",
@@ -426,7 +425,7 @@ export function ConversationSidebar({
             clamp={size.clamp}
             onLive={size.setLive}
             onCommit={size.commit}
-            onDraggingChange={setDragging}
+            onDraggingChange={size.setDragging}
           />
           <ConversationContext
             conversationId={conversationId}

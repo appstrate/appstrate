@@ -41,6 +41,7 @@ import { reasoningSaysMore, reasoningTitle, showStep } from "./turn-status.ts";
 import { showCall } from "./tool-presentation.ts";
 import { deriveToolPhase } from "./tool-result.ts";
 import type { StoredResults } from "./use-call-presentation.ts";
+import { presentationSubject } from "./tool-presentation.ts";
 import { forgetRevealedToolCalls, useRevealedToolCalls } from "./reveal-tool-call.ts";
 import { ThreadCallLine } from "./tool-uis.tsx";
 import {
@@ -61,7 +62,6 @@ type StepPart = GroupablePart & {
   readonly toolName?: string;
   readonly args?: unknown;
   readonly text?: string;
-  readonly timing?: unknown;
 };
 
 interface StepMessage {
@@ -160,7 +160,7 @@ export function ActivityGroup({
   const subjects = React.useMemo(
     () =>
       callIds.flatMap((id): PresentationSubject[] => {
-        const subject = stored.get(id)?.presentation?.subject;
+        const subject = presentationSubject(stored.get(id)?.presentation);
         return subject ? [subject] : [];
       }),
     [callIds, stored],

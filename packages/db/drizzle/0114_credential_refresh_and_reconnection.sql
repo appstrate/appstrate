@@ -1,6 +1,7 @@
 -- The background refresh sweep's visit stamp. NULL = never visited, so due: no backfill.
--- `model_provider_credentials.needs_reconnection` mirrors the blob's death flag, as `expires_at` mirrors its expiry;
--- rows flagged in their blob before the column existed are converged by `scripts/migration/0058`.
+-- `model_provider_credentials.needs_reconnection` is the one authority on whether a credential is dead (the
+-- refresh sweep reads it without decrypting); rows whose blob carried the flag before the column existed are
+-- converged by `scripts/migration/0058`.
 ALTER TABLE "integration_connections" ADD COLUMN "refresh_checked_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "model_provider_credentials" ADD COLUMN "refresh_checked_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "model_provider_credentials" ADD COLUMN "needs_reconnection" boolean DEFAULT false NOT NULL;--> statement-breakpoint

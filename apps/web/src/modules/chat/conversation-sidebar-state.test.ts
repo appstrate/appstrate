@@ -73,6 +73,16 @@ describe("conversation sidebar state", () => {
     ).toMatchObject({ expanded: true, activeTab: "files", selectedFile: null });
   });
 
+  it("opens the Info tab, dropping a file or call shown over another tab", () => {
+    const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-item",
+      item: { kind: "call", id: "call_a" },
+    });
+    const info = conversationSidebarReducer(shown, { type: "select-tab", tab: "info" });
+    expect(info).toMatchObject({ expanded: true, activeTab: "info", selectedFile: null });
+    expect(openToolCallId(info)).toBeNull();
+  });
+
   it("clears the shown file on navigation but keeps the user's panel layout", () => {
     const state: ConversationSidebarState = {
       ...INITIAL_CONVERSATION_SIDEBAR_STATE,

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ActivityIcon, FilesIcon, LayoutListIcon, WrenchIcon } from "lucide-react";
+import { ActivityIcon, FilesIcon, InfoIcon, LayoutListIcon, WrenchIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAdmittingSpaces } from "../../hooks/use-overview-mode";
 import type { ConversationSidebarTab } from "./conversation-sidebar-state";
 
 /**
  * `chat:read` opens the page, not the runs and files two tabs list. A selected
- * tab the caller can no longer see resolves to the summary, which always stays.
+ * tab the caller can no longer see resolves to the summary, which always stays, as do Tools and Info.
  */
 export function useConversationTabs(selected: ConversationSidebarTab) {
   const { t } = useTranslation("chat");
@@ -19,6 +19,7 @@ export function useConversationTabs(selected: ConversationSidebarTab) {
     runs,
     files,
     tools: true,
+    info: true,
   };
   const tabs = (
     [
@@ -26,6 +27,7 @@ export function useConversationTabs(selected: ConversationSidebarTab) {
       { id: "runs", Icon: ActivityIcon, label: t("common:nav.runs") },
       { id: "files", Icon: FilesIcon, label: t("common:nav.files") },
       { id: "tools", Icon: WrenchIcon, label: t("context.tabs.tools") },
+      { id: "info", Icon: InfoIcon, label: t("context.tabs.info") },
     ] as const satisfies readonly {
       id: ConversationSidebarTab;
       Icon: typeof LayoutListIcon;

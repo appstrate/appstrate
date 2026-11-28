@@ -77,8 +77,9 @@ function wait(ms = 150): Promise<void> {
 interface ListedSpace {
   id: string;
   personal: boolean;
-  role: { kind: string; key: string } | null;
+  role: { preset_role?: string; custom_role_id?: string; name: string } | null;
   permissions: string[];
+  shows_studio: boolean;
 }
 
 interface ListedOrg {
@@ -216,13 +217,13 @@ describe("view as role", () => {
 
     const [previewed] = await listedSpaces(view);
     expect(previewed?.id).toBe(owner.defaultSpaceId);
-    expect(previewed?.role).toMatchObject({ kind: "preset", key: "viewer" });
+    expect(previewed?.role).toMatchObject({ preset_role: "viewer" });
     expect(previewed?.permissions).not.toContain("agents:write");
     expect(previewed?.permissions).toContain("agents:read");
 
     // Same request, no header: the owner is preset `admin` everywhere.
     const [real] = await listedSpaces();
-    expect(real?.role).toMatchObject({ kind: "preset", key: "admin" });
+    expect(real?.role).toMatchObject({ preset_role: "admin" });
     expect(real?.permissions).toContain("agents:write");
 
     expect((await createAgent("@view-as/blocked", view)).status).toBe(403);
@@ -240,7 +241,7 @@ describe("view as role", () => {
       request("/api/packages/@view-as/shared/shares", {
         view,
         space: owner.defaultSpaceId,
-        body: { target: { kind: "space", spaceId: target.id } },
+        body: { spaceId: target.id },
       });
 
     await expectProblem(await share(persona("member", "preset:viewer")), 403);
@@ -298,7 +299,7 @@ describe("view as role", () => {
     const view = persona("member", `custom:${role.id}`);
 
     const [previewed] = await listedSpaces(view);
-    expect(previewed?.role).toMatchObject({ kind: "custom", key: "auditor" });
+    expect(previewed?.role).toMatchObject({ custom_role_id: role.id, name: role.name });
     expect(previewed?.permissions).toContain("space-settings:write");
     expect(previewed?.permissions).not.toContain("agents:write");
 
@@ -317,6 +318,21 @@ describe("view as role", () => {
     expect(previewedOrg?.permissions).not.toContain("members:remove");
     const realOrgPermissions = new Set(realOrg?.permissions);
     expect(previewedOrg?.permissions.filter((p) => !realOrgPermissions.has(p))).toEqual([]);
+  });
+
+  it("carries the previewed role's shows_studio, a preset's and a custom bundle's", async () => {
+    const hiding = await seedSpaceRole({
+      orgId: owner.orgId,
+      key: "no-studio",
+      permissions: ["agents:read"],
+      showsStudio: false,
+    });
+    const [real] = await listedSpaces();
+    expect(real?.shows_studio).toBe(true);
+    const [asViewer] = await listedSpaces(persona("member", "preset:viewer"));
+    expect(asViewer?.shows_studio).toBe(true);
+    const [asHidden] = await listedSpaces(persona("member", `custom:${hiding.id}`));
+    expect(asHidden?.shows_studio).toBe(false);
   });
 
   // ─── 4. Refusals, never a fall-back ───────────────────────────────
@@ -348,7 +364,7 @@ describe("view as role", () => {
           orgRole: "member",
           space: {
             spaceId: owner.defaultSpaceId,
-            role: { kind: "preset", key: "builder", name: "builder" },
+            role: { presetRole: "builder", customRoleId: null },
           },
         },
       });
@@ -515,7 +531,7 @@ describe("view as role", () => {
       orgRole: "member",
       space: {
         spaceId: owner.defaultSpaceId,
-        role: { kind: "preset", key: "admin", name: "admin" },
+        role: { presetRole: "admin", customRoleId: null },
       },
     });
     // The control: the same write with no header carries no persona at all.
