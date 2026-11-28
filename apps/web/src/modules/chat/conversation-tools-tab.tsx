@@ -7,7 +7,7 @@ import {
   activityCounts,
   type ConversationToolCall,
 } from "@appstrate/module-chat/conversation-tools";
-import type { ShownCall } from "@appstrate/module-chat/tool-presentation";
+import { subjectIconSrc, type ShownCall } from "@appstrate/module-chat/tool-presentation";
 import { ToolCallDetail } from "@appstrate/module-chat/tool-call-detail";
 import { CallStep } from "@appstrate/module-chat/call-step";
 import { cn } from "@appstrate/ui/cn";
@@ -44,7 +44,7 @@ const TURN_CALLS_CLASS = "border-b px-4 py-1 last:border-b-0";
  */
 export function ToolCallIcon({ shown }: { shown: ShownCall }) {
   if (shown.subject?.kind === "integration") {
-    return <IntegrationIcon src={shown.subject.icon} className="size-4 rounded-sm" />;
+    return <IntegrationIcon src={subjectIconSrc(shown.subject)} className="size-4 rounded-sm" />;
   }
   const { Icon } = shown;
   return <Icon aria-hidden="true" className="size-4" />;

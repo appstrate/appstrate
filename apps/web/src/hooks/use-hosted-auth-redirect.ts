@@ -37,7 +37,7 @@ export function useHostedAuthRedirect(options: HostedAuthRedirectOptions = {}): 
     if (!active) return;
     void import("../modules/oidc/lib/oidc")
       .then(({ startOidcLogin, startOidcSignup }) => {
-        rememberSignedIn(localStorage, true);
+        rememberSignedIn(true);
         return starter === "signup"
           ? startOidcSignup(redirectTo, loginHint)
           : startOidcLogin(redirectTo, loginHint);

@@ -6,7 +6,7 @@ import { useAppConfig } from "./use-app-config";
 import { useOverviewMode } from "./use-overview-mode";
 import { useSpaces } from "./use-spaces";
 import { useSpaceLink } from "./use-current-space";
-import { routeVerdict, STUDIO_PERMISSION, type RoutePath } from "../lib/route-access";
+import { routeVerdict, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
 import { homeOf } from "../lib/home-route";
 import { grantedInSomeActingSpace, spacesWhere, spanningRouteVerdict } from "../lib/space-lists";
@@ -17,16 +17,16 @@ import { grantedInSomeActingSpace, spacesWhere, spanningRouteVerdict } from "../
  * which open where some space admits them. A route the module does not load stays absent.
  */
 export function useRouteVerdict() {
-  const { can, inPersonalSpace } = usePermissions();
+  const { can, showsStudio, inPersonalSpace } = usePermissions();
   const { features } = useAppConfig();
   const { on } = useOverviewMode();
   const { data: spaces } = useSpaces();
   return useCallback(
     (path: RoutePath) => {
-      const own = routeVerdict(path, can, features, inPersonalSpace);
+      const own = routeVerdict(path, can, showsStudio, features, inPersonalSpace);
       return (own !== "absent" && spanningRouteVerdict(path, spaces, on)) || own;
     },
-    [on, spaces, can, features, inPersonalSpace],
+    [on, spaces, can, showsStudio, features, inPersonalSpace],
   );
 }
 
@@ -62,7 +62,7 @@ export function useCanReachInSpace(): (target: string, spaceId: string | undefin
       const space = spaces?.find((s) => s.id === spaceId);
       if (!space) return false;
       const gate = (permission: string) => grants(spaceId, permission);
-      return routeVerdict(route, gate, features, space.personal) === "granted";
+      return routeVerdict(route, gate, space.shows_studio, features, space.personal) === "granted";
     },
     [canReach, grants, features, spaces],
   );
@@ -90,13 +90,10 @@ export function useReachableSpaceLink(): (
 
 /** Whether the reader reaches the Studio: in the working space, or in « Tous les espaces » in some space. */
 export function useStudioReach(): boolean {
-  const { can } = usePermissions();
+  const { showsStudio } = usePermissions();
   const { on } = useOverviewMode();
   const { data: spaces } = useSpaces();
-  return (
-    can(STUDIO_PERMISSION) ||
-    (on && spacesWhere(spaces, (grant) => grant(STUDIO_PERMISSION)).length > 0)
-  );
+  return showsStudio || (on && spacesWhere(spaces, (_can, space) => space.shows_studio).length > 0);
 }
 
 /** Whether the reach verdicts are answers yet: until the permission set loads every one reads as refused. */

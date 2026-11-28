@@ -39,7 +39,7 @@ import {
   personalSpaceDefaultOn,
   psr,
   resolveSpaceRole,
-  toSpaceRoleWire,
+  toSpaceRoleReference,
   type SpaceAccessRow,
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
@@ -173,7 +173,7 @@ async function listMembersOfSpaces(
       email: row.email ?? null,
       org_role: row.orgRole,
       source: member ? "explicit" : row.orgRole === "member" ? "open_space" : "org_role",
-      role: toSpaceRoleWire(effective),
+      role: effective && toSpaceRoleReference(effective),
       createdAt: row.createdAt?.toISOString() ?? null,
     });
   }

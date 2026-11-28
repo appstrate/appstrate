@@ -1020,12 +1020,14 @@ async function forwardInnerRequest(
   // One row per forwarded request, its host as the runner addressed it (the tunnel's authority,
   // before any login substitution): the final attempt's outcome, a replay included.
   const started = performance.now();
+  const startedAtMs = Date.now();
   const journalCall = (outcome: string, credential: DispatchedCall["credential"]) =>
     journal?.({
       method: req.method,
       host: new URL(url).hostname,
       outcome,
       durationMs: performance.now() - started,
+      startedAtMs,
       credential,
     });
 

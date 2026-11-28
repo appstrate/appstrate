@@ -50,9 +50,10 @@ const {
   resumablePairing,
   markPairingShown,
   isPairingShown,
-  STORAGE_KEY,
   UNPOLLED_RETENTION_MS,
 } = await import("../pairing-store");
+const { LOCAL_STORAGE_KEYS, storageKey } = await import("@appstrate/ui/local-storage");
+const STORAGE_KEY = storageKey(LOCAL_STORAGE_KEYS.pendingPairings);
 
 function reset() {
   fakeStorage.clear();

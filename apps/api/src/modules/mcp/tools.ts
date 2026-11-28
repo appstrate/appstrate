@@ -57,7 +57,9 @@ import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import type { RunLogEvent } from "@appstrate/shared-types";
 import { FILE_NAME_META_KEY, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { parseScopedName } from "@appstrate/core/naming";
+import { z } from "zod";
 import { SKILL_URI_PREFIX } from "@appstrate/core/skill-address";
+import { getMeResultSchema } from "@appstrate/core/me-context";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -77,6 +79,7 @@ import {
   onDispatchSpaces,
   onDispatchTarget,
 } from "../../lib/internal-dispatch.ts";
+import { DEFAULT_PACKAGE_HINT_LIMIT } from "../../services/space-packages.ts";
 import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
 import {
   credentialProxyClosedDetail,
@@ -138,15 +141,13 @@ import {
 } from "./discovery.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import { presentTools, withPresentation } from "./presentation.ts";
-import {
-  MAX_PRESENTED_ITEMS,
-  TOOL_LOOKUP_META_KEY,
-  type PresentationSubject,
-} from "@appstrate/core/mcp-presentation";
+import { MAX_PRESENTED_ITEMS, type PresentationSubject } from "@appstrate/core/mcp-presentation";
 import {
   ACTIVE_SPACES_META_KEY,
   OPERATION_SPACES_META_KEY,
+  SPACE_LIST_INLINE_MAX,
   describeSpace,
+  describeSpaceList,
   projectActiveInSpaces,
 } from "@appstrate/core/mcp-spaces";
 import {
@@ -595,19 +596,10 @@ function invalidFilter(args: Record<string, unknown>): Refusal | undefined {
   return undefined;
 }
 
-/**
- * Read-only, unless the kind of integration tools is declared: reading its catalog reaches
- * third-party servers, so the descriptor is stamped a lookup instead.
- */
-function discoveryHints(
-  title: string,
-  kinds: readonly DiscoveryKind[],
-): Pick<Tool, "annotations" | "_meta"> {
+/** Always read-only; open-world when the kind of integration tools is declared (third-party servers). */
+function discoveryHints(title: string, kinds: readonly DiscoveryKind[]): Pick<Tool, "annotations"> {
   return kinds.includes("integration_tool")
-    ? {
-        annotations: { title, ...INTEGRATION_KIND_ANNOTATIONS },
-        _meta: { [TOOL_LOOKUP_META_KEY]: true },
-      }
+    ? { annotations: { title, ...INTEGRATION_KIND_ANNOTATIONS } }
     : { annotations: { title, readOnlyHint: true, idempotentHint: true, openWorldHint: false } };
 }
 
@@ -744,7 +736,11 @@ function buildSearchTool(
         ...sections,
         ...(readSpaceIds.length > 0 ? { searched_spaces: readSpaceIds } : {}),
       }),
-      { count: found, items: [...subjects.values()].slice(0, MAX_PRESENTED_ITEMS) },
+      {
+        call: "search",
+        count: found,
+        items: [...subjects.values()].slice(0, MAX_PRESENTED_ITEMS),
+      },
     );
   };
 
@@ -2568,11 +2564,31 @@ function actVocabulary(surface: McpSurface): string {
   return acts.length > 0 ? ` (${acts.map((act) => `\`${act}\``).join(", ")})` : "";
 }
 
+/**
+ * What `get_me` answers: the 200 relay of `/api/me/context` (the schema the chat reads it with), a
+ * 200 whose body was cut to fit the result, or a refusal (the tool's own or the route's).
+ */
+const getMeOutputSchema = (() => {
+  const { $schema: _dialect, ...schema } = z.toJSONSchema(
+    z.union([
+      getMeResultSchema,
+      z.looseObject({ status: z.literal(200), truncated: z.literal(true), body: z.string() }),
+      z.looseObject({
+        kind: z.literal("tool_refusal"),
+        code: z.string(),
+        error: z.string(),
+      }),
+      z.looseObject({ kind: z.literal("route_refusal"), status: z.int() }),
+    ]),
+  );
+  return { type: "object", ...schema } as NonNullable<Tool["outputSchema"]>;
+})();
+
 function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "get_me",
     description:
-      "Return the caller's working context in the space of the call: `user`, `org` (with the " +
+      "Return the caller's working context in the space of the call (each of `connectable_integrations`, `agents` and `skills` is an envelope `{ data, truncated, total }`): `user`, `org` (with the " +
       "organization `role`), `space`, `connections`, `connectable_integrations`, `agents`, `skills` " +
       "and `recent_runs`" +
       (ctx.orgSpaces
@@ -2607,12 +2623,11 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
           : "") +
       "`connectable_integrations` names the integrations active in " +
       "THIS space that the caller has not connected and for which a connect flow can start: " +
-      "connecting one makes it usable here. It is whole or withheld: more than 15 and it is " +
-      "empty with `connectable_integrations_truncated` true and the count in " +
-      "`connectable_integrations_total`; `search` finds them by keyword. " +
-      "`agents` and `skills` are listed whole, by id, or not at all: past 15 entries a list is " +
-      "empty, with `agents_truncated` / `skills_truncated` true and `agents_total` / " +
-      "`skills_total` counting it, and `search` finds its entries by keyword.",
+      `connecting one makes it usable here. It is whole or withheld: more than ${DEFAULT_PACKAGE_HINT_LIMIT} and it is ` +
+      "empty with `connectable_integrations.truncated` true and the count in " +
+      "`connectable_integrations.total`; `search` finds them by keyword. " +
+      `\`agents\` and \`skills\` are listed whole, by id, or not at all: past ${DEFAULT_PACKAGE_HINT_LIMIT} entries a list is ` +
+      "empty, with `truncated` true and `total` counting it, and `search` finds its entries by keyword.",
     annotations: {
       title: "Get caller context",
       readOnlyHint: true,
@@ -2620,6 +2635,7 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       openWorldHint: false,
     },
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    outputSchema: getMeOutputSchema,
   };
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
@@ -2798,6 +2814,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     (orgSpaces ? tools.map((tool) => withSpaceArgument(tool, orgSpaces)) : tools).map((tool) =>
       refuseUndeclaredArguments(tool, pinned),
     ),
+    ctx.requestId,
   );
 }
 
@@ -2811,7 +2828,7 @@ function spaceIdProperty(
   kind: (typeof TOOL_SPACE_RULES)[McpToolName]["kind"],
   perOperation: boolean,
 ): Record<string, unknown> {
-  const reached = spaces.reachable.map(describeSpace).join("; ");
+  const reached = describeSpaceList(spaces.reachable);
   let description: string;
   if (kind === "search")
     description =
@@ -2828,7 +2845,15 @@ function spaceIdProperty(
       `The space this call acts in, by id: ${reached}. Choose it in the order given in the ` +
       "server instructions." +
       (perOperation ? ORGANIZATION_LEVEL_SPACE_ID : "");
-  return { type: "string", enum: spaces.reachable.map((s) => s.id), description };
+  // Above the cap the ids are not repeated in the schema: a space the call names is checked
+  // server-side, and the refusal lists the ids it accepts.
+  return {
+    type: "string",
+    ...(spaces.reachable.length <= SPACE_LIST_INLINE_MAX
+      ? { enum: spaces.reachable.map((s) => s.id) }
+      : {}),
+    description,
+  };
 }
 
 /**
@@ -2883,7 +2908,7 @@ function withSpaceArgument(
     ...tool.descriptor,
     // Leading: clients cap long descriptions, and this is the part that varies.
     description: granted
-      ? `Available in: ${granted.map(describeSpace).join("; ")}. ${tool.descriptor.description}`
+      ? `Available in: ${describeSpaceList(granted)}. ${tool.descriptor.description}`
       : tool.descriptor.description,
     inputSchema: {
       ...schema,

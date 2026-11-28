@@ -61,9 +61,9 @@ const fakeWindow = {
 
 const { generateState, decodeStateRedirect, handleOidcCallback } = await import("../oidc");
 
-const STATE_KEY = "appstrate_oidc_state";
-const VERIFIER_KEY = "appstrate_oidc_verifier";
-const REDIRECT_KEY = "appstrate_oidc_redirect";
+const STATE_KEY = "appstrate:auth:oidcState";
+const VERIFIER_KEY = "appstrate:auth:oidcVerifier";
+const REDIRECT_KEY = "appstrate:auth:oidcRedirect";
 
 /** Install a fetch stub; returns the recorded calls. */
 function stubFetch(response: () => Response): Array<{ url: string; body: string }> {

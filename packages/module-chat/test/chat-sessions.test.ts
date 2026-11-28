@@ -25,7 +25,7 @@ import {
 } from "../../../apps/api/test/helpers/auth.ts";
 import { seedApiKey, seedSpace, seedSpaceMember } from "../../../apps/api/test/helpers/seed.ts";
 import { deleteOrganization } from "../../../apps/api/src/services/organizations.ts";
-import { ensureSession, touchSessionSpace, writingOriginSpace } from "../src/persistence.ts";
+import { ensureSession, touchSessionSpaces, writingOriginSpace } from "../src/persistence.ts";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
 import { orgPermissions } from "../../../apps/api/src/lib/permissions.ts";
 import { installPermissionAuditLogger } from "../../../apps/api/src/lib/permission-audit.ts";
@@ -928,7 +928,7 @@ describe("ensureSession", () => {
   });
 });
 
-describe("touchSessionSpace", () => {
+describe("touchSessionSpaces", () => {
   it("records a space once, and never the origin space", async () => {
     await truncateAll();
     const ctx = await createTestContext({ orgSlug: "touchorigin" });
@@ -947,10 +947,10 @@ describe("touchSessionSpace", () => {
       userId: ctx.user.id,
       originSpaceId: ctx.defaultSpaceId,
     };
-    await touchSessionSpace(session, ctx.defaultSpaceId);
+    await touchSessionSpaces(session, [ctx.defaultSpaceId]);
     expect(await touchedBy("chs_touch")).toEqual([]);
-    await touchSessionSpace(session, other);
-    await touchSessionSpace(session, other);
+    await touchSessionSpaces(session, [other]);
+    await touchSessionSpaces(session, [other]);
     expect(await touchedBy("chs_touch")).toEqual([other]);
     const dto = (await (await orgCallAs(ctx, "chs_touch")).json()) as SessionDto;
     expect(dto.space_ids).toEqual([ctx.defaultSpaceId, other]);

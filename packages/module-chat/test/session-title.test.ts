@@ -15,7 +15,7 @@ describe("the title derived from a first message", () => {
   });
 
   it("keeps a message of up to 60 characters whole", () => {
-    const text = "x".repeat(60);
+    const text = "X".repeat(60);
     expect(titleFromText(text)).toBe(text);
   });
 
@@ -29,7 +29,7 @@ describe("the title derived from a first message", () => {
   });
 
   it("keeps the head as is when it already ends on a word", () => {
-    const head = `${"a".repeat(28)} ${"b".repeat(28)}`;
+    const head = `${"A".repeat(28)} ${"b".repeat(28)}`;
     expect(titleFromText(`${head} ${"c".repeat(20)}`)).toBe(`${head}…`);
   });
 
@@ -40,6 +40,47 @@ describe("the title derived from a first message", () => {
   });
 
   it("cuts one unbroken word where the head ends", () => {
-    expect(titleFromText("x".repeat(80))).toBe(`${"x".repeat(57)}…`);
+    expect(titleFromText("X".repeat(80))).toBe(`${"X".repeat(57)}…`);
+  });
+
+  it("upper-cases a leading lowercase letter", () => {
+    expect(titleFromText("bonjour le monde")).toBe("Bonjour le monde");
+    expect(titleFromText("élan")).toBe("Élan");
+    expect(titleFromText("ibrahim")).toBe("Ibrahim");
+  });
+
+  it("upper-cases a plain lowercase first word ending on punctuation", () => {
+    expect(titleFromText("quel temps")).toBe("Quel temps");
+    expect(titleFromText("salut, ça va")).toBe("Salut, ça va");
+    expect(titleFromText("c'est urgent")).toBe("C'est urgent");
+    expect(titleFromText("j’ai une question")).toBe("J’ai une question");
+    expect(titleFromText("merci!")).toBe("Merci!");
+    expect(titleFromText("bon… alors")).toBe("Bon… alors");
+  });
+
+  it("keeps a first word holding a capital, a digit or a symbol as typed", () => {
+    for (const text of [
+      "iPhone ne marche plus",
+      "eBay",
+      "macOS bug",
+      "https://x.com/page",
+      "node_modules trop gros",
+      "v2 bug",
+      "e-mail perdu",
+      "user@example.com",
+    ]) {
+      expect(titleFromText(text)).toBe(text);
+    }
+  });
+
+  it("leaves a capital or a non-letter start unchanged", () => {
+    for (const text of ["Bonjour", "42 raisons", "😀 salut", '"citation"', "¿qué?"]) {
+      expect(titleFromText(text)).toBe(text);
+    }
+  });
+
+  it("still truncates a long lowercase message after capitalising it", () => {
+    const text = `${"a".repeat(28)} ${"b".repeat(28)} ${"c".repeat(20)}`;
+    expect(titleFromText(text)).toBe(`A${"a".repeat(27)} ${"b".repeat(28)}…`);
   });
 });

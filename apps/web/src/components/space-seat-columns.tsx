@@ -12,19 +12,13 @@ import type { DataColumn } from "./data-table";
 import { CellText } from "./table-cells";
 import { SpaceRoleSelect } from "./space-role-select";
 import { roleI18nKey } from "../hooks/use-permissions";
-import {
-  memberRoleValue,
-  spaceRoleLabel,
-  type RoleObject,
-  type SpaceRoleOption,
-} from "../hooks/use-roles";
+import { spaceRoleValue, spaceRoleLabel, type SpaceRoleOption } from "../hooks/use-roles";
 import type { SpaceSeat } from "../hooks/use-space-members";
 
 export function useSpaceSeatColumns<Row>({
   seat,
   seatName,
   editable,
-  roles,
   roleOptions,
   isChangingRole,
   onChangeRole,
@@ -34,13 +28,16 @@ export function useSpaceSeatColumns<Row>({
   seatName: (row: Row) => string;
   /** Whether this row's role is the caller's to change. */
   editable: (row: Row) => boolean;
-  roles: RoleObject[] | undefined;
   roleOptions: SpaceRoleOption[];
   isChangingRole: boolean;
   onChangeRole: (row: Row, value: string) => void;
 }): DataColumn<Row>[] {
   const { t } = useTranslation(["settings", "common"]);
 
+  const heldValue = (row: Row) => {
+    const { role } = seat(row);
+    return role ? spaceRoleValue(role) : "";
+  };
   const heldRole = (row: Row) => spaceRoleLabel(seat(row).role, t) ?? t("spaceMembers.noRole");
   /** What a role the caller cannot change reads as. */
   const fixedRole = (row: Row) => {
@@ -67,7 +64,7 @@ export function useSpaceSeatColumns<Row>({
       cell: (row) =>
         editable(row) ? (
           <SpaceRoleSelect
-            value={memberRoleValue(seat(row).role, roles) ?? `current:${seat(row).role?.key}`}
+            value={heldValue(row)}
             options={roleOptions}
             fallbackLabel={heldRole(row)}
             placeholder={t("spaceMembers.noRole")}

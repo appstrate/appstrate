@@ -184,11 +184,11 @@ At boot, before migrations, the API logs one `warn` line naming every environmen
 - **Read keys** `READ` = the keys of the `@appstrate/env` schema, `SIDECAR_OPERATOR_ENV_KEYS`, and the keys a package reads directly outside the schema (`DIRECT_READ_ENV_KEYS`: `AUTH_FAST_TEST_HASH`).
 - **Infra keys** `INFRA_ENV_KEYS` (`packages/env/src/env-key-inventory.ts`) are the compose and sibling-container keys the platform never reads. They are never reported and do not define a namespace: Coolify injects the resource env into every container, so `POSTGRES_DB`, `AWS_REGION` or `MINIO_BROWSER` beside them is not reported either.
 - **Namespace** of a key is the text before its first `_`, or the whole key when it has none.
-- **Platform family** = the namespaces of `READ`, minus the foreign namespaces below. A key is reported when it matches `^[A-Z][A-Z0-9_]*$`, is in neither `READ` nor `INFRA_ENV_KEYS`, and its namespace is in the family. A compose `${VAR:-}` left empty counts as unset.
-- **Foreign namespaces**, never reported:
+- **Platform namespaces** = `PLATFORM_ENV_NAMESPACES` (`packages/env/src/env-key-inventory.ts`), a declared list, not derived from `READ`: removing the last key of a namespace (`OAUTH_*`) must not make its leftovers silent. A test fails when a schema or sidecar key sits under an undeclared namespace, so a new family is declared with its first key; a namespace is never deleted because its keys are gone. A key is reported when it matches `^[A-Z][A-Z0-9_]*$`, is in neither `READ` nor `INFRA_ENV_KEYS`, and its namespace is in the list. A compose `${VAR:-}` left empty counts as unset.
+- **Foreign namespaces**, absent from the list and never reported:
   - `NODE`: the Node/Bun runtime (`NODE_OPTIONS`, `NODE_EXTRA_CA_CERTS`).
   - `GIT`: git's own environment.
-- Module namespaces (`STRIPE_`, `EE_`, `OTEL_`, `CHAT_`, `FIRECRACKER_`) and `PATH`, `HOME`, `HOSTNAME`, `TERM`, `BUN_*` are outside the platform family and are never reported.
+- Module namespaces (`STRIPE_`, `EE_`, `OTEL_`, `CHAT_`, `FIRECRACKER_`) and `PATH`, `HOME`, `HOSTNAME`, `TERM`, `BUN_*` are outside the platform namespaces and are never reported.
 
 **Limits**
 

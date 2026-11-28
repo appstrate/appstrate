@@ -5,11 +5,13 @@
  * naming the spaces where it stands, deterministic, within its budget, ranking nothing.
  */
 
+import { fullAgent, meBody } from "./me-context-body.ts";
 import { describe, expect, it } from "bun:test";
 import {
   CHAT_CONTEXT_DETAILS_BUDGET_CHARS,
   SPACE_DETAILS_HEADING,
   formatSpaceDetails,
+  orderDetailSpaces,
   readSpaceDetails,
   type DetailSpace,
   type SpaceDetail,
@@ -49,24 +51,27 @@ describe("formatSpaceDetails", () => {
       needsReconnection: false,
       connections: [{ id: connectionId, label, owned }],
     });
-    const { text, shown } = formatSpaceDetails([
-      detail(PERSO, {
-        integrations: [gmail("c1", "Pro", true)],
-        agents: [agent("@acme/digest", { description: "Daily\n  digest." })],
-        agentsTotal: 1,
-      }),
-      detail(VENTES, {
-        integrations: [gmail("c2", "Équipe", false, false)],
-        connectable: ["@appstrate/slack"],
-        agents: [
-          agent("@acme/digest", { takesInput: true }),
-          agent("@acme/brief", { published: false, homeWritable: true }),
-          agent("@acme/post", { inactiveRequired: ["@appstrate/slack"] }),
-          agent("@acme/sync", { inactiveRequired: ["@appstrate/gmail", "@appstrate/slack"] }),
-        ],
-        agentsTotal: 4,
-      }),
-    ]);
+    const { text, shown } = formatSpaceDetails(
+      [
+        detail(PERSO, {
+          integrations: [gmail("c1", "Pro", true)],
+          agents: [agent("@acme/digest", { description: "Daily\n  digest." })],
+          agentsTotal: 1,
+        }),
+        detail(VENTES, {
+          integrations: [gmail("c2", "Équipe", false, false)],
+          connectable: ["@appstrate/slack"],
+          agents: [
+            agent("@acme/digest", { takesInput: true }),
+            agent("@acme/brief", { published: false, homeWritable: true }),
+            agent("@acme/post", { inactiveRequired: ["@appstrate/slack"] }),
+            agent("@acme/sync", { inactiveRequired: ["@appstrate/gmail", "@appstrate/slack"] }),
+          ],
+          agentsTotal: 4,
+        }),
+      ],
+      0,
+    );
     expect(shown).toEqual(["spc_p", "spc_v"]);
     expect(text.split("\n")).toEqual([
       SPACE_DETAILS_HEADING,
@@ -85,10 +90,10 @@ describe("formatSpaceDetails", () => {
   });
 
   it("shows the entries of a space that has some, and an empty one shows none", () => {
-    const { shown } = formatSpaceDetails([
-      detail(PERSO, { connectable: ["@appstrate/slack"] }),
-      detail(VENTES),
-    ]);
+    const { shown } = formatSpaceDetails(
+      [detail(PERSO, { connectable: ["@appstrate/slack"] }), detail(VENTES)],
+      0,
+    );
     // An absence discloses nothing of Ventes: only Perso puts data into the conversation.
     expect(shown).toEqual(["spc_p"]);
   });
@@ -96,21 +101,24 @@ describe("formatSpaceDetails", () => {
   it("is the same text for the same reads, whatever order the entries came in", () => {
     const a = agent("@acme/a");
     const b = agent("@acme/b");
-    const once = formatSpaceDetails([detail(PERSO, { agents: [a, b], agentsTotal: 2 })]);
-    const again = formatSpaceDetails([detail(PERSO, { agents: [b, a], agentsTotal: 2 })]);
+    const once = formatSpaceDetails([detail(PERSO, { agents: [a, b], agentsTotal: 2 })], 0);
+    const again = formatSpaceDetails([detail(PERSO, { agents: [b, a], agentsTotal: 2 })], 0);
     expect(again).toEqual(once);
   });
 
   it("counts a list get_me capped instead of listing its first entries, and says what the role does not read", () => {
-    const { text, shown } = formatSpaceDetails([
-      detail(PERSO, {
-        agents: [agent("@acme/a")],
-        agentsTotal: 40,
-        connectable: ["@appstrate/slack"],
-        connectableTotal: 30,
-      }),
-      detail({ ...VENTES, integrations: false }, { integrations: null }),
-    ]);
+    const { text, shown } = formatSpaceDetails(
+      [
+        detail(PERSO, {
+          agents: [agent("@acme/a")],
+          agentsTotal: 40,
+          connectable: ["@appstrate/slack"],
+          connectableTotal: 30,
+        }),
+        detail({ ...VENTES, integrations: false }, { integrations: null }),
+      ],
+      0,
+    );
     expect(shown).toEqual(["spc_p"]);
     // The entries get_me happened to list first are not put before the others.
     expect(text).not.toContain("@acme/a");
@@ -124,14 +132,14 @@ describe("formatSpaceDetails", () => {
     expect(text).toContain("Your role does not read the integrations of Ventes.");
     expect(text).not.toContain("- none");
     // An empty list is said, never left for the model to guess.
-    expect(formatSpaceDetails([detail(PERSO)]).text).toContain("- none connected or to connect");
+    expect(formatSpaceDetails([detail(PERSO)], 0).text).toContain("- none connected or to connect");
   });
 
   it("is the same text whatever order the spaces came in, sorted by name", () => {
     const one = detail(VENTES, { agents: [agent("@acme/b")] });
     const two = detail(PERSO, { agents: [agent("@acme/a")] });
-    const { text } = formatSpaceDetails([one, two]);
-    expect(formatSpaceDetails([two, one]).text).toBe(text);
+    const { text } = formatSpaceDetails([one, two], 0);
+    expect(formatSpaceDetails([two, one], 0).text).toBe(text);
     expect(text).toContain("for Perso, Ventes.");
   });
 
@@ -153,7 +161,7 @@ describe("formatSpaceDetails", () => {
     const three = [many(VENTES), many(LAB), many(PERSO)];
 
     it("leaves the same detail out of every space, never a space or an entry", () => {
-      const { text, shown } = formatSpaceDetails(three);
+      const { text, shown } = formatSpaceDetails(three, 0);
       expect(text.length).toBeLessThanOrEqual(CHAT_CONTEXT_DETAILS_BUDGET_CHARS);
       expect(shown).toEqual(["spc_l", "spc_p", "spc_v"]);
       expect(text).toContain("for Lab, Perso, Ventes.");
@@ -170,7 +178,7 @@ describe("formatSpaceDetails", () => {
     });
 
     it("counts every space alike when even the names do not fit", () => {
-      const { text, shown } = formatSpaceDetails(three, 1_000);
+      const { text, shown } = formatSpaceDetails(three, 0, 1_000);
       expect(shown).toEqual(["spc_l", "spc_p", "spc_v"]);
       expect(text.split("\n")).toEqual([
         SPACE_DETAILS_HEADING,
@@ -199,19 +207,20 @@ describe("formatSpaceDetails", () => {
             ],
           }),
         ],
+        0,
         200,
       );
       expect(text).toContain("- Perso: 1 usable integration, 0 to connect; 0 agents");
     });
 
     it("details no space when not even the counts fit", () => {
-      const named = formatSpaceDetails(three, 200);
+      const named = formatSpaceDetails(three, 0, 200);
       expect(named.shown).toEqual([]);
       expect(named.text.split("\n")).toEqual([
         SPACE_DETAILS_HEADING,
         "Not detailed here, for room: `get_me` with a space's `space_id` lists what it holds.",
       ]);
-      expect(formatSpaceDetails(three, 10)).toEqual({ text: "", shown: [] });
+      expect(formatSpaceDetails(three, 0, 10)).toEqual({ text: "", shown: [] });
     });
   });
 });
@@ -231,7 +240,7 @@ describe("readSpaceDetails", () => {
   };
   const ok = (body: Record<string, unknown>) => ({
     content: [],
-    structuredContent: { status: 200, body },
+    structuredContent: { status: 200, body: meBody(body) },
   });
 
   it("reads get_me in each space and leaves out one that fails, refuses or answers another space", async () => {
@@ -244,13 +253,26 @@ describe("readSpaceDetails", () => {
           {
             integration_package_id: "@appstrate/gmail",
             name: "Gmail",
+            source: "own",
             active: true,
-            connections: [{ id: "c1", label: "Pro", owned_by_actor: true }],
+            via: "home",
+            connections: [
+              {
+                id: "c1",
+                label: "Pro",
+                account_id: "a1",
+                owned_by_actor: true,
+                needs_reconnection: false,
+              },
+            ],
           },
         ],
-        connectable_integrations: ["@appstrate/slack"],
-        agents: [{ packageId: "@acme/a", display_name: "A", published: true }],
-        agents_total: 1,
+        connectable_integrations: { data: ["@appstrate/slack"], truncated: false, total: 1 },
+        agents: {
+          data: [fullAgent("@acme/a", "A")],
+          truncated: false,
+          total: 1,
+        },
       }),
       spc_v: new Error("timeout"),
       spc_l: { isError: true, structuredContent: { status: 403, body: {} } },
@@ -305,7 +327,7 @@ describe("readSpaceDetails", () => {
         const id = String(args.arguments?.space_id);
         await new Promise((resolve) => setTimeout(resolve, 30 - Number(id.slice(4))));
         inFlight--;
-        return ok({ space: { id }, agents: [] }) as never;
+        return ok({ space: { id } }) as never;
       },
     };
     const read = await readSpaceDetails(slow, AbortSignal.timeout(5000), spaces);
@@ -318,10 +340,17 @@ describe("readSpaceDetails", () => {
       spc_p: ok({
         space: { id: "spc_p" },
         connections: [
-          { integration_package_id: "@appstrate/gmail", active: true, connections: [] },
+          {
+            integration_package_id: "@appstrate/gmail",
+            name: "Gmail",
+            source: "own",
+            active: true,
+            via: "home",
+            connections: [],
+          },
         ],
-        connectable_integrations: ["@appstrate/slack"],
-        agents: [{ packageId: "@acme/a" }],
+        connectable_integrations: { data: ["@appstrate/slack"], truncated: false, total: 1 },
+        agents: { data: [fullAgent("@acme/a", "A")], truncated: false, total: 1 },
       }),
     });
     const [read] = await readSpaceDetails(fake, AbortSignal.timeout(1000), [
@@ -330,5 +359,57 @@ describe("readSpaceDetails", () => {
     expect(read?.integrations).toBeNull();
     expect(read?.connectable).toEqual([]);
     expect(read?.agents).toHaveLength(1);
+  });
+
+  it("leaves out a space whose context does not match the schema", async () => {
+    const fake = client({
+      spc_p: {
+        content: [],
+        structuredContent: {
+          status: 200,
+          body: { ...meBody({ space: { id: "spc_p" } }), agents: [] },
+        },
+      },
+    });
+    expect(await readSpaceDetails(fake, AbortSignal.timeout(1000), [PERSO])).toEqual([]);
+  });
+
+  it("keeps a field the server adds", async () => {
+    const fake = client({ spc_p: ok({ space: { id: "spc_p", added: 1 }, added_list: [] }) });
+    expect(await readSpaceDetails(fake, AbortSignal.timeout(1000), [PERSO])).toHaveLength(1);
+  });
+});
+
+describe("the cap on the spaces read", () => {
+  const space = (id: string, name: string) => ({ id, name });
+
+  it("orders origin, personal, touched, then the rest by name and id", () => {
+    const ordered = orderDetailSpaces(
+      [
+        space("spc_z", "Zeta"),
+        space("spc_a", "Alpha"),
+        space("spc_t", "Touched"),
+        space("spc_p", "Perso"),
+        space("spc_o", "Origin"),
+        space("spc_b", "Alpha"),
+      ],
+      ["spc_o", "spc_p", null, "spc_t", "spc_o"],
+    );
+    expect(ordered.map((s) => s.id)).toEqual([
+      "spc_o",
+      "spc_p",
+      "spc_t",
+      "spc_a",
+      "spc_b",
+      "spc_z",
+    ]);
+  });
+
+  it("states how many spaces were not read, whatever the level", () => {
+    const { text } = formatSpaceDetails([detail(PERSO, { agents: [agent("@a/x")] })], 3);
+    expect(text).toContain("3 spaces not read; call `get_me` with `space_id` for one of them.");
+    expect(formatSpaceDetails([detail(PERSO)], 1).text).toContain("1 space not read");
+    expect(formatSpaceDetails([detail(PERSO)], 0).text).not.toContain("not read");
+    expect(formatSpaceDetails([], 2).text).toContain("2 spaces not read");
   });
 });

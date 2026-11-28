@@ -50,7 +50,8 @@ export function actingOrgRole(c: Context<ChatEnv>): string {
  * Deadline of a read over the caller's own MCP connection (the turn's skills, the composer's
  * commands, an agent launch's prompt), connection included: the preamble runs before the turn's
  * abort controller exists, and a client disconnect never cancels a turn, so the read carries its
- * own bound. Past it, a turn goes on with the skills read so far left out, each with its notice.
+ * own bound. Past it the pending reads fail on the signal: a turn goes on with what it could not
+ * read left out, an agent launch is refused.
  */
 const CALLER_READ_TIMEOUT_MS = 10_000;
 

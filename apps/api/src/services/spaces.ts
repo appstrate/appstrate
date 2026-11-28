@@ -658,7 +658,7 @@ export async function ensurePersonalSpaceFor(orgId: string, userId: string): Pro
  * The personal space `userId` owns in `orgId`, or `null` — a pure READ, and the
  * counterpart {@link ensurePersonalSpaceFor} must not be used for.
  *
- * `DELETE …/shares/{target}` is the caller: revoking a share that was never
+ * `DELETE …/shares/{spaceId}` is the caller: revoking a share that was never
  * made must not be the act that brings the recipient's space into existence,
  * and provisioning one there wrote a row on the way to a 404.
  */

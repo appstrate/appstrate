@@ -13,6 +13,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { logger } from "../../lib/logger.ts";
 import { getCatalog } from "./catalog.ts";
+import { refusalResult } from "./tool-results.ts";
 import { toolIcons } from "./tool-icons.ts";
 import type { McpToolName } from "./tools.ts";
 
@@ -64,7 +65,12 @@ function presentOperation(args: Record<string, unknown>): ToolPresentation | und
   if (!op) return undefined;
   const tag = op.tags[0];
   const subject = packageSubject(op.pathTemplate, args);
-  return { ...(tag ? { tag } : {}), method: op.method, ...(subject ? { subject } : {}) };
+  return {
+    call: "operation",
+    ...(tag ? { tag } : {}),
+    method: op.method,
+    ...(subject ? { subject } : {}),
+  };
 }
 
 /** `get_me`: the caller it answered for (`/api/me/context`, relayed as `{ status, body }`). */
@@ -72,7 +78,10 @@ function presentCaller(result: CallToolResult): ToolPresentation | undefined {
   const user = asRecord(asRecord(asRecord(unwrapMcpResult(result))?.body)?.user);
   if (!user || typeof user.id !== "string" || !user.id) return undefined;
   const name = typeof user.name === "string" && user.name ? user.name : undefined;
-  return { subject: { kind: "user", id: user.id, ...(name ? { display_name: name } : {}) } };
+  return {
+    call: "caller",
+    subject: { kind: "user", id: user.id, ...(name ? { display_name: name } : {}) },
+  };
 }
 
 function withIcons(descriptor: Tool): Tool {
@@ -80,11 +89,14 @@ function withIcons(descriptor: Tool): Tool {
   return icons ? { ...descriptor, icons } : descriptor;
 }
 
-function thrownResult(err: unknown): CallToolResult {
-  return {
-    content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-    isError: true,
-  };
+/** A handler's throw as a tool refusal: a generic sentence and the request id, the detail in the log only. */
+function thrownResult(requestId: string): CallToolResult {
+  return refusalResult({
+    code: "internal_error",
+    error:
+      "The tool failed unexpectedly. Retrying may work; if it persists, report the request_id.",
+    request_id: requestId,
+  });
 }
 
 type Presenter = (
@@ -103,9 +115,12 @@ const presenterOf = (name: string): Presenter | undefined =>
 /**
  * Every tool given its icons, and its results their presentation unless the handler stamped one
  * (`search`, `call_integration_tool`). A handler's throw, its call not cancelled, answers a failed
- * result (`isError`, the message) presented the same way rather than a JSON-RPC error.
+ * result (`internal_error`, the request id; the detail goes to the log) presented the same way rather than a JSON-RPC error.
  */
-export function presentTools(tools: AppstrateToolDefinition[]): AppstrateToolDefinition[] {
+export function presentTools(
+  tools: AppstrateToolDefinition[],
+  requestId: string,
+): AppstrateToolDefinition[] {
   return tools.map((tool) => ({
     ...tool,
     descriptor: withIcons(tool.descriptor),
@@ -117,9 +132,10 @@ export function presentTools(tools: AppstrateToolDefinition[]): AppstrateToolDef
         if (extra.signal?.aborted) throw err;
         logger.error("mcp: tool handler threw", {
           tool: tool.descriptor.name,
+          requestId,
           error: err instanceof Error ? (err.stack ?? err.message) : String(err),
         });
-        result = thrownResult(err);
+        result = thrownResult(requestId);
       }
       if (result._meta?.[TOOL_PRESENTATION_META_KEY] !== undefined) return result;
       const presentation = presenterOf(tool.descriptor.name)?.(args, result);

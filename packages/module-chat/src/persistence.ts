@@ -121,12 +121,6 @@ export async function touchSessionSpaces(
   if (inserted.length > 0) notifySessionUpdate(session.id, session.orgId, session.userId);
 }
 
-/** {@link touchSessionSpaces} for one space. */
-export const touchSessionSpace = (
-  session: Parameters<typeof touchSessionSpaces>[0],
-  spaceId: string,
-): Promise<void> => touchSessionSpaces(session, [spaceId]);
-
 /**
  * Runs a write that sets a conversation's origin space, checked in the acting set before it:
  * the space deleted in between refuses the write on its foreign key, answered as the same 400
@@ -698,12 +692,17 @@ function titleCandidate(message: UIMessage): string | null {
 const TITLE_HEAD = 57;
 
 /**
- * A message's text as a title; null when empty. Past 60 chars it is cut to its
- * head plus an ellipsis — on the last word boundary, unless that sits before
- * char 30 (a short word, then a long unbroken token), where the word is cut.
+ * A message's text as a title; null when empty. It opens on a capital when its first word is plain
+ * lowercase letters (an apostrophe included: "c'est"), optionally followed by one of
+ * `, ; ! ? . …` ("quel temps" → "Quel temps"); any other first word stays as typed ("iPhone",
+ * "macOS", "https://…", "node_modules", "v2"). Past 60 chars it is cut to its head plus an
+ * ellipsis — on the last word boundary, unless that sits before char 30 (a short word, then a long
+ * unbroken token), where the word is cut. `toUpperCase`, not the locale's: the server's locale
+ * must not decide a title.
  */
-export function titleFromText(text: string): string | null {
-  if (!text) return null;
+export function titleFromText(raw: string): string | null {
+  if (!raw) return null;
+  const text = raw.replace(/^\p{Ll}(?=[\p{Ll}\p{M}'’]*[,;!?.…]?(?!\S))/u, (c) => c.toUpperCase());
   if (text.length <= 60) return toPgSafe(text);
   const head = text.slice(0, TITLE_HEAD);
   const midWord = /\S/.test(text.charAt(TITLE_HEAD)) && /\S$/.test(head);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
+import { turnBudgetNoteBlock } from "@appstrate/core/chat-turn-metadata";
 import { deriveToolPhase, extractErrorMessage, httpStatusOf } from "../src/ui/tool-result.ts";
 
 describe("unwrapMcpResult through deriveToolPhase", () => {
@@ -9,7 +10,7 @@ describe("unwrapMcpResult through deriveToolPhase", () => {
     const enveloped = {
       content: [
         { type: "text", text: JSON.stringify({ status: 502, error: "upstream unavailable" }) },
-        { type: "text", text: budgetNote },
+        turnBudgetNoteBlock(budgetNote),
       ],
     };
     expect(deriveToolPhase({ status: { type: "complete" }, result: enveloped })).toBe("error");

@@ -330,7 +330,7 @@ test.describe("View as role", () => {
   }) => {
     await page.addInitScript(
       ([key, orgId]) => {
-        localStorage.setItem("appstrate_signed_in", "1");
+        localStorage.setItem("appstrate:auth:signedIn", "1");
         localStorage.setItem(key, JSON.stringify({ orgId, orgRole: "member", space: null }));
       },
       [PREVIEW_STORAGE_KEY, browserCtx.org.orgId] as const,
@@ -413,7 +413,7 @@ test.describe("View as role", () => {
     );
     // A returning user's browser: the boot primes the org list before React
     // mounts, and that primed read is the one the refusal answers.
-    await context.addInitScript(() => localStorage.setItem("appstrate_signed_in", "1"));
+    await context.addInitScript(() => localStorage.setItem("appstrate:auth:signedIn", "1"));
     const page = await context.newPage();
     try {
       await seedRolePreview(page, {

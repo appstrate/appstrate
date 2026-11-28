@@ -106,8 +106,11 @@ they start with `packages/` or `e2e/`.
   Then the trail (the last segment alone on a phone), the page's controls and, from `md` up, the
   notification bell. Below `md` the bell leaves the header for the drawer so the page's title keeps
   the room; the header never writes the organization's or the space's name either, the drawer
-  does. Controls are 44 px on touch. In the chat the trail is the conversation's name and the
-  controls are its spaces, the pencil that renames it and the context panel.
+  does. Controls are 44 px on touch. In the chat the trail is the conversation's name on every
+  format: the chat page publishes it, not the list, whose phone drawer is unmounted while closed.
+  The controls are the conversation's « … » then the context panel toggle. For a writer the « … »
+  is the same menu as its row (its spaces, Renommer, Supprimer); a reader's « … » opens a small
+  panel listing the conversation's spaces.
 - **The sidebar is the whole screen on a phone**: its first row is the organization switcher, as
   wide as its names with its chevrons right after them (the sidebar's width from `md` up), then at
   the row's end the notification bell (its list rises from the bottom, as every phone menu does)
@@ -119,7 +122,8 @@ they start with `packages/` or `e2e/`.
   tile, like the conversations below) with the search as a magnifier at the end of that row, which unfolds a filled field (no border)
   under it, closed by its X or by a tap elsewhere while empty, then the recent conversations (one
   line each: the title, then the tiles of its spaces, two at most then « +N », named for a screen
-  reader; the names are in the "…" panel). Then the footer every drawer has: Catalogue, Settings
+  reader; the names are in the "…" panel). A row keeps its « … » on touch: a phone user can act on
+  a conversation without opening it. Then the footer every drawer has: Catalogue, Settings
   and the account.
 - **Getting-started cards** (`components/sidebar-tips.tsx`, rules in `lib/sidebar-tips.ts`): on a
   desktop at least 760 px tall, a stack of small cards above Catalogue, one first step each (title,
@@ -900,7 +904,15 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 The chat is `@appstrate/module-chat` (UI in `packages/module-chat/src/ui/`, built
 on assistant-ui). Its lightweight `@appstrate/module-chat/conversation-skeleton`
 is shared by the route fallback and the history wait. The chat sits inside the
-shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
+shared shell (its list: `modules/chat/chat-sidebar.tsx`). On desktop the shell's sidebar, the
+chat's and Studio's alike, resizes from 224 to 480 px, capped at 30% of the window and never below
+16rem, starts at 16rem (256 px) and keeps one width per browser for both products
+(`appstrate-sidebar-width`); the handle shows only under a fine pointer (a phone, a touch screen
+and a collapsed sidebar have no handle). The list's date groups fold from their heading, a button with
+`aria-expanded` whose chevron turns when folded and which fills on hover under a fine pointer; its
+text is 14 px on touch and 11 px under a fine pointer. A folded group holding the open
+conversation still shows that one row under its heading, the others hidden (as Slack does); folded groups are remembered per browser (`appstrate-chat-collapsed-groups`). Search results are
+never grouped, so never folded. The chat
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
 import from `apps/web`. What the assistant does between two texts is ONE line (`activity-group.tsx`, drawn with the
 primitives of `activity-line.tsx`): its reasoning and its tool calls are a group from the first
@@ -932,12 +944,14 @@ canvas and floats beside the thread: its cards and its previewed file are `Card`
 takes a shadow outside what floats over the page. It opens on the Summary, which reads
 without scrolling: the title and its gist, then the activity in one view (its runs, its
 files and its integration calls, lookups included, the latest of each on one line, a
-failure on its own line, each group leading to its tab), then models, access and details
-folded to one line each (`Collapsible`, remembered per browser). Beside it,
-Runs, Files and Tools, each named in words on every format: a narrow panel drops the
-tabs' icons, tightens them and scrolls them sideways past its width. Each group of the
+failure on its own line, each group leading to its tab); with nothing yet, an `EmptyState`
+saying what will show there, and an unsaved conversation's `EmptyState` as on the other tabs.
+Beside it, Runs, Files, Tools and Info. Each tab is an icon, named by its accessible name and a
+tooltip, so the tabs fit any width of the panel. Each group of the
 Summary stands on its own read (waiting in its shape, or saying its failure in its place);
-the calls, held by the conversation, show at once. Tools lists the
+the calls, held by the conversation, show at once. Info (`conversation-info.tsx`) shows the
+models and tokens, the reader's access and the details as titled sections, always open; for an
+unsaved conversation, the access alone. Tools lists the
 calls as the open chat holds them, the turn in flight included, else as stored
 (`@appstrate/module-chat/conversation-tools`, `live-conversation`), named as their cards
 name them (`tool-presentation.ts`), lookups behind a switch the panel keeps. Each call is
@@ -948,8 +962,13 @@ and the call's detail
 (`tool-call-detail`) opening inline under it, led by « Voir dans le fil ». Each turn's
 heading counts its calls with the group line's own words (`activityCounts`); a call opened
 from the Summary opens on its line of Tools, in view. A file opened from the Summary leads
-back to it. Its width follows what it shows (a list, the Summary, a file), each remembered
-per browser.
+back to it. Its height follows its content (the conversation's whole height for a previewed file); its
+width is one for every tab (400 px by default, from 300 px to 60% of the chat area), remembered
+per browser (`appstrate-chat-context-width`), so switching tabs never changes it. Both widths, the sidebar's
+and this one, are a `createPanelWidthStore` (`stores/panel-width-store.ts`). `PanelResizeHandle` (`components/panel-resize.tsx`) is the one resize
+handle for a panel's edge: `edge="left"` for a panel that grows leftward (this context panel),
+`edge="right"` for one that grows rightward (the shell's sidebar). The arrow pointing past the edge
+widens the panel, Home and End go to the bounds, a double-click restores the default.
 
 ## 14. Modules and feature gating
 
@@ -1003,9 +1022,11 @@ Keep actions visible or reachable from a visible menu on touchscreens in either 
 The `desktop-pointer` variant allows denser controls on a wide screen with a fine pointer and
 hover. Actions revealed on hover must also appear on keyboard focus.
 
-- Keep the chat composer and conversation search at 1rem in both orientations. A landscape
-  phone can cross `md`, and iOS can zoom when focusing a smaller field. Message bodies use
-  `text-base md:text-sm`. Fenced code inherits its block's size (14 px below `md`, 12 px above).
+- Conversation text (composer, user bubble, assistant body and its code) is 16 px on touch and
+  14 px under a fine pointer (`text-base desktop-pointer:text-sm`; code one step smaller: 14 px
+  then 12 px), so a message keeps its size when sent: the pointer decides, never the width.
+  Editable fields stay 1rem on touch (iOS can zoom when focusing a smaller field). Conversation
+  search stays 1rem everywhere.
 - Use `dvh` when a surface should follow the browser toolbars, or `svh` for a stable height.
   The chat shell and sidebar share `KEYBOARD_VIEWPORT_CLASS`, including the portalled search
   sheet. `interactive-widget=resizes-content` lets supporting browsers resize the layout.

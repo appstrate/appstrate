@@ -20,17 +20,24 @@ describe("callSpaceOf", () => {
   it("prefers the resolved target and honors an organization-only receipt", () => {
     const providerMetadata = { appstrate: { spaceId: "spc_caller" } };
     expect(
-      callSpaceOf({ providerMetadata, result: { actedSpaceIds: ["spc_caller", "spc_target"] } }),
+      callSpaceOf({
+        providerMetadata,
+        resultProviderMetadata: { appstrate: { actedSpaceIds: ["spc_caller", "spc_target"] } },
+      }),
     ).toBe("spc_target");
-    expect(callSpaceOf({ providerMetadata, result: { actedSpaceIds: [] } })).toBeUndefined();
+    expect(
+      callSpaceOf({
+        providerMetadata,
+        resultProviderMetadata: { appstrate: { actedSpaceIds: [] } },
+      }),
+    ).toBeUndefined();
   });
 
-  it("reads a failure's resolved target off its outcome, the failure keeping no result", () => {
+  it("reads the resolved target off the outcome stamp, whatever the result holds", () => {
     const providerMetadata = { appstrate: { spaceId: "spc_caller" } };
     expect(
       callSpaceOf({
         providerMetadata,
-        result: { error: "403" },
         resultProviderMetadata: { appstrate: { actedSpaceIds: ["spc_caller", "spc_target"] } },
       }),
     ).toBe("spc_target");

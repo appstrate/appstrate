@@ -417,7 +417,7 @@ describe("connection rows carry their variables", () => {
 
     await persistCredentialBundle(
       { kind: "update-by-id", connectionId: id, expect: held },
-      { credentials: { api_key: "k-456" }, expiresAt: null, needsReconnection: false },
+      { credentials: { api_key: "k-456" }, expiresAt: null },
     );
 
     const after = (await load(id))!;

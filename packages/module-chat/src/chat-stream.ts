@@ -25,6 +25,7 @@ import { invalidRequest, conflict, forbidden } from "@appstrate/core/api-errors"
 import { readJsonBody } from "@appstrate/core/request-body";
 import { parseFileUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
+import { orderDetailSpaces } from "./space-details.ts";
 import { chatThreadMessagesSchema } from "@appstrate/core/chat-message";
 import { resolveAgentPrompt, withStoredAgentPromptTexts } from "./agent-launch.ts";
 import { notifySessionUpdate } from "./realtime.ts";
@@ -57,7 +58,6 @@ import {
   persistUserMessage,
   persistAssistantMessage,
   storedHistory,
-  touchSessionSpace,
   touchSessionSpaces,
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
@@ -434,7 +434,7 @@ export async function handleChatStream(
     });
     const capabilities = turnCapabilities((permission) => permissions.includes(permission), spaces);
     // A conversation acts in the spaces of its turn alone and records each one it acts in
-    // (see `touchSessionSpace`; the origin space is touched by definition): a space a call names,
+    // (see `touchSessionSpaces`; the origin space is touched by definition): a space a call names,
     // or the space of a file `read_resource` reads, before the call, refused outside the set;
     // search records the spaces that contributed an entry to its result (`searched_spaces`), and
     // a launch refusal records the spaces whose activation state it discloses, before any result
@@ -449,9 +449,9 @@ export async function handleChatStream(
       originSpaceId: originSpace?.id,
       touch: async (touchedSpaceId) => {
         if (!chatSessionId) return;
-        await touchSessionSpace(
+        await touchSessionSpaces(
           { id: chatSessionId, orgId, userId: user.id, originSpaceId: conv.spaceId },
-          touchedSpaceId,
+          [touchedSpaceId],
         );
       },
       fileSpace: async (uri) => {
@@ -462,11 +462,13 @@ export async function handleChatStream(
     // Detailed without recording: the origin and touched spaces are recorded already, and the
     // personal space holds the caller's own data, which they cannot lose access to. Every other
     // space is detailed only when the user asked for them all, and recorded before inference.
-    const engaged = new Set(
-      [conv.spaceId, personalSpaceId, ...conv.touched].filter((id) => id !== null),
+    const priority = [conv.spaceId, personalSpaceId, ...conv.touched];
+    const engaged = new Set(priority.filter((id) => id !== null));
+    // Priority order, which the read is capped on: origin, personal, touched, then the rest.
+    const detailSpaces = orderDetailSpaces(
+      body.context_all_spaces === true ? spaces : spaces.filter((space) => engaged.has(space.id)),
+      priority,
     );
-    const detailSpaces =
-      body.context_all_spaces === true ? spaces : spaces.filter((space) => engaged.has(space.id));
     return {
       skills: conv.selection,
       detailSpaces,

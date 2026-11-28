@@ -14,7 +14,8 @@
  * `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`).
  *
  * In one transaction: (a) an enabled integration a personal space holds outside the organization's
- * offer is kept by an `available` offer; (b) every other such row is deleted as
+ * offer is kept by an `available` offer, and every row an offer keeps there becomes a decision
+ * about that offer (`placed_by_offer`), so it goes when the offer does; (b) every other such row is deleted as
  * `withdrawPlacement` deletes, its schedules disabled first; (c) `package_shared` notifications are
  * deleted and `notifications_type_valid` validated. System packages are left alone. Rules,
  * audit shapes and the queue note: README section "Detail — Personal spaces take the org offer
@@ -24,13 +25,15 @@
 import { parseArgs } from "node:util";
 import { sql } from "drizzle-orm";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { exitUnlessDatabaseNamed } from "./lib/database-target.ts";
+import { describeDatabaseTarget, exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 class DryRunRollback extends Error {}
 
 export interface PersonalSpaceAudience {
   /** Offers created for integrations a personal space had switched on. */
   offers: { orgId: string; packageId: string }[];
+  /** Rows an offer keeps in a personal space, turned into decisions about that offer. */
+  offerRows: number;
   /** Rows deleted, with the schedules each took down. */
   deleted: { packageId: string; spaceId: string; enabled: boolean; schedulesDisabled: number }[];
   notificationsDeleted: number;
@@ -53,15 +56,11 @@ export async function runPersonalSpaceAudience(options: {
   const { apply, out } = options;
   // Imported here: `@appstrate/db/client` opens its database on import, after the entry point's guard.
   const { db, toRows } = await import("@appstrate/db/client");
-  const [target] = toRows<{ name: string; addr: string | null; port: number | null }>(
-    await db.execute(
-      "SELECT current_database() AS name, inet_server_addr()::text AS addr, inet_server_port() AS port",
-    ),
-  );
-  out(`database: ${target!.name} at ${target!.addr ?? "local socket"}:${target!.port ?? "-"}`);
+  out(await describeDatabaseTarget());
 
   const result: PersonalSpaceAudience = {
     offers: [],
+    offerRows: 0,
     deleted: [],
     notificationsDeleted: 0,
   };
@@ -92,6 +91,20 @@ export async function runPersonalSpaceAudience(options: {
         out(`  offered ${row.package_id} to ${row.org_id}: available`);
         result.offers.push({ orgId: row.org_id, packageId: row.package_id });
       }
+
+      // A row the offer keeps is a decision about it, as `withdrawPlacement` leaves one.
+      const kept = toRows<{ package_id: string }>(
+        await tx.execute(sql`UPDATE space_packages sp SET placed_by_offer = true, shared_by = NULL
+          FROM spaces s, packages p
+          WHERE s.id = sp.space_id AND s.owner_user_id IS NOT NULL
+            AND p.id = sp.package_id AND p.org_id = s.org_id
+            AND sp.space_id IS DISTINCT FROM p.home_space_id
+            AND sp.placed_by_offer = false
+            AND EXISTS (SELECT 1 FROM org_package_offers o
+              WHERE o.org_id = s.org_id AND o.package_id = p.id)
+          RETURNING sp.package_id`),
+      );
+      result.offerRows = kept.length;
 
       // (b) Everything else in a personal space with no offer: withdrawn.
       const rows = toRows<{
@@ -138,7 +151,7 @@ export async function runPersonalSpaceAudience(options: {
       await tx.execute("ALTER TABLE notifications VALIDATE CONSTRAINT notifications_type_valid");
 
       out(
-        `offers created: ${result.offers.length}, rows deleted: ${result.deleted.length}, schedules disabled: ${result.deleted.reduce((n, d) => n + d.schedulesDisabled, 0)}, notifications deleted: ${result.notificationsDeleted}`,
+        `offers created: ${result.offers.length}, rows kept by an offer: ${result.offerRows}, rows deleted: ${result.deleted.length}, schedules disabled: ${result.deleted.reduce((n, d) => n + d.schedulesDisabled, 0)}, notifications deleted: ${result.notificationsDeleted}`,
       );
       if (!apply) throw new DryRunRollback();
     });

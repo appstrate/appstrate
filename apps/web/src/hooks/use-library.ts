@@ -307,7 +307,7 @@ export async function setOrgOffer(packageId: string, mode: OrgOfferMode | null) 
   }
   const { data } = await client.PUT("/api/packages/{scope}/{name}/org-offer", {
     ...params,
-    body: { mode },
+    body: { org_offer: mode },
   });
   return data?.warnings ?? [];
 }

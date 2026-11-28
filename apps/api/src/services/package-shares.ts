@@ -19,10 +19,12 @@ const sharer = alias(user, "sharer");
 
 /** One entry of `GET /api/packages/{scope}/{name}/shares`. */
 export interface PackageShareView {
-  target: { kind: "space"; spaceId: string; name: string };
+  /** The team space the package is placed in. */
+  spaceId: string;
+  space_name: string;
   /** `user_id`, not `userId`: one of the enumerated counter-exceptions of CASING_CONVENTIONS. */
   shared_by: { user_id: string; name: string } | null;
-  /** `space_packages.enabled` of the target's row. */
+  /** `space_packages.enabled` of that space's row. */
   enabled: boolean;
   createdAt: string;
 }
@@ -168,7 +170,8 @@ export async function listPackageShares(
     .orderBy(spacePackages.installedAt);
 
   return rows.map((row) => ({
-    target: { kind: "space" as const, spaceId: row.spaceId, name: row.spaceName },
+    spaceId: row.spaceId,
+    space_name: row.spaceName,
     shared_by: sharerView(row),
     enabled: row.enabled,
     createdAt: row.createdAt.toISOString(),

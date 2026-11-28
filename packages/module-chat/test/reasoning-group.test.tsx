@@ -328,7 +328,7 @@ describe("the reasoning of an assistant turn", () => {
     reveal("s1");
     const counted = {
       ...lookup("s1", "issues"),
-      resultProviderMetadata: { appstrate: { presentation: { count: 3, items: [] } } },
+      resultProviderMetadata: { appstrate: { presentation: { call: "search", count: 3, items: [] } } },
     };
     const html = render([counted, answer], "ready");
     // The group's line alone is a disclosure: the step draws no line of its own.

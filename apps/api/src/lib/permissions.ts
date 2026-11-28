@@ -188,7 +188,6 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     "credential-proxy:call-own",
     "end-users:read",
     "end-users:write",
-    "studio:read",
   ]);
 
 /**
@@ -211,7 +210,6 @@ const RUNNER_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = new Set<Spa
   "integrations:read",
   "integrations:connect",
   "integrations:disconnect",
-  "studio:read",
 ]);
 
 /** `viewer`: look — the `:read` actions of `operator`. */
@@ -391,16 +389,6 @@ export function knownSpaceLevelPermissions(): ReadonlySet<string> {
   return known;
 }
 
-/** Grants a custom role holds through a column, never `permissions` (`studio:read` ⇐ `shows_studio`). */
-export const RESOLVED_SPACE_PERMISSIONS: ReadonlySet<string> = new Set<Permission>(["studio:read"]);
-
-/** What a custom role's `permissions` may hold: for the validator, the picker and the narrowing. */
-export function assignableSpaceLevelPermissions(): ReadonlySet<string> {
-  const assignable = new Set<string>(knownSpaceLevelPermissions());
-  for (const permission of RESOLVED_SPACE_PERMISSIONS) assignable.delete(permission);
-  return assignable;
-}
-
 /**
  * The reads any one of which `permission` requires, canonical first; empty when none.
  * The module loader passes its own `known`: it runs before the module snapshot is registered.
@@ -468,8 +456,7 @@ export function partitionSpacePermissions(stored: readonly string[]): {
   granted: Set<Permission>;
   unavailable: string[];
 } {
-  // A resolved grant in a stored array is reported, never held.
-  const known = assignableSpaceLevelPermissions();
+  const known = knownSpaceLevelPermissions();
   const granted = new Set<Permission>();
   const unavailable: string[] = [];
   for (const permission of stored) {
@@ -497,12 +484,12 @@ export interface SpaceVocabularyGroup {
 
 /**
  * Custom-role vocabulary grouped for a picker (`GET /api/roles/vocabulary`,
- * RBAC spec §6.2). Same source as {@link assignableSpaceLevelPermissions}, so what
+ * RBAC spec §6.2). Same source as {@link knownSpaceLevelPermissions}, so what
  * the picker offers and what the validator accepts cannot drift.
  */
 export function spaceLevelVocabulary(): SpaceVocabularyGroup[] {
   const apiKeyAllowed = getApiKeyAllowedScopes();
-  const known = assignableSpaceLevelPermissions();
+  const known = knownSpaceLevelPermissions();
   const byResource = new Map<string, SpacePermissionEntry[]>();
   for (const permission of [...known].sort()) {
     const colon = permission.indexOf(":");

@@ -46,14 +46,12 @@ import {
   extractRunAndWaitAuthOffers,
   isStartedRunResult,
 } from "./auth-offer.ts";
-import { asRecordOrNull } from "@appstrate/core/safe-json";
 import {
   packageCreatedByImport,
   packageCreatedByOperation,
   packagePageHref,
   type CreatedPackage,
 } from "./package-created.ts";
-import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { showCall } from "./tool-presentation.ts";
 import { cardSpaceOf, type StoredResult } from "./use-call-presentation.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
@@ -62,6 +60,7 @@ import {
   deriveToolPhase,
   extractErrorMessage,
   httpStatusOf,
+  unwrapToolResult,
 } from "./tool-result.ts";
 
 /**
@@ -71,16 +70,6 @@ import {
  * card (button + auto-resume on completion — see oauth-connect-card).
  */
 const INITIATE_CONNECT_OP = "initiateIntegrationConnect";
-
-// assistant-stream ToolCallTiming = { startedAt, completedAt? } (epoch ms;
-// completedAt absent while running).
-function readDurationMs(timing: unknown): number | undefined {
-  const t = asRecordOrNull(timing);
-  if (t && typeof t.startedAt === "number" && typeof t.completedAt === "number") {
-    return t.completedAt - t.startedAt;
-  }
-  return undefined;
-}
 
 /** A card's props: its part, and what its stored part says (`useStoredResults`). */
 export type ToolCardProps = ToolCallMessagePartProps<Record<string, unknown>, unknown> & {
@@ -138,12 +127,12 @@ function RunLaunchCard({
   const runId = extractRunId(props.result);
   const initialFiles = React.useMemo(() => extractRunFiles(props.result), [props.result]);
   // Same reason as `ToolCallCard` — see the note there.
-  const unwrapped = React.useMemo(() => unwrapMcpResult(props.result), [props.result]);
+  const unwrapped = React.useMemo(() => unwrapToolResult(props.result), [props.result]);
   const meta = definedEntries({
     tool_call_id: props.toolCallId,
     is_error: props.isError,
     http_status: httpStatusOf(unwrapped),
-    duration_ms: readDurationMs(props.timing),
+    duration_ms: props.stored?.durationMs,
   });
   const agentLabel = extractAgentLabel(props.args);
   const phase = deriveToolPhase(props);
@@ -197,11 +186,11 @@ export function ToolStep(props: ToolCardProps) {
   const presentation = props.stored?.presentation;
   const phase = deriveToolPhase(props);
   const { Icon, subject, label, idText } = showCall({ ...props, presentation }, t);
-  // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on every render of
+  // `unwrapToolResult` JSON-parses the tool payload. Unmemoized it re-parsed on every render of
   // this step, and during a stream the thread re-renders per chunk.
-  const unwrapped = React.useMemo(() => unwrapMcpResult(props.result), [props.result]);
+  const unwrapped = React.useMemo(() => unwrapToolResult(props.result), [props.result]);
   const status = httpStatusOf(unwrapped);
-  const durationMs = readDurationMs(props.timing);
+  const durationMs = props.stored?.durationMs;
   const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
   const spaceId = cardSpaceOf(props);
 
@@ -217,11 +206,11 @@ export function ToolStep(props: ToolCardProps) {
       idText={idText}
       running={phase === "running"}
       trailing={
-        presentation?.count !== undefined || spaceId || durationMs !== undefined ? (
+        presentation?.call === "search" || spaceId || durationMs !== undefined ? (
           <>
-            {presentation?.count !== undefined ? (
+            {presentation?.call === "search" ? (
               <span className="flex shrink-0 items-center gap-1.5 text-xs">
-                <SubjectStack subjects={presentation.items ?? []} />
+                <SubjectStack subjects={presentation.items} />
                 {t("tool.search.count", { count: presentation.count })}
               </span>
             ) : null}
@@ -285,7 +274,7 @@ export function InvokeOperationBreakout(props: ToolCardProps) {
         packageId={args?.path_params?.packageId}
         toolCallId={props.toolCallId}
         errorText={
-          phase === "error" && !offer ? extractErrorMessage(unwrapMcpResult(result)) : undefined
+          phase === "error" && !offer ? extractErrorMessage(unwrapToolResult(result)) : undefined
         }
       />
     );
@@ -299,7 +288,7 @@ export function InvokeOperationBreakout(props: ToolCardProps) {
   }
 
   const created =
-    phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;
+    phase === "success" ? packageCreatedByOperation(opId, unwrapToolResult(result)) : null;
   return created ? (
     <CreatedPackageLink
       created={created}
@@ -350,7 +339,7 @@ function CreatedPackageLink({
 export function ImportPackageBreakout(props: ToolCardProps) {
   const created =
     deriveToolPhase(props) === "success"
-      ? packageCreatedByImport(unwrapMcpResult(props.result))
+      ? packageCreatedByImport(unwrapToolResult(props.result))
       : null;
   return created ? (
     <CreatedPackageLink

@@ -14,14 +14,13 @@ import {
   useUpdateOrgSettings,
 } from "../../hooks/use-org-settings";
 import { usePermissions } from "../../hooks/use-permissions";
-import { useSpaceRoleOptions } from "../../hooks/use-roles";
+import { spaceRoleValue, useSpaceRoleOptions } from "../../hooks/use-roles";
 import { fieldWriteState } from "../../lib/field-write-state";
 import { onMutationError } from "../../lib/mutation-error";
 import {
   orgPersonalSpaceRoleBody,
   personalSpaceRoleImpactDescription,
   pickPersonalSpaceRole,
-  storedRoleToSelectValue,
   type PendingPersonalSpaceRole,
 } from "../../lib/personal-space-role";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
@@ -45,7 +44,7 @@ export function PersonalSpaceRoleSetting() {
   const [pending, setPending] = useState<PendingPersonalSpaceRole | null>(null);
   if (!currentOrg) return null;
   const mayWrite = can("org:settings");
-  const value = orgSettings ? storedRoleToSelectValue(orgSettings.personal_space_role) : "";
+  const value = orgSettings ? spaceRoleValue(orgSettings.personal_space_role) : "";
   const written = fieldWriteState(update, "personal_space_role");
 
   const write = (next: string) =>

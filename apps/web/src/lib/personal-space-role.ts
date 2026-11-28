@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { TFunction } from "i18next";
-import { isSpaceRolePreset } from "@appstrate/core/permissions";
 import type { components } from "../api/client";
 import type { operations } from "../api/schema";
 import {
   spaceRoleAssignment,
   spaceRoleLabel,
+  catalogRoleValue,
   spaceRoleValue,
   type RoleObject,
-  type SpaceRolePreset,
+  type SpaceRoleReference,
 } from "../hooks/use-roles";
 
 type OrgMember = components["schemas"]["OrgMember"];
@@ -17,55 +17,37 @@ type OrgMember = components["schemas"]["OrgMember"];
 /** The select value of « selon l'organisation »: no override of the member's own. */
 export const FOLLOW_ORG_DEFAULT = "org-default";
 
-/** A stored org setting is a preset key or a custom role id (`srl_…`); a select carries `preset:<key>` / `custom:<id>`. */
-export function storedRoleToSelectValue(stored: string): string {
-  return isSpaceRolePreset(stored)
-    ? spaceRoleValue({ preset_role: stored })
-    : spaceRoleValue({ custom_role_id: stored });
-}
-
 /**
  * What « selon l'organisation » resolves to for a member (`personal_space_default_role`, guest cap
  * applied), named as the role selects name it, or said invalid when it names no role.
  */
 export function followLabel(member: OrgMember, t: (key: string) => string): string {
-  return (
-    spaceRoleLabel(member.personal_space_default_role, t) ??
-    t("settings:userDetail.personalSpaceRoleNoDefault")
-  );
+  const role = member.personal_space_default_role;
+  if (!role) return t("settings:userDetail.personalSpaceRoleNoDefault");
+  return spaceRoleLabel(role, t);
 }
 
 /** The org setting's PATCH body for a picked select value. */
-export function orgPersonalSpaceRoleBody(selectValue: string): { personal_space_role: string } {
-  const { preset_role, custom_role_id } = spaceRoleAssignment(selectValue);
-  return { personal_space_role: (preset_role ?? custom_role_id) as string };
+export function orgPersonalSpaceRoleBody(selectValue: string): {
+  personal_space_role: SpaceRoleReference;
+} {
+  return { personal_space_role: spaceRoleAssignment(selectValue) };
 }
 
 /** What a member's own override reads as in the select. */
 export function memberOverrideToSelectValue(role: OrgMember["personal_space_role"]): string {
-  if (!role) return FOLLOW_ORG_DEFAULT;
-  return "preset_role" in role
-    ? spaceRoleValue({ preset_role: role.preset_role })
-    : spaceRoleValue({ custom_role_id: role.custom_role_id });
+  return role ? spaceRoleValue(role) : FOLLOW_ORG_DEFAULT;
 }
 
 export type MemberPersonalSpaceRoleRequest =
-  | { method: "DELETE" }
-  | {
-      method: "PUT";
-      body: { preset_role: SpaceRolePreset } | { custom_role_id: string };
-    };
+  { method: "DELETE" } | { method: "PUT"; body: SpaceRoleReference };
 
 /** The first option clears the override; any other sets it, with exactly one of the two body fields. */
 export function memberPersonalSpaceRoleRequest(
   selectValue: string,
 ): MemberPersonalSpaceRoleRequest {
   if (selectValue === FOLLOW_ORG_DEFAULT) return { method: "DELETE" };
-  const { preset_role, custom_role_id } = spaceRoleAssignment(selectValue);
-  return {
-    method: "PUT",
-    body: preset_role ? { preset_role } : { custom_role_id: custom_role_id as string },
-  };
+  return { method: "PUT", body: spaceRoleAssignment(selectValue) };
 }
 
 /**
@@ -81,9 +63,7 @@ export function guestRoleValues(
   return new Set(
     (roles ?? [])
       .filter((r) => r.permissions.every((permission) => operator.has(permission)))
-      .map((r) =>
-        spaceRoleValue({ preset_role: r.kind === "preset" ? r.key : null, custom_role_id: r.id }),
-      ),
+      .map(catalogRoleValue),
   );
 }
 
@@ -103,7 +83,7 @@ export interface PendingPersonalSpaceRole {
 export async function pickPersonalSpaceRole(
   selectValue: string,
   steps: {
-    impactOf: (role: string) => Promise<PersonalSpaceRoleImpact>;
+    impactOf: (role: SpaceRoleReference) => Promise<PersonalSpaceRoleImpact>;
     write: (selectValue: string) => void;
     askConfirmation: (pending: PendingPersonalSpaceRole) => void;
   },

@@ -230,7 +230,7 @@ describe("a column narrower in a narrow table", () => {
   });
 
   it("gives way to a width the reader chose, at every size", () => {
-    storage.setItem("appstrate-column-widths-chosen", JSON.stringify({ num: 80 }));
+    storage.setItem("appstrate:web:columnWidths:chosen", JSON.stringify({ num: 80 }));
     const chosen = table({ columns, tableId: "chosen" });
     expect(chosen).toContain("width:80px");
     expect(chosen).not.toContain("--dt-w-narrow");
@@ -264,7 +264,7 @@ describe("resizing", () => {
   });
 
   it("keeps the chosen width when the table's accessible label changes language", () => {
-    storage.setItem("appstrate-column-widths-measured", JSON.stringify({ name: 321 }));
+    storage.setItem("appstrate:web:columnWidths:measured", JSON.stringify({ name: 321 }));
     const french = table({ tableId: "measured", label: "Mesuré" });
     const english = table({ tableId: "measured", label: "Measured" });
     expect(french).toContain('aria-label="Mesuré"');
@@ -274,13 +274,13 @@ describe("resizing", () => {
   });
 
   it("isolates tables even when their accessible labels are identical", () => {
-    storage.setItem("appstrate-column-widths-first", JSON.stringify({ name: 345 }));
+    storage.setItem("appstrate:web:columnWidths:first", JSON.stringify({ name: 345 }));
     expect(table({ tableId: "first", label: "Packages" })).toContain("width:345px");
     expect(table({ tableId: "second", label: "Packages" })).not.toContain("width:345px");
   });
 
   it("never goes under the declared width", () => {
-    storage.setItem("appstrate-column-widths-narrow", JSON.stringify({ when: 10 }));
+    storage.setItem("appstrate:web:columnWidths:narrow", JSON.stringify({ when: 10 }));
     expect(table({ tableId: "narrow" })).toContain("width:96px");
   });
 });

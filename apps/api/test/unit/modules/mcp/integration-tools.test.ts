@@ -92,6 +92,7 @@ const TOOL = "acme_items__api_call";
 /** The presentation `call_integration_tool` stamps on a call to `@acme/docs`' `search`. */
 const SEARCH_STAMP = {
   "dev.appstrate/presentation": {
+    call: "remote_tool",
     title: "search",
     subject: { kind: "integration", id: "@acme/docs", display_name: "@acme/docs" },
   },
@@ -1220,25 +1221,39 @@ describe("call_integration_tool — an api_call's presentation", () => {
 
   it("names the method of its one request", async () => {
     expect(await presented({ requests: [get({ method: "DELETE" })] })).toEqual({
+      call: "proxied_request",
       method: "DELETE",
+      requests: 1,
       subject,
     });
   });
 
-  it("names no method for a batch of several", async () => {
-    expect(await presented({ requests: [get(), get({ method: "POST" })] })).toEqual({ subject });
+  it("names no method for a batch of several, and its size", async () => {
+    expect(await presented({ requests: [get(), get({ method: "POST" })] })).toEqual({
+      call: "proxied_request",
+      requests: 2,
+      subject,
+    });
   });
 
   it("reads refused arguments the same way, guessing nothing", async () => {
     // One request refused for a field it does not declare: its method is still the call's.
     expect(await presented({ requests: [get({ method: "PUT", bogus: 1 })] })).toEqual({
+      call: "proxied_request",
       method: "PUT",
+      requests: 1,
       subject,
     });
-    // A refused batch, and a method outside `requests`, name none.
-    for (const args of [{ requests: [get(), { method: 7 }] }, { method: "GET", target: TARGET }]) {
-      expect(await presented(args)).toEqual({ subject });
-    }
+    // A refused batch names its size, no method; a method outside `requests` names neither.
+    expect(await presented({ requests: [get(), { method: 7 }] })).toEqual({
+      call: "proxied_request",
+      requests: 2,
+      subject,
+    });
+    expect(await presented({ method: "GET", target: TARGET })).toEqual({
+      call: "proxied_request",
+      subject,
+    });
   });
 });
 

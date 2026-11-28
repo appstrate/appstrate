@@ -100,7 +100,7 @@ const offerRaw = (headers: Headers, packageId: string, body: unknown) =>
     body: JSON.stringify(body),
   });
 const offer = (headers: Headers, packageId: string, mode = "on_by_default") =>
-  offerRaw(headers, packageId, { mode });
+  offerRaw(headers, packageId, { org_offer: mode });
 const withdraw = (headers: Headers, packageId: string) =>
   app.request(`/api/packages/${packageId}/org-offer`, { method: "DELETE", headers });
 
@@ -201,7 +201,7 @@ beforeEach(async () => {
 describe("PUT/DELETE /api/packages/{scope}/{name}/org-offer", () => {
   it("lets an admin offer, is idempotent, and audits once", async () => {
     const first = await offer(admin.headers(teamId), AGENT);
-    expect(first.status, await first.clone().text()).toBe(200);
+    expect(first.status, await first.clone().text()).toBe(201);
     expect(await first.json()).toEqual({
       object: "package_org_offer",
       packageId: AGENT,
@@ -220,7 +220,7 @@ describe("PUT/DELETE /api/packages/{scope}/{name}/org-offer", () => {
 
   it("keeps an existing offer withdrawable when its last published version is deleted", async () => {
     const headers = admin.headers(teamId);
-    expect((await offer(headers, AGENT)).status).toBe(200);
+    expect((await offer(headers, AGENT)).status).toBe(201);
     const deleted = await app.request(`/api/packages/agents/${AGENT}/versions/0.1.0`, {
       method: "DELETE",
       headers,
@@ -258,7 +258,7 @@ describe("PUT/DELETE /api/packages/{scope}/{name}/org-offer", () => {
     const draft = await offer(authHeaders(ctx, { "X-Space-Id": teamId }), DRAFT_ONLY);
     await expectProblem(draft, 409, { code: "package_has_no_version" });
     const system = await offer(authHeaders(ctx), CATALOG_SSH);
-    expect(system.status, await system.clone().text()).toBe(200);
+    expect(system.status, await system.clone().text()).toBe(201);
   });
 
   it("refuses a credential confined to a space", async () => {
@@ -282,9 +282,14 @@ describe("the offer mode", () => {
       body: JSON.stringify({ packageId: AGENT }),
     });
 
-  it("refuses a body without a mode, with an unknown mode and with an unknown member", async () => {
+  it("refuses a body without `org_offer`, with an unknown value and with an unknown member", async () => {
     const headers = admin.headers(teamId);
-    for (const body of [{}, { mode: "everywhere" }, { mode: "available", extra: true }]) {
+    for (const body of [
+      {},
+      { mode: "available" },
+      { org_offer: "everywhere" },
+      { org_offer: "available", extra: true },
+    ]) {
       const res = await offerRaw(headers, AGENT, body);
       expect(res.status, JSON.stringify(body)).toBe(400);
     }
@@ -299,7 +304,7 @@ describe("the offer mode", () => {
   it("records an `available` offer and answers it", async () => {
     // The `on_by_default` answer shape is pinned by the first test.
     const res = await offer(admin.headers(teamId), AGENT, "available");
-    expect(res.status, await res.clone().text()).toBe(200);
+    expect(res.status, await res.clone().text()).toBe(201);
     expect(await res.json()).toEqual({
       object: "package_org_offer",
       packageId: AGENT,
@@ -329,7 +334,7 @@ describe("the offer mode", () => {
   });
 
   it("places an available offer in every space without activating it", async () => {
-    expect((await offer(admin.headers(teamId), AGENT, "available")).status).toBe(200);
+    expect((await offer(admin.headers(teamId), AGENT, "available")).status).toBe(201);
 
     const personal = await libraryPlacement(member, AGENT, "agent", member.personalSpaceId);
     expect(personal?.org_offer).toBe("available");
@@ -378,7 +383,7 @@ describe("an offered package is placed and active where no row says otherwise", 
     await seedOrgConnection(member.userId, CATALOG_SSH);
     expect((await contextEntry(member, member.personalSpaceId, CATALOG_SSH))?.active).toBe(false);
 
-    expect((await offer(authHeaders(ctx), CATALOG_SSH)).status).toBe(200);
+    expect((await offer(authHeaders(ctx), CATALOG_SSH)).status).toBe(201);
 
     const entry = await contextEntry(member, member.personalSpaceId, CATALOG_SSH);
     expect(entry?.active).toBe(true);
@@ -395,7 +400,7 @@ describe("an offered package is placed and active where no row says otherwise", 
   it("keeps a space that holds an enabled=false row off", async () => {
     await seedOrgConnection(member.userId, CATALOG_SSH);
     await seedSpacePackage(member.personalSpaceId, CATALOG_SSH, { enabled: false });
-    expect((await offer(authHeaders(ctx), CATALOG_SSH)).status).toBe(200);
+    expect((await offer(authHeaders(ctx), CATALOG_SSH)).status).toBe(201);
     expect((await contextEntry(member, member.personalSpaceId, CATALOG_SSH))?.active).toBe(false);
     const library = await libraryPlacement(
       member,
@@ -407,7 +412,7 @@ describe("an offered package is placed and active where no row says otherwise", 
   });
 
   it("shows via organization in a space library, active, and the offer flags to an admin", async () => {
-    expect((await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT)).status).toBe(200);
+    expect((await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT)).status).toBe(201);
     const row = await libraryPlacement(member, AGENT, "agent", member.personalSpaceId);
     expect(row?.org_offer).toBe("on_by_default");
     expect(row?.org_offerable).toBe(false);
@@ -419,7 +424,7 @@ describe("an offered package is placed and active where no row says otherwise", 
   });
 
   it("is not visible to another organization's spaces", async () => {
-    expect((await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT)).status).toBe(200);
+    expect((await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT)).status).toBe(201);
     const foreign = await createTestContext({ orgSlug: "foreign" });
     const res = await app.request(`/api/spaces/${foreign.defaultSpaceId}/library`, {
       headers: authHeaders(foreign),
@@ -433,7 +438,7 @@ describe("withdrawing the offer", () => {
   it("rejects a schedule whose offer was withdrawn after the create preflight", async () => {
     const scope = { orgId: ctx.orgId, spaceId: member.personalSpaceId };
     const actor = { type: "user" as const, id: member.userId };
-    expect((await offer(admin.headers(teamId), AGENT)).status).toBe(200);
+    expect((await offer(admin.headers(teamId), AGENT)).status).toBe(201);
     expect(await isPackageActiveHere(scope, AGENT)).toBe(true);
     const judgedGovernance = await readScheduleGovernance(scope.spaceId, AGENT, member.userId);
     expect((await withdraw(admin.headers(teamId), AGENT)).status).toBe(204);
@@ -444,7 +449,7 @@ describe("withdrawing the offer", () => {
   });
 
   it("disables schedules only in spaces without a row of their own", async () => {
-    expect((await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT)).status).toBe(200);
+    expect((await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT)).status).toBe(201);
     // Active by the offer alone.
     const viaOffer = await seedSchedule({
       orgId: ctx.orgId,
@@ -490,7 +495,7 @@ describe("withdrawing the offer", () => {
       enabled: false,
       disabledReason: "package_removed",
     });
-    expect((await offer(admin.headers(teamId), AGENT)).status).toBe(200);
+    expect((await offer(admin.headers(teamId), AGENT)).status).toBe(201);
     const resumed = await resume();
     expect(resumed.status, await resumed.clone().text()).toBe(200);
     expect(await read(viaOffer.id)).toMatchObject({ enabled: true, disabledReason: null });
@@ -535,7 +540,7 @@ describe("a row created under the offer is a decision about the offer, not a pla
         headers,
         body: JSON.stringify({ modelId }),
       });
-    expect((await offer(admin.headers(teamId), AGENT)).status).toBe(200);
+    expect((await offer(admin.headers(teamId), AGENT)).status).toBe(201);
     const invalid = await expectProblem(await patch("unknown-model"), 404);
     expect(invalid.detail).toContain("Model 'unknown-model'");
     expect(await rowIn(member.personalSpaceId, AGENT)).toBeUndefined();
@@ -605,14 +610,14 @@ describe("a row created under the offer is a decision about the offer, not a pla
     const third = (await seedSpace({ orgId: ctx.orgId, name: "Third", visibility: "closed" })).id;
     await seedSpacePackage(teamId, AGENT, { enabled: false });
     await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
-    const ids = await db.transaction((tx) =>
+    const outcome = await db.transaction((tx) =>
       reconcilePlacementsAfterRehome(tx, {
         packageId: AGENT,
         newHomeSpaceId: third,
         previousHome: { spaceId: teamId, keep: false },
       }),
     );
-    expect(ids).toEqual([]);
+    expect(outcome).toEqual({ kept: false, disabledScheduleIds: [] });
     const row = await rowIn(teamId, AGENT);
     expect(row?.enabled).toBe(false);
     expect(row?.placedByOffer).toBe(true);
@@ -763,7 +768,7 @@ describe("offering an agent names the integrations it leaves behind", () => {
 
   it("names only the integration that is neither offered nor active by default", async () => {
     const res = await offer(admin.headers(teamId), DEPS_AGENT);
-    expect(res.status, await res.clone().text()).toBe(200);
+    expect(res.status, await res.clone().text()).toBe(201);
     const body = (await res.json()) as Warnings;
     expect(body.warnings).toEqual([
       expect.objectContaining({
@@ -785,12 +790,12 @@ describe("offering an agent names the integrations it leaves behind", () => {
     });
     await seedPublishedVersion("@offers/notes", "0.1.0");
     const res = await offer(admin.headers(teamId), "@offers/notes");
-    expect(res.status, await res.clone().text()).toBe(200);
+    expect(res.status, await res.clone().text()).toBe(201);
     expect(((await res.json()) as Warnings).warnings).toEqual([]);
   });
 
   it("still names them when the mode of an existing offer changes", async () => {
-    expect((await offer(admin.headers(teamId), DEPS_AGENT, "available")).status).toBe(200);
+    expect((await offer(admin.headers(teamId), DEPS_AGENT, "available")).status).toBe(201);
     const res = await offer(admin.headers(teamId), DEPS_AGENT, "on_by_default");
     expect(res.status, await res.clone().text()).toBe(200);
     expect(((await res.json()) as Warnings).warnings).toEqual([

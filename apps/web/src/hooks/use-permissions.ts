@@ -54,6 +54,7 @@ export function usePermissions() {
   const space = spaces?.find((s) => s.id === spaceId) ?? null;
   const orgPermissions = currentOrg?.permissions;
   const spacePermissions = space?.permissions;
+  const showsStudio = space?.shows_studio ?? false;
 
   const granted = useMemo(
     () => new Set<string>(spaceId ? spacePermissions : orgPermissions),
@@ -70,6 +71,8 @@ export function usePermissions() {
 
   return {
     can,
+    /** The working space's role shows the Studio's screens. */
+    showsStudio,
     ready,
     orgRole: currentOrg?.role ?? null,
     /** The current space is the caller's personal one (`teamSpaceOnly` routes are absent there). */

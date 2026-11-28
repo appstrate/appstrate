@@ -11,7 +11,7 @@ import { notFound } from "../../lib/errors.ts";
 import { loadFileForPreview } from "../../services/files.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
 import { enterableSpaces, type ReachableSpace } from "../../lib/reachable-spaces.ts";
-import { toSpaceRoleWire } from "../../lib/space-role.ts";
+import { toSpaceRoleReference } from "../../lib/space-role.ts";
 import type { DispatchPin } from "../../lib/internal-dispatch.ts";
 import type { Dispatch, McpSurface } from "./tools.ts";
 import { resolveCallSpace } from "./call-space.ts";
@@ -125,7 +125,7 @@ export async function listReachableSpaces(
     .map((space) => ({
       id: space.id,
       name: space.name,
-      role: toSpaceRoleWire(space.role)!.name,
+      role: toSpaceRoleReference(space.role).name,
       personal: space.personal,
       permissions: space.permissions,
       surface: surfaceOf(space.permissions, space),

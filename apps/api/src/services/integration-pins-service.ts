@@ -742,6 +742,7 @@ export async function listAccessibleConnections(
     "usable",
     [integrationId],
   );
+  if (rows.length === 0) return [];
   const ownerName = await resolveConnectionOwnerNames(rows);
   const shares = await loadConnectionShares(
     db,

@@ -16,7 +16,7 @@ import type { DataColumn } from "../../components/data-table";
 import { TableRowActions } from "../../components/table-row-actions";
 import { rowActionsColumn } from "../../components/row-actions-column";
 import { CellText } from "../../components/table-cells";
-import { spaceRoleDescription, spaceRoleLabel, type RoleObject } from "../../hooks/use-roles";
+import { spaceRoleDescription, catalogRoleLabel, type RoleObject } from "../../hooks/use-roles";
 
 export function useRoleColumns({
   canDelete,
@@ -40,8 +40,8 @@ export function useRoleColumns({
       elastic: true,
       cell: (role) => (
         <span className="block min-w-0">
-          <CellText strong title={spaceRoleLabel(role, t) ?? role.name}>
-            {spaceRoleLabel(role, t) ?? role.name}
+          <CellText strong title={catalogRoleLabel(role, t)}>
+            {catalogRoleLabel(role, t)}
           </CellText>
           <CellText title={spaceRoleDescription(role, t) ?? role.key}>
             {spaceRoleDescription(role, t) ?? role.key}
@@ -63,7 +63,7 @@ export function useRoleColumns({
     rowActionsColumn((role: RoleObject) =>
       onPreview || canDelete(role) ? (
         <TableRowActions
-          menuLabel={t("providers.moreActions", { name: spaceRoleLabel(role, t) ?? role.name })}
+          menuLabel={t("providers.moreActions", { name: catalogRoleLabel(role, t) })}
           isPending={isDeleting}
           actions={[
             {

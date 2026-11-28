@@ -314,7 +314,7 @@ For each carve-out:
 4l. Logger fields: spot-check pino calls
 4m. Audit log: every `before`/`after` typed `AuditPayload`; no cast hiding a snake_case key
 4n. Headless-platform fields: the listed names only; every list goes through `listResponse`
-4o. Chat turn metadata camelCase
+4o. Chat metadata camelCase: `appstrate.turn` and tool-part `providerMetadata.appstrate` (`lookup`, `spaceId`, `durationMs`, `actedSpaceIds`); nested `presentation` stays snake_case (MCP wire object)
 4p. Agent tool arguments (runtime-pi/sidecar/mcp.ts, packages/afps-runtime/src/resolvers/): the listed names; the platform MCP server's tool args (apps/api/src/modules/mcp/tools.ts) snake_case
 4q. AFPS bundle container (packages/afps-runtime/src/bundle/)
 4r. ExecutionContext (packages/afps-runtime/src/types/execution-context.ts)

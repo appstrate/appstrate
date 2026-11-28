@@ -144,24 +144,15 @@ export function ComposerSkeleton({
 /**
  * The conversation list's rows while they load, inside its `SidebarMenu`: under a date group's
  * label (`dated`, the list's shape outside a search) or bare (search results), five rows of
- * `ConversationRow`'s box — its height, and its right padding, which keeps room for a writer's
+ * `ConversationRow`'s box — its height, and its right padding, which keeps room for the row's
  * « … » on touch and so sets where the space tiles end.
  */
-export function ConversationGroupSkeleton({
-  canWrite,
-  dated,
-}: {
-  canWrite: boolean;
-  dated: boolean;
-}) {
+export function ConversationGroupSkeleton({ dated }: { dated: boolean }) {
   const rows = Array.from({ length: 5 }, (_, i) => (
     <SidebarMenuItem key={i}>
       <div
         data-sidebar="menu-skeleton"
-        className={cn(
-          "desktop-pointer:h-8 flex h-12 items-center gap-2 rounded-md px-2",
-          canWrite && "desktop-pointer:pr-2 pr-11",
-        )}
+        className="desktop-pointer:h-8 desktop-pointer:pr-2 flex h-12 items-center gap-2 rounded-md px-2 pr-11"
       >
         <Skeleton className="h-4 w-3/5" />
         <Skeleton className="ml-auto size-4 shrink-0 rounded-sm" />
@@ -171,8 +162,9 @@ export function ConversationGroupSkeleton({
   if (!dated) return rows;
   return (
     <li aria-hidden className="flex flex-col gap-1">
-      <SidebarGroupLabel className="mt-1 h-6 px-2">
+      <SidebarGroupLabel className="desktop-pointer:h-6 mt-1 h-10 justify-start gap-1 px-2">
         <Skeleton className="h-3 w-16" />
+        <Skeleton className="size-3 rounded-sm" />
       </SidebarGroupLabel>
       <ul className="flex flex-col gap-1">{rows}</ul>
     </li>
@@ -215,7 +207,7 @@ export function ConversationListSkeleton({ newConversation }: { newConversation:
       </div>
       <SidebarGroup className="min-h-0 flex-1 pt-0 group-data-[collapsible=icon]:hidden">
         <SidebarMenu>
-          <ConversationGroupSkeleton canWrite dated />
+          <ConversationGroupSkeleton dated />
         </SidebarMenu>
       </SidebarGroup>
     </>

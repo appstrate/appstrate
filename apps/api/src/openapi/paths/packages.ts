@@ -5,7 +5,20 @@ import {
   STD_RESPONSE_HEADERS,
   REQUEST_ID_ONLY_HEADERS,
 } from "../headers.ts";
+import { orgOfferModeValues } from "@appstrate/db/schema";
 import { ORG_READ_REACH } from "../parameters.ts";
+
+/** The body of both successes of `PUT …/org-offer`: the offer and what its activation warns of. */
+const ORG_OFFER_CONTENT = {
+  "application/json": {
+    schema: {
+      allOf: [
+        { $ref: "#/components/schemas/PackageOrgOffer" },
+        { $ref: "#/components/schemas/ActivationWarnings" },
+      ],
+    },
+  },
+};
 
 /** Every door that creates an organization package under a caller-chosen id refuses the platform's scopes. */
 const SCOPE_RESERVED_RULE =
@@ -2067,7 +2080,7 @@ export const packagesPaths = {
                   type: "boolean",
                   default: true,
                   description:
-                    "Does the space being LEFT keep the package? `true` (the default) leaves its `space_packages` row in place, so it goes on reading and running the package and nothing it had scheduled stops. `false` completes the move: that row is removed, settings and all, and every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed), in the same transaction. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. An old home that held no row is left behind whatever the flag says: nothing places the package there once the home has moved, so its schedules there are disabled all the same. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`.",
+                    "Does the space being LEFT keep the package? `true` (the default) leaves its `space_packages` row in place, so it goes on reading and running the package and nothing it had scheduled stops. `false` completes the move: that row is removed, settings and all, and every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed), in the same transaction. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. A personal space is left whatever the flag says (outside its home it takes the organization's offer only: the row goes, or stays as a decision about the offer when the package is offered). An old home that held no row is left behind too: nothing places the package there once the home has moved, so its schedules there are disabled all the same. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`.",
                 },
               },
               additionalProperties: false,
@@ -2158,7 +2171,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Share a package with a team space",
       description:
-        "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller holds the type's activation grant in the target and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. The target is a team space the caller can reach (`target: {kind: \"space\", spaceId}`); a `user` target is a 400. A PERSONAL space is never a target: `409 personal_space_takes_offers_only` (a personal space receives packages only through the organization offer, `PUT …/org-offer`; another member's personal space still answers 404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.",
+        "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller holds the type's activation grant in the target and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. The target is a team space the caller can reach (`spaceId`). A PERSONAL space is never a target: `409 personal_space_takes_offers_only` (a personal space receives packages only through the organization offer, `PUT …/org-offer`; another member's personal space still answers 404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2171,8 +2184,14 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["target"],
-              properties: { target: { $ref: "#/components/schemas/ShareTarget" } },
+              required: ["spaceId"],
+              properties: {
+                spaceId: {
+                  type: "string",
+                  description:
+                    "Team space id (`spc_…`) the caller can reach. A personal space is `409 personal_space_takes_offers_only`: it receives packages through the organization offer (`PUT …/org-offer`) only.",
+                },
+              },
               additionalProperties: false,
             },
           },
@@ -2209,7 +2228,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/{scope}/{name}/shares/{target}": {
+  "/api/packages/{scope}/{name}/shares/{spaceId}": {
     delete: {
       operationId: "revokePackageShare",
       tags: ["Packages"],
@@ -2222,12 +2241,12 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
-          name: "target",
+          name: "spaceId",
           in: "path",
           required: true,
           schema: { type: "string" },
           description:
-            "The team space id (`spc_…`) exactly as `GET …/shares` published it. A user id is a 400.",
+            "The team space id (`spc_…`), the `spaceId` of a `GET …/shares` entry. Anything else is a 400.",
         },
       ],
       responses: {
@@ -2247,7 +2266,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Offer a package to the organization",
       description:
-        "Offer the package to its organization in a `mode`: it is then PLACED in every space of the organization that holds no `space_packages` row of its own, personal spaces included. Each mode is described on `mode`. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Idempotent: offering again in the same mode answers 200 and leaves the offer as it is; offering in the other mode rewrites it. `warnings[]` follows `ActivationWarnings` and answers for both modes: for an AGENT, one item per integration it declares that is neither offered to the organization nor active by default (`code: integration_not_offered`, `required` saying whether a launch in a personal space is refused until it is offered, or proceeds without it); `[]` for any other type. Nothing is offered in their place: offering the integrations is a decision of its own, one `PUT …/org-offer` each. Audited as `package.offered_to_org` when the offer is created and as `package.offer_mode_changed` (with the previous mode) when its mode changes.",
+        "Offer the package to its organization with the `org_offer` mode in the body: it is then PLACED in every space of the organization that holds no `space_packages` row of its own, personal spaces included. Each mode is described on `org_offer`. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Answers 201 when the offer is created; offering again in the same mode answers 200 and leaves the offer as it is, and offering in the other mode rewrites it (200). `warnings[]` follows `ActivationWarnings` and answers for both modes: for an AGENT, one item per integration it declares that is neither offered to the organization nor active by default (`code: integration_not_offered`, `required` saying whether a launch in a personal space is refused until it is offered, or proceeds without it); `[]` for any other type. Nothing is offered in their place: offering the integrations is a decision of its own, one `PUT …/org-offer` each. Audited as `package.offered_to_org` when the offer is created and as `package.offer_mode_changed` (with the previous mode) when its mode changes.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2260,11 +2279,11 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["mode"],
+              required: ["org_offer"],
               properties: {
-                mode: {
+                org_offer: {
                   type: "string",
-                  enum: ["available", "on_by_default"],
+                  enum: [...orgOfferModeValues],
                   description:
                     "`on_by_default`: placed and active in every space holding no row of its own. `available`: placed in every such space and off until the space switches it on.",
                 },
@@ -2277,18 +2296,14 @@ export const packagesPaths = {
       responses: {
         "200": {
           description:
-            "The package is offered to the organization in that mode (new, changed or already so).",
+            "The package was already offered to the organization: the offer is re-asserted in that mode or its mode changed.",
           headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/PackageOrgOffer" },
-                  { $ref: "#/components/schemas/ActivationWarnings" },
-                ],
-              },
-            },
-          },
+          content: ORG_OFFER_CONTENT,
+        },
+        "201": {
+          description: "The offer was created: the package is now offered in that mode.",
+          headers: STD_RESPONSE_HEADERS,
+          content: ORG_OFFER_CONTENT,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },

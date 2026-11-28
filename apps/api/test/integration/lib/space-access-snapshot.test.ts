@@ -277,10 +277,22 @@ describe("multi-row readers join the caller's rows, never someone else's", () =>
     const all = await listSpaceMembers(ctx.orgId, space.id, true);
     const byId = new Map(all.map((m) => [m.userId, m]));
 
-    expect(byId.get(explicit.id)).toMatchObject({ source: "explicit", role: { key: "viewer" } });
-    expect(byId.get(bundled.id)).toMatchObject({ source: "explicit", role: { key: role.key } });
-    expect(byId.get(implicit.id)).toMatchObject({ source: "open_space", role: { key: "builder" } });
-    expect(byId.get(ctx.user.id)).toMatchObject({ source: "org_role", role: { key: "admin" } });
+    expect(byId.get(explicit.id)).toMatchObject({
+      source: "explicit",
+      role: { preset_role: "viewer" },
+    });
+    expect(byId.get(bundled.id)).toMatchObject({
+      source: "explicit",
+      role: { custom_role_id: role.id },
+    });
+    expect(byId.get(implicit.id)).toMatchObject({
+      source: "open_space",
+      role: { preset_role: "builder" },
+    });
+    expect(byId.get(ctx.user.id)).toMatchObject({
+      source: "org_role",
+      role: { preset_role: "admin" },
+    });
     expect(byId.has(stranger.id)).toBe(false);
 
     const explicitOnly = await listSpaceMembers(ctx.orgId, space.id, false);

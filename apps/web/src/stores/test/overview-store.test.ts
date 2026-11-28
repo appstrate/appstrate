@@ -14,7 +14,7 @@ const { overviewStore } = await import("../overview-store.ts");
 
 beforeEach(() => {
   storage.setItem(
-    "appstrate_overview",
+    "appstrate:web:overview",
     JSON.stringify({ "u_1:org_1": true, "u_1:org_2": "false", "u_1:org_3": 1, "u_1:org_4": false }),
   );
 });
@@ -27,7 +27,7 @@ describe("overviewStore", () => {
 
   it("keeps only true entries when it writes over what another tab stored", () => {
     overviewStore.getState().set("u_1:org_5", true);
-    expect(JSON.parse(storage.getItem("appstrate_overview")!)).toEqual({
+    expect(JSON.parse(storage.getItem("appstrate:web:overview")!)).toEqual({
       "u_1:org_1": true,
       "u_1:org_5": true,
     });

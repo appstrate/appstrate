@@ -9,6 +9,7 @@ import {
   integer,
   uuid,
   index,
+  uniqueIndex,
   check,
 } from "drizzle-orm/pg-core";
 
@@ -28,6 +29,14 @@ import {
  * are the connection's owner when the call was made (`user` / `end_user`), NULL when the
  * connection was gone by then. `actor_type` / `actor_id` are who acted, `api_key_id` the key
  * they acted through, if any.
+ *
+ * `called_at` is when the call started and `call_id` its identity (a UUID minted where the call was
+ * dispatched: the sidecar for a run's call, the platform otherwise); `(run_id, call_id)` is unique,
+ * so a batch the sidecar sends twice is stored once. Both are NULL on a row recorded before
+ * migration 0118 (never backfilled); `created_at` is when the row was written, which for a
+ * sidecar-reported call is later than the call. `request_id` is the `Request-Id` of the platform
+ * request that made the call, NULL for a call a run's sidecar reported (the batch's own request
+ * is not the call's).
  *
  * `run_id` is the run the call belongs to, `chat_session_id` the conversation whose loopback
  * bearer issued it: at most one of the two (`connection_calls_one_context`).
@@ -57,7 +66,9 @@ export const connectionCalls = pgTable(
     host: text("host"),
     outcome: text("outcome").notNull(),
     durationMs: integer("duration_ms").notNull(),
-    requestId: text("request_id").notNull(),
+    requestId: text("request_id"),
+    calledAt: timestamp("called_at", { withTimezone: true }),
+    callId: uuid("call_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -70,6 +81,11 @@ export const connectionCalls = pgTable(
     index("idx_connection_calls_run_id")
       .on(table.runId, table.id)
       .where(sql`${table.runId} IS NOT NULL`),
+    // A run's call recorded once, whatever the sidecar retries. Partial: a row recorded before
+    // migration 0118 carries no `call_id` and stays out of it.
+    uniqueIndex("uq_connection_calls_run_call")
+      .on(table.runId, table.callId)
+      .where(sql`${table.callId} IS NOT NULL`),
     check("connection_calls_one_context", sql`run_id IS NULL OR chat_session_id IS NULL`),
     check("connection_calls_actor_type_valid", sql`actor_type IN ('user', 'end_user')`),
     check(

@@ -20,6 +20,7 @@
     "./context-window": "./src/context-window.ts",
     "./identity-colors": "./src/identity-colors.ts",
     "./keyset-paging": "./src/keyset-paging.ts",
+    "./local-storage": "./src/local-storage.ts",
     "./lucide-names": "./src/lucide-names.ts",
     "./use-copy-to-clipboard": "./src/use-copy-to-clipboard.ts",
     "./use-live-elapsed-ms": "./src/use-live-elapsed-ms.ts",

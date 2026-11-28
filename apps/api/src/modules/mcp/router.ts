@@ -106,6 +106,7 @@ import { buildOperationIndex, buildOrgWideOperationIndex, operationIdGranted } f
 import { buildSkillServer } from "./skills.ts";
 import { servedSkillsContext } from "../../services/served-skills.ts";
 import { SKILL_URI_PREFIX } from "@appstrate/core/skill-address";
+import { SPACE_LIST_INLINE_MAX } from "@appstrate/core/mcp-spaces";
 import {
   listReachableSpaces,
   pinnedSpaceIds,
@@ -115,7 +116,7 @@ import {
   type McpSpace,
   type OrgWideSpaces,
 } from "./spaces.ts";
-import { toSpaceRoleWire } from "../../lib/space-role.ts";
+import { toSpaceRoleReference } from "../../lib/space-role.ts";
 import { requestFileAccess } from "../../lib/file-access.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
@@ -360,7 +361,7 @@ function orgWideSpaceContext(
       ? "Not applicable to this connection: steps 4 and 5 apply to every act."
       : `For ${personalActs.join(", ")}: your personal space (the one marked \`your personal space\`); your reply names it. Send it there first, whatever your role there and even when another space looks better suited or is the only one where it would work: a refusal or a space that cannot serve is the next rule's case, never a reason to start in another space.`;
   return `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. ${ORG_BOUNDARY}
-- Use \`describe\` on an operation without choosing a space: it reports where its route acts. An organization-level operation acts in no space: omit \`space_id\` and never ask which space, whatever the steps below say. A route with a space in its path, query or body uses that destination. For other space operations send the space the user named. When no space is named, call the tool: the server uses the connection or conversation's designated destination, or, when the destination is ambiguous, refuses with \`missing_argument\` on \`space_id\`, listing the eligible spaces in \`accepted\` and by name in \`error\`. Then halt: ask the user which of those spaces to use, by name, and wait. Never pick one yourself; once the user answers, call again with that \`space_id\`. These rules choose the destination:
+- Use \`describe\` on an operation without choosing a space: it reports where its route acts. An organization-level operation acts in no space: omit \`space_id\` and never ask which space, whatever the steps below say. A route with a space in its path, query or body uses that destination. For other space operations send the space the user named. When no space is named, call the tool: the server uses the connection or conversation's designated destination, or, when the destination is ambiguous, refuses with \`missing_argument\` on \`space_id\`, listing the eligible spaces in \`accepted\` and by name in \`error\` (above ${SPACE_LIST_INLINE_MAX} spaces \`error\` gives only their count: read the names from \`get_me\`). Then halt: ask the user which of those spaces to use, by name, and wait. Never pick one yourself; once the user answers, call again with that \`space_id\`. These rules choose the destination:
   1. Only one space is listed (a conversation limited to a space, a narrowed credential): that one.
   2. The user's request names a space: that one.
   3. ${personalStep}
@@ -619,7 +620,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const permissions = c.get("permissions")!;
     const current = {
       ...chosen,
-      role: toSpaceRoleWire(c.get("spaceRole")!)!.name,
+      role: toSpaceRoleReference(c.get("spaceRole")!).name,
       permissions,
       surface: deriveMcpSurface(permissions, ceiling, actor, proxied, c.get("space")!),
     };

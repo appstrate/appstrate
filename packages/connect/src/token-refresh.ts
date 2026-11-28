@@ -41,7 +41,7 @@ export interface RefreshContext {
 /**
  * Error thrown by {@link performTokenRequest} when the token endpoint call fails.
  *
- * `kind` discriminates between three cases that callers MUST treat differently:
+ * `kind` discriminates between four cases that callers MUST treat differently:
  *
  * - `"revoked"`: the OAuth server answered `{ "error": "invalid_grant" }`
  *   (RFC 6749 §5.2) on `HTTP 400`, `HTTP 401` (mandated by §5.2 when client
@@ -51,7 +51,7 @@ export interface RefreshContext {
  *   `needsReconnection = true`.
  *
  * - `"transient"`: every other failure mode (network error, timeout, 5xx,
- *   non-JSON body, other 4xx, other OAuth error codes, a 2xx with neither
+ *   non-JSON body, other 4xx, unknown OAuth error codes, a 2xx with neither
  *   `access_token` nor `error`). The credential
  *   might still be valid — callers MUST NOT flag the connection, and should
  *   just fail the current request. Flagging on transient errors produces
@@ -62,6 +62,10 @@ export interface RefreshContext {
  * - `"client_rejected"`: the server rejected the client itself (`invalid_client`
  *   or `unauthorized_client`). The grant may be intact: callers MUST NOT flag
  *   the connection nor count it as a transient failure.
+ *
+ * - `"misconfigured"`: the request is wrong whatever the grant (`invalid_scope`,
+ *   `unsupported_grant_type`): a manifest or client defect. Same
+ *   treatment as `"client_rejected"`: never flag, never count.
  */
 export class RefreshError extends Error {
   constructor(
@@ -105,7 +109,7 @@ const PLATFORM_OWNED_PARAMS = [
 /**
  * Perform an OAuth2 token request (RFC 6749 §3.2) carrying `grant`: add the
  * `resource` and the client authentication, POST it, classify failures into
- * {@link RefreshError} (`revoked` / `client_rejected` / `transient`), and parse
+ * {@link RefreshError} (`revoked` / `client_rejected` / `misconfigured` / `transient`), and parse
  * the success body. `keepRefreshToken` is the token kept when the response omits
  * one. Table-specific concerns — which row to write back, `needsReconnection`
  * flips — stay in the caller so the wire mechanics stay isolated and reusable.
