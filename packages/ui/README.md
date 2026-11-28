@@ -1,6 +1,6 @@
 # @appstrate/ui
 
-The Appstrate React design system — shadcn/Radix components, schema-driven forms, upload widget, RJSF templates. Single source of truth for the UI shared across the monorepo.
+The Appstrate React design system — shadcn/ui components on Base UI, schema-driven forms, upload widget, RJSF templates. Single source of truth for the UI shared across the monorepo.
 
 ## Install
 
@@ -35,11 +35,11 @@ The widget is i18n-agnostic — pass translated strings via `labels`. See `apps/
 
 ## Host theme
 
-The web host defines the Tailwind theme in `apps/web/src/styles.css`. Include its light and dark tokens for the sidebar, background, foreground, popovers, borders, focus rings and destructive actions. The sidebar provider sets its widths and the keyboard viewport helpers supply fallbacks. Radix supplies its own popover, menu and select geometry at render time.
+The web host defines the Tailwind theme in `apps/web/src/styles.css`. Include its light and dark tokens for the sidebar, background, foreground, popovers, borders, focus rings and destructive actions. The sidebar provider sets its widths and the keyboard viewport helpers supply fallbacks. Base UI supplies its own popover, menu and select geometry at render time.
 
 ## Exports
 
-- `./components/*` — shadcn/Radix primitives, one per file (e.g. `@appstrate/ui/components/button`, `dialog`, `select`, `sidebar`, `sonner`, …). CVA variants + `cn()` styling. `ls packages/ui/src/components/` is the authoritative list.
+- `./components/*` — shadcn/ui components on Base UI, one per file (e.g. `@appstrate/ui/components/button`, `dialog`, `select`, `sidebar`, `sonner`, …). CVA variants + `cn()` styling. `ls packages/ui/src/components/` is the authoritative list.
 - `./components/sidebar` exports the sidebar primitives, `SidebarProvider` and `useSidebar()`.
 - `./cn` — the canonical `cn(...)` class-merge helper (`clsx` + `tailwind-merge`). The single implementation used by every component and the web app.
 - `./schema-form` — `SchemaForm` component, `SchemaFormLabels` type, RJSF widgets/templates.

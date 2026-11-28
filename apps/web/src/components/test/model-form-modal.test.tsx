@@ -6,7 +6,7 @@
  * is a key or a connection, and the catalog decides whether the capabilities toggle opens on, i.e.
  * whether this row has overridden its catalog entry.
  *
- * `ModelFormBody` is rendered rather than `ModelFormModal` because the dialog chrome is a Radix
+ * `ModelFormBody` is rendered rather than `ModelFormModal` because the dialog chrome is a
  * portal, which renders nothing at all without a DOM — and the web runner has none. Select ITEMS
  * are portalled too, so which credentials the picker offers is asserted on
  * `lib/test/model-credential-filter.test.ts`, and the payload on `lib/test/model-form-payload.test.ts`.
@@ -383,7 +383,7 @@ describe("ModelFormBody — editing a row whose provider left the registry", () 
   });
 });
 
-/** A Radix checkbox is a `button`, so its state reads off `aria-checked`. */
+/** A checkbox is a `button`, so its state reads off `aria-checked`. */
 function checkedState(html: string, id: string): string | undefined {
   const tag = html.slice(html.lastIndexOf("<button", html.indexOf(`id="${id}"`)));
   return /aria-checked="(\w+)"/.exec(tag.slice(0, tag.indexOf(">")))?.[1];

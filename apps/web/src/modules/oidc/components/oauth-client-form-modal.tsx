@@ -409,7 +409,7 @@ export function ScopeList({
  * client — the role and space grants a self-registered user lands with. The
  * policy is what a signup WOULD receive, so it is edited and validated whether
  * or not the opt-in is on. Split out of the modal body so it can be rendered
- * without the Radix dialog, which needs a DOM.
+ * without the dialog, which needs a DOM.
  */
 export function SignupPolicyFields({
   isOrgLevel,

@@ -38,7 +38,7 @@ import { deriveToolPhase } from "./tool-result.ts";
 import type { StoredResults } from "./use-call-presentation.ts";
 import { presentationSubject } from "./tool-presentation.ts";
 import { forgetRevealedToolCalls, useRevealedToolCalls } from "./reveal-tool-call.ts";
-import { DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
+import { DISCLOSURE_PANEL_CLASS, DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
 
 /** A thread part as the header reads it: a call's name and arguments for {@link showStep}. */
 type StepPart = GroupablePart & { readonly toolName?: string; readonly args?: unknown };
@@ -112,35 +112,31 @@ export function ActivityGroup({
           <span className="text-muted-foreground flex h-6 w-4 shrink-0 items-center justify-center">
             {running ? <ThinkingStatus /> : <EyeIcon aria-hidden className="size-4" />}
           </span>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className={`min-w-0 ${DISCLOSURE_TRIGGER_CLASS}`}>
-              {running ? (
-                <>
-                  <span className="text-foreground min-w-0 truncate">{stepLabel}</span>
-                  {stepIdText ? <span className="min-w-0 truncate">{stepIdText}</span> : null}
-                </>
-              ) : null}
-              <span className="shrink-0">{t("tool.reads.done", { count: reads })}</span>
-              {failed > 0 ? (
-                <>
-                  <FailedGlyph />
-                  <span className="shrink-0">{t("tool.reads.failed", { count: failed })}</span>
-                </>
-              ) : null}
-              {running && clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
-              {running ? null : <SubjectStack subjects={subjects} />}
-              <ChevronRightIcon className="duration-fast ease-surface transition-transform group-data-[state=open]:rotate-90" />
-            </Button>
+          <CollapsibleTrigger
+            render={
+              <Button variant="ghost" size="sm" className={`min-w-0 ${DISCLOSURE_TRIGGER_CLASS}`} />
+            }
+          >
+            {running ? (
+              <>
+                <span className="text-foreground min-w-0 truncate">{stepLabel}</span>
+                {stepIdText ? <span className="min-w-0 truncate">{stepIdText}</span> : null}
+              </>
+            ) : null}
+            <span className="shrink-0">{t("tool.reads.done", { count: reads })}</span>
+            {failed > 0 ? (
+              <>
+                <FailedGlyph />
+                <span className="shrink-0">{t("tool.reads.failed", { count: failed })}</span>
+              </>
+            ) : null}
+            {running && clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
+            {running ? null : <SubjectStack subjects={subjects} />}
+            <ChevronRightIcon className="duration-fast ease-surface transition-transform group-data-panel-open:rotate-90" />
           </CollapsibleTrigger>
         </div>
       ) : null}
-      <CollapsibleContent
-        className={
-          folded
-            ? "duration-base ease-surface motion-safe:data-[state=open]:animate-collapsible-down motion-safe:data-[state=closed]:animate-collapsible-up overflow-hidden"
-            : undefined
-        }
-      >
+      <CollapsibleContent className={folded ? DISCLOSURE_PANEL_CLASS : undefined}>
         <div className={folded ? "border-border ml-2 border-l pl-4" : undefined}>{children}</div>
       </CollapsibleContent>
     </Collapsible>

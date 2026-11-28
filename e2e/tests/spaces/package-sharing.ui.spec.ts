@@ -25,7 +25,7 @@ import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
 import { createAgent, createSpace, registerUser, type AuthResult } from "../../helpers/seed.ts";
 import { createApiClient } from "../../helpers/api-client.ts";
-import { selectOption } from "../../helpers/radix.ts";
+import { selectOption } from "../../helpers/select.ts";
 import { E2E_BASE_URL } from "../../helpers/base-url.ts";
 
 /** The caller's own personal space id, from the listing that also repairs it. */
@@ -408,7 +408,7 @@ test("a draft-only agent is published from the share dialog itself, then shared"
   const dropped = await apiClient.delete(`/packages/agents/${scope}/${name}/versions/0.1.0`);
   expect(dropped.status(), await dropped.text()).toBe(204);
 
-  // Named on its own first word: the picker is a Radix listbox driven by typeahead.
+  // Named on its own first word: the picker is a listbox driven by typeahead.
   const destinationName = `Recipient${Date.now().toString(36)}`;
   const destination = await createSpace(orgOnlyClient, destinationName);
 

@@ -158,23 +158,25 @@ export function ActorSelect({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          disabled={disabled}
-          className="w-full justify-between font-normal"
-        >
-          {labelResolving ? (
-            <Skeleton className="h-4 w-32" />
-          ) : (
-            <span className="truncate">
-              {selectedLabel ?? placeholder ?? t("actorSelect.placeholder")}
-            </span>
-          )}
-          <ChevronsUpDown className="ml-2 shrink-0 opacity-50" />
-        </Button>
+      <PopoverTrigger
+        render={
+          <Button
+            variant="outline"
+            disabled={disabled}
+            className="w-full justify-between font-normal"
+          />
+        }
+      >
+        {labelResolving ? (
+          <Skeleton className="h-4 w-32" />
+        ) : (
+          <span className="truncate">
+            {selectedLabel ?? placeholder ?? t("actorSelect.placeholder")}
+          </span>
+        )}
+        <ChevronsUpDown className="ml-2 shrink-0 opacity-50" />
       </PopoverTrigger>
-      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+      <PopoverContent className="w-(--anchor-width) p-0" align="start">
         {/* shouldFilter disabled — members are filtered in-memory and end-users
             server-side, so cmdk must not re-filter the rendered items. */}
         <Command shouldFilter={false}>

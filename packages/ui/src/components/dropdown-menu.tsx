@@ -2,17 +2,18 @@
 
 /**
  * A dropdown menu from `md` up; below, the same items as rows of a panel from the bottom
- * (`SheetMenuContent`): 48 px tall, the same open state, the same `onSelect` (the menu closes after
- * it unless the handler calls `event.preventDefault()`). A sub-menu is a group of rows there, under
- * its trigger's words. The width picks the container here, once, so no call site does.
+ * (`SheetMenuContent`): 48 px tall, the same open state, the same `onClick` (the menu closes after
+ * it unless the item says `closeOnClick={false}`). A sub-menu is a group of rows there, under its
+ * trigger's words. The width picks the container here, once, so no call site does.
  */
 
 import * as React from "react";
-import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import { Slot } from "@radix-ui/react-slot";
+import { Menu as MenuPrimitive } from "@base-ui/react/menu";
+import { useRender } from "@base-ui/react/use-render";
 import { Check, ChevronRight } from "lucide-react";
 
 import { cn } from "../cn.ts";
+import { splitAnchoring, type WithClassName } from "./primitive-props.ts";
 import { useIsMobile } from "../use-mobile.ts";
 import { Sheet, SheetTrigger } from "./sheet.tsx";
 import { SHEET_LABEL_CLASS, SHEET_ROW_CLASS, SheetMenuContent } from "./sheet-menu.tsx";
@@ -30,28 +31,28 @@ const MenuSheetContext = React.createContext<MenuSheet | null>(null);
 /** On a sheet, the id of the sub-menu's heading: its rows are a group named by it. */
 const SubSheetContext = React.createContext<string | undefined>(undefined);
 
-function DropdownMenu({
-  open,
-  defaultOpen,
-  onOpenChange,
-  modal,
-  dir,
-  children,
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+interface DropdownMenuProps {
+  open?: boolean;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  modal?: boolean;
+  children?: React.ReactNode;
+}
+
+function DropdownMenu({ open, defaultOpen, onOpenChange, modal, children }: DropdownMenuProps) {
   const mobile = useIsMobile();
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
   const [name, setName] = React.useState("");
   if (!mobile) {
     return (
-      <DropdownMenuPrimitive.Root
+      <MenuPrimitive.Root
         open={open}
         defaultOpen={defaultOpen}
         onOpenChange={onOpenChange}
         modal={modal}
-        dir={dir}
       >
         {children}
-      </DropdownMenuPrimitive.Root>
+      </MenuPrimitive.Root>
     );
   }
   const setOpen = (next: boolean) => {
@@ -67,238 +68,239 @@ function DropdownMenu({
   );
 }
 
-const DropdownMenuTrigger = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Trigger>
->(({ onClick, ...props }, ref) => {
+function DropdownMenuTrigger({ onClick, ...props }: MenuPrimitive.Trigger.Props) {
   const sheet = React.useContext(MenuSheetContext);
-  if (!sheet) return <DropdownMenuPrimitive.Trigger ref={ref} onClick={onClick} {...props} />;
+  if (!sheet) return <MenuPrimitive.Trigger onClick={onClick} {...props} />;
   return (
     <SheetTrigger
-      ref={ref}
       onClick={(event) => {
         onClick?.(event);
         sheet.setName(triggerName(event.currentTarget));
       }}
-      {...props}
+      {...(props as React.ComponentProps<typeof SheetTrigger>)}
     />
   );
-});
-DropdownMenuTrigger.displayName = DropdownMenuPrimitive.Trigger.displayName;
+}
 
-function DropdownMenuSub(props: React.ComponentProps<typeof DropdownMenuPrimitive.Sub>) {
+function DropdownMenuSub(props: MenuPrimitive.SubmenuRoot.Props) {
   const sheet = React.useContext(MenuSheetContext);
   const headingId = React.useId();
-  if (!sheet) return <DropdownMenuPrimitive.Sub {...props} />;
+  if (!sheet) return <MenuPrimitive.SubmenuRoot {...props} />;
   return <SubSheetContext.Provider value={headingId}>{props.children}</SubSheetContext.Provider>;
 }
 
-const DESTRUCTIVE_ITEM = "text-destructive focus:bg-destructive/10 focus:text-destructive";
+/** A highlighted menu item, or a sheet row with the keyboard focus. */
+const DESTRUCTIVE_ITEM =
+  "text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive focus-visible:bg-destructive/10";
 
-const DropdownMenuSubTrigger = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
-    inset?: boolean;
-    variant?: "default" | "destructive";
-  }
->(
-  (
-    { className, variant, inset, children, asChild: _asChild, textValue: _textValue, ...props },
-    ref,
-  ) => {
-    const sheet = React.useContext(MenuSheetContext);
-    const headingId = React.useContext(SubSheetContext);
-    if (sheet) {
-      // The sub-menu's rows follow, under its words: no level to open.
-      const { disabled: _disabled, ...heading } = props;
-      return (
-        <div
-          ref={ref}
-          id={headingId}
-          className={cn(
-            SHEET_LABEL_CLASS,
-            variant === "destructive" && DESTRUCTIVE_ITEM,
-            className,
-          )}
-          {...heading}
-        >
-          {children}
-        </div>
-      );
-    }
-    return (
-      <DropdownMenuPrimitive.SubTrigger
-        ref={ref}
-        className={cn(
-          "focus:bg-accent data-[state=open]:bg-accent flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
-          inset && "pl-8",
-          variant === "destructive" && DESTRUCTIVE_ITEM,
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        <ChevronRight className="ml-auto" />
-      </DropdownMenuPrimitive.SubTrigger>
-    );
-  },
-);
-DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
-
-const DropdownMenuSubContent = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
->(({ className, ...props }, ref) => {
+function DropdownMenuSubTrigger({
+  className,
+  variant,
+  inset,
+  children,
+  ...props
+}: WithClassName<MenuPrimitive.SubmenuTrigger.Props> & {
+  inset?: boolean;
+  variant?: "default" | "destructive";
+}) {
   const sheet = React.useContext(MenuSheetContext);
   const headingId = React.useContext(SubSheetContext);
   if (sheet) {
+    // The sub-menu's rows follow, under its words: no level to open.
     return (
       <div
-        ref={ref}
-        role="group"
-        aria-labelledby={headingId}
-        className={cn("flex flex-col", className)}
+        id={headingId}
+        className={cn(SHEET_LABEL_CLASS, variant === "destructive" && DESTRUCTIVE_ITEM, className)}
       >
-        {props.children}
+        {children}
       </div>
     );
   }
   return (
-    <DropdownMenuPrimitive.SubContent
-      ref={ref}
+    <MenuPrimitive.SubmenuTrigger
       className={cn(
-        "bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-hidden rounded-md border p-1 shadow-lg",
+        "data-highlighted:bg-accent data-popup-open:bg-accent flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+        inset && "pl-8",
+        variant === "destructive" && DESTRUCTIVE_ITEM,
         className,
       )}
       {...props}
-    />
+    >
+      {children}
+      <ChevronRight className="ml-auto" />
+    </MenuPrimitive.SubmenuTrigger>
   );
-});
-DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName;
+}
 
-const DropdownMenuContent = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> & {
-    /**
-     * The menu's name, drawn as the sheet's heading below `md` (the dropdown has none). Without
-     * it the sheet is named after its trigger, for a screen reader only.
-     */
-    sheetTitle?: string;
+const POPUP_CLASS =
+  "bg-popover text-popover-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 min-w-[8rem] origin-(--transform-origin) rounded-md border p-1 outline-none";
+
+type MenuContentProps = WithClassName<MenuPrimitive.Popup.Props> &
+  Omit<MenuPrimitive.Positioner.Props, "className" | "render" | "style" | "children">;
+
+function DropdownMenuSubContent({ className, ...props }: MenuContentProps) {
+  const sheet = React.useContext(MenuSheetContext);
+  const headingId = React.useContext(SubSheetContext);
+  if (sheet) {
+    return (
+      <div role="group" aria-labelledby={headingId} className={cn("flex flex-col", className)}>
+        {props.children as React.ReactNode}
+      </div>
+    );
   }
->(({ className, sideOffset = 4, sheetTitle, children, ...props }, ref) => {
+  const [positioning, popup] = splitAnchoring(props);
+  return (
+    <MenuPrimitive.Portal>
+      <MenuPrimitive.Positioner className="z-50" {...positioning}>
+        <MenuPrimitive.Popup
+          className={cn(POPUP_CLASS, "overflow-hidden shadow-lg", className)}
+          {...popup}
+        />
+      </MenuPrimitive.Positioner>
+    </MenuPrimitive.Portal>
+  );
+}
+
+function DropdownMenuContent({
+  className,
+  sideOffset = 4,
+  sheetTitle,
+  children,
+  ...props
+}: MenuContentProps & {
+  /**
+   * The menu's name, drawn as the sheet's heading below `md` (the dropdown has none). Without
+   * it the sheet is named after its trigger, for a screen reader only.
+   */
+  sheetTitle?: string;
+}) {
   const sheet = React.useContext(MenuSheetContext);
   if (sheet) {
     return (
       <SheetMenuContent
-        ref={ref}
         title={sheetTitle ?? sheet.name}
         showTitle={sheetTitle !== undefined}
         className={className}
-        {...withoutAnchoring(props)}
+        {...(withoutAnchoring(props) as Omit<
+          React.ComponentProps<typeof SheetMenuContent>,
+          "title" | "children"
+        >)}
       >
-        <div className="flex flex-col py-2">{children}</div>
+        <div className="flex flex-col py-2">{children as React.ReactNode}</div>
       </SheetMenuContent>
     );
   }
+  const [positioning, popup] = splitAnchoring(props);
   return (
-    <DropdownMenuPrimitive.Portal>
-      <DropdownMenuPrimitive.Content
-        ref={ref}
-        sideOffset={sideOffset}
-        className={cn(
-          "bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border p-1 shadow-md",
-          className,
-        )}
-        {...props}
-      >
-        {children}
-      </DropdownMenuPrimitive.Content>
-    </DropdownMenuPrimitive.Portal>
+    <MenuPrimitive.Portal>
+      <MenuPrimitive.Positioner className="z-50" sideOffset={sideOffset} {...positioning}>
+        <MenuPrimitive.Popup
+          className={cn(
+            POPUP_CLASS,
+            "max-h-(--available-height) overflow-x-hidden overflow-y-auto shadow-md",
+            className,
+          )}
+          {...popup}
+        >
+          {children}
+        </MenuPrimitive.Popup>
+      </MenuPrimitive.Positioner>
+    </MenuPrimitive.Portal>
   );
-});
-DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName;
+}
 
-type SheetRowProps = Omit<
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item>,
-  "textValue"
-> & {
+interface SheetRowProps {
+  sheet: MenuSheet;
+  render?: useRender.RenderProp;
+  disabled?: boolean;
+  onClick?: React.MouseEventHandler<HTMLElement>;
+  closeOnClick?: boolean;
   /** A checkbox item's state: the row says it and flips it. */
-  checked?: React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.CheckboxItem>["checked"];
+  checked?: boolean;
   onCheckedChange?: (checked: boolean) => void;
-};
+  className?: string;
+  children?: React.ReactNode;
+  [key: `data-${string}`]: string | undefined;
+  "aria-label"?: string;
+}
 
 /**
- * An item as a sheet's row: a button (or its `asChild` element) whose press runs `onSelect` with a
- * cancelable event, then closes the sheet unless the handler prevented it, as Radix's items do.
+ * An item as a sheet's row: a button (or its `render` element) whose press runs `onClick`, then
+ * closes the sheet unless the item says `closeOnClick={false}`, as Base UI's items do (a checkbox
+ * item stays open by default, and an `onClick` that prevents the default closes it all the same).
  * No call site holds an item's ref, so a row takes none.
  */
 function SheetRow({
   sheet,
-  asChild,
+  render,
   disabled,
-  onSelect,
   onClick,
+  closeOnClick,
   checked,
   onCheckedChange,
   className,
   children,
   ...props
-}: SheetRowProps & { sheet: MenuSheet }) {
-  const Comp = (asChild ? Slot : "button") as React.ElementType;
+}: SheetRowProps) {
   const checkable = checked !== undefined;
-  return (
-    <Comp
-      {...props}
-      {...(asChild ? {} : { type: "button", disabled })}
-      role={checkable ? "checkbox" : undefined}
-      aria-checked={checkable ? checked === true : undefined}
-      aria-disabled={disabled || undefined}
-      data-disabled={disabled ? "" : undefined}
-      className={cn(SHEET_ROW_CLASS, className)}
-      onClick={(event: React.MouseEvent<HTMLElement>) => {
-        onClick?.(event as React.MouseEvent<HTMLDivElement>);
-        if (event.defaultPrevented || disabled) return;
-        const select = new Event("menu.itemSelect", { cancelable: true });
-        onSelect?.(select);
-        if (checkable) onCheckedChange?.(checked !== true);
-        if (!select.defaultPrevented) sheet.close();
-      }}
-    >
-      {checkable ? (
+  const closes = closeOnClick ?? !checkable;
+  return useRender({
+    defaultTagName: "button",
+    render,
+    props: {
+      ...props,
+      ...(render ? {} : { type: "button" as const, disabled }),
+      role: checkable ? "checkbox" : undefined,
+      "aria-checked": checkable ? checked : undefined,
+      "aria-disabled": disabled || undefined,
+      "data-disabled": disabled ? "" : undefined,
+      className: cn(SHEET_ROW_CLASS, className),
+      onClick: (event: React.MouseEvent<HTMLElement>) => {
+        if (disabled) return;
+        onClick?.(event);
+        if (checkable) onCheckedChange?.(!checked);
+        if (closes) sheet.close();
+      },
+      children: checkable ? (
         <>
           <span className="flex size-5 shrink-0 items-center justify-center" aria-hidden>
-            {checked === true && <Check />}
+            {checked && <Check />}
           </span>
           {children}
         </>
       ) : (
         children
-      )}
-    </Comp>
-  );
+      ),
+    },
+  });
 }
 
-const DropdownMenuItem = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
-    inset?: boolean;
-    variant?: "default" | "destructive";
-  }
->(({ className, variant, inset, textValue: _textValue, ...props }, ref) => {
+const ITEM_CLASS =
+  "data-highlighted:bg-accent data-highlighted:text-accent-foreground relative flex cursor-default items-center rounded-sm text-sm transition-colors outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50";
+
+function DropdownMenuItem({
+  className,
+  variant,
+  inset,
+  ...props
+}: WithClassName<MenuPrimitive.Item.Props> & {
+  inset?: boolean;
+  variant?: "default" | "destructive";
+}) {
   const sheet = React.useContext(MenuSheetContext);
   if (sheet)
     return (
       <SheetRow
         sheet={sheet}
         className={cn(variant === "destructive" && DESTRUCTIVE_ITEM, className)}
-        {...props}
+        {...(props as Omit<SheetRowProps, "sheet">)}
       />
     );
   return (
-    <DropdownMenuPrimitive.Item
-      ref={ref}
+    <MenuPrimitive.Item
       className={cn(
-        "focus:bg-accent focus:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm transition-colors outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+        ITEM_CLASS,
+        "gap-2 px-2 py-1.5 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
         inset && "pl-8",
         variant === "destructive" && DESTRUCTIVE_ITEM,
         className,
@@ -306,85 +308,114 @@ const DropdownMenuItem = React.forwardRef<
       {...props}
     />
   );
-});
-DropdownMenuItem.displayName = DropdownMenuPrimitive.Item.displayName;
+}
 
-const DropdownMenuCheckboxItem = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.CheckboxItem>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.CheckboxItem>
->(({ className, children, checked, textValue: _textValue, ...props }, ref) => {
+/**
+ * A link among the items, an `<a>` (or its `render` element, a router link). The menu closes when
+ * it is followed, as after any other item: the page it opens usually leaves the menu on screen.
+ */
+function DropdownMenuLinkItem({
+  className,
+  variant,
+  closeOnClick = true,
+  render,
+  ...props
+}: WithClassName<MenuPrimitive.LinkItem.Props> & { variant?: "default" | "destructive" }) {
+  const sheet = React.useContext(MenuSheetContext);
+  if (sheet)
+    return (
+      <SheetRow
+        sheet={sheet}
+        closeOnClick={closeOnClick}
+        className={cn(variant === "destructive" && DESTRUCTIVE_ITEM, className)}
+        {...({ ...props, render: render ?? <a /> } as Omit<SheetRowProps, "sheet">)}
+      />
+    );
+  return (
+    <MenuPrimitive.LinkItem
+      className={cn(
+        ITEM_CLASS,
+        "gap-2 px-2 py-1.5 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+        variant === "destructive" && DESTRUCTIVE_ITEM,
+        className,
+      )}
+      closeOnClick={closeOnClick}
+      render={render}
+      {...props}
+    />
+  );
+}
+
+function DropdownMenuCheckboxItem({
+  className,
+  children,
+  checked,
+  ...props
+}: WithClassName<MenuPrimitive.CheckboxItem.Props>) {
   const sheet = React.useContext(MenuSheetContext);
   if (sheet) {
     return (
-      <SheetRow sheet={sheet} checked={checked ?? false} className={className} {...props}>
+      <SheetRow
+        sheet={sheet}
+        checked={checked ?? false}
+        className={className}
+        {...(props as Omit<SheetRowProps, "sheet" | "checked">)}
+      >
         {children}
       </SheetRow>
     );
   }
   return (
-    <DropdownMenuPrimitive.CheckboxItem
-      ref={ref}
-      className={cn(
-        "focus:bg-accent focus:text-accent-foreground relative flex cursor-default items-center rounded-sm py-1.5 pr-2 pl-8 text-sm transition-colors outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-        className,
-      )}
+    <MenuPrimitive.CheckboxItem
+      className={cn(ITEM_CLASS, "py-1.5 pr-2 pl-8", className)}
       checked={checked}
       {...props}
     >
       <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
-        <DropdownMenuPrimitive.ItemIndicator>
+        <MenuPrimitive.CheckboxItemIndicator>
           <Check className="h-4 w-4" />
-        </DropdownMenuPrimitive.ItemIndicator>
+        </MenuPrimitive.CheckboxItemIndicator>
       </span>
       {children}
-    </DropdownMenuPrimitive.CheckboxItem>
+    </MenuPrimitive.CheckboxItem>
   );
-});
-DropdownMenuCheckboxItem.displayName = DropdownMenuPrimitive.CheckboxItem.displayName;
+}
 
-const DropdownMenuLabel = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.Label>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Label> & {
-    inset?: boolean;
-  }
->(({ className, inset, asChild: _asChild, ...props }, ref) => {
+/** A heading among the items: words only, not an item (a Base UI group label needs a group). */
+function DropdownMenuLabel({
+  className,
+  inset,
+  ...props
+}: React.ComponentProps<"div"> & { inset?: boolean }) {
   const sheet = React.useContext(MenuSheetContext);
-  if (sheet) return <div ref={ref} className={cn(SHEET_LABEL_CLASS, className)} {...props} />;
+  if (sheet) return <div className={cn(SHEET_LABEL_CLASS, className)} {...props} />;
   return (
-    <DropdownMenuPrimitive.Label
-      ref={ref}
+    <div
       className={cn("px-2 py-1.5 text-sm font-semibold", inset && "pl-8", className)}
       {...props}
     />
   );
-});
-DropdownMenuLabel.displayName = DropdownMenuPrimitive.Label.displayName;
+}
 
-const DropdownMenuSeparator = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.Separator>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Separator>
->(({ className, asChild: _asChild, ...props }, ref) => {
+function DropdownMenuSeparator({
+  className,
+  ...props
+}: WithClassName<MenuPrimitive.Separator.Props>) {
   const sheet = React.useContext(MenuSheetContext);
   if (sheet) {
-    return (
-      <div ref={ref} role="separator" className={cn("bg-border my-2 h-px", className)} {...props} />
-    );
+    return <div role="separator" className={cn("bg-border my-2 h-px", className)} />;
   }
   return (
-    <DropdownMenuPrimitive.Separator
-      ref={ref}
-      className={cn("bg-muted -mx-1 my-1 h-px", className)}
-      {...props}
-    />
+    <MenuPrimitive.Separator className={cn("bg-muted -mx-1 my-1 h-px", className)} {...props} />
   );
-});
-DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName;
+}
 
 export {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLinkItem,
   DropdownMenuCheckboxItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,

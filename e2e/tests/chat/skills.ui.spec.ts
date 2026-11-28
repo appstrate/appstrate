@@ -39,11 +39,11 @@ test("carries the pins and discovery with the first message, and writes nothing 
   const popover = page.getByTestId("composer-panel");
   const discovery = popover.getByTestId("skills-discovery");
   // Discovery is on by default, and the list is offered whether it is on or off.
-  await expect(discovery).toHaveAttribute("data-state", "checked");
+  await expect(discovery).toBeChecked();
   const pin = popover.getByTestId(`skill-pin-${packageId}`);
   await expect(pin).toBeEnabled();
   await discovery.click();
-  await expect(discovery).toHaveAttribute("data-state", "unchecked");
+  await expect(discovery).not.toBeChecked();
   await expect(pin).toBeEnabled();
   await pin.click();
   await expect(pin).toBeChecked();

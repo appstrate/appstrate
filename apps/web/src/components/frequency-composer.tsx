@@ -234,7 +234,7 @@ export function FrequencyComposer({
         <Field>
           <Label id="frequency-days">{t("schedule.frequency.days")}</Label>
           <ToggleGroup
-            type="multiple"
+            multiple
             aria-labelledby="frequency-days"
             variant="outline"
             className="flex-wrap justify-start"

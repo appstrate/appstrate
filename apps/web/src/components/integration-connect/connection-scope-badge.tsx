@@ -17,14 +17,16 @@ export function ConnectionScopeBadge({ scope }: { scope: ConnectionScope }) {
       : t("integration.connection.scope.spaceHelp");
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          tabIndex={0}
-          className="text-muted-foreground border-border inline-flex shrink-0 cursor-default rounded-full border px-2 py-px text-[0.65rem] whitespace-nowrap"
-        >
-          {label}
-          <span className="sr-only">{help}</span>
-        </span>
+      <TooltipTrigger
+        render={
+          <span
+            tabIndex={0}
+            className="text-muted-foreground border-border inline-flex shrink-0 cursor-default rounded-full border px-2 py-px text-[0.65rem] whitespace-nowrap"
+          />
+        }
+      >
+        {label}
+        <span className="sr-only">{help}</span>
       </TooltipTrigger>
       <TooltipContent className="max-w-xs">{help}</TooltipContent>
     </Tooltip>

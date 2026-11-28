@@ -400,7 +400,7 @@ function FieldModal({
               type="button"
               className="group text-muted-foreground hover:text-foreground flex items-center gap-1 text-sm"
             >
-              <ChevronDown className="size-4 group-data-[state=open]:rotate-180" />
+              <ChevronDown className="size-4 group-data-panel-open:rotate-180" />
               {t("editor.fieldAdvanced")}
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-3 grid gap-4 sm:grid-cols-2">

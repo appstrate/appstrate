@@ -198,7 +198,7 @@ describe("the direct access switch of a workspace", () => {
       expect(draws[0]?.checked).toBe(true);
       expect(draws[draws.length - 1]?.checked).toBe(false);
       // Off, and held while the write is in flight.
-      expect(switchTag(html)).toContain('data-state="unchecked"');
+      expect(switchTag(html)).toContain('data-unchecked=""');
       expect(switchTag(html)).toContain(' disabled=""');
       await Bun.sleep(0);
       const calls = patch.mock.calls as unknown as PatchCall[];
@@ -244,7 +244,7 @@ describe("the direct access switch of a workspace", () => {
   it("is drawn on and read-only in a personal workspace, which the server never closes", () => {
     const html = generalPage(true);
     const tag = switchTag(html);
-    expect(tag).toContain('data-state="checked"');
+    expect(tag).toContain('data-checked=""');
     expect(tag).toContain(' disabled=""');
     expect(html).toContain("Toujours activé dans un espace personnel");
     // The team workspace's hint and its note on inline runs describe a switch that can close.
@@ -254,7 +254,7 @@ describe("the direct access switch of a workspace", () => {
   it("is gated by the route, not by the page: the page draws it enabled for any caller", () => {
     // The fixture grants neither `space-settings:write` nor any space permission.
     const tag = switchTag(generalPage(false));
-    expect(tag).toContain('data-state="checked"');
+    expect(tag).toContain('data-checked=""');
     expect(tag).not.toContain(' disabled=""');
     // The route itself is refused to that caller.
     expect(ROUTE_ACCESS["/workspace-settings/general"].anyOf).toEqual(["space-settings:write"]);

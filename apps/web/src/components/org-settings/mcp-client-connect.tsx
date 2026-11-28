@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { SelectItem } from "@appstrate/ui/components/select";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { CopyBlock } from "../copy-block";
@@ -27,11 +26,9 @@ function DeeplinkTab({ label, href, fallback }: { label: string; href: string; f
   const { t } = useTranslation("settings");
   return (
     <div className="flex flex-col gap-3">
-      <Button asChild variant="default" size="sm" className="self-start">
-        <a href={href}>
-          <ExternalLink />
-          {label}
-        </a>
+      <Button variant="default" size="sm" className="self-start" render={<a href={href} />}>
+        <ExternalLink />
+        {label}
       </Button>
       <p className="text-muted-foreground text-xs">{t("orgSettings.mcpManualFallback")}</p>
       <CopyBlock value={fallback} multiline />
@@ -72,7 +69,7 @@ export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
           onValueChange={setScope}
           className="w-full sm:w-72"
           data-testid="mcp-scope-select"
-          leading={<SelectItem value={ALL_SPACES}>{t("orgSettings.mcpScopeAll")}</SelectItem>}
+          leading={[{ value: ALL_SPACES, label: t("orgSettings.mcpScopeAll") }]}
           options={enterable.map((s) => ({ value: s.id, label: spaceLabel(s, t) }))}
         />
         <p className="text-muted-foreground mt-1 text-xs">

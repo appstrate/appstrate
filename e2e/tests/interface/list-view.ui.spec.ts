@@ -11,37 +11,48 @@ for (const screen of [
     authedPage: page,
   }) => {
     await page.goto(screen.path);
-    const cards = page.getByRole("radio", { name: "Vue cartes", exact: true });
-    const table = page.getByRole("radio", { name: "Vue tableau", exact: true });
-    await expect(cards).toBeChecked();
+    const cards = page.getByRole("button", { name: "Vue cartes", exact: true });
+    const table = page.getByRole("button", { name: "Vue tableau", exact: true });
+    await expect(cards).toHaveAttribute("aria-pressed", "true");
     for (const stored of ['"table"', '"cards"', '"invalid"', "{broken"]) {
       await page.evaluate(
         ({ key, stored }) => localStorage.setItem(`appstrate:web:view:${key}`, stored),
         { key: screen.key, stored },
       );
       await page.reload();
-      await expect(stored === '"table"' ? table : cards).toBeChecked();
+      await expect(stored === '"table"' ? table : cards).toHaveAttribute("aria-pressed", "true");
     }
     const other = await page.context().newPage();
     try {
       await other.goto(screen.path);
-      await expect(other.getByRole("radio", { name: "Vue cartes", exact: true })).toBeChecked();
-      await other.getByRole("radio", { name: "Vue tableau", exact: true }).click();
-      await expect(table).toBeChecked();
+      await expect(other.getByRole("button", { name: "Vue cartes", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await other.getByRole("button", { name: "Vue tableau", exact: true }).click();
+      await expect(table).toHaveAttribute("aria-pressed", "true");
       await cards.click();
-      await expect(other.getByRole("radio", { name: "Vue cartes", exact: true })).toBeChecked();
+      await expect(other.getByRole("button", { name: "Vue cartes", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
     } finally {
       await other.close();
     }
     await cards.focus();
     await page.keyboard.press("ArrowLeft");
     await expect(table).toBeFocused();
-    await expect(table).toBeChecked();
+    await expect(table).toHaveAttribute("aria-pressed", "false");
+    await page.keyboard.press("Space");
+    await expect(table).toHaveAttribute("aria-pressed", "true");
     await page.reload();
-    await expect(table).toBeChecked();
+    await expect(table).toHaveAttribute("aria-pressed", "true");
     // A choice on either new grid must not change another index's default.
     await page.goto("/agents");
-    await expect(page.getByRole("radio", { name: "Vue tableau", exact: true })).toBeChecked();
+    await expect(page.getByRole("button", { name: "Vue tableau", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 }
 

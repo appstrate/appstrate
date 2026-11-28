@@ -13,7 +13,7 @@ import {
 export interface SelectOption {
   value: string;
   label: ReactNode;
-  /** The text typeahead matches, when `label` is not plain text (Radix reads `textContent` otherwise). */
+  /** The text typeahead matches, when `label` is not plain text (read from the item's text otherwise). */
   textValue?: string;
   disabled?: boolean;
 }
@@ -40,26 +40,28 @@ export function OptionSelect({
   /** On the trigger. */
   className?: string;
   contentClassName?: string;
-  /** Items drawn above the options (a "none" choice, a kept unknown value). */
-  leading?: ReactNode;
+  /** Options drawn above the others (a "none" choice, a kept unknown value). */
+  leading?: readonly SelectOption[];
   "aria-label"?: string;
   "aria-labelledby"?: string;
   "aria-invalid"?: boolean;
   "aria-describedby"?: string;
 }) {
+  const all = leading ? [...leading, ...options] : options;
+  // The trigger draws the chosen option's label, not its value.
+  const items = Object.fromEntries(all.map((option) => [option.value, option.label]));
   return (
-    <Select value={value} onValueChange={onValueChange} disabled={disabled}>
+    <Select value={value ?? null} onValueChange={onValueChange} disabled={disabled} items={items}>
       <SelectTrigger id={id} className={className} {...aria}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent className={contentClassName}>
         <SelectGroup>
-          {leading}
-          {options.map((option) => (
+          {all.map((option) => (
             <SelectItem
               key={option.value}
               value={option.value}
-              textValue={option.textValue}
+              label={option.textValue}
               disabled={option.disabled}
             >
               {option.label}

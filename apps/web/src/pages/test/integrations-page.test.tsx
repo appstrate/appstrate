@@ -137,8 +137,7 @@ describe("the integration index", () => {
     expect(html).not.toContain("Distantes");
     expect(html).not.toContain("Locales");
     expect(html).not.toContain('role="tablist"');
-    expect(html).toContain('role="radiogroup"');
-    expect(html).toContain('aria-label="Affichage de la liste"');
+    expect(html).toMatch(/role="group"[^>]*aria-label="Affichage de la liste"/);
   });
 
   it("filters on the source param", () => {

@@ -303,7 +303,7 @@ function box(html: string, id: string): { checked: boolean; disabled: boolean } 
   const tag = html.match(new RegExp(`<button[^>]*data-testid="member-pick-option-${id}"[^>]*>`));
   if (!tag) throw new Error(`no box for ${id}`);
   return {
-    checked: tag[0].includes('data-state="checked"'),
+    checked: tag[0].includes('data-checked=""'),
     disabled: / disabled=""/.test(tag[0]),
   };
 }

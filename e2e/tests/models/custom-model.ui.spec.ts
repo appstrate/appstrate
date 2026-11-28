@@ -28,7 +28,7 @@
 
 import { createServer, type Server } from "node:http";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
-import { selectOption } from "../../helpers/radix.ts";
+import { selectOption } from "../../helpers/select.ts";
 import { openRowMenuItem } from "../../helpers/table.ts";
 import {
   NEXT,

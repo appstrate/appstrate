@@ -48,22 +48,23 @@ function Combobox({
   const selected = options.find((option) => option.value === value);
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          id={id}
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          disabled={disabled}
-          className={cn("w-full justify-between font-normal", className)}
-        >
-          <span className={cn("truncate", !value && "text-muted-foreground")}>
-            {value ? (selected?.label ?? selected?.value ?? value) : placeholder}
-          </span>
-          <ChevronsUpDown className="text-muted-foreground shrink-0" />
-        </Button>
+      <PopoverTrigger
+        render={
+          <Button
+            id={id}
+            variant="outline"
+            role="combobox"
+            disabled={disabled}
+            className={cn("w-full justify-between font-normal", className)}
+          />
+        }
+      >
+        <span className={cn("truncate", !value && "text-muted-foreground")}>
+          {value ? (selected?.label ?? selected?.value ?? value) : placeholder}
+        </span>
+        <ChevronsUpDown className="text-muted-foreground shrink-0" />
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
+      <PopoverContent align="start" className="w-(--anchor-width) p-0">
         <Command>
           <CommandInput placeholder={searchPlaceholder} />
           <CommandList>

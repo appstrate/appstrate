@@ -99,43 +99,45 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
 
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn(
-            // shadcn's own `size="sm"` resolves to `px-2.5 gap-1.5` for a button carrying an
-            // icon; ours is a flat `px-3 gap-2`, which would add width inside every filter.
-            "h-8 gap-1.5 bg-transparent px-2.5 shadow-none",
-            // Dashed and `+` both mean "an empty slot you can fill"; a filled button is a
-            // statement, so the border closes and the plus leaves with it.
-            selected.length === 0 && "border-dashed",
-          )}
-        >
-          {selected.length === 0 && <PlusCircle />}
-          {filter.label}
-          {selected.length > 0 && (
-            <>
-              <Separator orientation="vertical" className="mx-1.5 h-4" />
-              {selected.length > NAMED_VALUES ? (
-                <Badge variant="secondary" className="rounded-sm px-1 font-normal">
-                  {t("toolbar.selected", { count: selected.length })}
+      <PopoverTrigger
+        render={
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(
+              // shadcn's own `size="sm"` resolves to `px-2.5 gap-1.5` for a button carrying an
+              // icon; ours is a flat `px-3 gap-2`, which would add width inside every filter.
+              "h-8 gap-1.5 bg-transparent px-2.5 shadow-none",
+              // Dashed and `+` both mean "an empty slot you can fill"; a filled button is a
+              // statement, so the border closes and the plus leaves with it.
+              selected.length === 0 && "border-dashed",
+            )}
+          />
+        }
+      >
+        {selected.length === 0 && <PlusCircle />}
+        {filter.label}
+        {selected.length > 0 && (
+          <>
+            <Separator orientation="vertical" className="mx-1.5 h-4" />
+            {selected.length > NAMED_VALUES ? (
+              <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+                {t("toolbar.selected", { count: selected.length })}
+              </Badge>
+            ) : (
+              selected.map((option) => (
+                <Badge
+                  key={option.value}
+                  variant="secondary"
+                  className="gap-1 rounded-sm px-1 font-normal"
+                >
+                  {option.icon}
+                  {option.label}
                 </Badge>
-              ) : (
-                selected.map((option) => (
-                  <Badge
-                    key={option.value}
-                    variant="secondary"
-                    className="gap-1 rounded-sm px-1 font-normal"
-                  >
-                    {option.icon}
-                    {option.label}
-                  </Badge>
-                ))
-              )}
-            </>
-          )}
-        </Button>
+              ))
+            )}
+          </>
+        )}
       </PopoverTrigger>
       <PopoverContent className="w-52 p-0" align="start">
         <Command>
@@ -199,17 +201,19 @@ function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={TOOLBAR_UTILITY}
-          title={label}
-          aria-label={label}
-        >
-          <SlidersHorizontal />
-          <span className="hidden @xl/bar:inline">{label}</span>
-        </Button>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="outline"
+            size="sm"
+            className={TOOLBAR_UTILITY}
+            title={label}
+            aria-label={label}
+          />
+        }
+      >
+        <SlidersHorizontal />
+        <span className="hidden @xl/bar:inline">{label}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuLabel>{t("toolbar.columnsLabel")}</DropdownMenuLabel>
@@ -221,9 +225,8 @@ function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
               key={option.id}
               checked={isVisible}
               disabled={option.required || (isVisible && visibleCount === 1)}
+              // Stays open (a checkbox item's default): several columns are usually toggled in a row.
               onCheckedChange={() => columns.onToggle(option.id)}
-              // Stay open: several columns are usually toggled in a row.
-              onSelect={(event) => event.preventDefault()}
             >
               {option.label}
             </DropdownMenuCheckboxItem>
