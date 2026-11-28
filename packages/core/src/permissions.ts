@@ -571,16 +571,10 @@ export const orgSettingsSchema = z.object({
   // would protect the link and not the content. SKILLS are exempt: the CLI's
   // `code sync` is a local copy by design and its audience is already the space.
   restrict_package_copy: z.boolean().optional(),
-  // Absent = allowed. `false` refuses new personal model credentials, and the chain ignores existing ones.
-  personal_model_credentials: z.boolean().optional(),
 });
 
-/** The stored settings as read: each defaulted policy read as its effective value; other stored keys kept. */
-export const orgSettingsReadSchema = orgSettingsSchema
-  .extend({
-    personal_model_credentials: z.boolean().default(true),
-  })
-  .loose();
+/** The stored settings as read: other stored keys kept. */
+export const orgSettingsReadSchema = orgSettingsSchema.loose();
 
 /**
  * The org settings as served: `personal_space_role` (members' default role in their personal space)

@@ -54,6 +54,8 @@ interface CreatePairingArgs {
   ownerUserId: string | null;
   /** Existing credential to update; omitted when connecting a new account. */
   reconnectCredentialId?: string;
+  /** Configuration a new connection joins; `null` = its provider's family configuration. */
+  configId?: string | null;
   /** Public platform URL embedded in the token so the helper knows where to POST back. */
   platformUrl: string;
   /** Lifetime in seconds — typically 300 (5 min). */
@@ -77,6 +79,7 @@ interface ConsumedPairing {
   providerId: string;
   ownerUserId: string | null;
   reconnectCredentialId: string | null;
+  configId: string | null;
   expiresAt: Date;
   consumedAt: Date;
 }
@@ -128,6 +131,7 @@ export async function createPairing(args: CreatePairingArgs): Promise<CreatePair
       providerId: args.providerId,
       ownerUserId: args.ownerUserId,
       reconnectCredentialId: args.reconnectCredentialId ?? null,
+      configId: args.configId ?? null,
       expiresAt,
     });
   });
@@ -167,6 +171,7 @@ export async function consumePairing(token: string): Promise<ConsumedPairing> {
       providerId: modelProviderPairings.providerId,
       ownerUserId: modelProviderPairings.ownerUserId,
       reconnectCredentialId: modelProviderPairings.reconnectCredentialId,
+      configId: modelProviderPairings.configId,
       expiresAt: modelProviderPairings.expiresAt,
       consumedAt: modelProviderPairings.consumedAt,
     });
@@ -183,6 +188,7 @@ export async function consumePairing(token: string): Promise<ConsumedPairing> {
     providerId: row.providerId,
     ownerUserId: row.ownerUserId,
     reconnectCredentialId: row.reconnectCredentialId,
+    configId: row.configId,
     expiresAt: row.expiresAt,
     consumedAt: row.consumedAt,
   };

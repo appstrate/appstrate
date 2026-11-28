@@ -2320,6 +2320,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/model-configs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List model configurations
+         * @description Every model configuration of the organization, sorted by label. A configuration is one catalog family (a provider and the subscriptions that serve its catalog, e.g. `anthropic` with Claude Code) or one endpoint of a gateway provider. Its connections (`GET /api/model-provider-credentials`, `config_id`) serve its models (`GET /api/models`, `config_id`). **Permission:** `models:read`; `personal_connection_count` needs `model-provider-credentials:read`.
+         */
+        get: operations["listModelConfigs"];
+        put?: never;
+        /**
+         * Create a model configuration
+         * @description Create a configuration. `provider_id` is normalised to its family's representative provider (`claude-code` → `anthropic`). One configuration per family for a catalog provider, one per endpoint for a gateway: an existing one is `409 model_config_exists` with `existing_config_id`. **Permission:** `models:write`.
+         */
+        post: operations["createModelConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/model-configs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a model configuration
+         * @description Delete a configuration with its connections and models. The organization default is cleared when it named one of its models. **Permission:** `models:delete`.
+         */
+        delete: operations["deleteModelConfig"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a model configuration
+         * @description Merge semantics: an absent field is left unchanged. Turning `personal_connections_allowed` off keeps the members' connections, which stop serving (and end the runs on one). **Permission:** `models:write`.
+         */
+        patch: operations["updateModelConfig"];
+        trace?: never;
+    };
     "/api/model-provider-credentials": {
         parameters: {
             query?: never;
@@ -2335,7 +2383,7 @@ export interface paths {
         put?: never;
         /**
          * Create a model provider credential
-         * @description Create a new LLM model provider credential. The plaintext API key is encrypted at rest under a versioned envelope. **Permission:** `model-provider-credentials:write` for an organization credential (`owner_type: org`, the default); `model-provider-credentials:connect` for a personal credential (`owner_type: user`), which belongs to the caller and serves only their own calls. A personal credential is refused with `403 personal_model_credentials_disabled` when the organization turned `personal_model_credentials` off, and with `400 personal_credential_custom_endpoint` for a `baseUrlOverridable` provider or any `base_url_override`.
+         * @description Create a new LLM model provider credential. The plaintext API key is encrypted at rest under a versioned envelope. **Permission:** `model-provider-credentials:write` for an organization credential (`owner_type: org`, the default); `model-provider-credentials:connect` for a personal credential (`owner_type: user`), which belongs to the caller and serves only their own calls. The connection joins a model configuration (`config_id`, else its provider's family configuration). A personal connection is refused with `403 personal_model_credentials_disabled` when that configuration does not allow personal connections.
          */
         post: operations["createModelProviderCredential"];
         delete?: never;
@@ -2395,7 +2443,7 @@ export interface paths {
         put?: never;
         /**
          * Test model provider credential configuration inline
-         * @description Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId`: its provider, API shape and base URL are used, and its stored API key when `api_key` is omitted. `base_url` must then equal the credential's, unless `api_key` is supplied for a provider accepting a base URL override; a built-in (system) credential is refused with 403, and a personal credential with `403 personal_model_credentials_disabled` while the organization has personal credentials off. Without a stored credential, the provider's own API shape is used and `base_url` must be its default unless it accepts an override; a provider accepting one is refused with 400 to a caller without `model-provider-credentials:write`. The test follows the provider's definition: a provider whose model listing is unauthenticated is tested with one minimal chat completion instead of `GET <base_url>/models`. **Permission:** `model-provider-credentials:read` or `:connect`; a `credentialId` the caller may not use answers `404`. Rate limited to 5 requests per minute.
+         * @description Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId`: its provider, API shape and base URL are used, and its stored API key when `api_key` is omitted. `base_url` must then equal the credential's, unless `api_key` is supplied for a provider accepting a base URL override; a built-in (system) credential is refused with 403, and a personal credential with `403 personal_model_credentials_disabled` while its model configuration does not allow personal connections. Without a stored credential, the provider's own API shape is used and `base_url` must be its default unless it accepts an override; a provider accepting one is refused with 400 to a caller without `model-provider-credentials:write`. The test follows the provider's definition: a provider whose model listing is unauthenticated is tested with one minimal chat completion instead of `GET <base_url>/models`. **Permission:** `model-provider-credentials:read` or `:connect`; a `credentialId` the caller may not use answers `404`. Rate limited to 5 requests per minute.
          */
         post: operations["testModelProviderCredentialInline"];
         delete?: never;
@@ -2416,7 +2464,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a model provider credential
-         * @description Delete a model provider credential. Returns 409 with `credential_in_use` if any `org_models` row still references it (FK ON DELETE RESTRICT) — detach the model first. **Permission:** `model-provider-credentials:delete` for an organization credential; `model-provider-credentials:connect` for a personal credential the caller owns. A holder of `delete` may also delete any member's personal credential (break-glass). Another member's personal credential otherwise answers `404`. A personal credential is never bound to a model, so it never answers `credential_in_use`.
+         * @description Delete a model provider credential. Its configuration's models stay: they are served by the configuration's other connections, or by none. **Permission:** `model-provider-credentials:delete` for an organization credential; `model-provider-credentials:connect` for a personal credential the caller owns. A holder of `delete` may also delete any member's personal credential (break-glass). Another member's personal credential otherwise answers `404`.
          */
         delete: operations["deleteModelProviderCredential"];
         options?: never;
@@ -2459,7 +2507,7 @@ export interface paths {
         put?: never;
         /**
          * Redeem a pairing token: post the OAuth credential bundle back to the platform
-         * @description Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider / owner and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, owner or credential. The request carries no principal, so the member who minted the pairing is judged again on what the organization grants them at this moment, by the rules of the mint: a new connection needs `model-provider-credentials:write` (organization) or `model-provider-credentials:connect` (personal) and answers `403` without it, or once the member left; a reconnect needs the credential to still list `reconnect` for them and answers `404` otherwise. A personal credential answers `403 personal_model_credentials_disabled` when the organization turned `personal_model_credentials` off after the mint. The token is single-use and consumed before anything is judged, the request body included: a refused redeem spends it (a retry answers `410`) and is recorded on the pairing, which `GET /pairing/{id}` then reads as `failed`; a new pairing must be minted. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.
+         * @description Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider / owner and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, owner or credential. The request carries no principal, so the member who minted the pairing is judged again on what the organization grants them at this moment, by the rules of the mint: a new connection needs `model-provider-credentials:write` (organization) or `model-provider-credentials:connect` (personal) and answers `403` without it, or once the member left; a reconnect needs the credential to still list `reconnect` for them and answers `404` otherwise. A personal credential answers `403 personal_model_credentials_disabled` when its model configuration stopped allowing personal connections after the mint. The token is single-use and consumed before anything is judged, the request body included: a refused redeem spends it (a retry answers `410`) and is recorded on the pairing, which `GET /pairing/{id}` then reads as `failed`; a new pairing must be minted. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.
          */
         post: operations["redeemOAuthModelProviderPairing"];
         delete?: never;
@@ -2479,7 +2527,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a one-shot pairing token for the connect helper
-         * @description Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper@0.3.x <token>` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Two body shapes. A new connection sends `owner_type`, as on `POST /api/model-provider-credentials`: `org` (default) pairs an organization credential, which an organization model may be bound to and which then serves every caller; `user` pairs the caller's personal credential, serving only their own calls. A reconnect sends `credentialId` and no `owner_type` (the credential names its own owner, and the two together are a `400`): it updates that exact credential in place, and is accepted exactly when the credential lists the `reconnect` action for the caller. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. **Permission:** a new connection needs `model-provider-credentials:write` for `owner_type: org`, `model-provider-credentials:connect` for `owner_type: user` (`403` otherwise, and `403 personal_model_credentials_disabled` for `user` while the organization has `personal_model_credentials` off). A reconnect the caller may not make answers `404`, except the caller's own personal credential while the organization has `personal_model_credentials` off, which answers `403 personal_model_credentials_disabled`. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).
+         * @description Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper@0.3.x <token>` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Two body shapes. A new connection sends `owner_type`, as on `POST /api/model-provider-credentials`: `org` (default) pairs an organization credential, which an organization model may be bound to and which then serves every caller; `user` pairs the caller's personal credential, serving only their own calls. A reconnect sends `credentialId` and no `owner_type` (the credential names its own owner, and the two together are a `400`): it updates that exact credential in place, and is accepted exactly when the credential lists the `reconnect` action for the caller. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. **Permission:** a new connection needs `model-provider-credentials:write` for `owner_type: org`, `model-provider-credentials:connect` for `owner_type: user` (`403` otherwise, and `403 personal_model_credentials_disabled` for `user` while its model configuration does not allow personal connections). A reconnect the caller may not make answers `404`, except the caller's own personal credential while its model configuration does not allow personal connections, which answers `403 personal_model_credentials_disabled`. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).
          */
         post: operations["createOAuthModelProviderPairing"];
         delete?: never;
@@ -2521,13 +2569,13 @@ export interface paths {
         };
         /**
          * List organization models
-         * @description Returns all models (built-in + custom) for the current organization. `billed_to` is computed for the caller: an unbound model (`credentialId: null`, each member brings their own credential) is `user` when the caller holds a usable personal credential for its provider, `null` otherwise.
+         * @description Returns all models (built-in + custom) for the current organization. Each custom model belongs to a model configuration (`config_id`), whose connections serve it. `billed_to` and `needs_reconnection` are computed for the caller: whose connection would serve the caller now.
          */
         get: operations["listModels"];
         put?: never;
         /**
          * Create a custom model
-         * @description Create a new custom LLM model for the organization. One row per `(credentialId, modelId)` binding — a second create for a pair the organization already holds is refused with `409 model_already_added`, unless it is a managed (`aliased`) model, which may share a binding. `credentialId` must be an organization credential: a member's personal credential is refused with `400 personal_credential_not_bindable`. `credentialId: null` creates an unbound model, served by each member's own credential for `providerId`.
+         * @description Create a new custom LLM model in a model configuration (`config_id`, `GET /api/model-configs`): the configuration's connections serve it. One row per `(config_id, modelId)` — a second create for a pair the organization already holds is refused with `409 model_already_added`, unless it is a managed (`aliased`) model.
          */
         post: operations["createModel"];
         delete?: never;
@@ -2546,8 +2594,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Apply a model-provider choice in one transaction
-         * @description One write for a provider choice: the credential its models run on (an existing organization credential `{ id }`, a new organization API key — the `POST /api/model-provider-credentials` body without `owner_type` —, or `null` for models each member serves with their own credential, `providerId` then naming the service), the models to create (`add`), the ones to switch on (`enable`) and off (`disable`), and the default (`default_model_id`, the `modelId` of a model of this choice). Applied in that order — the key, the models, the switches on, the default, the switches off — inside ONE transaction: either all of it is written or none. Every entry is checked as its own route would check it (`POST /api/models`, `PATCH /api/models/{id}`, `PUT /api/models/default`); refusals come back together as `400 validation_failed` with one `errors[]` item per entry (`field`: `add.<i>`, `enable.<i>`, `disable.<i>`, `default_model_id`; `code`: that route's own, or `model_not_in_choice` for a model that does not run on the choice's credential), and nothing is written. Requires `models:write`, and `model-provider-credentials:write` to mint an organization key (the rule of `POST /api/model-provider-credentials` with `owner_type: org`; `:connect` alone does not suffice), rate-limited like that route. Accepts `Idempotency-Key`: a retry with the same key and body replays the first response.
+         * Apply a configuration's model choice in one transaction
+         * @description One write for a configuration's model choice (`config_id`): the models to create (`add`), the ones to switch on (`enable`) and off (`disable`), and the default (`default_model_id`, the `modelId` of a model of this configuration). Applied in that order — the models, the switches on, the default, the switches off — inside ONE transaction: either all of it is written or none. Every entry is checked as its own route would check it (`POST /api/models`, `PATCH /api/models/{id}`, `PUT /api/models/default`); refusals come back together as `400 validation_failed` with one `errors[]` item per entry (`field`: `add.<i>`, `enable.<i>`, `disable.<i>`, `default_model_id`; `code`: that route's own, or `model_not_in_choice` for a model of another configuration), and nothing is written. Connections are added on their own route (`POST /api/model-provider-credentials`, the pairing flow). Requires `models:write`. Accepts `Idempotency-Key`: a retry with the same key and body replays the first response.
          */
         post: operations["applyModelChoice"];
         delete?: never;
@@ -2606,8 +2654,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Bulk-seed models from the registry for a credential
-         * @description Atomically seed multiple `org_models` rows from the registry entry pinned by the credential's `providerId`. Idempotent — returns `created: 0` when the org already has any model bound to this credential.
+         * Bulk-seed catalog models into a model configuration
+         * @description Atomically seed multiple `org_models` rows into a model configuration from its provider's catalog. Idempotent — returns `created: 0` when the configuration already has models.
          */
         post: operations["seedModels"];
         delete?: never;
@@ -2655,7 +2703,7 @@ export interface paths {
         head?: never;
         /**
          * Update a custom model
-         * @description Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `credentialId: null` unbinds the model and requires `providerId` in the same body; a non-null `credentialId` must be an organization credential (`400 personal_credential_not_bindable` otherwise).
+         * @description Update a custom model. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. A model never changes configuration.
          */
         patch: operations["updateModel"];
         trace?: never;
@@ -6787,6 +6835,37 @@ export interface components {
             /** @description On an agent-run, inline-run or remote-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration required by the definition this launch runs (the version it names, or its default published version) are active. Connections are judged at launch there. Absent on a schedule write and on readiness. */
             active_in_spaces?: components["schemas"]["ActiveInSpaces"];
         };
+        ModelConfig: {
+            /** Format: uuid */
+            id: string;
+            /** @description The family's representative provider (`anthropic` serves Anthropic keys and Claude Code subscriptions), or the gateway provider. */
+            provider_id: string;
+            provider_name: string | null;
+            label: string;
+            /** @description The endpoint of a gateway configuration; `null` for a catalog provider. */
+            base_url: string | null;
+            /** @description Whether members' own connections serve its models (for themselves only). */
+            personal_connections_allowed: boolean;
+            /** @description The providers whose connections fit this configuration, API keys first. */
+            accepts: {
+                provider_id: string;
+                display_name: string;
+                /** @enum {string} */
+                auth_mode: "api_key" | "oauth2";
+            }[];
+            /**
+             * @description `active` — a live organization connection; `needs_reconnection` — only dead ones; `none` — no organization connection: schedules, API keys and end users cannot use its models.
+             * @enum {string}
+             */
+            org_connection: "active" | "needs_reconnection" | "none";
+            /** @description Members holding a personal connection to it; `null` unless the caller holds `model-provider-credentials:read`. */
+            personal_connection_count: number | null;
+            model_count: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         /** @description A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. Thresholds are unique within a card. */
         ModelCostTier: {
             inputTokensAbove: number;
@@ -6862,13 +6941,14 @@ export interface components {
             owner_id: string | null;
             /** @description Display name of `owner_id`; `null` for `org`. */
             owner_name: string | null;
-            /** @description The actions the caller may take on this credential, computed for the caller. A built-in credential allows only `test`, to a caller holding `model-provider-credentials:read`. An organization credential allows `edit` to a `model-provider-credentials:write` holder, `delete` to a `model-provider-credentials:delete` holder, and `test` to a `model-provider-credentials:read` holder. A personal credential allows `edit` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:write`; `delete` to its owner holding `model-provider-credentials:connect`, or to any `model-provider-credentials:delete` holder; and, while the organization allows personal model credentials, `test` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:read`. An OAuth credential also allows `reconnect` (re-pairing it in place, `POST /api/model-providers-oauth/pairing` with `credentialId`) to whoever it allows `edit`, a personal one only while the organization allows personal model credentials, whether or not it needs reconnection (`needs_reconnection`). */
+            /** @description The actions the caller may take on this credential, computed for the caller. A built-in credential allows only `test`, to a caller holding `model-provider-credentials:read`. An organization credential allows `edit` to a `model-provider-credentials:write` holder, `delete` to a `model-provider-credentials:delete` holder, and `test` to a `model-provider-credentials:read` holder. A personal credential allows `edit` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:write`; `delete` to its owner holding `model-provider-credentials:connect`, or to any `model-provider-credentials:delete` holder; and, while its configuration allows personal connections, `test` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:read`. An OAuth credential also allows `reconnect` (re-pairing it in place, `POST /api/model-providers-oauth/pairing` with `credentialId`) to whoever it allows `edit`, a personal one only while its configuration allows personal connections, whether or not it needs reconnection (`needs_reconnection`). */
             allowed_actions: ("edit" | "delete" | "test" | "reconnect")[];
-            /** @description Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one. */
-            bindable: boolean;
-            /** @description Number of organization model rows bound to this credential, including disabled models. A positive count prevents deletion (409 credential_in_use). Personal and built-in credentials have no such bindings. */
-            referencing_model_count: number;
-            /** @description On a personal credential, the ids of the organization models left to members' own credentials (`binding: user`) that it pays for — the same service, or a subscription offering the model on its API. `[]` on an organization or built-in credential: its models name it in `credentialId`. */
+            /**
+             * Format: uuid
+             * @description The model configuration this connection serves (`GET /api/model-configs`); `null` for a built-in credential.
+             */
+            config_id: string | null;
+            /** @description The ids of its configuration's models this connection can serve (its offer: a gateway serves any id, a subscription its catalog's). `[]` on a built-in credential. */
             serves_model_ids: string[];
             created_by: string | null;
             /** Format: date-time */
@@ -7081,21 +7161,19 @@ export interface components {
             is_default: boolean;
             /** @description True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. On an unbound model (`credentialId: null`) it is read for the caller, like `billed_to`: true when nothing of the caller's serves it and one of their own credentials for it must be reconnected. */
             needs_reconnection: boolean;
-            /** @description Managed-model flag. When true, the binding (`modelId`, `apiShape`, `base_url`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge. */
+            /** @description Managed-model flag. When true, the binding (`modelId`, `apiShape`, `base_url`, `config_id`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge. */
             aliased: boolean;
             /** @description Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`base_url`, or fall back to a generic icon. */
             iconUrl: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
-            /** @description The credential serving the model: the organization credential when `binding` is `org`, the platform's key when it is `system`. `null` when `binding` is `user`, and for managed models — binding not exposed. */
-            credentialId: string | null;
             /**
-             * @description Whose credential serves the model, in the vocabulary of `billed_to`. `system` — a built-in model, served by the platform's key. `org` — bound to an organization credential. `user` — unbound: each member serves it with their own credential for `providerId`. `managed` — an alias; its binding is not exposed.
-             * @enum {string}
+             * Format: uuid
+             * @description The model configuration the model belongs to (`GET /api/model-configs`): its connections serve it. `null` for a built-in model, and for managed models — the configuration names the provider.
              */
-            binding: "system" | "org" | "user" | "managed";
+            config_id: string | null;
             /**
-             * @description Who pays for a call to this model, for the caller. `system` — a built-in model, paid by the platform. `org` — bound to an organization credential: the organization pays whoever calls (a dead credential is `needs_reconnection`). `user` — unbound, and served by one of the caller's own credentials. `null` — unbound and nothing of the caller's serves it: a spend is refused (`409 model_credential_required`). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there.
+             * @description Who pays for a call to this model, for the caller: whose connection of its configuration would serve the caller now. `system` — a built-in model, paid by the platform. `user` — one of the caller's own connections (personal ones come first, while the configuration allows them and the model is not managed). `org` — an organization connection. `null` — no connection serves it for the caller: a spend is refused (`409 model_credential_required`), or, when one that would is dead, `needs_reconnection` is true. Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription.
              * @enum {string|null}
              */
             billed_to: "system" | "org" | "user" | null;
@@ -7225,8 +7303,6 @@ export interface components {
             api_version?: string;
             /** @description When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users. */
             dashboard_sso_enabled?: boolean;
-            /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
-            personal_model_credentials: boolean;
             /** @description The role an organization member or guest holds by default in their own personal space, as a role reference: `{ preset_role }` (`admin`, `builder`, `operator`, `runner`, `viewer`) or `{ custom_role_id }` (the id of one of this organization's custom space roles, `srl_…`). Defaults to `{ preset_role: "admin" }`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
             personal_space_role: {
                 /** @enum {string} */
@@ -7872,11 +7948,6 @@ export interface components {
             /** @description Highest run number this schedule ever produced; 0 when it never fired. */
             last_run_number: number;
         };
-        /** @description A problem that may name schedules. On `model_scheduled` — the write would leave enabled schedules running a model served only by each member's own credential, which a schedule has none of — `schedule_ids` lists them. A schedule's effective model is its `model_id_override`, else its agent's model in its space, else the organization default. Change those schedules' model, or bind the model to an organization credential. */
-        ScheduleIdsProblem: components["schemas"]["ProblemDetail"] & {
-            /** @description On `model_scheduled`: the enabled schedules the write would leave on that model. */
-            schedule_ids?: string[];
-        };
         SmtpConfigView: {
             spaceId: string;
             host: string;
@@ -8304,7 +8375,7 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["MissingIntegrationConnectionProblem"];
             };
         };
-        /** @description `model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair, or, for a model each member serves with their own credential (`credentialId` null), for this `(providerId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding. */
+        /** @description `model_already_added` — this model configuration already has a row for this `modelId`. One row per `(config_id, modelId)`: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds it. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one. */
         ModelAlreadyAdded: {
             headers: {
                 [name: string]: unknown;
@@ -18432,6 +18503,173 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listModelConfigs: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model configuration list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["ModelConfig"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createModelConfig: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A registered provider (`GET /api/model-provider-credentials/registry`). */
+                    provider_id: string;
+                    /** @description Display name. Default: the provider's name, prefixed by a gateway's host. */
+                    label?: string;
+                    /**
+                     * Format: uri
+                     * @description The endpoint of a gateway configuration (`baseUrlOverridable` provider): required at creation for a gateway, refused (`400`, param `base_url`) for any other provider.
+                     */
+                    base_url?: string;
+                    /**
+                     * @description Whether members may connect their own keys or subscriptions.
+                     * @default true
+                     */
+                    personal_connections_allowed?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Model configuration created */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelConfig"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description `model_config_exists` — the organization already has this configuration; the problem body carries `existing_config_id`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    deleteModelConfig: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model configuration deleted */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateModelConfig: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    label?: string;
+                    /**
+                     * Format: uri
+                     * @description The endpoint of a gateway configuration (`baseUrlOverridable` provider): required at creation for a gateway, refused (`400`, param `base_url`) for any other provider.
+                     */
+                    base_url?: string;
+                    personal_connections_allowed?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Model configuration updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelConfig"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `model_config_exists` — another configuration of the organization already has this endpoint; the problem body carries `existing_config_id`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     listModelProviderCredentials: {
         parameters: {
             query?: never;
@@ -18472,8 +18710,7 @@ export interface operations {
                      *             "delete",
                      *             "test"
                      *           ],
-                     *           "bindable": false,
-                     *           "referencing_model_count": 0,
+                     *           "config_id": "0f1e2d3c-4b5a-4968-8776-655443322110",
                      *           "serves_model_ids": [],
                      *           "created_by": "usr_cm3abc123",
                      *           "createdAt": "2026-01-10T08:00:00Z",
@@ -18522,10 +18759,10 @@ export interface operations {
                     /** @description API key for authentication */
                     api_key: string;
                     /**
-                     * Format: uri
-                     * @description Optional `http(s)` override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise. Refused with `owner_type: user`.
+                     * Format: uuid
+                     * @description The model configuration the connection joins (`GET /api/model-configs`); its endpoint is the connection's. Absent: the provider's family configuration, created when missing — refused (`400`, param `config_id`) for a gateway provider (`baseUrlOverridable: true`), whose endpoint a configuration chooses. A provider that does not fit the configuration is `400 connection_provider_mismatch`; a personal connection to a configuration that does not allow them is `403 personal_model_credentials_disabled`.
                      */
-                    base_url_override?: string | null;
+                    config_id?: string;
                     /**
                      * @description `org` (default) creates an organization credential; `user` creates a personal credential owned by the caller.
                      * @default org
@@ -18547,7 +18784,7 @@ export interface operations {
                     "application/json": components["schemas"]["ModelProviderCredential"];
                 };
             };
-            /** @description Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when `providerId` is unknown or refers to an OAuth-only provider (use the pairing flow instead). `personal_credential_custom_endpoint` — `owner_type: user` on a `baseUrlOverridable` provider or with a `base_url_override`. */
+            /** @description Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when `providerId` is unknown or refers to an OAuth-only provider (use the pairing flow instead). `config_id` (param) when it is absent for a gateway provider; `connection_provider_mismatch` when the provider does not fit the named configuration. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18557,7 +18794,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Forbidden — caller lacks `model-provider-credentials:write` (organization credential) or `model-provider-credentials:connect` (`owner_type: user`), or `personal_model_credentials_disabled` — the organization turned personal model credentials off. */
+            /** @description Forbidden — caller lacks `model-provider-credentials:write` (organization credential) or `model-provider-credentials:connect` (`owner_type: user`), or `personal_model_credentials_disabled` — the configuration does not allow personal connections. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -18593,10 +18830,15 @@ export interface operations {
                     /** @description API key for the endpoint. Used for this one request and never stored or echoed back. */
                     api_key?: string;
                     /**
-                     * Format: uri
-                     * @description Endpoint base URL. Accepted only for providers with `baseUrlOverridable: true`; defaults to the provider's `defaultBaseUrl`.
+                     * Format: uuid
+                     * @description A stored model configuration whose endpoint to enumerate; the provider must fit it. Exclusive with `base_url`.
                      */
-                    base_url_override?: string;
+                    config_id?: string;
+                    /**
+                     * Format: uri
+                     * @description A draft endpoint, for a gateway provider (`baseUrlOverridable: true`) not configured yet; defaults to the provider's `defaultBaseUrl`.
+                     */
+                    base_url?: string;
                 };
             };
         };
@@ -18710,8 +18952,6 @@ export interface operations {
                             baseUrlOverridable?: boolean;
                             /** @enum {string} */
                             authMode?: "api_key" | "oauth2";
-                            /** @description Whether members may bring their own credential for this provider. `false` when the endpoint is the organization's to choose: a personal credential is refused with `personal_credential_custom_endpoint`. */
-                            personal_allowed?: boolean;
                             /** @description Surface this provider in the picker's 'Featured' group (above an 'Other' divider). Module-supplied metadata; never gates writes — any registry entry stays selectable. */
                             featured?: boolean;
                             /** @description The provider serves more models than `models` lists: they are searched live on the provider (`GET /api/models/openrouter`) and any model id is accepted, not only the listed ones. */
@@ -18791,7 +19031,7 @@ export interface operations {
                     "application/json": components["schemas"]["TestResult"];
                 };
             };
-            /** @description Validation error, including `personal_credential_custom_endpoint` (param `providerId`) when a personal credential is tested on a provider whose endpoint is the organization's to choose. */
+            /** @description Validation error. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -18833,15 +19073,6 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
-            /** @description Credential is still referenced by one or more models (credential_in_use) */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     updateModelProviderCredential: {
@@ -19012,6 +19243,11 @@ export interface operations {
                      * @enum {string}
                      */
                     owner_type?: "org" | "user";
+                    /**
+                     * Format: uuid
+                     * @description New connection: the model configuration it joins, kept on the pairing and used at redeem. Absent: the provider's family configuration, created at redeem when missing. Never sent with `credentialId`: a reconnect keeps its configuration.
+                     */
+                    config_id?: string;
                 };
             };
         };
@@ -19034,7 +19270,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error (`validation_failed`, the offending fields in `errors[]`): an unknown or unregistered `providerId`, an unknown field, or `owner_type` sent with `credentialId` (reported on `owner_type`). `personal_credential_custom_endpoint` — `owner_type: user` on a provider whose endpoint is the organization's to choose. */
+            /** @description Validation error (`validation_failed`, the offending fields in `errors[]`): an unknown or unregistered `providerId`, an unknown field, or `owner_type` / `config_id` sent with `credentialId` (reported on that field). `connection_provider_mismatch` — the provider does not fit `config_id`'s configuration. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19044,7 +19280,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Forbidden — a new connection whose caller lacks `model-provider-credentials:write` (`owner_type: org`) or `model-provider-credentials:connect` (`owner_type: user`); or `personal_model_credentials_disabled` — a personal connection, or a reconnect of the caller's own personal credential, while the organization has personal model credentials off. */
+            /** @description Forbidden — a new connection whose caller lacks `model-provider-credentials:write` (`owner_type: org`) or `model-provider-credentials:connect` (`owner_type: user`); or `personal_model_credentials_disabled` — a personal connection, or a reconnect of the caller's own personal credential, to a configuration that does not allow personal connections. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -19180,8 +19416,7 @@ export interface operations {
                      *           "is_default": false,
                      *           "needs_reconnection": false,
                      *           "aliased": false,
-                     *           "credentialId": "pk_abc123",
-                     *           "binding": "system",
+                     *           "config_id": null,
                      *           "billed_to": "system",
                      *           "contextWindow": 128000,
                      *           "maxTokens": 16384,
@@ -19222,10 +19457,11 @@ export interface operations {
                     label?: string;
                     /** @description Model identifier (e.g. gpt-4o) */
                     modelId: string;
-                    /** @description Organization provider credential ID. The provider's apiShape and baseUrl are resolved from the credential's providerId. `null` makes the model unbound: each member serves it with their own personal credential for `providerId`. */
-                    credentialId: string | null;
-                    /** @description Canonical registry providerId. Required when `credentialId` is `null`; with a credential it is taken from that credential. */
-                    providerId?: string;
+                    /**
+                     * Format: uuid
+                     * @description The model configuration the model belongs to. Its provider decides the catalog and the endpoint; an unknown id is a 404.
+                     */
+                    config_id: string;
                     /** @description Supported input types */
                     input?: ("text" | "image")[];
                     /** @description Context window size in tokens */
@@ -19259,10 +19495,11 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
-            /** @description Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, `personal_credential_not_bindable` when `credentialId` names a member's personal credential, or `personal_credential_custom_endpoint` (param `providerId`) when `credentialId` is `null` on a provider whose endpoint is the organization's to choose (`personal_allowed: false`). */
+            /** @description Validation error. `code` is `model_not_offered` when the configuration's provider restricts models to its catalog offer and `modelId` is outside it. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["ModelAlreadyAdded"];
             503: components["responses"]["EncryptionKeyUnavailable"];
         };
@@ -19282,18 +19519,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    credential: {
-                        /** Format: uuid */
-                        id: string;
-                    } | {
-                        label?: string;
-                        providerId: string;
-                        api_key: string;
-                        /** Format: uri */
-                        base_url_override?: string | null;
-                    } | null;
-                    /** @description The service of a choice without a credential (`credential: null`). */
-                    providerId?: string;
+                    /**
+                     * Format: uuid
+                     * @description The model configuration the choice applies to.
+                     */
+                    config_id: string;
                     add?: {
                         label?: string;
                         modelId: string;
@@ -19311,13 +19541,13 @@ export interface operations {
                     }[];
                     enable?: string[];
                     disable?: string[];
-                    /** @description The `modelId` of a model of this choice, created or existing. */
+                    /** @description The `modelId` of a model of this configuration, created or existing. */
                     default_model_id?: string;
                 };
             };
         };
         responses: {
-            /** @description The choice was applied: the credential the models run on (`null` for each member's own), the models created or switched (same shape as `GET`/`list`), and the default set, if any. */
+            /** @description The choice was applied: the configuration, the models created or switched (same shape as `GET`/`list`), and the default set, if any. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -19328,9 +19558,10 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "model_choice";
-                        credential_id: string | null;
+                        /** Format: uuid */
+                        config_id: string;
                         models: components["schemas"]["OrgModel"][];
-                        /** @description Organization model row ID resolved from the provider modelId in the request and the choice’s credential. Null when this request did not set a default. */
+                        /** @description Organization model row ID resolved from the provider modelId in the request and the configuration. Null when this request did not set a default. */
                         default_model_id: string | null;
                     };
                 };
@@ -19338,8 +19569,8 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["IdempotencyConflict"];
-            429: components["responses"]["RateLimited"];
             503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
@@ -19385,7 +19616,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The model cannot become the organization default. `model_disabled` — the row is switched off (`enabled: false`), so model resolution skips it. `model_needs_reconnection` — its stored credential can no longer be used for inference (see the `needs_reconnection` field on `OrgModel`): such a model is listed so it can be inspected or detached, but every run and chat would fail at inference time. */
+            /** @description The model cannot become the organization default. `model_disabled` — the row is switched off (`enabled: false`), so model resolution skips it. `model_needs_reconnection` — the organization connection that would serve it can no longer be used for inference: reconnect it first. `model_org_connection_required` — no organization connection of its configuration serves it: the default also serves schedules, API keys and end users, which only an organization connection can pay for. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -19529,7 +19760,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    credentialId: string;
+                    /** Format: uuid */
+                    config_id: string;
                     model_ids: string[];
                 };
             };
@@ -19643,10 +19875,6 @@ export interface operations {
                 "application/json": {
                     label?: string;
                     modelId?: string;
-                    /** @description Organization provider credential ID to bind the model to. `null` unbinds it: each member then serves the model with their own personal credential for `providerId`. */
-                    credentialId?: string | null;
-                    /** @description Canonical registry providerId. Required in the same body when `credentialId` is `null`; with a credential it is taken from that credential. */
-                    providerId?: string;
                     enabled?: boolean;
                     input?: ("text" | "image")[] | null;
                     contextWindow?: number | null;
@@ -19677,18 +19905,18 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
-            /** @description Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, `personal_credential_not_bindable` when `credentialId` names a member's personal credential, or `personal_credential_custom_endpoint` (param `providerId`) when `credentialId` is `null` on a provider whose endpoint is the organization's to choose (`personal_allowed: false`). */
+            /** @description Validation error. `code` is `model_not_offered` when the configuration's provider restricts models to its catalog offer and `modelId` is outside it. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`). `model_scheduled` — `credentialId: null` was sent for a model enabled schedules run (through their override, their agent's model in their space, or the organization default): a schedule spends organization credentials only, so change those schedules' model first; the problem body carries `schedule_ids`. */
+            /** @description `model_already_added` — the update lands on a `modelId` another row of its configuration already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ScheduleIdsProblem"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
@@ -19723,7 +19951,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `model_credential_required` — the model is unbound (`credentialId: null`): each member's own credential serves it, so there is no organization credential to test. */
+            /** @description `model_credential_required` — no organization connection of the model's configuration serves it, so there is nothing of the organization's to test. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -23178,7 +23406,6 @@ export interface operations {
                     /**
                      * @example {
                      *       "api_version": "2026-03-21",
-                     *       "personal_model_credentials": true,
                      *       "personal_space_role": {
                      *         "preset_role": "admin"
                      *       }
@@ -23209,8 +23436,6 @@ export interface operations {
                     api_version?: string;
                     /** @description When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users. */
                     dashboard_sso_enabled?: boolean;
-                    /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
-                    personal_model_credentials?: boolean;
                     /** @description The role an organization member or guest holds by default in their own personal space, as a role reference: `{ preset_role }` (`admin`, `builder`, `operator`, `runner`, `viewer`) or `{ custom_role_id }` (the id of one of this organization's custom space roles, `srl_…`). Defaults to `{ preset_role: "admin" }`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
                     personal_space_role?: {
                         /** @enum {string} */

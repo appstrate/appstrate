@@ -58,7 +58,7 @@ export type { PackageType };
 
 export type { RunArtifactsSummary } from "@appstrate/db/schema";
 import type { RunArtifactsSummary, ScheduleDisabledReason } from "@appstrate/db/schema";
-import type { ModelBinding, ModelCredentialOwner, ModelPayer } from "@appstrate/core/model-payer";
+import type { ModelCredentialOwner, ModelPayer } from "@appstrate/core/model-payer";
 
 /**
  * Stripe-canonical list envelope for HTTP list responses.
@@ -1135,7 +1135,7 @@ export interface OrgModelInfo extends ModelMetadata {
   /**
    * Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a
    * public alias; user-facing surfaces strip the real binding (`modelId`,
-   * `apiShape`, `base_url`, `credentialId`, capabilities/cost). Clients render
+   * `apiShape`, `base_url`, `config_id`, capabilities/cost). Clients render
    * an alias badge and never learn the backing model.
    */
   aliased: boolean;
@@ -1150,24 +1150,16 @@ export interface OrgModelInfo extends ModelMetadata {
   iconUrl: string | null;
   source: "built-in" | "custom";
   /**
-   * The credential serving the model: the organization credential when
-   * {@link binding} is `org`, the platform's key when it is `system`; `null`
-   * when it is `user` or `managed`.
+   * The model configuration offering this model (`model_configs.id`); `null` for a
+   * built-in model and for a model alias (it would name the backing provider).
    */
-  credentialId: string | null;
-  /**
-   * Whose credential serves the model: `system` — a built-in model, served by
-   * the platform's key; `org` — bound to an organization credential; `user` —
-   * unbound, each member serves it with their own credential for
-   * {@link providerId}; `managed` — an alias, whose binding is not exposed.
-   */
-  binding: ModelBinding;
+  config_id: string | null;
   /**
    * Who pays for a call to this model, as seen by the caller: `system` for a
-   * built-in model, `org` when an organization credential serves it, `user` when
-   * the caller's own personal credential serves it, `null` when they have neither
-   * (the spend is refused with `model_credential_required`). Never `user` for a
-   * model alias.
+   * built-in model, `org` when an organization connection of its configuration
+   * serves it, `user` when the caller's own connection serves it, `null` when
+   * none does (the spend is refused with `model_credential_required`). Never
+   * `user` for a model alias.
    */
   billed_to: ModelPayer | null;
   created_by: string | null;
@@ -1221,17 +1213,41 @@ export interface ModelProviderCredentialInfo {
    * personal model credentials.
    */
   allowed_actions: ModelProviderCredentialAction[];
-  /** Whether an organization model may be bound to this credential: `true` for an organization one (API key or subscription), `false` for a personal or a built-in one. */
-  bindable: boolean;
-  /** Organization model rows referencing this credential, including disabled models. A positive count prevents deletion. */
-  referencing_model_count: number;
+  /** The model configuration this connection serves; `null` for a built-in credential. */
+  config_id: string | null;
   /**
-   * On a personal credential, the organization models left to members' own credentials that it
-   * pays for (`servesModel`: the same service, or a subscription offering the model on its
-   * API); `[]` on an organization or built-in one, whose models name it as their credential.
+   * The models of its configuration this connection can serve (`servesModel`: a
+   * subscription serves only its catalog's ids); `[]` for a built-in credential.
    */
   serves_model_ids: string[];
   created_by: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** `GET /api/model-configs` item: whether an organization connection serves the configuration. */
+export type ModelConfigOrgConnection = "active" | "needs_reconnection" | "none";
+
+/**
+ * A model configuration (`model_configs`): one catalog family of the organization, or one
+ * endpoint of a gateway provider, with its connections and models.
+ */
+export interface ModelConfigInfo {
+  id: string;
+  /** The family's representative provider (`anthropic` serves Anthropic keys and Claude Code subscriptions). */
+  provider_id: string;
+  provider_name: string | null;
+  label: string;
+  /** The endpoint of a gateway configuration; `null` for a catalog provider (its default endpoint). */
+  base_url: string | null;
+  personal_connections_allowed: boolean;
+  /** The providers whose connections fit this configuration, API keys first. */
+  accepts: { provider_id: string; display_name: string; auth_mode: "api_key" | "oauth2" }[];
+  /** `active`: a live organization connection; `needs_reconnection`: only dead ones; `none`. */
+  org_connection: ModelConfigOrgConnection;
+  /** Members with a personal connection; `null` unless the caller may read the organization's credentials. */
+  personal_connection_count: number | null;
+  model_count: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -1256,8 +1272,6 @@ export interface ProviderRegistryEntry {
   defaultBaseUrl: string;
   baseUrlOverridable: boolean;
   authMode: "api_key" | "oauth2";
-  /** Whether members may bring their own credential for this provider (`false` when the endpoint is the organization's to choose). */
-  personal_allowed: boolean;
   /** Surface in the picker's "Featured" group. Module-supplied metadata. */
   featured: boolean;
   /** Models are searched live on the provider and any id is accepted, not only `models`. */

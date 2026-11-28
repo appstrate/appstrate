@@ -9,7 +9,7 @@ import {
   runOriginValues,
   scheduleDisabledReasonValues,
 } from "@appstrate/db/schema";
-import { MODEL_BINDINGS, MODEL_CREDENTIAL_OWNERS, MODEL_PAYERS } from "@appstrate/core/model-payer";
+import { MODEL_CREDENTIAL_OWNERS, MODEL_PAYERS } from "@appstrate/core/model-payer";
 import { runStatusValues } from "@appstrate/core/run-status";
 import { NEEDS_RECONNECTION_RECORD_PROPERTIES } from "./needs-reconnection-record.ts";
 import {
@@ -103,8 +103,7 @@ const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
  * Closing the shared component would publish that read as a promise the server
  * does not keep. Sharing the PROPERTIES instead is what keeps the two halves
  * from drifting on the descriptions. The READ is parsed through
- * `orgSettingsReadSchema`, so the read-side defaults (`personal_model_credentials`)
- * are present on every read.
+ * `orgSettingsReadSchema`.
  */
 /**
  * The `via` / `state` / `shared_by` group of a placement, on `PackagePlacement`
@@ -226,11 +225,6 @@ export const ORG_SETTINGS_PROPERTIES = {
     type: "boolean",
     description:
       "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users.",
-  },
-  personal_model_credentials: {
-    type: "boolean",
-    description:
-      "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH.",
   },
   personal_space_role: {
     oneOf: SPACE_ROLE_REFERENCE_ONE_OF,
@@ -573,24 +567,6 @@ export const schemas = {
         type: "object",
         properties: {
           code: { type: "string", enum: [...MISSING_INTEGRATION_CONNECTION_CODES] },
-        },
-      },
-    ],
-  },
-  ScheduleIdsProblem: {
-    description:
-      "A problem that may name schedules. On `model_scheduled` — the write would leave enabled schedules running a model served only by each member's own credential, which a schedule has none of — `schedule_ids` lists them. A schedule's effective model is its `model_id_override`, else its agent's model in its space, else the organization default. Change those schedules' model, or bind the model to an organization credential.",
-    allOf: [
-      { $ref: "#/components/schemas/ProblemDetail" },
-      {
-        type: "object",
-        properties: {
-          schedule_ids: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "On `model_scheduled`: the enabled schedules the write would leave on that model.",
-          },
         },
       },
     ],
@@ -951,7 +927,7 @@ export const schemas = {
   OrgSettings: {
     type: "object",
     description: "Organization settings (extensible)",
-    required: ["personal_model_credentials", "personal_space_role"],
+    required: ["personal_space_role"],
     properties: ORG_SETTINGS_PROPERTIES,
   },
   ProfileBatchItem: {
@@ -2330,8 +2306,7 @@ export const schemas = {
       "owner_id",
       "owner_name",
       "allowed_actions",
-      "bindable",
-      "referencing_model_count",
+      "config_id",
       "serves_model_ids",
       "created_by",
       "createdAt",
@@ -2384,26 +2359,84 @@ export const schemas = {
         type: "array",
         items: { type: "string", enum: ["edit", "delete", "test", "reconnect"] },
         description:
-          "The actions the caller may take on this credential, computed for the caller. A built-in credential allows only `test`, to a caller holding `model-provider-credentials:read`. An organization credential allows `edit` to a `model-provider-credentials:write` holder, `delete` to a `model-provider-credentials:delete` holder, and `test` to a `model-provider-credentials:read` holder. A personal credential allows `edit` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:write`; `delete` to its owner holding `model-provider-credentials:connect`, or to any `model-provider-credentials:delete` holder; and, while the organization allows personal model credentials, `test` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:read`. An OAuth credential also allows `reconnect` (re-pairing it in place, `POST /api/model-providers-oauth/pairing` with `credentialId`) to whoever it allows `edit`, a personal one only while the organization allows personal model credentials, whether or not it needs reconnection (`needs_reconnection`).",
+          "The actions the caller may take on this credential, computed for the caller. A built-in credential allows only `test`, to a caller holding `model-provider-credentials:read`. An organization credential allows `edit` to a `model-provider-credentials:write` holder, `delete` to a `model-provider-credentials:delete` holder, and `test` to a `model-provider-credentials:read` holder. A personal credential allows `edit` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:write`; `delete` to its owner holding `model-provider-credentials:connect`, or to any `model-provider-credentials:delete` holder; and, while its configuration allows personal connections, `test` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:read`. An OAuth credential also allows `reconnect` (re-pairing it in place, `POST /api/model-providers-oauth/pairing` with `credentialId`) to whoever it allows `edit`, a personal one only while its configuration allows personal connections, whether or not it needs reconnection (`needs_reconnection`).",
       },
-      bindable: {
-        type: "boolean",
+      config_id: {
+        type: ["string", "null"],
+        format: "uuid",
         description:
-          "Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one.",
-      },
-      referencing_model_count: {
-        type: "integer",
-        minimum: 0,
-        description:
-          "Number of organization model rows bound to this credential, including disabled models. A positive count prevents deletion (409 credential_in_use). Personal and built-in credentials have no such bindings.",
+          "The model configuration this connection serves (`GET /api/model-configs`); `null` for a built-in credential.",
       },
       serves_model_ids: {
         type: "array",
         items: { type: "string" },
         description:
-          "On a personal credential, the ids of the organization models left to members' own credentials (`binding: user`) that it pays for — the same service, or a subscription offering the model on its API. `[]` on an organization or built-in credential: its models name it in `credentialId`.",
+          "The ids of its configuration's models this connection can serve (its offer: a gateway serves any id, a subscription its catalog's). `[]` on a built-in credential.",
       },
       created_by: { type: ["string", "null"] },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+    },
+  },
+  ModelConfig: {
+    type: "object",
+    required: [
+      "id",
+      "provider_id",
+      "provider_name",
+      "label",
+      "base_url",
+      "personal_connections_allowed",
+      "accepts",
+      "org_connection",
+      "personal_connection_count",
+      "model_count",
+      "createdAt",
+      "updatedAt",
+    ],
+    properties: {
+      id: { type: "string", format: "uuid" },
+      provider_id: {
+        type: "string",
+        description:
+          "The family's representative provider (`anthropic` serves Anthropic keys and Claude Code subscriptions), or the gateway provider.",
+      },
+      provider_name: { type: ["string", "null"] },
+      label: { type: "string" },
+      base_url: {
+        type: ["string", "null"],
+        description: "The endpoint of a gateway configuration; `null` for a catalog provider.",
+      },
+      personal_connections_allowed: {
+        type: "boolean",
+        description: "Whether members' own connections serve its models (for themselves only).",
+      },
+      accepts: {
+        type: "array",
+        description: "The providers whose connections fit this configuration, API keys first.",
+        items: {
+          type: "object",
+          required: ["provider_id", "display_name", "auth_mode"],
+          properties: {
+            provider_id: { type: "string" },
+            display_name: { type: "string" },
+            auth_mode: { type: "string", enum: ["api_key", "oauth2"] },
+          },
+        },
+      },
+      org_connection: {
+        type: "string",
+        enum: ["active", "needs_reconnection", "none"],
+        description:
+          "`active` — a live organization connection; `needs_reconnection` — only dead ones; `none` — no organization connection: schedules, API keys and end users cannot use its models.",
+      },
+      personal_connection_count: {
+        type: ["integer", "null"],
+        minimum: 0,
+        description:
+          "Members holding a personal connection to it; `null` unless the caller holds `model-provider-credentials:read`.",
+      },
+      model_count: { type: "integer", minimum: 0 },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -2427,8 +2460,7 @@ export const schemas = {
       "aliased",
       "iconUrl",
       "source",
-      "credentialId",
-      "binding",
+      "config_id",
       "billed_to",
       "created_by",
       "createdAt",
@@ -2493,7 +2525,7 @@ export const schemas = {
       aliased: {
         type: "boolean",
         description:
-          "Managed-model flag. When true, the binding (`modelId`, `apiShape`, `base_url`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge.",
+          "Managed-model flag. When true, the binding (`modelId`, `apiShape`, `base_url`, `config_id`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge.",
       },
       iconUrl: {
         type: ["string", "null"],
@@ -2501,22 +2533,17 @@ export const schemas = {
           "Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`base_url`, or fall back to a generic icon.",
       },
       source: { type: "string", enum: ["built-in", "custom"] },
-      credentialId: {
+      config_id: {
         type: ["string", "null"],
+        format: "uuid",
         description:
-          "The credential serving the model: the organization credential when `binding` is `org`, the platform's key when it is `system`. `null` when `binding` is `user`, and for managed models — binding not exposed.",
-      },
-      binding: {
-        type: "string",
-        enum: [...MODEL_BINDINGS],
-        description:
-          "Whose credential serves the model, in the vocabulary of `billed_to`. `system` — a built-in model, served by the platform's key. `org` — bound to an organization credential. `user` — unbound: each member serves it with their own credential for `providerId`. `managed` — an alias; its binding is not exposed.",
+          "The model configuration the model belongs to (`GET /api/model-configs`): its connections serve it. `null` for a built-in model, and for managed models — the configuration names the provider.",
       },
       billed_to: {
         type: ["string", "null"],
         enum: [...MODEL_PAYERS, null],
         description:
-          "Who pays for a call to this model, for the caller. `system` — a built-in model, paid by the platform. `org` — bound to an organization credential: the organization pays whoever calls (a dead credential is `needs_reconnection`). `user` — unbound, and served by one of the caller's own credentials. `null` — unbound and nothing of the caller's serves it: a spend is refused (`409 model_credential_required`). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there.",
+          "Who pays for a call to this model, for the caller: whose connection of its configuration would serve the caller now. `system` — a built-in model, paid by the platform. `user` — one of the caller's own connections (personal ones come first, while the configuration allows them and the model is not managed). `org` — an organization connection. `null` — no connection serves it for the caller: a spend is refused (`409 model_credential_required`), or, when one that would is dead, `needs_reconnection` is true. Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription.",
       },
       cost: {
         type: ["object", "null"],

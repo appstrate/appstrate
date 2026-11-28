@@ -317,12 +317,8 @@
   "apiError.model_already_added": "This model is already added with this key.",
   "apiError.model_not_in_choice": "This model does not run on the chosen key.",
   "apiError.model_not_offered": "This model is not offered by this provider: {{message}}",
-  "apiError.credential_in_use": "Models still use this key: try deleting it again.",
-  "apiError.model_scheduled": "Enabled schedules would run a model served only by personal keys; change their model or bind it to an org key.",
   "apiError.model_credential_required": "This model needs your personal key or subscription. Add it under Preferences › My model keys, or ask an administrator to serve it with an org key.",
   "apiError.personal_model_credentials_disabled": "The organization does not allow personal keys or personal subscriptions: ask an administrator to enable them.",
-  "apiError.personal_credential_custom_endpoint": "A personal key cannot serve a custom endpoint: use an org key.",
-  "apiError.personal_credential_not_bindable": "A personal key cannot be bound to an organization model: choose an org key.",
   "apiError.pairing_expired_or_consumed": "This pairing code has expired or was already used. Generate a new one.",
   "apiError.org_run_rate_limited": "The organization is starting too many runs at once. Wait a moment before trying again.",
   "apiError.org_run_concurrency_exceeded": "The organization's limit of concurrent runs is reached: {{message}}",
@@ -573,5 +569,8 @@
   "appearance.colorName.cyan": "Cyan",
   "appearance.colorName.pink": "Pink",
   "appearance.colorName.orange": "Orange",
-  "apiError.local_server_missing_entry_point": "The local MCP server’s entry point is missing from the integration’s files: {{message}}"
+  "apiError.local_server_missing_entry_point": "The local MCP server’s entry point is missing from the integration’s files: {{message}}",
+  "apiError.model_config_exists": "A configuration already exists for this provider (or endpoint).",
+  "apiError.model_org_connection_required": "This model has no live organization connection: add one to its configuration.",
+  "apiError.connection_provider_mismatch": "This provider does not fit the chosen configuration."
 }

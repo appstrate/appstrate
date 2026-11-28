@@ -484,9 +484,57 @@ export async function seedApiKey(
 // ─── Model Provider Credentials ─────────────────────────────
 
 import { encryptCredentials } from "@appstrate/connect";
+import { modelConfigs } from "@appstrate/db/schema";
+import { isNull } from "drizzle-orm";
+import { getModelProvider } from "../../src/services/model-providers/registry.ts";
+import {
+  configProviderOf,
+  isGatewayProvider,
+} from "../../src/services/model-providers/credential-chain.ts";
+
+/**
+ * The model configuration a seeded connection or model of `providerId` joins: its family's
+ * (gateway: per endpoint, the provider default when none is given), created when missing.
+ */
+export async function seedModelConfigFor(
+  orgId: string,
+  providerId: string,
+  baseUrl: string | null = null,
+  personalConnectionsAllowed = true,
+): Promise<string> {
+  const configProviderId = configProviderOf(providerId);
+  const endpoint = isGatewayProvider(providerId)
+    ? (baseUrl ?? getModelProvider(providerId)?.defaultBaseUrl ?? null)
+    : null;
+  const [existing] = await db
+    .select({ id: modelConfigs.id })
+    .from(modelConfigs)
+    .where(
+      and(
+        eq(modelConfigs.orgId, orgId),
+        eq(modelConfigs.providerId, configProviderId),
+        endpoint === null ? isNull(modelConfigs.baseUrl) : eq(modelConfigs.baseUrl, endpoint),
+      ),
+    )
+    .limit(1);
+  if (existing) return existing.id;
+  const [row] = await db
+    .insert(modelConfigs)
+    .values({
+      orgId,
+      providerId: configProviderId,
+      label: getModelProvider(configProviderId)?.displayName ?? configProviderId,
+      baseUrl: endpoint,
+      personalConnectionsAllowed,
+    })
+    .returning({ id: modelConfigs.id });
+  return row!.id;
+}
 
 interface ModelProviderCredentialSeed {
   orgId: string;
+  /** Configuration joined; omitted = the provider's (gateway: endpoint's) configuration. */
+  configId?: string;
   label?: string;
   /** Convenience alias for callers that think in apiShape terms — mapped to a built-in providerId. */
   apiShape?: string;
@@ -562,6 +610,9 @@ export async function seedOrgModelProviderKey(
       providerId,
       credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey }),
       baseUrlOverride,
+      configId:
+        overrides.configId ??
+        (await seedModelConfigFor(overrides.orgId, providerId, baseUrlOverride)),
       createdBy: overrides.createdBy ?? null,
       ownerUserId: overrides.ownerUserId ?? null,
     })
@@ -584,6 +635,8 @@ interface OAuthCredentialSeed {
   createdBy?: string | null;
   /** Personal credential owner; omitted = organization credential. */
   ownerUserId?: string | null;
+  /** Configuration joined; omitted = the provider's family configuration. */
+  configId?: string;
 }
 
 /**
@@ -599,12 +652,16 @@ export async function seedOrgModelProviderOAuth(
 ): Promise<InferSelectModel<typeof modelProviderCredentials>> {
   const expiresAt = overrides.expiresAt === undefined ? Date.now() + 3600_000 : overrides.expiresAt;
   const needsReconnection = overrides.needsReconnection ?? false;
+  const oauthProviderId = overrides.providerId ?? "test-oauth";
+  const configId =
+    overrides.configId ?? (await seedModelConfigFor(overrides.orgId, oauthProviderId));
   const [row] = await db
     .insert(modelProviderCredentials)
     .values({
       orgId: overrides.orgId,
       label: overrides.label ?? "Test OAuth Credential",
-      providerId: overrides.providerId ?? "test-oauth",
+      providerId: oauthProviderId,
+      configId,
       credentialsEncrypted: encryptCredentials({
         kind: "oauth",
         accessToken: overrides.accessToken ?? "test-access-token",
@@ -654,34 +711,49 @@ export async function corruptCredentialBlob(credentialId: string): Promise<void>
 
 // ─── Org Models ───────────────────────────────────────────
 
-type OrgModelInsert = Partial<InferInsertModel<typeof orgModels>> & {
-  orgId: string;
-} & ({ credentialId: string; providerId?: string } | { credentialId: null; providerId: string });
+/**
+ * A seeded organization model: its configuration is `configId`, else its (retired, read only by
+ * script 0062) `credentialId`'s, else `providerId`'s family configuration.
+ */
+type OrgModelInsert = Partial<InferInsertModel<typeof orgModels>> & { orgId: string };
 
 /** `providerId` of a bound credential: an unbound model must name its provider explicitly. */
-async function boundCredentialProviderId(credentialId: string | null): Promise<string> {
-  if (credentialId === null) {
-    throw new Error("seedOrgModel: an unbound model (credentialId null) needs providerId");
-  }
+async function boundCredential(
+  credentialId: string | null | undefined,
+): Promise<{ providerId: string; configId: string | null } | null> {
+  if (!credentialId) return null;
   const [row] = await db
-    .select({ providerId: modelProviderCredentials.providerId })
+    .select({
+      providerId: modelProviderCredentials.providerId,
+      configId: modelProviderCredentials.configId,
+    })
     .from(modelProviderCredentials)
     .where(eq(modelProviderCredentials.id, credentialId))
     .limit(1);
   if (!row) throw new Error(`seedOrgModel: credential ${credentialId} not found`);
-  return row.providerId;
+  return row;
 }
 
 export async function seedOrgModel(
   overrides: OrgModelInsert,
 ): Promise<InferSelectModel<typeof orgModels>> {
+  const bound = await boundCredential(overrides.credentialId);
+  const providerId = overrides.providerId ?? bound?.providerId;
+  if (!overrides.configId && !bound?.configId && !providerId) {
+    throw new Error("seedOrgModel: needs configId, a credentialId or a providerId");
+  }
+  const configId =
+    overrides.configId ??
+    bound?.configId ??
+    (await seedModelConfigFor(overrides.orgId, providerId!));
   const [model] = await db
     .insert(orgModels)
     .values({
       label: "Test Model",
       modelId: "claude-sonnet-4-20250514",
       ...overrides,
-      providerId: overrides.providerId ?? (await boundCredentialProviderId(overrides.credentialId)),
+      providerId: providerId ?? null,
+      configId,
     })
     .returning();
   return model!;

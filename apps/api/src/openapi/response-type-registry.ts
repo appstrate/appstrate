@@ -104,6 +104,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "OrgModel ↔ OrgModelInfo",
   },
   {
+    specSchemaName: "ModelConfig",
+    sharedTypeName: "ModelConfigInfo",
+    description: "ModelConfig ↔ ModelConfigInfo",
+  },
+  {
     specSchemaName: "ModelProviderCredential",
     sharedTypeName: "ModelProviderCredentialInfo",
     description: "ModelProviderCredential ↔ ModelProviderCredentialInfo",
@@ -270,8 +275,6 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "ResolutionFieldError narrowed to the 409 resolution codes; canonical type in @appstrate/core/api-errors, no shared-type",
   ConnectionResolutionWarning:
     "ResolutionFieldError narrowed to the warning codes; canonical type in @appstrate/core/api-errors, no shared-type",
-  ScheduleIdsProblem:
-    "ProblemDetail with the `model_scheduled` extension; RFC 9457 envelope, never read through a shared-type",
   MissingIntegrationConnectionProblem:
     "ProblemDetail narrowed to `missing_integration_connection`; RFC 9457 envelope, never read through a shared-type",
   AgentNotActiveInSpaceProblem:

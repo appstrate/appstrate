@@ -48,8 +48,10 @@ interface ImportOAuthModelProviderResult {
  * function derives one from the provider's `displayName` when the helper
  * doesn't supply it.
  */
-type ImportOAuthModelProviderInput = Omit<CreateOAuthCredentialInput, "label"> & {
+type ImportOAuthModelProviderInput = Omit<CreateOAuthCredentialInput, "label" | "configId"> & {
   label?: string;
+  /** Configuration a new connection joins; absent or `null` = its family configuration. */
+  configId?: string | null;
   /** Existing credential to update in place; omitted for a new connection. */
   credentialId?: string;
 };
@@ -67,7 +69,7 @@ type ImportOAuthModelProviderInput = Omit<CreateOAuthCredentialInput, "label"> &
 export async function importOAuthModelProviderConnection(
   input: ImportOAuthModelProviderInput,
 ): Promise<ImportOAuthModelProviderResult> {
-  const { credentialId: reconnectCredentialId, ...credentialInput } = input;
+  const { credentialId: reconnectCredentialId, configId, ...credentialInput } = input;
   const config = getModelProvider(input.providerId);
   if (!config || config.authMode !== "oauth2" || !config.oauth) {
     throw notFound(`Unknown OAuth model provider: ${input.providerId} (not in registry)`);
@@ -138,6 +140,7 @@ export async function importOAuthModelProviderConnection(
 
   const credentialId = await createOAuthCredential({
     ...credentialInput,
+    ...(configId ? { configId } : {}),
     label,
     ...(accountId ? { accountId } : {}),
     ...(email ? { email } : {}),

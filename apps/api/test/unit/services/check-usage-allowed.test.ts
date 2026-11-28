@@ -33,13 +33,13 @@
 import { describe, it, expect, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { organizations, orgModels } from "@appstrate/db/schema";
+import { organizations } from "@appstrate/db/schema";
 import { checkUsageAllowed } from "../../../src/services/chat-platform-services.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
-import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
+import { seedModelConfigFor, seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import type {
@@ -140,18 +140,15 @@ describe("checkUsageAllowed", () => {
   });
 
   async function seedUnboundModel(): Promise<string> {
-    const [unbound] = await db
-      .insert(orgModels)
-      .values({
-        orgId: ORG_ID,
-        providerId: "test-apikey",
-        credentialId: null,
-        label: "Unbound",
-        modelId: "gpt-4o-2024-08-06",
-        enabled: true,
-      })
-      .returning();
-    return unbound!.id;
+    // A model whose configuration (another endpoint of the gateway) holds no connection.
+    const unbound = await seedOrgModel({
+      orgId: ORG_ID,
+      configId: await seedModelConfigFor(ORG_ID, "test-apikey", "https://unserved.example.test/v1"),
+      label: "Unbound",
+      modelId: "gpt-4o-2024-08-06",
+      enabled: true,
+    });
+    return unbound.id;
   }
 
   it("refuses a turn on a model no credential of the session user serves, with or without a hook", async () => {

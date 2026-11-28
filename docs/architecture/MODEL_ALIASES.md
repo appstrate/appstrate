@@ -204,76 +204,63 @@ billing/audit; the module-facing service accessor (`listLlmUsage`, exposed as
 ## Who pays
 
 The model is resolved first, by the cascade, which is actor-free. Who pays then
-follows from the model alone (`loadModel`, `services/org-models.ts`):
+follows from the model's **configuration** (`model_configs`, `services/model-configs.ts`):
+one per organization and catalog family, or per (provider, endpoint) for a gateway
+(`baseUrlOverridable`). A configuration holds the connections
+(`model_provider_credentials.config_id`) and the models (`org_models.config_id`); a
+model has no connection of its own.
 
-1. a built-in model (`binding: system`): the platform key (`billed_to: system`);
-2. a model bound to an organization credential (`binding: org`): that credential,
-   whoever calls (`billed_to: org`);
-3. a model with no organization credential (`credential_id` NULL, `binding:
-user`, "each member uses their own credential"): the payer's own credential.
-   The applicable ones are of the model's catalog family with the model in their
-   provider's offer, subscriptions first, then the oldest
-   (`services/model-providers/credential-chain.ts`); none applies while the
-   organization has personal model credentials off. With none, the call is refused
-   with `409 model_credential_required`.
+1. a built-in model: the platform key (`billed_to: system`);
+2. an organization model: the first live connection of its configuration, in the order
+   `rankCandidates` gives (`services/model-providers/credential-chain.ts`): the
+   payer's personal subscription, the payer's personal API key, an organization
+   subscription, an organization API key, then the oldest. A connection counts only
+   when it serves the model (`servesModel`: same family, the model in its provider's
+   offer unless the provider is a gateway or not restricted to its offer).
+   Personal connections count only when there is a payer, the configuration allows
+   them (`personal_connections_allowed`) and the model is no alias. `billed_to` is
+   `user` or `org` after the connection that serves.
 
-An unbound model is only possible on a provider whose endpoint is fixed
-(`providerAllowsPersonalCredentials`: not `baseUrlOverridable`). A provider whose
-base URL is overridable refuses an unbound model at binding time
-(`400 personal_credential_custom_endpoint`), because a member's credential could
-then send that member's key to an endpoint of their choosing.
+When no candidate is live: a dead organization candidate makes the model unavailable
+(`needs_reconnection: true`); otherwise the model resolves with no connection and
+`requireBoundModel` refuses the call (`409 model_credential_required`). An alias and
+the LLM proxy (`viaProxy`) never take a subscription: an alias's body rewrite and the
+proxy cannot run on a bearer swap. Making a custom model the organization default
+requires a live organization connection in its configuration
+(`409 model_org_connection_required`, or `409 model_needs_reconnection` when the
+only one is dead).
 
-A credential may be bound to a model only when it is an organization credential
-(`owner_user_id` NULL), API key or subscription: `isBindableCredential` refuses a
-member's own credential (`400 personal_credential_not_bindable`). The credential
-list reports the result as `bindable`. A model bound to an organization
-subscription is paid by that subscription for every caller of step 2, a schedule,
-an API key and an end user included
-(`docs/architecture/SUBSCRIPTION_COMPLIANCE.md` §1.5).
-
-The payer is the user whose personal credentials may serve step 3, or nobody.
-Only a user principal pays: `requestPayerUserId(c)` returns the caller's user id
-when `isUserPrincipal(c)` holds (`apps/api/src/lib/principal.ts`), `null`
-otherwise. Each door computes it once per request and passes it down.
+The payer is the user whose personal connections may serve, or nobody. Only a user
+principal pays: `requestPayerUserId(c)` returns the caller's user id when
+`isUserPrincipal(c)` holds (`apps/api/src/lib/principal.ts`), `null` otherwise. Each
+door computes it once per request and passes it down.
 
 - a session, CLI, MCP instance token or chat loopback: that user;
 - an API key, a third-party OAuth token, an end user or an OIDC end-user token: nobody;
-- a schedule: nobody, whoever wrote it or is its actor. A schedule is judged on
-  its effective model (its override, else the agent's model in its space, else
-  the organization default), which must be bound (`409 model_credential_required`
-  otherwise) when a write creates it, moves its model or enables it. A model
-  enabled schedules run that way cannot be unbound (`PATCH /api/models/{id}`,
-  `409 model_scheduled`, with their ids in `schedule_ids`). Other writes that
-  move the effective model (the organization default, an agent's model in a
-  space) are not refused: a schedule that then fires a member-paid model records
-  a failed run;
+- a schedule: nobody, whoever wrote it or is its actor, so it is served by an
+  organization connection or refused;
 - a run: the payer its launch door computed, recorded as `runs.payer_user_id` at
   launch. It is the one fact every later door compares against: a run's personal
-  credential requires its owner to match it, on the LLM proxy and on the
-  sidecar's OAuth door alike. An organization credential has no owner to match:
-  the OAuth door serves an organization subscription to any run of the
-  organization pinned to it (`runs.model_credential_id`).
+  connection requires its owner to match it, on the LLM proxy and on the sidecar's
+  OAuth door alike. An organization connection has no owner to match: the OAuth door
+  serves an organization subscription to any run of the organization pinned to it
+  (`runs.model_credential_id`).
 
-An alias is always bound (a model alias needs an organization credential), so it
-never takes a personal credential. `GET /api/models` reads step 3 for the caller:
-`billed_to` is `system` for a built-in model, `org` for a bound model, `user` for
-an unbound model one of the caller's credentials serves, `null` otherwise;
-`binding` names whose credential serves the model in the same words: `system`
-(built-in), `org` (bound), `user` (unbound) and `managed` (an alias).
-`needs_reconnection` on an unbound model is true when nothing of the caller's
-serves it and one of their credentials for it is dead.
+`GET /api/models` reads this for the caller: `billed_to` is `system`, `org` or `user`
+after the connection that would serve the caller, `null` when none does;
+`needs_reconnection` is true when none is live and one of them is dead.
 
 The public LLM proxy (`/api/llm-proxy`) never serves a subscription (`viaProxy`
 skips oauth2 credentials), so `billed_to` describes runs and chat. A run's proxy
 calls on a member-paid model keep the personal credential it launched with
-(`runs.model_credential_id`, `loadRunModel`), even if the model is bound
-meanwhile; a launch credential that no longer belongs to the recorded payer
+(`runs.model_credential_id`, `loadRunModel`) while it still belongs to the
+model's configuration, serves the model and its configuration allows personal
+connections; a launch credential that no longer belongs to the recorded payer
 (`runs.payer_user_id`) returns no model, and one removed mid-run, or personal
-credentials switched off, refuses the run's next call while the model stays
-unbound. Any other run is served as the model is now. A payer changes mid-call only
-through an administrator's act: binding or unbinding a model makes the next call
-of a chat turn, or of a run whose launch credential is gone, served as the model
-now is. The sidecar's token door (`/internal/oauth-token/{credentialId}`) gives a
+connections switched off on the configuration, makes the run's next call served as
+the model now is for nobody (organization connections only). Any other run is served
+as the model is now. A payer changes mid-call only through an administrator's act on
+the configuration or its connections. The sidecar's token door (`/internal/oauth-token/{credentialId}`) gives a
 subscription's token only to a platform run pinned to it. A personal
 subscription also requires the run's recorded payer (`runs.payer_user_id`) to be
 its owner, so a run launched with an API key never gets it. An organization

@@ -8,7 +8,9 @@ import type { AppEnv } from "../types/index.ts";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { importOAuthModelProviderConnection } from "../services/model-providers/oauth-flow.ts";
-import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
+import { isOAuthModelProvider } from "../services/model-providers/registry.ts";
+import { findFamilyConfig, resolveConnectionConfig } from "../services/model-configs.ts";
+import { db } from "@appstrate/db/client";
 import {
   cancelPairing,
   consumePairing,
@@ -26,9 +28,8 @@ import { connectHelperCommand } from "../lib/connect-helper.ts";
 import {
   credentialOwnerTypeSchema,
   getOrgModelProviderCredential,
+  loadCredentialBinding,
   MANAGE_CREDENTIALS,
-  assertPersonalCredentialCreatable,
-  personalModelCredentialsAllowed,
   personalModelCredentialsDisabled,
   reconnectVerdict,
   requestModelCredentialCaller,
@@ -107,12 +108,19 @@ export const createPairingBody = z
     credentialId: z.uuid().optional(),
     /** Owner of a new connection (default `org`). */
     owner_type: credentialOwnerTypeSchema.unwrap().optional(),
+    /** Configuration a new connection joins (default: its provider's family configuration). */
+    config_id: z.uuid().optional(),
   })
   .strict()
   // A reconnect takes its owner from the credential: a restated one is never silently dropped.
   .refine((body) => body.credentialId === undefined || body.owner_type === undefined, {
     path: ["owner_type"],
     message: "owner_type applies to a new connection only; omit it with credentialId",
+  })
+  // A reconnect keeps its credential's configuration.
+  .refine((body) => body.credentialId === undefined || body.config_id === undefined, {
+    path: ["config_id"],
+    message: "config_id applies to a new connection only; omit it with credentialId",
   });
 
 /**
@@ -172,6 +180,7 @@ async function handlePairRedeem(c: Context<AppEnv>) {
       orgId: consumed.orgId,
       userId: consumed.userId,
       ownerUserId: consumed.ownerUserId,
+      configId: consumed.configId,
       ...(consumed.reconnectCredentialId ? { credentialId: consumed.reconnectCredentialId } : {}),
     });
   } catch (err) {
@@ -266,6 +275,7 @@ export function createModelProvidersOAuthRouter() {
     let reconnectCredentialId: string | null = null;
     if (input.credentialId !== undefined) {
       const credential = await getOrgModelProviderCredential(caller, input.credentialId);
+      const binding = credential ? await loadCredentialBinding(orgId, credential.id) : null;
       const verdict = credential
         ? reconnectVerdict(
             caller,
@@ -276,7 +286,7 @@ export function createModelProvidersOAuthRouter() {
               providerId: credential.providerId,
             },
             input.providerId,
-            await personalModelCredentialsAllowed(orgId),
+            binding?.personalConnectionsAllowed ?? true,
           )
         : "absent";
       if (verdict === "policy_off") throw personalModelCredentialsDisabled();
@@ -287,10 +297,13 @@ export function createModelProvidersOAuthRouter() {
       reconnectCredentialId = credential.id;
     } else {
       ownerUserId = resolveCredentialOwner(c, credentialOwnerTypeSchema.parse(input.owner_type));
-      // The redeem's own guard: a pairing it would refuse is never minted.
-      const provider = getModelProvider(input.providerId);
-      if (ownerUserId !== null && provider) {
-        await assertPersonalCredentialCreatable(orgId, provider, null);
+      // The redeem's own guards: a pairing it would refuse is never minted. The family
+      // configuration is created at redeem, not here, so an abandoned pairing leaves none.
+      const config = input.config_id
+        ? await resolveConnectionConfig(db, orgId, input.providerId, input.config_id, user.id)
+        : await findFamilyConfig(orgId, input.providerId);
+      if (ownerUserId !== null && config && !config.personalConnectionsAllowed) {
+        throw personalModelCredentialsDisabled();
       }
     }
 
@@ -300,7 +313,9 @@ export function createModelProvidersOAuthRouter() {
       orgId,
       providerId: input.providerId,
       ownerUserId,
-      ...(reconnectCredentialId ? { reconnectCredentialId } : {}),
+      ...(reconnectCredentialId
+        ? { reconnectCredentialId }
+        : { configId: input.config_id ?? null }),
       platformUrl,
       ttlSeconds: PAIRING_TTL_SECONDS,
     });

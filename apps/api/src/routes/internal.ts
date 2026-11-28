@@ -6,6 +6,7 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
+  modelConfigs,
   modelProviderCredentials,
   packages,
   packageVersions,
@@ -51,7 +52,6 @@ import {
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
 import {
-  personalModelCredentialsAllowed,
   personalModelCredentialsDisabled,
   serializeOAuthTokenResponse,
 } from "../services/model-providers/credentials.ts";
@@ -896,7 +896,7 @@ function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void
  *   2. Org-membership: the credential row exists and `orgId === run.orgId`.
  *   3. Owner: a personal credential (`owner_user_id` set) serves only the run
  *      whose recorded payer (`runs.payer_user_id`) is its owner, and nothing
- *      while the organization has personal credentials off. An organization
+ *      while its model configuration does not allow personal connections. An organization
  *      credential serves every run of the organization.
  *   4. UUID well-formedness: malformed path params surface as 404 not 500.
  *
@@ -918,14 +918,17 @@ async function assertOAuthModelCredential(credentialId: string, run: VerifiedRun
   if (pinned !== credentialId) {
     throw forbidden(`Credential ${credentialId} not pinned to this run`);
   }
-  let row: { orgId: string; ownerUserId: string | null } | undefined;
+  let row:
+    { orgId: string; ownerUserId: string | null; personalAllowed: boolean | null } | undefined;
   try {
     [row] = await db
       .select({
         orgId: modelProviderCredentials.orgId,
         ownerUserId: modelProviderCredentials.ownerUserId,
+        personalAllowed: modelConfigs.personalConnectionsAllowed,
       })
       .from(modelProviderCredentials)
+      .leftJoin(modelConfigs, eq(modelConfigs.id, modelProviderCredentials.configId))
       // Keyed by the (non-null) pin — equal to the requested credentialId by
       // the gate above, so the run can only ever read its own credential.
       .where(eq(modelProviderCredentials.id, pinned))
@@ -951,7 +954,8 @@ async function assertOAuthModelCredential(credentialId: string, run: VerifiedRun
   if (row.ownerUserId !== null && row.ownerUserId !== run.payerUserId) {
     throw forbidden(`Credential ${credentialId} is another member's`);
   }
-  if (row.ownerUserId !== null && !(await personalModelCredentialsAllowed(run.orgId))) {
+  // Its configuration switching personal connections off ends the runs on one too.
+  if (row.ownerUserId !== null && row.personalAllowed === false) {
     throw personalModelCredentialsDisabled();
   }
 }

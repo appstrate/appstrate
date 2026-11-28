@@ -23,8 +23,8 @@ describe("deriveCredentialLabel", () => {
     );
   });
 
-  it("falls back to the display name when no override is given", () => {
-    for (const override of [null, undefined, ""]) {
+  it("falls back to the display name when the configuration has no endpoint", () => {
+    for (const override of [null, ""]) {
       expect(deriveCredentialLabel(CUSTOM, override)).toBe("OpenAI-compatible (custom)");
     }
   });

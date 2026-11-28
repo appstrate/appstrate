@@ -21,13 +21,14 @@ import {
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
   MANAGE_CREDENTIALS,
-  personalCredentialCustomEndpoint,
   requestModelCredentialCaller,
   resolveCredentialOwner,
   updateModelProviderCredential,
   type ModelCredentialCaller,
 } from "../services/model-providers/credentials.ts";
-import { providerAllowsPersonalCredentials } from "../services/model-providers/credential-chain.ts";
+import { connectionFitsConfig } from "../services/model-providers/credential-chain.ts";
+import { loadModelConfig } from "../services/model-configs.ts";
+import { effectiveBaseUrl } from "../services/model-providers/credentials.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
 import { hasLiveModelSearch } from "../services/model-search.ts";
 import { listServedModels } from "../services/model-providers/model-listing.ts";
@@ -38,10 +39,8 @@ import type { ProviderRegistryEntry, ProviderRegistryModelEntry } from "@appstra
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
-import { isForeignKeyViolation } from "@appstrate/db/errors";
 import {
   ApiError,
-  conflict,
   invalidRequest,
   notFound,
   internalError,
@@ -65,8 +64,8 @@ export const createSchema = z
   .object({
     /**
      * Optional. When omitted, the server derives the label from the provider's
-     * `displayName`, prefixed with the endpoint host when the credential carries
-     * a `base_url_override` (see {@link deriveCredentialLabel}). Either way it is
+     * `displayName`, prefixed with the endpoint host for a connection of a gateway
+     * configuration (see {@link deriveCredentialLabel}). Either way it is
      * deduped against existing org credentials (suffixed ` (2)`, ` (3)`, … on
      * collision). See {@link dedupeCredentialLabel}.
      */
@@ -74,11 +73,11 @@ export const createSchema = z
     providerId: z.string().min(1, "providerId is required"),
     api_key: z.string().min(1, "api_key is required"),
     /**
-     * Required only for providers with `baseUrlOverridable: true` (the
-     * custom-endpoint entries). HTTP(S) only: any other scheme would be stored
-     * and then refused by every call made against it.
+     * The configuration the connection joins. Absent: its provider's family
+     * configuration, created when missing (refused for a gateway, whose endpoint
+     * is a configuration's choice).
      */
-    base_url_override: endpointUrlSchema.optional().nullable(),
+    config_id: z.uuid().optional(),
     owner_type: credentialOwnerTypeSchema,
   })
   .strict();
@@ -95,13 +94,18 @@ export const updateSchema = z
   })
   .strict();
 
-/** Exactly one of `credentialId` or inline `providerId` + `api_key`; the route enforces which. */
+/**
+ * Exactly one of `credentialId` or inline `providerId` + `api_key`; the route enforces which.
+ * An inline draft targets a stored configuration's endpoint (`config_id`) or, for a gateway
+ * not configured yet, a draft endpoint (`base_url`).
+ */
 export const discoverSchema = z
   .object({
     credentialId: z.uuid().optional(),
     providerId: z.string().min(1).optional(),
     api_key: z.string().min(1).optional(),
-    base_url_override: endpointUrlSchema.optional(),
+    config_id: z.uuid().optional(),
+    base_url: endpointUrlSchema.optional(),
   })
   .strict();
 
@@ -139,7 +143,8 @@ async function resolveDiscoverTarget(
   const inline =
     body.providerId !== undefined ||
     body.api_key !== undefined ||
-    body.base_url_override !== undefined;
+    body.config_id !== undefined ||
+    body.base_url !== undefined;
 
   if (body.credentialId !== undefined) {
     if (inline) {
@@ -180,18 +185,38 @@ async function resolveDiscoverTarget(
   const cfg = getModelProvider(body.providerId);
   if (!cfg) throw invalidRequest(`Unknown providerId: ${body.providerId}`, "providerId");
   assertEnumerableProvider(cfg, "providerId");
-  if (body.base_url_override !== undefined && !cfg.baseUrlOverridable) {
-    throw invalidRequest(
-      `Provider ${cfg.providerId} does not accept a base URL override`,
-      "base_url_override",
-    );
-  }
   return {
     providerId: cfg.providerId,
     apiShape: cfg.apiShape,
-    baseUrl: body.base_url_override ?? cfg.defaultBaseUrl,
+    baseUrl: await draftBaseUrl(caller.orgId, cfg, body),
     apiKey: body.api_key,
   };
+}
+
+/** The endpoint an inline draft targets: its configuration's, a gateway's draft one, or the default. */
+async function draftBaseUrl(
+  orgId: string,
+  cfg: ModelProviderDefinition,
+  body: { config_id?: string; base_url?: string },
+): Promise<string> {
+  if (body.config_id !== undefined) {
+    if (body.base_url !== undefined) {
+      throw invalidRequest("Provide either config_id or base_url, not both", "base_url");
+    }
+    const config = await loadModelConfig(orgId, body.config_id);
+    if (!config) throw notFound("Model configuration not found");
+    if (!connectionFitsConfig(cfg.providerId, config.providerId)) {
+      throw invalidRequest(
+        `A ${cfg.providerId} connection does not fit the configuration '${config.label}'`,
+        "config_id",
+      );
+    }
+    return effectiveBaseUrl(cfg, config.baseUrl);
+  }
+  if (body.base_url !== undefined && !cfg.baseUrlOverridable) {
+    throw invalidRequest(`Provider ${cfg.providerId} does not take a base URL`, "base_url");
+  }
+  return body.base_url ?? cfg.defaultBaseUrl;
 }
 
 export const testInlineSchema = z
@@ -237,11 +262,6 @@ async function resolveTestTarget(
   if (!callerKey) throw invalidRequest("API key is required", "api_key");
   const cfg = getModelProvider(body.providerId);
   if (!cfg) throw invalidRequest(`Unknown providerId: ${body.providerId}`, "providerId");
-  // Same line as creation: a custom endpoint is an organization credential, so only
-  // its managers may point a probe at a host of their choosing.
-  if (!providerAllowsPersonalCredentials(cfg) && !caller.writesOrg) {
-    throw personalCredentialCustomEndpoint(cfg.providerId, "providerId");
-  }
   if (!cfg.baseUrlOverridable && !sameBaseUrl(body.base_url, cfg.defaultBaseUrl)) {
     throw invalidRequest(
       `Provider ${cfg.providerId} does not accept a base URL override`,
@@ -301,7 +321,6 @@ export function createModelProviderCredentialsRouter() {
     "defaultBaseUrl",
     "baseUrlOverridable",
     "authMode",
-    "personal_allowed",
     "featured",
     "live_model_search",
     "models",
@@ -324,7 +343,6 @@ export function createModelProviderCredentialsRouter() {
       defaultBaseUrl: p.defaultBaseUrl,
       baseUrlOverridable: p.baseUrlOverridable,
       authMode: p.authMode,
-      personal_allowed: providerAllowsPersonalCredentials(p),
       featured: p.featured ?? false,
       live_model_search: hasLiveModelSearch(p.providerId),
       models: includeModels ? serializeProviderModels(p) : [],
@@ -347,7 +365,7 @@ export function createModelProviderCredentialsRouter() {
     const caller = requestModelCredentialCaller(c);
     const user = c.get("user");
     const data = await readJsonBody(c, createSchema);
-    const { providerId, api_key: apiKey, base_url_override: baseUrlOverride } = data;
+    const { providerId, api_key: apiKey } = data;
     const ownerUserId = resolveCredentialOwner(c, data.owner_type);
 
     const cfg = getModelProvider(providerId);
@@ -361,11 +379,15 @@ export function createModelProviderCredentialsRouter() {
       );
     }
 
+    // The endpoint a gateway connection's label names; the service settles the configuration.
+    const configBaseUrl = data.config_id
+      ? ((await loadModelConfig(caller.orgId, data.config_id))?.baseUrl ?? null)
+      : null;
     // Always dedupe — a user-supplied label is suffixed on collision too, so
     // labels stay unique within the org (same scheme as org models).
     const label = await dedupeCredentialLabel(
       caller.orgId,
-      data.label?.trim() || deriveCredentialLabel(cfg, baseUrlOverride),
+      data.label?.trim() || deriveCredentialLabel(cfg, configBaseUrl),
       ownerUserId,
     );
 
@@ -376,7 +398,7 @@ export function createModelProviderCredentialsRouter() {
         label,
         providerId,
         apiKey,
-        baseUrlOverride: baseUrlOverride ?? null,
+        ...(data.config_id ? { configId: data.config_id } : {}),
         ownerUserId,
       });
       await recordAuditFromContext(c, {
@@ -386,7 +408,7 @@ export function createModelProviderCredentialsRouter() {
         after: {
           label,
           providerId,
-          baseUrlOverride: baseUrlOverride ?? null,
+          configId: data.config_id ?? null,
           ownerType: data.owner_type,
         },
       });
@@ -580,16 +602,7 @@ export function createModelProviderCredentialsRouter() {
       });
       return c.body(null, 204);
     } catch (err) {
-      // `org_models.credential_id` has ON DELETE RESTRICT — surface the
-      // PG `foreign_key_violation` (23503) as a 409 with an actionable
-      // message rather than a generic 500.
       if (err instanceof ApiError) throw err;
-      if (isForeignKeyViolation(err, "org_models_credential_provider_fk")) {
-        throw conflict(
-          "credential_in_use",
-          "Cannot delete this credential while one or more models reference it. Detach the model first.",
-        );
-      }
       logger.error("Model provider credential delete failed", {
         id,
         error: getErrorMessage(err),
