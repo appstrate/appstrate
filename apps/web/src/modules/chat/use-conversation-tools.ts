@@ -27,7 +27,7 @@ export function useConversationTools(conversationId: string | null, active: bool
   return { tools, error: tools === undefined ? query.error : null };
 }
 
-/** The call as its card in the thread shows it (`showCall`): label, target, what it acted on. */
+/** The call as its line in the thread shows it (`showCall`): label, target, what it acted on. */
 export function useToolLabel() {
   const t = useChatTranslate();
   return (call: ConversationToolCall): ShownCall =>

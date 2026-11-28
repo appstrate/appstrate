@@ -174,7 +174,11 @@ function SummaryRunLine({
           />
         }
         label={agentName}
-        detail={<span className="min-w-0 truncate text-xs">{`#${run.runNumber}`}</span>}
+        detail={
+          run.runNumber != null ? (
+            <span className="min-w-0 truncate text-xs">{`#${run.runNumber}`}</span>
+          ) : null
+        }
         space={spanning ? <RowSpaceName spaceId={run.spaceId} /> : null}
         trailing={<RunStatusBadge status={run.status} unread={run.unread} compact />}
       />

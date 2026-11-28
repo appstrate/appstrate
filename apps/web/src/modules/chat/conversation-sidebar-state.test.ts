@@ -7,6 +7,7 @@ import {
   heldLocalUrl,
   openRunId,
   openRunToRefetch,
+  openRunUnlisted,
   openToolCallId,
   revealMissed,
   shownFile,
@@ -267,12 +268,12 @@ describe("conversation sidebar tool calls", () => {
     expect(openToolCallId(changed)).toBeNull();
   });
 
-  it("leaves the panel as it is when the thread holds the call's card", () => {
+  it("leaves the panel as it is when the thread holds the call's line", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-item",
       item: { kind: "call", id: "call_1" },
     });
-    // The phone's sheet closed to show the card, and the card was there.
+    // The phone's sheet closed to show the line, and the line was there.
     const closed = conversationSidebarReducer(open, { type: "toggle" });
     const found = conversationSidebarReducer(closed, {
       type: "revealed",
@@ -283,7 +284,7 @@ describe("conversation sidebar tool calls", () => {
     expect(revealMissed(found)).toBe(false);
   });
 
-  it("opens again on the Tools list, the call open and saying so, when the thread does not hold its card", () => {
+  it("opens again on the Tools list, the call open and saying so, when the thread does not hold its line", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-item",
       item: { kind: "call", id: "call_1" },
@@ -309,7 +310,7 @@ describe("conversation sidebar tool calls", () => {
 });
 
 describe("conversation sidebar runs", () => {
-  it("opens a run on its line of the Runs tab, from the thread's card too, and folds it back", () => {
+  it("opens a run on its line of the Runs tab, from the thread's line too, and folds it back", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-item",
       item: { kind: "run", id: "run_1" },
@@ -357,7 +358,7 @@ describe("conversation sidebar runs", () => {
     expect(openRunId(conversationSidebarReducer(open, { type: "conversation-change" }))).toBeNull();
   });
 
-  it("opens again on the Runs list, the run open and saying so, when the thread does not hold its card", () => {
+  it("opens again on the Runs list, the run open and saying so, when the thread does not hold its line", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-item",
       item: { kind: "run", id: "run_1" },
@@ -415,5 +416,20 @@ describe("openRunToRefetch", () => {
 
   it("reads it again once per run: one still absent afterwards is not read for again", () => {
     expect(openRunToRefetch("run_new", runs, "run_new")).toBeNull();
+  });
+});
+
+describe("openRunUnlisted", () => {
+  const runs = [{ id: "run_a" }];
+
+  it("says the open run is absent once the list was read again for it", () => {
+    expect(openRunUnlisted("run_new", runs, "run_new")).toBe(true);
+  });
+
+  it("says nothing before that read, for a listed run, or with nothing open", () => {
+    expect(openRunUnlisted("run_new", runs, null)).toBe(false);
+    expect(openRunUnlisted("run_new", undefined, "run_new")).toBe(false);
+    expect(openRunUnlisted("run_a", runs, "run_a")).toBe(false);
+    expect(openRunUnlisted(null, runs, null)).toBe(false);
   });
 });

@@ -26,6 +26,7 @@ import { ConversationSummary } from "./conversation-summary";
 import { ConversationToolsList } from "./conversation-tools-tab";
 import { ConversationRuns } from "./conversation-runs-tab";
 import { ConversationFileRow } from "./conversation-file-row";
+import { openItemTrigger } from "./use-open-item";
 import {
   openRunId,
   openToolCallId,
@@ -97,8 +98,8 @@ const FILE_CLOSE_LABEL: Record<SidebarOrigin, string> = {
 };
 
 /**
- * The file's frame IS the panel: its header replaces the panel's. Its X closes
- * the panel, or goes back to the file list or the summary the file was opened from.
+ * The file's frame IS the panel: its header replaces the panel's. Its X closes the panel, or goes
+ * back to the file list, the summary or the run the file was opened from.
  */
 export function ShownFile({
   file,
@@ -362,7 +363,7 @@ export function ConversationSidebar({
   const { t } = useTranslation("chat");
   const desktop = useMediaQuery(LG_AND_UP);
   const panelRef = useRef<HTMLElement>(null);
-  // The card "See in the thread" waits to reveal until the phone's sheet has closed.
+  // The line "See in the thread" asked for, while the phone's sheet closes over the thread.
   const pendingReveal = useRef<ThreadItem | null>(null);
   const reveal = (item: ThreadItem) => {
     // Missed, the panel opens again on the call or the run to say so.
@@ -370,24 +371,18 @@ export function ConversationSidebar({
   };
   const showInThread = (item: ThreadItem) => {
     if (desktop) {
-      // The panel floats beside the thread: the card is revealed in place.
       reveal(item);
       return;
     }
-    // The phone's sheet covers the thread: it closes first, and the card is revealed once it has,
-    // in place of the focus the sheet would give back to its trigger (`finalFocus`).
+    // Revealed once the sheet has closed and the thread is interactive again.
     pendingReveal.current = item;
     dispatch({ type: "toggle" });
   };
   const size = useContextPanelWidth(panelRef);
 
-  // Desktop: the panel floats over the thread's right side, inside the conversation. The thread
-  // keeps the whole width, so its scrollbar stays at the right edge, outside the panel (`right-4`,
-  // the scrollbar's gutter), and reserves the room the panel and that gutter take
-  // (`--chat-context-inset`, read by the module's side padding): nothing reads under it and the
-  // column stays centered in what is left. Closed, the panel is `inert` (out of the tab order and
-  // the accessibility tree) and lets the pointer through; its content keeps the full width so
-  // nothing reflows mid-transition. Below `lg` it opens in a sheet.
+  // Desktop: the panel floats over the thread, which keeps the whole width so its scrollbar stays
+  // outside the panel, and reserves the panel's room (`--chat-context-inset`, read by the module's
+  // side padding). Closed, the panel keeps its width so nothing reflows mid-transition.
   const inset =
     desktop && state.expanded ? `calc(${size.width}px + ${SCROLLBAR_GUTTER})` : undefined;
   return (
@@ -396,7 +391,7 @@ export function ConversationSidebar({
       style={{ ["--chat-context-inset" as string]: inset }}
     >
       {/* While the panel is resized, the thread's padding follows the pointer, not its transition.
-          `isolate` keeps the thread's raised layers (a card's space name is `z-10`) under the panel. */}
+          `isolate` keeps the thread's raised layers (a line's space name is `z-10`) under the panel. */}
       <div className={cn("isolate min-w-0 flex-1", size.dragging && "[&_*]:transition-none")}>
         {children}
       </div>
@@ -439,6 +434,12 @@ export function ConversationSidebar({
         <Sheet
           open={state.expanded}
           onOpenChange={(open) => open !== state.expanded && dispatch({ type: "toggle" })}
+          onOpenChangeComplete={(open) => {
+            const item = pendingReveal.current;
+            if (open || !item) return;
+            pendingReveal.current = null;
+            reveal(item);
+          }}
         >
           <SheetContent
             id={CONVERSATION_CONTEXT_PANEL_ID}
@@ -446,14 +447,12 @@ export function ConversationSidebar({
             // The panel's header carries the one close control.
             showCloseButton={false}
             className="bg-canvas flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
-            finalFocus={() => {
-              const item = pendingReveal.current;
-              if (!item) return true;
-              pendingReveal.current = null;
-              // The revealed card takes the focus, not the toggle that opened the sheet.
-              reveal(item);
-              return false;
-            }}
+            // An item opened from the thread takes the focus; the default otherwise.
+            initialFocus={() =>
+              openItemTrigger(document.getElementById(CONVERSATION_CONTEXT_PANEL_ID)) ?? true
+            }
+            // The revealed line takes the focus, not the toggle that opened the sheet.
+            finalFocus={() => pendingReveal.current === null}
           >
             <SheetTitle className="sr-only">{t("context.label")}</SheetTitle>
             <ConversationContext

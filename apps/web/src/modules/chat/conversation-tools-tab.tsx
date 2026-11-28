@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useId, useRef } from "react";
-import { MessageSquareIcon, WrenchIcon } from "lucide-react";
+import { useId } from "react";
+import { WrenchIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   activityCounts,
@@ -11,7 +11,6 @@ import { subjectIconSrc, type ShownCall } from "@appstrate/module-chat/tool-pres
 import { ToolCallDetail } from "@appstrate/module-chat/tool-call-detail";
 import { CallStep } from "@appstrate/module-chat/call-step";
 import { cn } from "@appstrate/ui/cn";
-import { Button } from "@appstrate/ui/components/button";
 import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Switch } from "@appstrate/ui/components/switch";
@@ -27,6 +26,8 @@ import {
   useToolLabel,
 } from "./use-conversation-tools";
 import { useChatTranslate } from "./use-chat-runtime";
+import { ShowInThreadAction } from "./show-in-thread-action";
+import { useOpenItem } from "./use-open-item";
 
 /** The line holding the lookups' switch: the whole line is its label, a 40 px target. */
 const SWITCH_LINE_CLASS = "flex min-h-10 items-center justify-between gap-3 border-b px-4";
@@ -38,7 +39,7 @@ const TURN_HEAD_CLASS =
 const TURN_CALLS_CLASS = "border-b px-4 py-1 last:border-b-0";
 
 /**
- * The call's icon: the logo of the integration it acted on, as its card draws it, else its icon
+ * The call's icon: the logo of the integration it acted on, as its thread line draws it, else its icon
  * (`showCall`) in its line's muted tone. An agent's tile is not drawn: it reads the chat host,
  * which the panel is rendered outside of.
  */
@@ -50,12 +51,7 @@ export function ToolCallIcon({ shown }: { shown: ShownCall }) {
   return <Icon aria-hidden="true" className="size-4" />;
 }
 
-/**
- * One call on the thread's step line (`CallStep`): its detail opens under it, led by "See in the
- * thread" (`missing`: the last ask found no line). Once open it scrolls into view, so a call opened
- * from the thread, the summary or by a reveal that missed is in sight; one the reader opened
- * already is, and does not move.
- */
+/** One call on the thread's step line (`CallStep`): its detail opens under it, led by "See in the thread". */
 function ToolCallStep({
   call,
   shown,
@@ -76,13 +72,10 @@ function ToolCallStep({
 }) {
   const { t } = useTranslation("chat");
   const chatT = useChatTranslate();
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (open) ref.current?.scrollIntoView({ block: "nearest" });
-  }, [open]);
+  const openItem = useOpenItem(open);
   return (
     <CallStep
-      ref={ref}
+      {...openItem}
       lead={<ToolCallIcon shown={shown} />}
       label={shown.label}
       idText={shown.idText}
@@ -104,20 +97,12 @@ function ToolCallStep({
       open={open}
       onOpenChange={onOpenChange}
     >
-      <div className="mb-3 flex flex-col gap-1">
-        <Button
-          variant="outline"
-          size="sm"
-          className="desktop-pointer:h-9 h-10 self-start"
-          onClick={onShowInThread}
-        >
-          <MessageSquareIcon />
-          {t("context.showInThread")}
-        </Button>
-        {missing ? (
-          <p className="text-muted-foreground text-xs">{t("context.tools.notInThread")}</p>
-        ) : null}
-      </div>
+      <ShowInThreadAction
+        className="mb-3"
+        missing={missing}
+        missedLabel={t("context.tools.notInThread")}
+        onShowInThread={onShowInThread}
+      />
       <ToolCallDetail
         t={chatT}
         input={call.input}
@@ -182,7 +167,7 @@ export function ConversationToolsList({
   showLookups: boolean;
   onShowLookupsChange: (show: boolean) => void;
   openToolCallId: string | null;
-  /** "See in the thread" found no card for the open call. */
+  /** "See in the thread" found no line for the open call. */
   missing: boolean;
   onOpenChange: (call: ConversationToolCall, open: boolean) => void;
   onShowInThread: (call: ConversationToolCall) => void;

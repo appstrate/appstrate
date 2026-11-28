@@ -4,7 +4,7 @@ import type { EnrichedRun } from "@appstrate/shared-types";
 import { runDetailPath } from "../lib/package-paths";
 import { useReachableSpaceLink } from "./use-can-reach";
 
-export type RunPageTarget = Pick<EnrichedRun, "id" | "packageId" | "spaceId">;
+type RunPageTarget = Pick<EnrichedRun, "id" | "packageId" | "spaceId">;
 
 /**
  * The run's page, entering its space when it is not the working one: none when the run has no

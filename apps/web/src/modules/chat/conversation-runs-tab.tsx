@@ -1,22 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
-import { ActivityIcon, ChevronRightIcon, ExternalLinkIcon, MessageSquareIcon } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ActivityIcon, ChevronRightIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { ACTIVE_RUN_STATUSES, type AgentListItem, type EnrichedRun } from "@appstrate/shared-types";
 import { ACTIVITY_CONTENT_CLASS } from "@appstrate/module-chat/activity-line";
 import { RunLine } from "@appstrate/module-chat/run-line";
-import {
-  runFailureMessage,
-  runOutcomeText,
-  visibleLogEntries,
-  type VisibleLogEntry,
-} from "@appstrate/module-chat/run-events";
+import { runOutcomeText, visibleLogEntries } from "@appstrate/module-chat/run-events";
 import { runReadAccess, useRunLogStream } from "@appstrate/module-chat/run-log-stream";
 import type { RunStatus } from "@appstrate/core/run-status";
 import { cn } from "@appstrate/ui/cn";
-import { Button } from "@appstrate/ui/components/button";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import {
   Collapsible,
   CollapsibleContent,
@@ -24,203 +18,36 @@ import {
 } from "@appstrate/ui/components/collapsible";
 import { RunStatusIcon } from "@appstrate/ui/components/run-status";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { PendingButton } from "@/components/app-ui/pending-button";
 import { EmptyState, ErrorState } from "../../components/page-states";
-import { TextSkeleton, Waiting } from "../../components/loading-skeletons";
+import { Waiting } from "../../components/loading-skeletons";
 import { SkeletonLine } from "../../components/skeleton-line";
 import { PackageIcon } from "../../components/package-icon";
 import { IntegrationLogoStack } from "../../components/integration-logo-stack";
 import { RunDuration } from "../../components/run-duration";
-import { RunCostReadout } from "../../components/run-cost-readout";
-import { useRunPageHref } from "../../hooks/use-run-page-href";
 import { SpaceTilesOf } from "../../components/space-name";
-import { StructuredOutputBody } from "../../components/run-detail/run-results-view";
-import type { components } from "../../api/client";
-import { useFiles } from "../../hooks/use-files";
-import { useCancelRun } from "../../hooks/use-mutations";
 import { useRowSpaceGrants } from "../../hooks/use-permissions";
 import { formatDateField } from "../../lib/format-date";
-import { producedRunFiles } from "../../lib/files";
 import { readShown, useConversationRuns } from "./use-conversation-lists";
-import { ConversationFileRow } from "./conversation-file-row";
-import { openRunToRefetch, type StoredSidebarFile } from "./conversation-sidebar-state";
+import {
+  openRunToRefetch,
+  openRunUnlisted,
+  type StoredSidebarFile,
+} from "./conversation-sidebar-state";
+import { useOpenItem } from "./use-open-item";
+import { RunDetail } from "./conversation-run-detail";
 
 const ACTIVE = ACTIVE_RUN_STATUSES as ReadonlySet<string>;
 
-/** A section of an open run's detail: a small heading over its content. */
-function DetailSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="flex flex-col gap-1.5">
-      <h4 className="text-muted-foreground text-xs font-medium">{title}</h4>
-      {children}
-    </section>
-  );
-}
-
-/** The run's produced files, read across spaces while its line is open. */
-function RunFiles({
-  run,
-  named,
-  onSelectFile,
-}: {
-  run: EnrichedRun;
-  named: boolean;
-  onSelectFile: (file: StoredSidebarFile) => void;
-}) {
-  const { t } = useTranslation("chat");
-  const query = useFiles({ spanning: true, runId: run.id, limit: 100 });
-  const read = readShown(query);
-  if (read === "error") return <ErrorState error={query.error} compact />;
-  // A read the reader may not make never starts: nothing waits for it.
-  if (read === "pending") {
-    return query.isFetching && run.file_counts.output > 0 ? <TextSkeleton lines={1} /> : null;
-  }
-  // A file chained in from an earlier run sits in the run's container too: only its own outputs.
-  const files = producedRunFiles(query.data?.data ?? [], run.id);
-  if (files.length === 0) return null;
-  return (
-    <DetailSection title={t("context.runs.files")}>
-      <div className="-mx-4 divide-y">
-        {files.map((file) => (
-          <ConversationFileRow key={file.id} file={file} named={named} onSelect={onSelectFile} />
-        ))}
-      </div>
-    </DetailSection>
-  );
-}
-
 /**
- * An open run's detail, each section only when it has something to say: its actions, its error,
- * its result, its files, its log (live while it runs), then its model and cost.
- */
-function RunDetail({
-  run,
-  status,
-  error,
-  logs,
-  named,
-  missing,
-  onShowInThread,
-  onSelectFile,
-}: {
-  run: EnrichedRun;
-  status: RunStatus;
-  error: string | undefined;
-  logs: VisibleLogEntry[];
-  named: boolean;
-  missing: boolean;
-  onShowInThread: () => void;
-  onSelectFile: (file: StoredSidebarFile) => void;
-}) {
-  const { t } = useTranslation("chat");
-  const href = useRunPageHref(run);
-  const canIn = useRowSpaceGrants();
-  const cancel = useCancelRun();
-  // A remote run's process runs on its caller's host: the platform cannot signal it.
-  const cancellable =
-    ACTIVE.has(status) && run.runOrigin !== "remote" && canIn(run.spaceId, "runs:cancel");
-  const failure = runFailureMessage(status, error);
-  // `output` is agent-declared, so the spec leaves it `unknown`: narrowed as the run page does.
-  const result = run.result as components["schemas"]["Run"]["result"];
-  const output = result?.output as Record<string, unknown> | undefined;
-  const logRef = useRef<HTMLOListElement>(null);
-  // The log follows its last line while it runs, as a run page's journal does.
-  useEffect(() => {
-    const list = logRef.current;
-    if (list) list.scrollTop = list.scrollHeight;
-  }, [logs.length]);
-  const meta = run.model_label || run.cost != null;
-
-  return (
-    <div className="flex flex-col gap-4 px-4 pt-1 pb-4">
-      <div className="flex flex-col gap-1">
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="desktop-pointer:h-9 h-10"
-            onClick={onShowInThread}
-          >
-            <MessageSquareIcon />
-            {t("context.showInThread")}
-          </Button>
-          {href ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="desktop-pointer:h-9 h-10"
-              render={<Link to={href} state={{ runNumber: run.runNumber }} />}
-            >
-              <ExternalLinkIcon />
-              {t("context.runs.openPage")}
-            </Button>
-          ) : null}
-          {cancellable ? (
-            <PendingButton
-              variant="outline"
-              size="sm"
-              className="desktop-pointer:h-9 h-10"
-              pending={cancel.isPending}
-              onClick={() => cancel.mutate({ id: run.id, spaceId: run.spaceId })}
-            >
-              {t("context.runs.cancel")}
-            </PendingButton>
-          ) : null}
-        </div>
-        {missing ? (
-          <p className="text-muted-foreground text-xs">{t("context.runs.notInThread")}</p>
-        ) : null}
-      </div>
-      {failure ? (
-        <DetailSection title={t("context.runs.error")}>
-          <p className="text-sm break-words">{failure}</p>
-        </DetailSection>
-      ) : null}
-      {output && Object.keys(output).length > 0 ? (
-        <DetailSection title={t("context.runs.result")}>
-          <StructuredOutputBody output={output} schema={undefined} />
-        </DetailSection>
-      ) : null}
-      <RunFiles run={run} named={named} onSelectFile={onSelectFile} />
-      {logs.length > 0 ? (
-        <DetailSection title={t("context.runs.log")}>
-          <ol
-            ref={logRef}
-            className="bg-muted/40 max-h-48 overflow-y-auto rounded-md p-2 font-mono text-xs"
-          >
-            {logs.map((line) => (
-              <li key={line.id} className="break-words">
-                {line.text}
-              </li>
-            ))}
-          </ol>
-        </DetailSection>
-      ) : null}
-      {meta ? (
-        <p className="text-muted-foreground flex flex-wrap gap-x-1.5 text-xs">
-          {run.model_label ? <span>{run.model_label}</span> : null}
-          {run.model_label && run.cost != null ? <span aria-hidden>·</span> : null}
-          {run.cost != null ? (
-            <RunCostReadout cost={run.cost} pricingStatus={run.cost_pricing_status} />
-          ) : null}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * One run on two lines (`RunLine`): the agent's tile with the run's state on its
- * corner, its name and number, its integrations, its space when the list spans several, its
- * duration; under them its start and outcome. The line is the disclosure of its detail; open, the
- * run is followed live over its own stream (`useRunLogStream`), which the line's state follows
- * too, and the list is read again once it ends so its result shows.
+ * One run on its two lines (`RunLine`), the disclosure of its detail. Open, the run is followed
+ * over its own stream, and the list is read again once it ends so its result shows.
  */
 function RunDisclosure({
   run,
   agentName,
   agent,
   spanning,
+  canIn,
   open,
   missing,
   onOpenChange,
@@ -232,6 +59,7 @@ function RunDisclosure({
   agentName: string;
   agent: AgentListItem | undefined;
   spanning: boolean;
+  canIn: ReturnType<typeof useRowSpaceGrants>;
   open: boolean;
   missing: boolean;
   onOpenChange: (open: boolean) => void;
@@ -240,7 +68,7 @@ function RunDisclosure({
   onSettled: () => unknown;
 }) {
   const { t } = useTranslation(["chat", "agents"]);
-  const canIn = useRowSpaceGrants();
+  const subId = useId();
   const stream = useRunLogStream(
     open ? run.id : undefined,
     run.status,
@@ -258,11 +86,9 @@ function RunDisclosure({
     if (settledLate) onSettled();
   }, [settledLate, onSettled]);
   const logs = useMemo(() => visibleLogEntries(stream.logs), [stream.logs]);
-  const ref = useRef<HTMLDivElement>(null);
-  // Opened from the thread's run line or by a reveal that missed, the line comes into sight.
-  useEffect(() => {
-    if (open) ref.current?.scrollIntoView({ block: "nearest" });
-  }, [open]);
+  const openItem = useOpenItem(open);
+  // A remote run's process runs on its caller's host: the platform cannot signal it.
+  const cancellable = active && run.runOrigin !== "remote" && canIn(run.spaceId, "runs:cancel");
 
   const start = run.started_at
     ? formatDateField(run.started_at)
@@ -270,12 +96,17 @@ function RunDisclosure({
   const outcome = runOutcomeText(status, error, t);
 
   return (
-    <Collapsible ref={ref} open={open} onOpenChange={onOpenChange}>
+    <Collapsible {...openItem} open={open} onOpenChange={onOpenChange}>
       {/* The trigger covers the line, behind it: the integrations' tooltip stays its own control
           rather than one nested in a button. */}
       <div className="relative isolate">
         <CollapsibleTrigger
-          aria-label={run.runNumber != null ? `${agentName} #${run.runNumber}` : agentName}
+          aria-label={
+            run.runNumber != null
+              ? t("runs.rowLabel", { ns: "agents", number: run.runNumber, agent: agentName })
+              : agentName
+          }
+          aria-describedby={subId}
           className="hover:bg-muted/50 focus-visible:ring-ring absolute inset-0 z-0 transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
         />
         <RunLine
@@ -332,7 +163,7 @@ function RunDisclosure({
               />
             </>
           }
-          sub={<span>{`${start} · ${outcome}`}</span>}
+          sub={<span id={subId}>{`${start} · ${outcome}`}</span>}
         />
       </div>
       <CollapsibleContent className={ACTIVITY_CONTENT_CLASS}>
@@ -342,6 +173,7 @@ function RunDisclosure({
           error={error}
           logs={logs}
           named={spanning}
+          cancellable={cancellable}
           missing={missing}
           onShowInThread={onShowInThread}
           onSelectFile={onSelectFile}
@@ -369,9 +201,9 @@ function RunLinesSkeleton() {
 }
 
 /**
- * The runs a conversation launched, one line each (`RunDisclosure`), the one the panel holds open
- * (`openRunId`) showing its detail under its line. A run opened from the thread that the polled
- * list does not hold yet reads the list again, once.
+ * The runs a conversation launched, one line each, the one the panel holds open (`openRunId`)
+ * showing its detail. A run opened from the thread that the polled list does not hold yet reads
+ * the list again, once; still absent, a note says so.
  */
 export function ConversationRuns({
   conversationId,
@@ -385,13 +217,14 @@ export function ConversationRuns({
   conversationId: string | null;
   active: boolean;
   openRunId: string | null;
-  /** "See in the thread" found no card for the open run. */
+  /** "See in the thread" found no line for the open run. */
   missing: boolean;
   onOpenChange: (run: EnrichedRun, open: boolean) => void;
   onShowInThread: (run: EnrichedRun) => void;
   onSelectFile: (file: StoredSidebarFile) => void;
 }) {
   const { t } = useTranslation("chat");
+  const canIn = useRowSpaceGrants();
   const { query, runs, agentName, agentById, spanning } = useConversationRuns(
     conversationId,
     active,
@@ -402,13 +235,15 @@ export function ConversationRuns({
   // The answered list, the same array until the next answer.
   const listed = read === "ready" ? runs : undefined;
   const askedFor = useRef<string | null>(null);
+  const [refetchedFor, setRefetchedFor] = useState<string | null>(null);
   useEffect(() => {
     if (!listed) return;
     const runId = openRunToRefetch(openRunId, listed, askedFor.current);
     if (!runId) return;
     askedFor.current = runId;
-    void refetch();
+    void refetch().then(() => setRefetchedFor(runId));
   }, [listed, openRunId, refetch]);
+  const unlisted = openRunUnlisted(openRunId, listed, refetchedFor);
 
   if (!conversationId) {
     return <EmptyState message={t("context.unsaved")} icon={ActivityIcon} compact />;
@@ -416,12 +251,23 @@ export function ConversationRuns({
   if (read === "error") return <ErrorState error={query.error} compact />;
   // Pending covers a read not yet answered and one held while the panel is closed.
   if (read === "pending") return <RunLinesSkeleton />;
+  const unlistedNote = unlisted ? (
+    <Alert role="note" size="sm" className="m-3 w-auto">
+      <AlertDescription>{t("context.runs.unlisted")}</AlertDescription>
+    </Alert>
+  ) : null;
   if (runs.length === 0) {
-    return <EmptyState message={t("context.runs.empty")} icon={ActivityIcon} compact />;
+    return (
+      <>
+        {unlistedNote}
+        <EmptyState message={t("context.runs.empty")} icon={ActivityIcon} compact />
+      </>
+    );
   }
 
   return (
     <div className="divide-y">
+      {unlistedNote}
       {runs.map((run) => {
         const open = run.id === openRunId;
         return (
@@ -431,6 +277,7 @@ export function ConversationRuns({
             agentName={agentName(run)}
             agent={run.packageId ? agentById.get(run.packageId) : undefined}
             spanning={spanning}
+            canIn={canIn}
             open={open}
             missing={open && missing}
             onOpenChange={(next) => onOpenChange(run, next)}

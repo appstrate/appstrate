@@ -77,18 +77,9 @@ function showItem(state: ConversationSidebarState, item: ThreadItem): Conversati
 }
 
 /**
- * State behind the chat's context panel. A file shows in the Files tab over its list; closing it
- * goes back where it was opened from (`SidebarOrigin`). A thread item opens on its line of its
- * tab's list, one at a time: a tool call in the Tools list, a run in the Runs list, from the list
- * itself, the summary, the thread, or a reveal that missed; folding it leaves its list as it is.
- * Choosing a tab shows that tab's own content.
- *
- * Opening the panel always shows its tabs: a file is shown by a "show-file",
- * never restored. Collapsing keeps it, so it stays drawn while the panel slides
- * out, and the next opening drops it.
- *
- * "See in the thread" may close the panel first (the phone's sheet covers the thread): when the
- * card is not there, the panel opens again on its list, the call or the run open, saying so.
+ * State behind the chat's context panel. Collapsing keeps the shown file, so it stays drawn while
+ * the panel slides out; the next opening drops it. A reveal that missed (the phone's sheet closed
+ * for it) opens the panel again on the item, saying so.
  */
 export function conversationSidebarReducer(
   state: ConversationSidebarState,
@@ -168,6 +159,20 @@ export function openRunToRefetch(
 ): string | null {
   if (!runId || runId === asked || runs.some((run) => run.id === runId)) return null;
   return runId;
+}
+
+/** The open run is still absent from the list once it was read again for it (`refetchedFor`). */
+export function openRunUnlisted(
+  runId: string | null,
+  runs: readonly { id: string }[] | undefined,
+  refetchedFor: string | null,
+): boolean {
+  return (
+    runId !== null &&
+    runId === refetchedFor &&
+    runs !== undefined &&
+    !runs.some((run) => run.id === runId)
+  );
 }
 
 /** Whether "See in the thread" missed the call's line or the run's line its list holds open. */

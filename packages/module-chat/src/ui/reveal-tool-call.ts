@@ -14,7 +14,7 @@ import type { ThreadItem } from "./runtime-context.ts";
 interface RevealState {
   /** Calls whose group was opened for them, until the reader folds it. */
   readonly opened: ReadonlySet<string>;
-  /** The id (a call's, or a run's) the revealed card is anchored by. */
+  /** The id (a call's, or a run's) the revealed line is anchored by. */
   readonly marked: string | null;
 }
 
@@ -44,7 +44,7 @@ export function forgetRevealedToolCalls(toolCallIds: readonly string[]): void {
   write({ ...state, opened });
 }
 
-/** A focus moved by script draws no ring: this one marks the card until the focus leaves it. */
+/** A focus moved by script draws no ring: this one marks the line until the focus leaves it. */
 export const REVEAL_RING_CLASS =
   "transition-shadow duration-fast ease-surface data-[revealed]:ring-2 data-[revealed]:ring-ring";
 
@@ -68,7 +68,10 @@ export function useRevealAnchor(toolCallId: string | undefined, runId?: string) 
   };
 }
 
-/** True only when the item's element took the focus; false when the thread draws none for it. */
+/**
+ * True when the thread draws the item's line, which is then scrolled to and focused; false when it
+ * draws none. Call it outside React's render and commit (`flushSync`), with the thread interactive.
+ */
 export function revealThreadItem({ kind, id }: ThreadItem): boolean {
   const thread = document.querySelector("[data-chat-thread]");
   if (!thread) return false;
@@ -76,13 +79,13 @@ export function revealThreadItem({ kind, id }: ThreadItem): boolean {
   const opened = kind === "call" ? new Set(state.opened).add(id) : state.opened;
   flushSync(() => write({ opened, marked: id }));
   const attribute = kind === "call" ? "data-tool-call-id" : "data-run-id";
-  const card = thread.querySelector<HTMLElement>(`[${attribute}="${CSS.escape(id)}"]`);
-  if (!card) {
+  const line = thread.querySelector<HTMLElement>(`[${attribute}="${CSS.escape(id)}"]`);
+  if (!line) {
     write({ ...state, marked: null });
     return false;
   }
-  card.scrollIntoView({ block: "center" });
-  const control = card.querySelector<HTMLElement>("button, a[href]");
-  (control ?? card).focus({ preventScroll: true });
-  return card.contains(document.activeElement);
+  line.scrollIntoView({ block: "center" });
+  const control = line.querySelector<HTMLElement>("button, a[href]");
+  (control ?? line).focus({ preventScroll: true });
+  return true;
 }
