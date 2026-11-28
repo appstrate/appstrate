@@ -29,7 +29,7 @@ import {
 } from "@appstrate/ui/components/collapsible";
 import { useChatHost, type ChatTranslate } from "./runtime-context.ts";
 import { endsInActivity, type GroupablePart } from "./conversation-tools.ts";
-import { reasoningTitle, showStep } from "./turn-status.ts";
+import { reasoningTitleAt, showStep } from "./turn-status.ts";
 import { deriveToolPhase } from "./tool-result.ts";
 import { useTurnClock } from "./use-turn-clock.ts";
 import {
@@ -54,11 +54,10 @@ type ThreadPart = Parameters<typeof deriveToolPhase>[0] & {
 const SPARK_LOOP_MS = 2400;
 
 /**
- * The turn's one status region (the e2e/bench hook reads its test id): the
- * spark loader, in an activity line's lead slot.
+ * The turn's one status region (the e2e/bench hook reads its test id): the spark loader, in an
+ * activity line's lead slot, announcing `label`, the step in progress, as visually hidden text.
  */
-export function ThinkingStatus() {
-  const { t } = useChatHost();
+export function ThinkingStatus({ label }: { label: string }) {
   // Every mount joins one clock, so the loader moving between the loading line
   // and a group's header mid-turn does not restart.
   const [phase] = React.useState(() => `${-(performance.now() % SPARK_LOOP_MS)}ms`);
@@ -66,15 +65,15 @@ export function ThinkingStatus() {
     <span
       className="flex size-4 items-center justify-center"
       role="status"
-      aria-label={t("thinking.status")}
       data-testid="chat-thinking-status"
     >
-      <span className="spark" style={{ "--spark-phase": phase } as React.CSSProperties}>
+      <span aria-hidden className="spark" style={{ "--spark-phase": phase } as React.CSSProperties}>
         <i />
         <i />
         <i />
         <i />
       </span>
+      <span className="sr-only">{label}</span>
     </span>
   );
 }
@@ -96,22 +95,17 @@ export function LoadingLine() {
   const step = useAuiState((s) => runningCallLabel(s.message.parts as readonly ThreadPart[], t));
   const clock = useTurnClock(!deferred);
   if (deferred) return null;
+  const label = step || t("reasoning.running");
   return (
-    <ActivityLine lead={<ThinkingStatus />} className={ACTIVITY_BLOCK_CLASS}>
-      <ActivityLabel active>{step || t("reasoning.running")}</ActivityLabel>
-      {clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
+    <ActivityLine lead={<ThinkingStatus label={label} />} className={ACTIVITY_BLOCK_CLASS}>
+      <ActivityLabel active>{label}</ActivityLabel>
+      {clock ? (
+        <span aria-hidden className="shrink-0 tabular-nums">
+          {clock}
+        </span>
+      ) : null}
     </ActivityLine>
   );
-}
-
-/** The first line of the reasoning parts from `start` to `end`, a string for `useAuiState`. */
-function titleOf(parts: readonly { type: string; text?: string }[], start: number, end: number) {
-  for (let i = start; i <= end; i++) {
-    const part = parts[i];
-    const title = part?.type === "reasoning" ? reasoningTitle(part.text ?? "") : "";
-    if (title) return title;
-  }
-  return "";
 }
 
 /**
@@ -119,21 +113,21 @@ function titleOf(parts: readonly { type: string; text?: string }[], start: numbe
  * part follows, and on a turn stopped or failed mid-reasoning.
  */
 export function ReasoningStep({
-  startIndex,
-  endIndex,
+  indices,
   children,
 }: {
-  startIndex: number;
-  endIndex: number;
+  indices: readonly number[];
   children: React.ReactNode;
 }) {
   const { t } = useChatHost();
   const solo = useActivityMode()?.solo ?? false;
   const streaming = useAuiState(
-    (s) => s.message.status?.type === "running" && s.message.parts.length - 1 === endIndex,
+    (s) =>
+      s.message.status?.type === "running" &&
+      s.message.parts.length - 1 === indices[indices.length - 1],
   );
   const title = useAuiState((s) =>
-    titleOf(s.message.parts as readonly { type: string; text?: string }[], startIndex, endIndex),
+    reasoningTitleAt(s.message.parts as readonly { type: string; text?: string }[], indices),
   );
   const [readerOpen, setReaderOpen] = React.useState<boolean | null>(null);
 

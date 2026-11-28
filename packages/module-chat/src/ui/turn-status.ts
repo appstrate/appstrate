@@ -9,6 +9,7 @@ import { formatDuration } from "@appstrate/core/format";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import type { ChatTranslate } from "./runtime-context.ts";
 import { showCall } from "./tool-presentation.ts";
+import { deriveToolPhase } from "./tool-result.ts";
 
 /**
  * The turn's elapsed time in whole seconds, from 1 s on: under it every turn would open on « 0 ms »,
@@ -48,6 +49,12 @@ export function showStep(
   return idText ? { label, idText } : { label };
 }
 
+/** A call still in progress (running, or awaiting its result): its line shimmers. */
+export function isCallInProgress(part: Parameters<typeof deriveToolPhase>[0]): boolean {
+  const phase = deriveToolPhase(part);
+  return phase === "running" || phase === "pending";
+}
+
 /** A line's markdown marks: heading, quote and list markers ahead, emphasis and code around words. */
 const LEADING_MARKS = /^(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)+/;
 const LINK = /!?\[([^\]]*)\]\([^)]*\)/g;
@@ -63,6 +70,19 @@ export function reasoningTitle(text: string): string {
   // Lazily, line by line: a long reasoning is not split past its title.
   for (const [line] of text.matchAll(/^.*$/gm)) {
     const title = wordsOf(line);
+    if (title) return title;
+  }
+  return "";
+}
+
+/** The first title among the reasoning parts of `parts` at `indices`; "" when none reads as words. */
+export function reasoningTitleAt(
+  parts: readonly { readonly type: string; readonly text?: string }[],
+  indices: Iterable<number>,
+): string {
+  for (const i of indices) {
+    const part = parts[i];
+    const title = part?.type === "reasoning" ? reasoningTitle(part.text ?? "") : "";
     if (title) return title;
   }
   return "";

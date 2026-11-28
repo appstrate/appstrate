@@ -26,6 +26,9 @@ import {
   FailedGlyph,
 } from "./activity-line.tsx";
 
+/** What sits under a call's line, aligned on its name. */
+export const UNDER_LINE_CLASS = "pb-1.5 pl-6";
+
 /** What a call's line says besides its control. */
 interface CallLineFacts {
   lead: React.ReactNode;
@@ -74,7 +77,9 @@ export function CallLine({
         {failure ? <FailedGlyph label={failure.label} /> : null}
       </ActivityLine>
       {errorText ? (
-        <p className="text-muted-foreground pb-1.5 pl-6 text-xs break-words">{errorText}</p>
+        <p className={`text-muted-foreground ${UNDER_LINE_CLASS} text-xs break-words`}>
+          {errorText}
+        </p>
       ) : null}
     </>
   );

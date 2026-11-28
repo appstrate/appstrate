@@ -992,11 +992,7 @@ function ReasoningPart({
   children: React.ReactNode;
 }) {
   if (useActivityMode()?.mode === "breakout") return null;
-  return (
-    <ReasoningStep startIndex={indices[0] ?? 0} endIndex={indices[indices.length - 1] ?? 0}>
-      {children}
-    </ReasoningStep>
-  );
+  return <ReasoningStep indices={indices}>{children}</ReasoningStep>;
 }
 
 function AssistantParts() {

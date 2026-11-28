@@ -82,7 +82,7 @@ function renderSoloReasoning() {
   function SoloReasoning() {
     return (
       <ActivityModeContext value={{ mode: "step", solo: true }}>
-        <ReasoningStep startIndex={0} endIndex={0}>
+        <ReasoningStep indices={[0]}>
           <p>{REASONING_BODY}</p>
         </ReasoningStep>
       </ActivityModeContext>
@@ -118,8 +118,10 @@ function render(parts: Parts, status: ChatHelpers["status"] = "streaming", error
 
 const count = (html: string, needle: string) => html.split(needle).length - 1;
 /** The thinking loader: THE status region, one at most per turn, carrying the e2e/bench hook. */
-const statusRegions = (html: string) =>
-  count(html, 'role="status" aria-label="thinking.status" data-testid="chat-thinking-status"');
+const statusRegions = (html: string) => count(html, 'data-testid="chat-thinking-status"');
+/** What the status region announces: the step in progress, as visually hidden text. */
+const announced = (html: string) =>
+  /data-testid="chat-thinking-status">.*?<span class="sr-only">([^<]*)<\/span>/s.exec(html)?.[1];
 /** Every disclosure the turn draws: a group's line, and its steps once it is open. */
 const disclosures = (html: string) => count(html, "aria-expanded=");
 const openDisclosures = (html: string) => count(html, 'aria-expanded="true"');
@@ -308,7 +310,7 @@ describe("the reasoning of an assistant turn", () => {
     const html = render([]);
     expect(statusRegions(html)).toBe(1);
     expect(html).toMatch(/<span class="flex size-4 items-center justify-center" role="status"/);
-    expect(html).toContain('<span class="spark"');
+    expect(html).toMatch(/<span aria-hidden="true" class="spark"/);
     expect(count(html, "<i></i>")).toBe(4);
     expect(html).not.toContain("animate-bounce");
   });
@@ -363,38 +365,49 @@ describe("the reasoning of an assistant turn", () => {
 });
 
 describe("a running turn's one status region, whatever its tail", () => {
-  it("is the group's disclosure from its first call, naming the call that runs", () => {
+  it("is the call's own line from its first chunk: the spark leading, its name shimmering", () => {
     const html = render([lookup("s1", "issues", false)]);
     expect(statusRegions(html)).toBe(1);
-    // A lone call while the turn runs: the group's disclosure, the shape a second step keeps.
-    expect(disclosures(html)).toBe(1);
-    expect(callLines(html)).toBe(0);
-    const trigger = groupTrigger(html);
-    expect(trigger).not.toContain('role="status"');
-    // The step in progress as `showCall` names it, then its target; no count while it runs.
-    expect(trigger).toContain("shimmer-text");
-    expect(trigger.indexOf("issues")).toBeGreaterThan(trigger.indexOf("tool.name.search"));
-    expect(trigger).not.toContain("tool.reads.done");
+    // A lone call is never a disclosure: its line opens it in the panel, as once settled.
+    expect(disclosures(html)).toBe(0);
+    expect(callLines(html)).toBe(1);
+    const button = callButton(html);
+    expect(button).toContain("shimmer-text");
+    expect(button.indexOf("issues")).toBeGreaterThan(button.indexOf("tool.name.search"));
+    expect(button).not.toContain('role="status"');
+    // Named by its line and announced by the region, no step line repeating it under the line.
+    expect(count(html, "tool.name.search")).toBe(2);
+    expect(announced(html)).toBe("tool.name.search");
     // No loading line after it: the line holds the turn's region.
-    expect(html).not.toContain("reasoning.running");
-    // The spark first, then the trigger.
-    expect(html.indexOf("chat-thinking-status")).toBeLessThan(html.indexOf("tool.name.search"));
+    expect(count(html, "reasoning.running")).toBe(0);
+    // The spark first, then the call's name.
+    expect(html.indexOf("chat-thinking-status")).toBeLessThan(html.indexOf(button));
   });
 
-  it("stays the same line when a second call joins: one disclosure, the call that runs", () => {
+  it("becomes the disclosure when a second call joins, naming the call that runs", () => {
     const html = render([lookup("s1", "issues"), lookup("s2", "agents", false)]);
     expect(statusRegions(html)).toBe(1);
     expect(disclosures(html)).toBe(1);
     const trigger = groupTrigger(html);
     expect(trigger).toContain("agents");
     expect(trigger).not.toContain("issues");
+    expect(trigger).not.toContain('role="status"');
+    expect(announced(html)).toBe("tool.name.search");
   });
 
-  it("reads « thinking » on the line while the model thinks after a call's result", () => {
+  it("keeps the lone call's line while the model thinks after its result, the region saying so", () => {
     const html = render([lookup("s1", "issues")]);
     expect(statusRegions(html)).toBe(1);
-    expect(groupTrigger(html)).toContain("reasoning.running");
-    expect(count(html, "reasoning.running")).toBe(1);
+    expect(disclosures(html)).toBe(0);
+    const button = callButton(html);
+    expect(button).toContain("tool.name.search");
+    expect(button).not.toContain("shimmer-text");
+    expect(announced(html)).toBe("reasoning.running");
+  });
+
+  it("announces the step in progress, the model thinking before its first line is whole", () => {
+    expect(announced(render([reasoning("Lister les", "streaming")]))).toBe("reasoning.running");
+    expect(announced(render([]))).toBe("reasoning.running");
   });
 
   it("is still the line alone with the group opened by the context panel", () => {

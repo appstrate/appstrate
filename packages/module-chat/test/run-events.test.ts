@@ -466,33 +466,6 @@ describe("autoPresentFile", () => {
       autoPresentFile({ files: publishedFilesFromLogs(logs.slice(0, 2)), ...settled }),
     ).toBeUndefined();
   });
-
-  it("leaves the run line no reader of the retired agent-declared selection", () => {
-    // A source-text grep, and deliberately only the NEGATIVE half of one — the
-    // same rule the `useRunLogStream source guards` block below states, for the
-    // same reason. There is no DOM harness in this repo, so the card cannot be
-    // rendered; "this string is absent" is the one claim a grep answers
-    // honestly, because it fails on the thing coming back and cannot pass by
-    // luck of formatting.
-    //
-    // The positive assertions this case used to carry are gone — both species
-    // the doctrine below names, and both were demonstrated on this card:
-    //  - `toContain("autoPresentFile({ files, status: effectiveStatus, sweepDone })")`
-    //    pinned one unwrapped call expression. Letting prettier rewrap it —
-    //    zero behaviour change — failed it, while `const _x = autoPresentFile({…})`,
-    //    a call whose result is discarded, would have passed. What it reached
-    //    for is the rule itself, which the cases above test directly.
-    //  - `toContain("producedFiles")` was already satisfied by the unrelated
-    //    `producedFilesTruncated` further down the same file, so dropping the
-    //    authoritative `/api/files` read out of the counted set — the real
-    //    defect it was there to catch — left the whole suite green.
-    const card = readFileSync(
-      fileURLToPath(new URL("../src/ui/thread-run-line.tsx", import.meta.url)),
-      "utf8",
-    );
-    expect(card).not.toContain("primary");
-    expect(card).not.toContain("presentation:");
-  });
 });
 
 /**

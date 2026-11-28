@@ -5,7 +5,8 @@
  * acted on, its name, its target, then its duration and, when it failed, a small red cross. The
  * thread names, the context panel details: clicking the line opens the call there, its input and
  * output with it. The line is a step under its group's rail (`ToolStep`), or the group's own line
- * when the call is its one step.
+ * when the call is its one step. Its label shimmers while the call is in progress
+ * (`isCallInProgress`), as the group's header does.
  *
  * A failure is softened, never hidden: its message stays under the line, muted, and the cross
  * ends the line, named with the HTTP status. Tone is driven by the actual result
@@ -53,6 +54,7 @@ import {
   type CreatedPackage,
 } from "./package-created.ts";
 import { showCall } from "./tool-presentation.ts";
+import { isCallInProgress } from "./turn-status.ts";
 import { cardSpaceOf, type StoredResult } from "./use-call-presentation.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
 import {
@@ -213,7 +215,7 @@ export function ToolStep(props: ToolCardProps) {
       lead={subject ? <SubjectGlyph subject={subject} /> : <Icon aria-hidden />}
       label={label}
       idText={idText}
-      running={deriveToolPhase(props) === "running"}
+      running={isCallInProgress(props)}
     />
   );
 }

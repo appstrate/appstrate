@@ -148,9 +148,17 @@ describe("a run's line in the thread", () => {
     const html = render({ phase: "error", errorText: message });
     expect(html).not.toContain("<button");
     expect(html).toContain("run.launchFailed");
-    expect(html).toContain(
-      `<p class="text-muted-foreground pb-1.5 pl-6 text-xs break-words">${message}</p>`,
-    );
+    expect(html).toContain(`>${message}</p>`);
+  });
+
+  it("keeps the launch call's error under the line when the call errored with a run id", () => {
+    const html = render({
+      runId: "run_1",
+      initialStatus: "running",
+      phase: "error",
+      errorText: "Délai d'attente dépassé",
+    });
+    expect(html).toContain(">Délai d&#x27;attente dépassé</p>");
   });
 
   it("states a failed run's short outcome on the line, with one cross only", () => {
@@ -178,5 +186,30 @@ describe("a run's line in the thread", () => {
       /^<div data-tool-call-id="call_1" data-run-id="run_1" tabindex="-1"/,
     );
     expect(rootClass(html)).toContain("data-[revealed]:ring-2");
+  });
+});
+
+/** The visually hidden status region's text: what the line announces. */
+const announced = (html: string) =>
+  /<span role="status" class="sr-only">([^<]*)<\/span>/.exec(html)?.[1];
+
+describe("what a run's line announces", () => {
+  it("announces the settled outcome", () => {
+    expect(announced(render({ runId: "run_1", initialStatus: "success", phase: "success" }))).toBe(
+      "run.status.success",
+    );
+    expect(announced(render({ phase: "error", errorText: "refusé" }))).toBe("run.launchFailed");
+    expect(
+      announced(
+        render(
+          { runId: "run_1", initialStatus: "running" },
+          { host: { can: () => false, canIn: () => false } },
+        ),
+      ),
+    ).toBe("run.noAccess");
+  });
+
+  it("announces nothing while the run goes", () => {
+    expect(announced(render({ runId: "run_1", initialStatus: "running" }))).toBe("");
   });
 });
