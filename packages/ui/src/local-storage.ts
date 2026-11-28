@@ -25,6 +25,7 @@ export const LOCAL_STORAGE_KEYS = {
   theme: { zone: "web", key: "theme" },
   sidebar: { zone: "web", key: "sidebar" },
   chatSidebar: { zone: "web", key: "chatSidebar" },
+  sidebarWidth: { zone: "web", key: "sidebarWidth" },
   currentOrg: { zone: "web", key: "currentOrg" },
   lastSpace: { zone: "web", key: "lastSpace" },
   viewAs: { zone: "web", key: "viewAs" },
@@ -37,9 +38,8 @@ export const LOCAL_STORAGE_KEYS = {
   /** Per table name (sub-key). */
   columnVisibility: { zone: "web", key: "columns" },
   columnWidths: { zone: "web", key: "columnWidths" },
-  /** Per panel view (sub-key). */
   chatPanelWidth: { zone: "chat", key: "contextWidth" },
-  chatSummarySections: { zone: "chat", key: "summarySections" },
+  chatCollapsedGroups: { zone: "chat", key: "collapsedGroups" },
   chatModelPick: { zone: "chat", key: "modelPick" },
   chatGeneration: { zone: "chat", key: "generation" },
   chatContextAllSpaces: { zone: "chat", key: "contextAllSpaces", scope: "user" },

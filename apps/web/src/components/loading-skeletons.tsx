@@ -30,7 +30,6 @@ import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PackageType } from "@appstrate/core/validation";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
-import { canReadRuns } from "@appstrate/core/permissions";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import { usePageBreadcrumb } from "../hooks/use-overlay-breadcrumb";
@@ -948,16 +947,14 @@ export function OverlayPanelSkeleton({ list }: { list?: boolean }) {
 }
 
 /**
- * The chat's header actions (`ChatModulePage`): the context tabs (one `size-7` tab per readable
- * pane in a `p-1` list), and for a stored conversation the writer's settings button.
+ * The chat's header actions (`ChatModulePage`), icon buttons 44 px on touch and 32 px under a
+ * mouse: for a stored conversation its « … » (a reader's too), then the context toggle.
  */
 function ChatHeaderActionsBlocks({ conversation }: { conversation: boolean }) {
-  const { can } = usePermissions();
-  const tabs = 1 + Number(canReadRuns(can)) + Number(can("files:read"));
   return (
     <ShellHeaderActions>
-      {conversation && can("chat:write") && <Skeleton className="size-8 rounded-md" />}
-      <Skeleton className="h-8 rounded-md" style={{ width: tabs * 28 + 8 }} />
+      {conversation && <Skeleton className="desktop-pointer:size-8 size-11 rounded-md" />}
+      <Skeleton className="desktop-pointer:size-8 size-11 rounded-md" />
     </ShellHeaderActions>
   );
 }

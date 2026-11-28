@@ -9,7 +9,10 @@
 
 import type { SessionSummary } from "./sessions.ts";
 
-export type SessionGroupKey = "today" | "yesterday" | "week" | "month" | "older";
+/** The date buckets, in display order. */
+export const SESSION_GROUP_KEYS = ["today", "yesterday", "week", "month", "older"] as const;
+
+export type SessionGroupKey = (typeof SESSION_GROUP_KEYS)[number];
 
 export interface SessionGroup {
   key: SessionGroupKey;
@@ -37,8 +40,6 @@ export function sessionGroupKey(iso: string, now: Date): SessionGroupKey {
   return "older";
 }
 
-const ORDER: readonly SessionGroupKey[] = ["today", "yesterday", "week", "month", "older"];
-
 /** Non-empty groups in display order; rows keep their incoming order inside each. */
 export function groupSessionsByDate(sessions: SessionSummary[], now: Date): SessionGroup[] {
   const buckets = new Map<SessionGroupKey, SessionSummary[]>();
@@ -48,7 +49,7 @@ export function groupSessionsByDate(sessions: SessionSummary[], now: Date): Sess
     if (bucket) bucket.push(session);
     else buckets.set(key, [session]);
   }
-  return ORDER.flatMap((key) => {
+  return SESSION_GROUP_KEYS.flatMap((key) => {
     const group = buckets.get(key);
     return group ? [{ key, sessions: group }] : [];
   });
