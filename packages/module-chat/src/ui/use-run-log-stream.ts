@@ -2,7 +2,7 @@
 
 /**
  * Follow a launched run's logs in the chat: fetch the persisted history once,
- * then tail new lines live over the run's SSE stream. Drives `ChatRunProgressCard`.
+ * then tail new lines live over the run's SSE stream. Drives `ThreadRunLine`.
  *
  * Three sources, merged (they overlap):
  *  1. `GET /api/runs/:id/logs` — the persisted history, so a panel that mounts
@@ -397,7 +397,7 @@ export function useRunLogStream(
     // `transport` is a dependency, not a convenience: the host rebuilds it when
     // its scoping context (organization, space, role preview) changes, and this
     // stream reads its URL once at connect. Without it a preview entered while
-    // a run card is open keeps tailing under the previous authority. The host
+    // a run's line is mounted keeps tailing under the previous authority. The host
     // also rebuilds it on a list-filter change, which reconnects the stream.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, transport, readsRuns, readsFiles, spaceId]);

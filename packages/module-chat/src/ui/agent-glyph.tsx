@@ -51,16 +51,16 @@ export function KnownAgentGlyph({
 }
 
 /**
- * An agent's tile at a run's lead (32px): its identity tile, a neutral bot tile of the same size
- * for an inline run or an agent the data does not hold.
+ * An agent's tile at a run's lead in the thread (16px, an activity line's lead slot): its identity
+ * tile, a neutral bot tile of the same size for an inline run or an agent the data does not hold.
  */
 export function AgentTile({ agent, label }: { agent: AgentAppearance | undefined; label: string }) {
   if (!agent) {
     return (
-      <span className="bg-muted text-muted-foreground flex size-8 items-center justify-center rounded-lg">
-        <BotIcon className="size-4" aria-hidden="true" />
+      <span className="bg-muted text-muted-foreground flex size-4 shrink-0 items-center justify-center rounded-sm">
+        <BotIcon className="size-[55%]" aria-hidden="true" />
       </span>
     );
   }
-  return <AgentGlyph agent={agent} label={label} className="size-8 rounded-lg" />;
+  return <AgentGlyph agent={agent} label={label} />;
 }

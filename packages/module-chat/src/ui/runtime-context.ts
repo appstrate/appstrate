@@ -137,7 +137,7 @@ export interface ThreadItem {
 
 /**
  * Shows a thread item in the host's context panel, open on its line: a call's input and output, a
- * run's result, files and log, followed live. The thread's call lines and run cards open theirs on
+ * run's result, files and log, followed live. The thread's call lines and run lines open theirs on
  * a click: the module owns no detail of its own, as it owns no file viewer.
  */
 export type OpenThreadItem = (item: ThreadItem) => void;

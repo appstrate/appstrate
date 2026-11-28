@@ -217,7 +217,7 @@ function ConversationContext({
   dispatch: Dispatch<ConversationSidebarAction>;
   /** The phone's sheet has no header toggle beside it: it carries its own close. */
   closable: boolean;
-  /** "See in the thread": bring a call's or a run's card into view, where the panel leaves room for it. */
+  /** "See in the thread": bring a call's or a run's line into view, where the panel leaves room for it. */
   onShowInThread: (item: ThreadItem) => void;
 }) {
   // The desktop column stays mounted while closed (for its transition): its

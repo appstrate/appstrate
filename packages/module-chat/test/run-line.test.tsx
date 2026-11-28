@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A run's two-line block, as the thread's run card and the context panel's Runs tab draw it: rendered
- * with no chat host around it, everything from its props.
+ * A run's two-line block, as the context panel's Runs tab draws it: rendered with no chat host
+ * around it, everything from its props.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -33,8 +33,8 @@ describe("RunLine", () => {
   it("sets the badge on a 16px disc at the tile's corner, and draws none without one", () => {
     const html = line({ badge: <svg data-badge="" /> });
     expect(html).toContain("absolute -right-1 -bottom-1 flex size-4");
-    expect(html).toContain("rounded-full [&amp;_svg]:size-3 bg-card");
-    expect(line({ badge: <svg />, badgeClassName: "bg-muted" })).not.toContain("bg-card");
+    expect(html).toContain("rounded-full [&amp;_svg]:size-3");
+    expect(html).toContain("bg-card absolute -right-1 -bottom-1");
     expect(html).toContain("data-badge");
     expect(line()).not.toContain("-bottom-1");
   });
@@ -44,16 +44,6 @@ describe("RunLine", () => {
     expect(html).toContain('ml-auto flex shrink-0 items-center gap-2"><span>1,2 s</span>');
     expect(html.indexOf("1,2 s")).toBeGreaterThan(html.indexOf("Rapport hebdo"));
     expect(line()).not.toContain("ml-auto");
-  });
-
-  it("follows line 2 with its meta, line 2 adding no width of its own", () => {
-    const html = line({ meta: <span>1,2 s</span> });
-    expect(html).toContain("min-w-[20ch] flex-1 [contain:inline-size]");
-    expect(html).toContain(
-      'text-muted-foreground flex shrink-0 items-center gap-2 text-xs"><span>1,2 s</span>',
-    );
-    expect(html.indexOf("1,2 s")).toBeGreaterThan(html.indexOf("Lecture des courriels"));
-    expect(line()).not.toContain("contain:inline-size");
   });
 
   it("keeps both lines at a fixed height, the second muted, one cell, truncated", () => {

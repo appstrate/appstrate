@@ -170,7 +170,7 @@ export function openRunToRefetch(
   return runId;
 }
 
-/** Whether "See in the thread" missed the call's line or the run's card its list holds open. */
+/** Whether "See in the thread" missed the call's line or the run's line its list holds open. */
 export function revealMissed(state: ConversationSidebarState): boolean {
   return openItem(state) !== null && state.revealMissed;
 }

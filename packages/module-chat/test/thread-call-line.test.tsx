@@ -2,7 +2,7 @@
 
 /**
  * A call's line in the thread opens the call in the host's context panel: the one host entry point
- * (`openThreadItem`) the run card opens its run through too. The line is rendered as a function, so
+ * (`openThreadItem`) a run's line opens its run through too. The line is rendered as a function, so
  * its control's click handler is reached without a DOM.
  */
 

@@ -18,7 +18,7 @@ import {
   type ThreadItem,
 } from "../../../../../packages/module-chat/src/ui/runtime-context.ts";
 import { FileAttachment } from "../../../../../packages/module-chat/src/ui/file-attachment.tsx";
-import { ChatRunProgressCard } from "../../../../../packages/module-chat/src/ui/chat-run-progress-card.tsx";
+import { ThreadRunLine } from "../../../../../packages/module-chat/src/ui/thread-run-line.tsx";
 import { render } from "../../test/render.tsx";
 import { ConversationUsage } from "../../modules/chat/conversation-info.tsx";
 import { conversationStats } from "@appstrate/module-chat/conversation-stats";
@@ -172,7 +172,7 @@ describe("chat surfaces held to the caller's grants", () => {
     const card = (granted: string[]) =>
       render(
         <ChatHostProvider value={hostWith(granted)}>
-          <ChatRunProgressCard
+          <ThreadRunLine
             toolCallId="call_1"
             runId="run_1"
             initialStatus="running"
@@ -187,18 +187,18 @@ describe("chat surfaces held to the caller's grants", () => {
     expect(denied).toContain("run.noAccess");
     expect(denied).not.toContain("run.starting");
     expect(denied).not.toContain('title="run.openPage"');
-    // A run out of reach has nothing to show in the panel either.
-    expect(denied).not.toContain('aria-label="run.details"');
+    // A run out of reach has nothing to show in the panel either: its name is no button.
+    expect(denied).not.toContain("<button");
 
     const granted = card(["runs:read"]);
     expect(granted).toContain("run.starting");
     expect(granted).toContain('title="run.openPage"');
     expect(granted).toContain("?enterSpace=spc_b");
-    expect(granted).toContain('aria-label="run.details"');
+    expect(granted).toContain("<button");
   });
 });
 
-describe("chat run card", () => {
+describe("chat run line", () => {
   const agent = {
     name: "run-bot",
     title: "Bot",
@@ -211,7 +211,7 @@ describe("chat run card", () => {
       { id: "@acme/slack", name: "Slack", icon: null },
     ],
   };
-  /** The card under a commands cache holding `agents`, keyed as `useChatCommands` reads it outside a transport. */
+  /** The line under a commands cache holding `agents`, keyed as `useChatCommands` reads it outside a transport. */
   const card = (packageId: string | undefined, phase: "running" | "error" = "running") => {
     const qc = new QueryClient();
     qc.setQueryData(["packages", "chat-commands", undefined, null, true], {
@@ -224,7 +224,7 @@ describe("chat run card", () => {
     };
     return render(
       <ChatHostProvider value={host}>
-        <ChatRunProgressCard
+        <ThreadRunLine
           runId={undefined}
           agentLabel="@acme/bot"
           initialPackageId={packageId}
@@ -237,19 +237,19 @@ describe("chat run card", () => {
 
   it("leads with the agent's tile and follows its name with its integrations, named", () => {
     const html = card("@acme/bot");
-    expect(html).toContain("size-8 rounded-lg");
-    expect(html).not.toContain("bg-muted text-muted-foreground flex size-8");
+    expect(html).toContain("size-4 shrink-0 rounded-sm");
+    expect(html).not.toContain("bg-muted text-muted-foreground flex size-4");
     expect(html).toContain('role="img" aria-label="run.integrations:Gmail, Slack"');
     expect(html.indexOf("run.integrations")).toBeGreaterThan(html.indexOf("@acme/bot<"));
   });
 
   it("draws the neutral bot tile, and no logos, for an agent the commands do not hold", () => {
     const html = card("@inline/shadow");
-    expect(html).toContain("bg-muted text-muted-foreground flex size-8");
+    expect(html).toContain("bg-muted text-muted-foreground flex size-4");
     expect(html).not.toContain("run.integrations");
   });
 
-  /** The first element under `node` whose props satisfy `match`. */
+  /** The first element under `node`, through every prop, whose props satisfy `match`. */
   function findElement(
     node: ReactNode,
     match: (props: Record<string, unknown>) => boolean,
@@ -263,21 +263,27 @@ describe("chat run card", () => {
       return undefined;
     }
     const el = node as ReactElement<Record<string, unknown>>;
-    if (match(el.props ?? {})) return el;
-    return findElement(el.props?.children as ReactNode, match);
+    if (!el.props) return undefined;
+    if (match(el.props)) return el;
+    // Through every prop, not only `children`: a line's control is one of its props.
+    for (const value of Object.values(el.props)) {
+      const hit = findElement(value as ReactNode, match);
+      if (hit) return hit;
+    }
+    return undefined;
   }
 
   it("opens its run in the host's panel on a click", () => {
     const opened: ThreadItem[] = [];
     function Probe() {
-      const tree = ChatRunProgressCard({
+      const tree = ThreadRunLine({
         runId: "run_1",
         initialStatus: "success",
         agentLabel: "@acme/bot",
         initialPackageId: "@acme/bot",
         phase: "success",
       });
-      const button = findElement(tree, (props) => props["aria-label"] === "run.details");
+      const button = findElement(tree, (props) => typeof props.onClick === "function");
       (button!.props.onClick as () => void)();
       return null;
     }
@@ -291,15 +297,15 @@ describe("chat run card", () => {
     expect(opened).toEqual([{ kind: "run", id: "run_1" }]);
   });
 
-  it("is no button on a launch failure: no run to open, its message on the card", () => {
+  it("is no button on a launch failure: no run to open, its state on the line", () => {
     const failed = card("@acme/bot", "error");
     expect(failed).not.toContain("<button");
     expect(failed).toContain("run.launchFailed");
   });
 
-  it("puts the state on the tile's corner: a spinner until it is known, an alert on a launch failure", () => {
+  it("follows the name with its state: a spinner until it is known, an alert on a launch failure", () => {
     const starting = card("@acme/bot");
-    expect(starting).toContain("absolute -right-1 -bottom-1");
+    expect(starting).not.toContain("absolute -right-1 -bottom-1");
     expect(starting).toContain("animate-spin");
     const failed = card("@acme/bot", "error");
     expect(failed).not.toContain("animate-spin");

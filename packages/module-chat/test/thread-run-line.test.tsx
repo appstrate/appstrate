@@ -1,0 +1,174 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * A run in the thread: one activity line, no box, led by the agent's 16px tile, its name a button
+ * opening the run in the context panel; what a short state cannot say goes under the line, in full.
+ */
+
+import { describe, expect, it } from "bun:test";
+import { isValidElement, type ReactElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ChatCommands } from "../src/commands.ts";
+import { ThreadRunLine } from "../src/ui/thread-run-line.tsx";
+import { ChatHostProvider, type ChatHost, type ThreadItem } from "../src/ui/runtime-context.ts";
+import { testHost } from "./test-host.ts";
+
+const commands: ChatCommands = {
+  skills: [],
+  agents: [
+    {
+      name: "agent-amont",
+      title: "Agent amont",
+      description: "",
+      packageId: "@acme/agent-amont",
+      icon: null,
+      color: "emerald",
+      integrations: [{ id: "@acme/slack", name: "Slack", icon: "https://cdn.test/slack.svg" }],
+    },
+  ],
+};
+
+type LineProps = React.ComponentProps<typeof ThreadRunLine>;
+
+function render(
+  props: Partial<LineProps> = {},
+  { known = true, host = {} }: { known?: boolean; host?: Partial<ChatHost> } = {},
+) {
+  const client = new QueryClient();
+  if (known) client.setQueryData(["packages", "chat-commands", undefined, null, true], commands);
+  return renderToStaticMarkup(
+    <QueryClientProvider client={client}>
+      <ChatHostProvider value={testHost(host)}>
+        <ThreadRunLine
+          runId={undefined}
+          agentLabel="@acme/agent-amont"
+          initialPackageId="@acme/agent-amont"
+          phase="running"
+          {...props}
+        />
+      </ChatHostProvider>
+    </QueryClientProvider>,
+  );
+}
+
+/** The markup past the image preloads React hoists before the root. */
+const rooted = (html: string) => html.replace(/^(<link [^>]*\/>)+/, "");
+
+/** The root element's class list. */
+function rootClass(html: string): string {
+  const match = /^<div[^>]*class="([^"]*)"/.exec(rooted(html));
+  expect(match).not.toBeNull();
+  return match?.[1] ?? "";
+}
+
+/** The first element under `node`, through every prop, that has an `onClick`. */
+function clickable(node: ReactNode): ReactElement<{ onClick: () => void }> | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = clickable(child as ReactNode);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+  if (!isValidElement<Record<string, unknown>>(node)) return undefined;
+  if (typeof node.props.onClick === "function") {
+    return node as ReactElement<{ onClick: () => void }>;
+  }
+  for (const value of Object.values(node.props)) {
+    const hit = clickable(value as ReactNode);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+describe("a run's line in the thread", () => {
+  it("is a line with no border, background or card padding", () => {
+    const root = rootClass(render());
+    expect(root).not.toMatch(/(^|\s)border(\s|$|-)/);
+    expect(root).not.toMatch(/(^|\s)bg-/);
+    expect(root).not.toMatch(/(^|\s)(p|px|py)-/);
+    expect(render()).toContain("desktop-pointer:h-8 flex h-10");
+  });
+
+  it("names the agent by its title and draws its integrations' logos", () => {
+    const html = render({ runId: "run_1", initialStatus: "running" });
+    expect(html).toContain(">Agent amont<");
+    expect(html).not.toContain(">@acme/agent-amont<");
+    expect(html).toContain('src="https://cdn.test/slack.svg"');
+    expect(html).toContain('aria-label="run.integrations"');
+  });
+
+  it("leads with the agent's 16px tile, a neutral bot tile for an agent the data does not hold", () => {
+    expect(render()).toContain("size-4 shrink-0 rounded-sm");
+    const unknown = render({}, { known: false });
+    expect(unknown).toContain("bg-muted text-muted-foreground flex size-4");
+    expect(unknown).toContain("@acme/agent-amont");
+  });
+
+  it("makes the name the button, opening the run in the host's panel", () => {
+    const html = render({ runId: "run_1", initialStatus: "running" });
+    // The button holds the name and nothing else: its accessible name is the agent's.
+    expect(html).toMatch(
+      /<button[^>]*><span class="[^"]*shimmer-text[^"]*">Agent amont<\/span><\/button>/,
+    );
+
+    const opened: ThreadItem[] = [];
+    function Probe() {
+      clickable(
+        ThreadRunLine({
+          runId: "run_1",
+          initialStatus: "success",
+          agentLabel: "@acme/agent-amont",
+          phase: "success",
+        }),
+      )?.props.onClick();
+      return null;
+    }
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <ChatHostProvider value={testHost({ openThreadItem: (item) => opened.push(item) })}>
+          <Probe />
+        </ChatHostProvider>
+      </QueryClientProvider>,
+    );
+    expect(opened).toEqual([{ kind: "run", id: "run_1" }]);
+  });
+
+  it("is no button without a run id, its launch failure's message under the line in full", () => {
+    const message = "Agent introuvable dans cet espace : vérifiez son identifiant puis relancez.";
+    const html = render({ phase: "error", errorText: message });
+    expect(html).not.toContain("<button");
+    expect(html).toContain("run.launchFailed");
+    expect(html).toContain(
+      `<p class="text-muted-foreground pb-1.5 pl-6 text-xs break-words">${message}</p>`,
+    );
+  });
+
+  it("states a failed run's short outcome on the line, with one cross only", () => {
+    const html = render({ runId: "run_1", initialStatus: "failed" });
+    expect(html).toContain("run.status.failed");
+    expect(html.match(/<svg[^>]*lucide-circle-x/g)?.length).toBe(1);
+    expect(html).not.toContain("lucide-x ");
+    expect(html).not.toContain('role="img" aria-label="tool.failed');
+  });
+
+  it("is no button for a reader who cannot read the run, its notice under the line", () => {
+    const html = render(
+      { runId: "run_1", initialStatus: "running" },
+      { host: { can: () => false, canIn: () => false } },
+    );
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain('title="run.openPage"');
+    expect(html).not.toContain("run.starting");
+    expect(html).toContain(">run.noAccess</p>");
+  });
+
+  it("anchors the panel's reveal on its root", () => {
+    const html = render({ toolCallId: "call_1", runId: "run_1", initialStatus: "running" });
+    expect(rooted(html)).toMatch(
+      /^<div data-tool-call-id="call_1" data-run-id="run_1" tabindex="-1"/,
+    );
+    expect(rootClass(html)).toContain("data-[revealed]:ring-2");
+  });
+});

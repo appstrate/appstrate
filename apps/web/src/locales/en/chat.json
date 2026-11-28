@@ -44,7 +44,6 @@
   "run.starting": "Starting",
   "run.running": "Running",
   "run.launchFailed": "Launch failed",
-  "run.details": "Run details",
   "run.openPage": "Open the run page",
   "run.integrations": "Integrations: {{names}}",
   "run.status.success": "Completed",

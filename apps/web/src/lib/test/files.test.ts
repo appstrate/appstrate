@@ -270,9 +270,9 @@ describe("producedRunFiles", () => {
 /**
  * The run page uses this tag to decide when a LIVE log frame should invalidate
  * its file caches. It is not where the file list comes from: that is
- * `producedRunFiles` over `GET /api/files`, i.e. the `files` table. The chat
- * card unions the same authoritative read over its log-derived chips
- * (`chat-run-progress-card.tsx`), so neither reader can lose a file by
+ * `producedRunFiles` over `GET /api/files`, i.e. the `files` table. The chat's
+ * run line unions the same authoritative read over its log-derived chips
+ * (`thread-run-line.tsx`), so neither reader can lose a file by
  * declining a tag.
  *
  * That is what makes the strict match affordable. Releases through

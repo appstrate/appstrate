@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bring a tool call's line, or a run's card, into view in the thread, from the context panel: a
+ * Bring a tool call's line, or a run's line, into view in the thread, from the context panel: a
  * call's activity group opens (a folded one does not mount its steps; a lone call is the group's
- * line) and the anchored element is ringed while it holds the focus. A run's card is drawn
+ * line) and the anchored element is ringed while it holds the focus. A run's line is drawn
  * whatever its group's fold, so no group opens for it.
  */
 
@@ -49,7 +49,7 @@ export const REVEAL_RING_CLASS =
   "transition-shadow duration-fast ease-surface data-[revealed]:ring-2 data-[revealed]:ring-ring";
 
 /**
- * A card's anchor: focusable by script only, marked while it is the revealed one. A run's card is
+ * A line's anchor: focusable by script only, marked while it is the revealed one. A run's line is
  * anchored by its run as well (`runId`), so the panel's Runs tab finds it without its call.
  */
 export function useRevealAnchor(toolCallId: string | undefined, runId?: string) {

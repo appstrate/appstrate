@@ -13,8 +13,8 @@
  *
  * What a call must keep in view whatever its group's fold is drawn under the group's line
  * (the `…Breakout` components): the interactive `OAuthConnectCard` of a connect kickoff, a
- * launched run's `ChatRunProgressCard`, the link to a created package. `run_and_wait` is a card
- * of its own, outside any group.
+ * launched run's line (`ThreadRunLine`), the link to a created package. `run_and_wait` is a run's
+ * line of its own, outside any group.
  */
 
 import * as React from "react";
@@ -24,9 +24,14 @@ import { formatDuration } from "@appstrate/core/format";
 import { useChatHost } from "./runtime-context.ts";
 import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
-import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
+import { ThreadRunLine } from "./thread-run-line.tsx";
 import { CallSpace } from "./call-space.tsx";
-import { ActivityId, ActivityLine, ActivityTrigger } from "./activity-line.tsx";
+import {
+  ACTIVITY_BLOCK_CLASS,
+  ActivityId,
+  ActivityLine,
+  ActivityTrigger,
+} from "./activity-line.tsx";
 import { CallLine, CallName } from "./call-step.tsx";
 import {
   extractAgentLabel,
@@ -71,25 +76,25 @@ export type ToolCardProps = ToolCallMessagePartProps<Record<string, unknown>, un
 };
 
 /**
- * Render run-launch tool calls as in-chat run progress while launch/run state is
- * available.
+ * Render run-launch tool calls as the run's line in the thread, from the launch to its terminal
+ * status.
  *
- * A real component, not a `build…()` helper called inline: `ChatRunProgressCard`
+ * A real component, not a `build…()` helper called inline: `ThreadRunLine`
  * memoizes its file set on the `initialFiles` prop, and this is where that array
  * is derived. Computed inline it was a fresh array every time THIS component
  * rendered — which assistant-ui does once per stream chunk while the tool part
  * is live — so the memo missed on each of those, the auto-present candidate was
  * a new object, and the effect that opens it re-ran (only a ref kept the result
- * correct). Note the card's own 500 ms log ticker is NOT the trigger: it is
+ * correct). Note the line's own 500 ms log ticker is NOT the trigger: it is
  * state inside the child, and a child's re-render never re-invokes this
  * extraction. Hooks need a component, and `InvokeOperationTool` reaches this
  * branch conditionally, so the `useMemo` cannot live in its body.
  */
-function RunLaunchCard({
+function RunLaunchLine({
   anchorsCall,
   ...props
 }: ToolCardProps & {
-  /** The card is the call's whole display, so the context panel reveals the call by it. */
+  /** The line is the call's whole display, so the context panel reveals the call by it. */
   anchorsCall: boolean;
 }): React.ReactNode {
   const runId = extractRunId(props.result);
@@ -101,10 +106,10 @@ function RunLaunchCard({
   // Inline labels are manifest names, not package ids, so they wait for result/fetch.
   const packageId =
     extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
-  // The call names the space the run ran in: the card reads and links there.
+  // The call names the space the run ran in: the line reads and links there.
   const spaceId = cardSpaceOf(props);
   return (
-    <ChatRunProgressCard
+    <ThreadRunLine
       toolCallId={anchorsCall ? props.toolCallId : undefined}
       runId={runId}
       initialStatus={extractRunStatus(props.result)}
@@ -249,10 +254,10 @@ export function InvokeOperationBreakout(props: ToolCardProps) {
   }
 
   // Run launch (runAgent / runInline): the run's progress, from the launch to its terminal
-  // status. A launch refused started no run: its step says so, and no card stands for it.
+  // status. A launch refused started no run: its step says so, and no run's line stands for it.
   if (isRunLaunchOp(opId)) {
     if (phase === "error" && !extractRunId(result)) return null;
-    return <RunLaunchCard {...props} anchorsCall={false} />;
+    return <RunLaunchLine {...props} anchorsCall={false} />;
   }
 
   const created =
@@ -318,24 +323,26 @@ export function ImportPackageBreakout(props: ToolCardProps) {
   ) : null;
 }
 
-// `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its own
-// card — the same component the invoke-operation run-launch branch renders. Chat
-// emits the run id as a preliminary result; the progress panel is mounted for
-// the call's whole life (launch failures render inside it) — no generic-card
+// `run_and_wait` is its own MCP tool (not invoke_operation), outside any activity group, so it
+// draws its own block — the run's line the invoke-operation run-launch branch renders, in the room
+// a group takes (`ACTIVITY_BLOCK_CLASS`). Chat emits the run id as a preliminary result; the line is
+// mounted for the call's whole life (a launch failure's message goes under it) — no generic-card
 // fallback swap.
 //
 // A launch refused for a missing connection (409) carries a ready-to-open
 // `connect_url` per actionable integration, so the connect cards render
-// UNDER the run panel and the user clicks straight through — the model is never
+// UNDER the run's line and the user clicks straight through — the model is never
 // asked to kick a connect flow off, and never sees the link. A run that started
 // without an optional integration carries the same link on its warning, shown
 // once the call settles — by then it may have lapsed, so the card gets its expiry.
 // Zero offers adds nothing: unlike the invoke_operation connect branch there is
-// no placeholder card here, because the run panel already holds its geometry.
+// no placeholder card here, because the run's line already holds its geometry.
 export function RunAndWaitTool(props: ToolCardProps) {
   return (
     <>
-      <RunLaunchCard {...props} anchorsCall />
+      <div className={ACTIVITY_BLOCK_CLASS}>
+        <RunLaunchLine {...props} anchorsCall />
+      </div>
       {extractRunAndWaitAuthOffers(props).map((offer) => (
         <OAuthConnectCard
           key={offer.authUrl}

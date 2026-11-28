@@ -210,7 +210,7 @@ function RunDetail({
 }
 
 /**
- * One run as the thread's card draws it (`RunLine`): the agent's tile with the run's state on its
+ * One run on two lines (`RunLine`): the agent's tile with the run's state on its
  * corner, its name and number, its integrations, its space when the list spans several, its
  * duration; under them its start and outcome. The line is the disclosure of its detail; open, the
  * run is followed live over its own stream (`useRunLogStream`), which the line's state follows
@@ -259,7 +259,7 @@ function RunDisclosure({
   }, [settledLate, onSettled]);
   const logs = visibleLogEntries(stream.logs);
   const ref = useRef<HTMLDivElement>(null);
-  // Opened from the thread's card or by a reveal that missed, the line comes into sight.
+  // Opened from the thread's run line or by a reveal that missed, the line comes into sight.
   useEffect(() => {
     if (open) ref.current?.scrollIntoView({ block: "nearest" });
   }, [open]);

@@ -734,7 +734,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   not a collection. Entity cards in lists: `PackageCard` (every package
   type, the dashboard's agents included), a run as
   a dense list row is `RunRow` (the dashboard); the chat's context panel draws its
-  runs with the thread's `RunLine` (section 13).
+  runs with `RunLine` (section 13).
 - Cards are `bg-card` with a `border` on the canvas; a clickable card is one
   stretched link (`absolute inset-0`), never a link around a button.
 
@@ -942,19 +942,19 @@ and the call's detail in the panel holds it. The panel locates a call or a run b
 (« Voir dans le fil », `revealThreadItem`): a call's group opens and its line is ringed. What needs
 the reader stays in view under the line whatever the fold: a connect card, a launched run, a
 created package's link, a read skill's chip. A run started from the chat is a
-`ChatRunProgressCard`, drawn with the run line the context panel shares (`RunLine`,
-`@appstrate/module-chat/run-line`): a compact card as wide as its content (from 17.5rem to the
-thread's width), tinted by the agent's identity colour (`IDENTITY_SURFACE_CLASSES`,
-`@appstrate/ui/identity-colors`: a light veil of its tile token, raised one step under the pointer,
-a hairline of its hue, no shadow), a muted veil for an inline run, an unknown agent or a launch
-that failed. The agent's 32px tile leads (a neutral bot tile for an inline run), the run's state on
-a 16px badge at its corner, on the tile's own fill; line 1 is the agent's name and the run page's
-link; line 2 the paced live log, then the outcome, or a failed run's own message in red (the card
-keeps its tint), followed by its duration, the agent's integration logos and its space, muted. The
-log truncates and adds no width, so both lines keep their size whatever arrives. A click on the card opens its run in the
-context panel (`ChatHost.openThreadItem`, the one way the thread opens a call or a run there),
-on its line of Runs; a launch that failed before any
-run existed is no button. The model picker is `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
+line like every other activity of the thread, so the thread reads as one rhythm (`ThreadRunLine`,
+`thread-run-line.tsx`, drawn with the call's own `CallLine`): no border, no background, no tint.
+The agent's 16px identity tile leads (a neutral bot tile for an inline run or an unknown agent);
+the agent's name is the line's control, shimmering while the run goes, a button that opens its run
+in the context panel (`ChatHost.openThreadItem`, the one way the thread opens a call or a run
+there), on its line of Runs; a launch that failed before any run existed, or a run the reader
+cannot read, names it in plain text. After it, muted: the run's state (its status icon, then the
+paced live log, truncated in the room left, or the outcome's short label), its duration, the
+agent's integration logos, its space and the run page's link; the line's height is fixed, so
+nothing that arrives moves it. What the short state cannot say goes under the line in full, muted,
+aligned on the name, as a failed call's message does: a failed or timed-out run's own error, a
+launch failure's message, the notice that the reader's role cannot read the run; the run's files
+follow on the same indent. The model picker is `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
 The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that
 canvas and floats beside the thread: its cards and its previewed file are `Card` /
@@ -980,8 +980,8 @@ the line's muted tone, label, id, chevron, a failure said by the small red cross
 outcome and its muted message under the line, and the call's detail (`tool-call-detail`) opening
 inline under it, led by « Voir dans le fil ». Each turn's heading counts its calls with the group
 line's own words (`activityCounts`); a call opened from the thread or the Summary opens on its line
-of Tools, in view, listed even when it is a lookup the switch hides. Runs draws each run with the card's
-`RunLine` (`modules/chat/conversation-runs-tab.tsx`): the agent's tile and state badge, name
+of Tools, in view, listed even when it is a lookup the switch hides. Runs draws each run on two
+lines with `RunLine` (`@appstrate/module-chat/run-line`, `modules/chat/conversation-runs-tab.tsx`): the agent's tile and state badge, name
 and number, integrations, its space when the list spans several, its duration, then its start
 and outcome. The line is a disclosure, one item open at a time, a call or a run (`selectedItem` in the panel's
 reducer): open, it follows the run live over its own stream and shows, each only when it has

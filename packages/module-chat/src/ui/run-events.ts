@@ -9,7 +9,7 @@
  * (`GET /api/runs/:id/logs`), then tails new lines live over the run's SSE
  * stream (`GET /api/realtime/runs/:id?verbose=true`). These helpers parse and
  * merge both sources so the React layer (`use-run-log-stream.ts`,
- * `chat-run-progress-card.tsx`) stays a thin shell.
+ * `thread-run-line.tsx`) stays a thin shell.
  *
  * The schemas here are deliberately a MINIMAL local subset of the canonical
  * `@appstrate/shared-types` realtime schemas: we only need a handful of
@@ -45,8 +45,8 @@ export function isTerminalStatus(status: string | null | undefined): status is R
 /**
  * Whether `useRunLogStream` should open the live SSE tail for a run.
  *
- * A card mounted with a TERMINAL `initialStatus` (a `run_and_wait` result, or a
- * reopened conversation whose launch card carries the final status) has nothing
+ * A line mounted with a TERMINAL `initialStatus` (a `run_and_wait` result, or a
+ * reopened conversation whose launch call carries the final status) has nothing
  * to tail: the run will never emit another log line or `run_update`, and a
  * stream would only cost a connection, a second 1000-row log sweep and a
  * duplicate `/api/files` read on the snapshot frame. Without a tail the
@@ -76,9 +76,9 @@ export function isRunAutoPresentEligible(
 }
 
 /**
- * i18n key for the settled line a terminal run's card shows instead of its last
+ * i18n key for the settled state a terminal run's line shows instead of its last
  * log. A KEY, not a sentence: this module ships no literal user-facing text —
- * the card resolves it through the host translator (same pattern as the web
+ * the line resolves it through the host translator (same pattern as the web
  * shell's `artifactFailureCodeKey`). An unknown/absent status falls back to the
  * generic "finished" key, so a new status can never render a raw key.
  */
@@ -95,7 +95,7 @@ export function runStatusLineKey(status: RunStatus | undefined): string {
 }
 
 /**
- * The message a terminal run's card shows in place of its outcome label: the run's own error
+ * The message a terminal run's line shows under it, its outcome's label on the line: the run's own error
  * (`runs.error`), for a run that failed or timed out with one. Not for a cancellation, whose
  * label already says it all.
  */
@@ -396,7 +396,7 @@ export function visibleLogEntries(logs: readonly RunLogLine[]): VisibleLogEntry[
 }
 
 /**
- * A file surfaced in a run card: the stable id + uri (for chaining) plus a
+ * A file surfaced under a run's line: the stable id + uri (for chaining) plus a
  * display name. `mime`/`size` are optional (present in the persisted tool
  * result, absent on some log frames).
  */

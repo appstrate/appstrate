@@ -467,7 +467,7 @@ describe("autoPresentFile", () => {
     ).toBeUndefined();
   });
 
-  it("leaves the card no reader of the retired agent-declared selection", () => {
+  it("leaves the run line no reader of the retired agent-declared selection", () => {
     // A source-text grep, and deliberately only the NEGATIVE half of one — the
     // same rule the `useRunLogStream source guards` block below states, for the
     // same reason. There is no DOM harness in this repo, so the card cannot be
@@ -487,7 +487,7 @@ describe("autoPresentFile", () => {
     //    authoritative `/api/files` read out of the counted set — the real
     //    defect it was there to catch — left the whole suite green.
     const card = readFileSync(
-      fileURLToPath(new URL("../src/ui/chat-run-progress-card.tsx", import.meta.url)),
+      fileURLToPath(new URL("../src/ui/thread-run-line.tsx", import.meta.url)),
       "utf8",
     );
     expect(card).not.toContain("primary");
