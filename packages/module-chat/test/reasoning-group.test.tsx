@@ -334,7 +334,9 @@ describe("the reasoning of an assistant turn", () => {
   it("is the call's own line when it is the group's one call: a button, nothing to unfold", () => {
     const counted = {
       ...lookup("s1", "issues"),
-      resultProviderMetadata: { appstrate: { presentation: { call: "search", count: 3, items: [] } } },
+      resultProviderMetadata: {
+        appstrate: { presentation: { call: "search", count: 3, items: [] } },
+      },
     };
     const html = render([counted, answer], "ready");
     // No disclosure: a click opens the call in the context panel.
@@ -361,12 +363,13 @@ describe("the reasoning of an assistant turn", () => {
 });
 
 describe("a running turn's one status region, whatever its tail", () => {
-  it("is the group's line from its first call, naming the call that runs", () => {
+  it("is the group's disclosure from its first call, naming the call that runs", () => {
     const html = render([lookup("s1", "issues", false)]);
     expect(statusRegions(html)).toBe(1);
-    // A lone call: its line opens it in the panel while it runs too.
-    expect(disclosures(html)).toBe(0);
-    const trigger = callButton(html);
+    // A lone call while the turn runs: the group's disclosure, the shape a second step keeps.
+    expect(disclosures(html)).toBe(1);
+    expect(callLines(html)).toBe(0);
+    const trigger = groupTrigger(html);
     expect(trigger).not.toContain('role="status"');
     // The step in progress as `showCall` names it, then its target; no count while it runs.
     expect(trigger).toContain("shimmer-text");
@@ -390,7 +393,7 @@ describe("a running turn's one status region, whatever its tail", () => {
   it("reads « thinking » on the line while the model thinks after a call's result", () => {
     const html = render([lookup("s1", "issues")]);
     expect(statusRegions(html)).toBe(1);
-    expect(callButton(html)).toContain("reasoning.running");
+    expect(groupTrigger(html)).toContain("reasoning.running");
     expect(count(html, "reasoning.running")).toBe(1);
   });
 

@@ -6,9 +6,13 @@
  * is even known — so the card keeps a constant two-line height with no
  * transient placeholder swap.
  *
- * Drawn as a `RunLine`: the agent's tile leads (a neutral bot tile for an inline run or an agent
- * the `/chat/commands` data does not hold), with the run's state on a badge at its corner.
- * Line 1: the package name, then the agent's integration logos. Line 2: the run's own log-tool output (the
+ * A compact card, as wide as its content (from 17.5rem to the thread's width), tinted by the
+ * agent's identity colour (`IDENTITY_SURFACE_CLASSES`): a light veil and a hairline of its hue, a
+ * muted veil for an inline run, an agent the `/chat/commands` data does not hold, or a launch that
+ * failed. Drawn as a `RunLine`: the agent's tile leads (a neutral bot tile when no agent is known),
+ * with the run's state on a badge at its corner. Line 1: the agent's name (its title in the
+ * `/chat/commands` data, else the launch's label), the run page's link at its end. Line 2: the
+ * run's own log-tool output (the
  * `event='log'` rows the platform writes for the agent's explicit `log` tool
  * of `@appstrate/platform` — NOT runtime lifecycle or tool-call breadcrumbs),
  * streamed live over the run's SSE channel (`useRunLogStream`) and paced one
@@ -16,8 +20,8 @@
  * burst reads as a sequence rather than a flash.
  * Before the first log the line reads `run.starting` (still starting), then
  * `run.running` once running; once terminal it settles on the final outcome (a failed
- * or timed-out run's own error message when it carries one). The live execution time and a
- * link to the run's page sit on the right. Clicking
+ * or timed-out run's own error message when it carries one, in the destructive colour). The live
+ * execution time, the agent's integration logos and the run's space follow it, muted. Clicking
  * the card opens the run in the host's context panel (`openThreadItem`), where its result, files and log
  * follow it; the launch call's raw input and output stay in the panel's Tools tab.
  *
@@ -31,7 +35,10 @@
 
 import * as React from "react";
 import { AlertTriangleIcon, ExternalLinkIcon, LockIcon } from "lucide-react";
+import { resolveColor } from "@appstrate/core/appearance";
+import { cn } from "@appstrate/ui/cn";
 import { RunStatusIcon } from "@appstrate/ui/components/run-status";
+import { IDENTITY_SURFACE_CLASSES } from "@appstrate/ui/identity-colors";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { useLiveElapsedMs } from "@appstrate/ui/use-live-elapsed-ms";
 import { runReadAccess, useRunLogStream } from "./use-run-log-stream.ts";
@@ -48,7 +55,7 @@ import {
   mergeRunFiles,
   publishedFilesFromLogs,
   runFailureMessage,
-  runStatusLineKey,
+  runOutcomeText,
   visibleLogEntries,
   type ChatRunFile,
 } from "./run-events.ts";
@@ -80,7 +87,10 @@ function FileChips({ files, spaceId }: { files: ChatRunFile[]; spaceId?: string 
   );
 }
 
-/** The agent's integrations as stacked logos, named for assistive technology. */
+/**
+ * The agent's integrations as stacked logos (each its manifest `icon`, drawn by the
+ * `IntegrationIcon` the panel's Runs tab draws too), named for assistive technology.
+ */
 function IntegrationLogos({
   integrations,
   label,
@@ -93,7 +103,7 @@ function IntegrationLogos({
       integrations.map((integration) => ({
         kind: "integration" as const,
         id: integration.id,
-        ...(integration.icon && { icon: integration.icon }),
+        ...(integration.icon && { icons: [{ src: integration.icon }] }),
       })),
     [integrations],
   );
@@ -240,8 +250,8 @@ export function ChatRunProgressCard({
   }, [autoPresentEligible, openFile, autoPresented, runId, spaceId]);
   // Before any log line: "starting" while the run is still coming up (no status
   // yet, or pending), then "running" once it is — up until the first log
-  // replaces it.
-  const placeholder = t(effectiveStatus === "running" ? "run.running" : "run.starting");
+  // replaces it. Once terminal, the outcome itself.
+  const outcome = runOutcomeText(effectiveStatus, error, t);
 
   // Once the run is terminal, the live log line is replaced by a fixed status
   // label so the card settles on the actual outcome instead of freezing on
@@ -254,10 +264,7 @@ export function ChatRunProgressCard({
   // than reading "starting" forever, and offer no link to a page that 403s.
   const denied = !!runId && runDenied && !terminal;
   const line = terminal
-    ? {
-        id: -1,
-        text: runFailureMessage(effectiveStatus, error) ?? t(runStatusLineKey(effectiveStatus)),
-      }
+    ? { id: -1, text: outcome }
     : launchFailed
       ? { id: -1, text: errorText ?? t("run.launchFailed") }
       : denied
@@ -266,7 +273,13 @@ export function ChatRunProgressCard({
   const effectiveRunHref =
     runId && !runDenied ? runPageHref(linkInSpace, packageId, runId, spaceId) : undefined;
   const agent = useKnownAgent(packageId ? { packageId } : undefined);
-  const label = agentLabel ?? t("run.fallbackLabel");
+  const label = agent?.title ?? agentLabel ?? t("run.fallbackLabel");
+  // The agent's colour as its tile resolves it; a failed run keeps it, a failed launch has none.
+  const tint =
+    IDENTITY_SURFACE_CLASSES[
+      agent && !launchFailed ? resolveColor(agent.color, agent.packageId) : "neutral"
+    ];
+  const failedLine = launchFailed || runFailureMessage(effectiveStatus, error) !== undefined;
 
   // `isolate` scopes the internal z-0/z-10 layering to this card — without it
   // the z-10 content escapes into the thread's stacking context and paints
@@ -274,7 +287,11 @@ export function ChatRunProgressCard({
   return (
     <div
       {...anchor}
-      className={`bg-card text-card-foreground relative isolate my-2 w-full rounded-lg border ${REVEAL_RING_CLASS}`}
+      className={cn(
+        "text-card-foreground relative isolate my-2 w-fit max-w-full min-w-70 rounded-lg border",
+        tint.surface,
+        REVEAL_RING_CLASS,
+      )}
     >
       {/* Full-card click target (opens the run in the panel). Behind the content so
           the run-page link can re-enable pointer events for itself — avoids
@@ -283,7 +300,7 @@ export function ChatRunProgressCard({
         <button
           type="button"
           aria-label={t("run.details")}
-          className="hover:bg-muted/50 absolute inset-0 z-0 rounded-lg"
+          className="absolute inset-0 z-0 rounded-lg"
           onClick={() => openThreadItem({ kind: "run", id: runId })}
         />
       ) : null}
@@ -291,30 +308,34 @@ export function ChatRunProgressCard({
         className="pointer-events-none relative z-10 px-3 py-2"
         tile={<AgentTile agent={agent} label={label} />}
         badge={<StatusIcon status={effectiveStatus} phase={phase} denied={denied} />}
+        badgeClassName={tint.badge}
         name={label}
         trailing={
-          <>
-            <IntegrationLogos
-              integrations={agent?.integrations ?? []}
-              label={(names) => t("run.integrations", { names })}
-            />
-            <CallSpace spaceId={spaceId} />
-            {elapsedMs !== undefined ? (
-              <span className="text-muted-foreground text-xs tabular-nums">
-                {formatDuration(elapsedMs, lang)}
-              </span>
-            ) : null}
-            {effectiveRunHref ? (
-              <a
-                href={effectiveRunHref}
-                className="text-muted-foreground hover:text-foreground pointer-events-auto"
-                title={t("run.openPage")}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <ExternalLinkIcon className="size-3.5" />
-              </a>
-            ) : null}
-          </>
+          effectiveRunHref ? (
+            <a
+              href={effectiveRunHref}
+              className="text-muted-foreground hover:text-foreground pointer-events-auto"
+              title={t("run.openPage")}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ExternalLinkIcon className="size-3.5" />
+            </a>
+          ) : null
+        }
+        // A failed launch has only its message to say: it takes the whole line, readable in full.
+        meta={
+          launchFailed ? undefined : (
+            <>
+              {elapsedMs !== undefined ? (
+                <span className="tabular-nums">{formatDuration(elapsedMs, lang)}</span>
+              ) : null}
+              <IntegrationLogos
+                integrations={agent?.integrations ?? []}
+                label={(names) => t("run.integrations", { names })}
+              />
+              <CallSpace spaceId={spaceId} />
+            </>
+          )
         }
         // The paced log line, keyed by log id so each new one remounts and runs the fade/slide
         // enter animation over the last.
@@ -322,12 +343,12 @@ export function ChatRunProgressCard({
           line ? (
             <span
               key={line.id}
-              className={`${launchFailed ? "text-destructive" : ""} animate-in fade-in slide-in-from-bottom-1 ease-surface duration-base font-mono`}
+              className={`${failedLine ? "text-destructive" : ""} animate-in fade-in slide-in-from-bottom-1 ease-surface duration-base font-mono`}
             >
               {line.text}
             </span>
           ) : (
-            <span className="font-mono">{placeholder}</span>
+            <span className="font-mono">{outcome}</span>
           )
         }
       />

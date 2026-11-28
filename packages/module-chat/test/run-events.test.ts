@@ -33,6 +33,7 @@ import {
   resolveAttachmentContent,
   safeJsonParse,
   runFailureMessage,
+  runOutcomeText,
   runStatusLineKey,
   visibleLogEntries,
   type RunLogLine,
@@ -92,6 +93,17 @@ describe("run-events helpers", () => {
     expect(runFailureMessage("failed", "")).toBeUndefined();
     expect(runFailureMessage("cancelled", "stopped")).toBeUndefined();
     expect(runFailureMessage("success", "stale")).toBeUndefined();
+  });
+
+  it("reads a run's outcome: starting, running, then its failure or its status's label", () => {
+    const t = (key: string) => `<${key}>`;
+    expect(runOutcomeText(undefined, undefined, t)).toBe("<run.starting>");
+    expect(runOutcomeText("pending", undefined, t)).toBe("<run.starting>");
+    expect(runOutcomeText("running", "stale", t)).toBe("<run.running>");
+    expect(runOutcomeText("failed", "Gmail refused the token", t)).toBe("Gmail refused the token");
+    expect(runOutcomeText("failed", undefined, t)).toBe("<run.status.failed>");
+    expect(runOutcomeText("cancelled", "stopped", t)).toBe("<run.status.cancelled>");
+    expect(runOutcomeText("success", undefined, t)).toBe("<run.status.success>");
   });
 
   it("extracts run id and status from invoke and run_and_wait results", () => {

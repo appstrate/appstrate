@@ -156,6 +156,20 @@ export function openRunId(state: ConversationSidebarState): string | null {
   return item?.kind === "run" ? item.id : null;
 }
 
+/**
+ * The open run the list must be read again for: one it does not hold (launched since its last
+ * poll), unless it was already read again for it (`asked`), so a run that is not the
+ * conversation's is not read for forever.
+ */
+export function openRunToRefetch(
+  runId: string | null,
+  runs: readonly { id: string }[],
+  asked: string | null,
+): string | null {
+  if (!runId || runId === asked || runs.some((run) => run.id === runId)) return null;
+  return runId;
+}
+
 /** Whether "See in the thread" missed the call's line or the run's card its list holds open. */
 export function revealMissed(state: ConversationSidebarState): boolean {
   return openItem(state) !== null && state.revealMissed;

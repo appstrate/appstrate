@@ -299,7 +299,7 @@ describe("chat run card", () => {
 
   it("puts the state on the tile's corner: a spinner until it is known, an alert on a launch failure", () => {
     const starting = card("@acme/bot");
-    expect(starting).toContain("bg-card absolute -right-1 -bottom-1");
+    expect(starting).toContain("absolute -right-1 -bottom-1");
     expect(starting).toContain("animate-spin");
     const failed = card("@acme/bot", "error");
     expect(failed).not.toContain("animate-spin");

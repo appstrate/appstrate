@@ -106,6 +106,19 @@ export function runFailureMessage(
   return (status === "failed" || status === "timeout") && error ? error : undefined;
 }
 
+/**
+ * A run's outcome as its line reads it, the thread's card and the panel's Runs tab alike: starting,
+ * then running, while it goes; once terminal, its own failure message, else its status's label.
+ */
+export function runOutcomeText(
+  status: RunStatus | undefined,
+  error: string | undefined,
+  t: (key: string) => string,
+): string {
+  if (!isTerminalStatus(status)) return t(status === "running" ? "run.running" : "run.starting");
+  return runFailureMessage(status, error) ?? t(runStatusLineKey(status));
+}
+
 /** Is this op-id one whose result we can mine for a launched run id? */
 export function isRunLaunchOp(opId: string | undefined): opId is RunLaunchOp {
   return !!opId && (RUN_LAUNCH_OPS as readonly string[]).includes(opId);

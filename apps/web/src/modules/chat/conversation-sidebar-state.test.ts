@@ -6,6 +6,7 @@ import {
   conversationSidebarReducer,
   heldLocalUrl,
   openRunId,
+  openRunToRefetch,
   openToolCallId,
   revealMissed,
   shownFile,
@@ -396,5 +397,23 @@ describe("conversation sidebar items", () => {
     // The run took the call's place: back on the Tools tab, no call is open.
     expect(openToolCallId({ ...run, activeTab: "tools" })).toBeNull();
     expect(revealMissed({ ...run, activeTab: "tools", revealMissed: true })).toBe(false);
+  });
+});
+
+describe("openRunToRefetch", () => {
+  const runs = [{ id: "run_a" }, { id: "run_b" }];
+
+  it("reads the list again for an open run it does not hold", () => {
+    expect(openRunToRefetch("run_new", runs, null)).toBe("run_new");
+    expect(openRunToRefetch("run_new", [], "run_old")).toBe("run_new");
+  });
+
+  it("does not read it again for a run it holds, or with nothing open", () => {
+    expect(openRunToRefetch("run_a", runs, null)).toBeNull();
+    expect(openRunToRefetch(null, runs, null)).toBeNull();
+  });
+
+  it("reads it again once per run: one still absent afterwards is not read for again", () => {
+    expect(openRunToRefetch("run_new", runs, "run_new")).toBeNull();
   });
 });

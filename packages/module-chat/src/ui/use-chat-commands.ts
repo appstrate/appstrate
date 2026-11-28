@@ -52,7 +52,11 @@ export function useChatCommands(wanted: boolean) {
 /** How an agent is looked up in the commands data: by its prompt name or its package id. */
 export type AgentRef = { promptName: string } | { packageId: string };
 
-/** The commands entry of an agent (its key is shared with the `/` menu); none for `undefined`. */
+/**
+ * The commands entry of an agent (its key is shared with the `/` menu); none for `undefined`. An
+ * agent installed in several spaces is read from its first entry, so its integrations may be those
+ * of another space's install than the one a run used.
+ */
 export function useKnownAgent(agentRef: AgentRef | undefined): ChatAgentCommand | undefined {
   const { data } = useChatCommands(agentRef !== undefined);
   if (!agentRef) return undefined;

@@ -930,9 +930,9 @@ a rail of steps of the same height: a reasoning (`ReasoningStep`) opens its text
 call (`ToolStep`, drawn by `ThreadCallLine` in `tool-uis.tsx`) is a button, darkening under the
 pointer like the group's trigger, that opens it on its line of the panel's Tools tab, its raw
 input / output there. A group of one reasoning draws no second line: its header names it, and
-opening it shows its text directly under the header's label. A group of one call is that call's
-line, nothing to unfold: no chevron, a click opens the call in the panel, and its count, space and
-duration (the turn's clock while it runs) and its cross end the line. A settled reasoning that
+opening it shows its text directly under the header's label. A settled group of one call is that
+call's line, nothing to unfold: no chevron, a click opens the call in the panel, and its count, space
+and duration and its cross end the line; while the turn runs it stays the group's disclosure. A settled reasoning that
 says nothing past its first line is a plain line: the same lead and label, no chevron, nothing to
 open. A failed call is softened, never hidden: no red border or lead icon, its message stays under
 its line in muted text, and a small red cross (`FailedGlyph`, named « Échec · HTTP 404 » for
@@ -943,11 +943,15 @@ and the call's detail in the panel holds it. The panel locates a call or a run b
 the reader stays in view under the line whatever the fold: a connect card, a launched run, a
 created package's link, a read skill's chip. A run started from the chat is a
 `ChatRunProgressCard`, drawn with the run line the context panel shares (`RunLine`,
-`@appstrate/module-chat/run-line`): the agent's 32px tile leads (a neutral bot tile for an inline
-run), the run's state on a 16px badge at its corner; line 1 is the name, then the agent's
-integration logos, its space, its duration and the run page's link; line 2 the paced live log,
-then the outcome, or a failed run's own message, muted. The colour lives in the tile alone, and
-both lines keep their height whatever arrives. A click on the card opens its run in the
+`@appstrate/module-chat/run-line`): a compact card as wide as its content (from 17.5rem to the
+thread's width), tinted by the agent's identity colour (`IDENTITY_SURFACE_CLASSES`,
+`@appstrate/ui/identity-colors`: a light veil of its tile token, raised one step under the pointer,
+a hairline of its hue, no shadow), a muted veil for an inline run, an unknown agent or a launch
+that failed. The agent's 32px tile leads (a neutral bot tile for an inline run), the run's state on
+a 16px badge at its corner, on the tile's own fill; line 1 is the agent's name and the run page's
+link; line 2 the paced live log, then the outcome, or a failed run's own message in red (the card
+keeps its tint), followed by its duration, the agent's integration logos and its space, muted. The
+log truncates and adds no width, so both lines keep their size whatever arrives. A click on the card opens its run in the
 context panel (`ChatHost.openThreadItem`, the one way the thread opens a call or a run there),
 on its line of Runs; a launch that failed before any
 run existed is no button. The model picker is `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the

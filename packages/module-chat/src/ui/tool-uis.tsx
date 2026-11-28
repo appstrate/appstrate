@@ -133,9 +133,7 @@ type LineCall = Parameters<typeof deriveToolPhase>[0] & {
 /**
  * A call's line in the thread: its name is a button opening the call in the context panel, which
  * holds its input and output (the thread names, the panel details). What a search found, the space
- * and the duration follow it; a failure ends it with its cross, its message under it. `clock`: the
- * line is its group's, the turn's status while the turn runs; the turn's clock ("" until its first
- * tick) stands for what the call says after its name.
+ * and the duration follow it; a failure ends it with its cross, its message under it.
  */
 export function ThreadCallLine({
   call,
@@ -143,14 +141,12 @@ export function ThreadCallLine({
   label,
   idText,
   running,
-  clock,
 }: {
   call: LineCall;
   lead: React.ReactNode;
   label: string;
   idText?: string | undefined;
   running: boolean;
-  clock?: string | undefined;
 }) {
   const { t, lang, openThreadItem } = useChatHost();
   const anchor = useRevealAnchor(call.toolCallId);
@@ -173,26 +169,20 @@ export function ThreadCallLine({
           </ActivityTrigger>
         }
         trailing={
-          clock !== undefined ? (
-            clock ? (
-              <span className="shrink-0 tabular-nums">{clock}</span>
-            ) : null
-          ) : (
-            <>
-              {presentation?.call === "search" ? (
-                <span className="flex shrink-0 items-center gap-1.5 text-xs">
-                  <SubjectStack subjects={presentation.items} />
-                  {t("tool.search.count", { count: presentation.count })}
-                </span>
-              ) : null}
-              <CallSpace spaceId={spaceId} />
-              {durationMs !== undefined ? (
-                <span className="shrink-0 text-xs tabular-nums">
-                  {formatDuration(durationMs, lang)}
-                </span>
-              ) : null}
-            </>
-          )
+          <>
+            {presentation?.call === "search" ? (
+              <span className="flex shrink-0 items-center gap-1.5 text-xs">
+                <SubjectStack subjects={presentation.items} />
+                {t("tool.search.count", { count: presentation.count })}
+              </span>
+            ) : null}
+            <CallSpace spaceId={spaceId} />
+            {durationMs !== undefined ? (
+              <span className="shrink-0 text-xs tabular-nums">
+                {formatDuration(durationMs, lang)}
+              </span>
+            ) : null}
+          </>
         }
         failure={
           failed

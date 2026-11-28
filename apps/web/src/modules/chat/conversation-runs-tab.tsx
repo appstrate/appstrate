@@ -9,7 +9,7 @@ import { ACTIVITY_CONTENT_CLASS } from "@appstrate/module-chat/activity-line";
 import { RunLine } from "@appstrate/module-chat/run-line";
 import {
   runFailureMessage,
-  runStatusLineKey,
+  runOutcomeText,
   visibleLogEntries,
   type VisibleLogEntry,
 } from "@appstrate/module-chat/run-events";
@@ -43,7 +43,7 @@ import { formatDateField } from "../../lib/format-date";
 import { producedRunFiles } from "../../lib/files";
 import { readShown, useConversationRuns } from "./use-conversation-lists";
 import { ConversationFileRow } from "./conversation-file-row";
-import type { StoredSidebarFile } from "./conversation-sidebar-state";
+import { openRunToRefetch, type StoredSidebarFile } from "./conversation-sidebar-state";
 
 const ACTIVE = ACTIVE_RUN_STATUSES as ReadonlySet<string>;
 
@@ -267,9 +267,7 @@ function RunDisclosure({
   const start = run.started_at
     ? formatDateField(run.started_at)
     : t("dashboard.runPending", { ns: "agents" });
-  const outcome = active
-    ? t(status === "running" ? "run.running" : "run.starting")
-    : (runFailureMessage(status, error) ?? t(runStatusLineKey(status)));
+  const outcome = runOutcomeText(status, error, t);
 
   return (
     <Collapsible ref={ref} open={open} onOpenChange={onOpenChange}>
@@ -372,7 +370,8 @@ function RunLinesSkeleton() {
 
 /**
  * The runs a conversation launched, one line each (`RunDisclosure`), the one the panel holds open
- * (`openRunId`) showing its detail under its line.
+ * (`openRunId`) showing its detail under its line. A run opened from the thread that the polled
+ * list does not hold yet reads the list again, once.
  */
 export function ConversationRuns({
   conversationId,
@@ -399,11 +398,21 @@ export function ConversationRuns({
   );
   // Stable (React Query binds it once): a run's settling effect depends on it.
   const { refetch } = query;
+  const read = readShown(query);
+  // The answered list, the same array until the next answer.
+  const listed = read === "ready" ? runs : undefined;
+  const askedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!listed) return;
+    const runId = openRunToRefetch(openRunId, listed, askedFor.current);
+    if (!runId) return;
+    askedFor.current = runId;
+    void refetch();
+  }, [listed, openRunId, refetch]);
 
   if (!conversationId) {
     return <EmptyState message={t("context.unsaved")} icon={ActivityIcon} compact />;
   }
-  const read = readShown(query);
   if (read === "error") return <ErrorState error={query.error} compact />;
   // Pending covers a read not yet answered and one held while the panel is closed.
   if (read === "pending") return <RunLinesSkeleton />;
