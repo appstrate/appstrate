@@ -73,7 +73,8 @@ function matchesAgentRef(agent: ChatAgentCommand, agentRef: AgentRef): boolean {
 /**
  * The commands entry of an agent (its key is shared with the `/` menu); none for `undefined`.
  * Named with a space, it is that space's install, or none when the agent is not offered there;
- * named without one, an agent installed in several spaces is read from its first entry.
+ * named without one, an agent installed in several spaces is read from its first entry, whose
+ * per-install facts (its integrations) may be another space's.
  */
 export function useKnownAgent(agentRef: AgentRef | undefined): ChatAgentCommand | undefined {
   const { data } = useChatCommands(agentRef !== undefined);

@@ -140,12 +140,15 @@ export function ThreadCallLine({
   label,
   idText,
   running,
+  trailing,
 }: {
   call: LineCall;
   lead: React.ReactNode;
   label: string;
   idText?: string | undefined;
   running: boolean;
+  /** What ends the line's trailing content (the running turn's clock, for a group's lone call). */
+  trailing?: React.ReactNode;
 }) {
   const { t, lang, openThreadItem } = useChatHost();
   const anchor = useRevealAnchor(call.toolCallId);
@@ -181,6 +184,7 @@ export function ThreadCallLine({
                 {formatDuration(durationMs, lang)}
               </span>
             ) : null}
+            {trailing}
           </>
         }
         failure={

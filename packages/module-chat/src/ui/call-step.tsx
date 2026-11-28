@@ -10,6 +10,7 @@
  */
 
 import * as React from "react";
+import { cn } from "@appstrate/ui/cn";
 import {
   Collapsible,
   CollapsibleContent,
@@ -77,7 +78,7 @@ export function CallLine({
         {failure ? <FailedGlyph label={failure.label} /> : null}
       </ActivityLine>
       {errorText ? (
-        <p className={`text-muted-foreground ${UNDER_LINE_CLASS} text-xs break-words`}>
+        <p className={cn("text-muted-foreground text-xs break-words", UNDER_LINE_CLASS)}>
           {errorText}
         </p>
       ) : null}

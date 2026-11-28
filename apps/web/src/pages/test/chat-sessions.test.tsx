@@ -225,6 +225,7 @@ describe("chat run line", () => {
           runId={undefined}
           agentLabel="@acme/bot"
           initialPackageId={packageId}
+          spaceId={agent.spaceId}
           phase={phase}
         />
       </ChatHostProvider>,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, type Dispatch, type ReactNode } from "react";
+import { useEffect, useRef, type Dispatch, type ReactNode } from "react";
 import { FilesIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { revealThreadItem } from "@appstrate/module-chat/reveal-tool-call";
@@ -378,6 +378,10 @@ export function ConversationSidebar({
     pendingReveal.current = item;
     dispatch({ type: "toggle" });
   };
+  // The sheet unmounts when the viewport crosses to desktop, so its close never consumes the reveal.
+  useEffect(() => {
+    if (desktop) pendingReveal.current = null;
+  }, [desktop]);
   const size = useContextPanelWidth(panelRef);
 
   // Desktop: the panel floats over the thread, which keeps the whole width so its scrollbar stays

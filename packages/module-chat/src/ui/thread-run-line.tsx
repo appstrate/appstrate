@@ -19,8 +19,8 @@
  * a fade/slide animation, truncated in the room left; `run.starting` before the first log, then
  * `run.running`, and the outcome's short label once terminal. Then the duration, the agent's
  * integrations (`IntegrationLogoStack`, the stack the panel's Runs tab and the agent cards draw, as
- * the `/chat/commands` data holds them for the run's space), the run's space and the run page's
- * link.
+ * the `/chat/commands` data holds them for the run's space; none when the line does not know that
+ * space, another space's install would answer), the run's space and the run page's link.
  *
  * What a short state cannot say goes under the line, in full and muted, aligned on the name, as a
  * failed call's message does: a failed or timed-out run's own error, else the launch call's error
@@ -292,7 +292,7 @@ export function ThreadRunLine({
                 {formatDuration(elapsedMs, lang)}
               </span>
             ) : null}
-            <IntegrationLogoStack integrations={agent?.integrations ?? []} />
+            <IntegrationLogoStack integrations={(spaceId && agent?.integrations) || []} />
             <CallSpace spaceId={spaceId} />
             {effectiveRunHref ? (
               <a

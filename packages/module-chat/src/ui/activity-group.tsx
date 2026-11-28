@@ -202,9 +202,31 @@ export function ActivityGroup({
 
   const steps = <ActivityModeContext value={stepMode}>{children}</ActivityModeContext>;
   const loneCallId = solo && only ? callIds[0] : undefined;
+  const lineKind =
+    onlyCall && only && loneCallId
+      ? "call"
+      : calls === 0 && !running && !facts.saysMore
+        ? "reasoning"
+        : "disclosure";
+  // Ticking every second: out of the line's accessible name.
+  const clockLabel =
+    running && clock ? (
+      <span aria-hidden className="shrink-0 tabular-nums">
+        {clock}
+      </span>
+    ) : null;
+
+  // A switch of kind remounts the line: focus held in it moves to the new line's control.
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const lineFocused = React.useRef(false);
+  React.useLayoutEffect(() => {
+    const active = document.activeElement;
+    if (!lineFocused.current || (active && active !== document.body)) return;
+    rootRef.current?.firstElementChild?.querySelector<HTMLElement>("button")?.focus();
+  }, [lineKind]);
 
   const line =
-    onlyCall && only && loneCallId ? (
+    lineKind === "call" && onlyCall && only && loneCallId ? (
       // A lone call is its own line for its whole life: a click opens it in the panel.
       <ThreadCallLine
         call={{ ...onlyCall, toolCallId: loneCallId, stored: stored.get(loneCallId) }}
@@ -212,8 +234,9 @@ export function ActivityGroup({
         label={only.label}
         idText={only.idText}
         running={isCallInProgress(onlyCall)}
+        trailing={clockLabel}
       />
-    ) : calls === 0 && !running && !facts.saysMore ? (
+    ) : lineKind === "reasoning" ? (
       // Reasoning that says nothing past its title: the disclosure's line without its trigger.
       <ActivityLine lead={lead}>
         <ActivityLabel>{title || t("reasoning.done")}</ActivityLabel>
@@ -239,12 +262,7 @@ export function ActivityGroup({
                 <span className="shrink-0">{t("tool.reads.failed", { count: failed })}</span>
               </>
             ) : null}
-            {/* Ticking every second: out of the button's accessible name. */}
-            {running && clock ? (
-              <span aria-hidden className="shrink-0 tabular-nums">
-                {clock}
-              </span>
-            ) : null}
+            {clockLabel}
             {!running && calls > 1 ? <SubjectStack subjects={subjects} /> : null}
             <ActivityChevron />
           </CollapsibleTrigger>
@@ -258,7 +276,17 @@ export function ActivityGroup({
 
   // The line first, the breakout second: whatever the line becomes, the breakout keeps its place.
   return (
-    <div className={ACTIVITY_BLOCK_CLASS}>
+    <div
+      ref={rootRef}
+      className={ACTIVITY_BLOCK_CLASS}
+      onFocus={(event) => {
+        lineFocused.current = !!rootRef.current?.firstElementChild?.contains(event.target);
+      }}
+      onBlur={(event) => {
+        // A blur to nowhere is also what removing the focused control fires: it keeps the mark.
+        if (event.relatedTarget) lineFocused.current = false;
+      }}
+    >
       {line}
       <ActivityModeContext value={BREAKOUT_MODE}>{children}</ActivityModeContext>
     </div>

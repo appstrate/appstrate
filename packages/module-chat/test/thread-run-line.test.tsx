@@ -115,7 +115,7 @@ describe("a run's line in the thread", () => {
   });
 
   it("names the agent by its title and draws its integrations' logos", () => {
-    const html = render({ runId: "run_1", initialStatus: "running" });
+    const html = render({ runId: "run_1", initialStatus: "running", spaceId: "spc_a" });
     expect(html).toContain(">Agent amont<");
     expect(html).not.toContain(">@acme/agent-amont<");
     expect(html).toContain('src="https://cdn.test/slack.svg"');
@@ -131,6 +131,12 @@ describe("a run's line in the thread", () => {
     const elsewhere = render({ runId: "run_1", initialStatus: "running", spaceId: "spc_c" });
     expect(elsewhere).toContain("bg-muted text-muted-foreground flex size-4");
     expect(elsewhere).not.toContain('data-testid="integration-logo-stack"');
+  });
+
+  it("draws no integrations without the run's space: the first entry's may be another install", () => {
+    const html = render({ runId: "run_1", initialStatus: "running" });
+    expect(html).toContain(">Agent amont<");
+    expect(html).not.toContain('data-testid="integration-logo-stack"');
   });
 
   it("leads with the agent's 16px tile, a neutral bot tile for an agent the data does not hold", () => {

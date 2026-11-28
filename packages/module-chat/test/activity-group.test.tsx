@@ -8,8 +8,9 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import * as React from "react";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
-import { renderToString } from "react-dom/server";
+import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import { AssistantRuntimeProvider, ThreadPrimitive } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 import { Collapsible } from "@appstrate/ui/components/collapsible";
@@ -66,6 +67,7 @@ function groupTree(
   parts: Parts,
   status: ChatHelpers["status"],
   indices: number[],
+  { elapsedMs = 0 }: { elapsedMs?: number } = {},
 ): ReactElement<{ children: ReactNode[] }> {
   let tree: ReactNode = null;
   function Probe() {
@@ -82,11 +84,19 @@ function groupTree(
       </AssistantRuntimeProvider>
     );
   }
-  renderToString(
-    <ChatHostProvider value={testHost()}>
-      <Turn />
-    </ChatHostProvider>,
-  );
+  // The turn's clock counts from the messages' creation (`new Date()`) to `Date.now()`: shifting
+  // the latter is the time the turn has run.
+  const realNow = Date.now;
+  Date.now = () => realNow() + elapsedMs;
+  try {
+    renderToString(
+      <ChatHostProvider value={testHost()}>
+        <Turn />
+      </ChatHostProvider>,
+    );
+  } finally {
+    Date.now = realNow;
+  }
   if (!isValidElement<{ children: ReactNode[] }>(tree)) throw new Error("no group rendered");
   return tree;
 }
@@ -127,5 +137,51 @@ describe("an activity group's tree over a turn", () => {
 
   it("becomes the disclosure when a second step joins, the breakout still in its place", () => {
     expect(slots(joined).line.type).toBe(Collapsible);
+  });
+
+  it("keeps a failed lone call its own line: the cross and the message, no disclosure", () => {
+    const failed = groupTree(
+      [
+        {
+          type: "dynamic-tool",
+          toolName: "search",
+          toolCallId: "s1",
+          input: { query: "s1" },
+          state: "output-error",
+          errorText: "Recherche impossible",
+        },
+        answer,
+      ],
+      "ready",
+      [0],
+    );
+    const { line } = slots(failed);
+    expect(line.type).toBe(ThreadCallLine);
+    const html = renderToStaticMarkup(
+      <ChatHostProvider value={testHost()}>{line}</ChatHostProvider>,
+    );
+    expect(html).toContain('role="img"');
+    expect(html).toContain(">Recherche impossible<");
+    expect(html).not.toContain("aria-expanded");
+  });
+
+  it("keeps the spark and the turn's clock on a lone call whose result came in mid-turn", () => {
+    const { line } = slots(groupTree([lookup("s1", true)], "streaming", [0], { elapsedMs: 5000 }));
+    expect(line.type).toBe(ThreadCallLine);
+    const props = line.props as React.ComponentProps<typeof ThreadCallLine>;
+    expect(isValidElement(props.lead) && props.lead.type).toBe(ThinkingStatus);
+    // The call is done: its label no longer shimmers.
+    expect(props.running).toBe(false);
+    const clock = props.trailing as ReactElement<{ "aria-hidden"?: boolean; children: ReactNode }>;
+    expect(isValidElement(clock)).toBe(true);
+    expect(clock.props["aria-hidden"]).toBe(true);
+    expect(String(clock.props.children)).toMatch(/^5\s?s/);
+  });
+
+  it("draws no clock on the lone call of a settled turn", () => {
+    const { line } = slots(
+      groupTree([lookup("s1", true), answer], "ready", [0], { elapsedMs: 5000 }),
+    );
+    expect((line.props as React.ComponentProps<typeof ThreadCallLine>).trailing).toBeNull();
   });
 });

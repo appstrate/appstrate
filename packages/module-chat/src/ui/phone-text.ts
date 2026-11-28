@@ -81,8 +81,12 @@ export const MARKDOWN_PROSE_CLASS =
 export const THREAD_SIDE_PADDING_CLASS =
   "pl-4 pr-[calc(1rem+var(--chat-context-inset,0px))] duration-base ease-surface transition-[padding]";
 
-/** The transcript scroller: it keeps its scroll to itself (no rubber-band or pull-to-refresh of the page). */
-export const THREAD_VIEWPORT_CLASS = `relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto overscroll-contain pt-6 ${THREAD_SIDE_PADDING_CLASS}`;
+/**
+ * The transcript scroller: it keeps its scroll to itself (no rubber-band or pull-to-refresh of the
+ * page). Its content box is the room the messages' column has: the `thread` container its lines
+ * size against.
+ */
+export const THREAD_VIEWPORT_CLASS = `@container/thread relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto overscroll-contain pt-6 ${THREAD_SIDE_PADDING_CLASS}`;
 
 /** The sticky footer holding the composer; `group/footer` lets the disclaimer react to the focus. */
 export const THREAD_FOOTER_CLASS =
