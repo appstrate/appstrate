@@ -8,13 +8,12 @@
 import { useTranslation } from "react-i18next";
 import { PermissionMark } from "../../components/permission-mark";
 import { PermissionMatrix } from "../../components/permission-matrix";
-import { spaceRoleLabel, useRoleVocabulary, type RoleObject } from "../../hooks/use-roles";
+import { catalogRoleLabel, useRoleVocabulary, type RoleObject } from "../../hooks/use-roles";
 import {
   groupPermissionsByResource,
   permissionLabel,
   permissionResourceLabel,
 } from "../../lib/permission-labels";
-import { STUDIO_PERMISSION } from "../../lib/route-access";
 
 export function RoleMatrix({ roles }: { roles: RoleObject[] }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -40,7 +39,7 @@ export function RoleMatrix({ roles }: { roles: RoleObject[] }) {
         firstHeader={t("roles.matrixPermission")}
         columns={roles.map((role) => ({
           key: columnKey(role),
-          label: spaceRoleLabel(role, t) ?? role.name,
+          label: catalogRoleLabel(role, t),
           dividerBefore: role === firstCustom,
         }))}
         groups={[
@@ -56,12 +55,11 @@ export function RoleMatrix({ roles }: { roles: RoleObject[] }) {
             })),
           })),
           {
-            label: permissionResourceLabel("studio", t),
+            label: t("products.studio", { ns: "common" }),
             rows: [
               {
-                key: STUDIO_PERMISSION,
+                key: "shows_studio",
                 label: t("roles.showsStudio"),
-                title: STUDIO_PERMISSION,
                 cell: (column: string) => (
                   <PermissionMark granted={showsStudio.get(column) === true} />
                 ),

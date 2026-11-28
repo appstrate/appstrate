@@ -144,7 +144,7 @@ describe("0059 — personal spaces take the org offer only", () => {
 
   it("--apply offers the enabled integration, deletes the rest, and leaves the rest alone", async () => {
     await seedLegacyState();
-    expect(await pending()).toBe(4); // team agent + INT_ON + INT_OFF rows, one notification
+    expect(await pending()).toBe(5); // team agent, INT_ON, INT_OFF and OFFERED rows, one notification
 
     const applied = await run(true);
     expect(applied.offers).toEqual([{ orgId: ctx.orgId, packageId: INT_ON }]);
@@ -156,7 +156,7 @@ describe("0059 — personal spaces take the org offer only", () => {
     ]);
     expect(applied.notificationsDeleted).toBe(1);
     expect(lines).toContain(
-      "offers created: 1, rows deleted: 2, schedules disabled: 1, notifications deleted: 1",
+      "offers created: 1, rows kept by an offer: 2, rows deleted: 2, schedules disabled: 1, notifications deleted: 1",
     );
     expect(lines.at(-1)).toBe("0059: APPLIED — committed.");
 
@@ -175,6 +175,13 @@ describe("0059 — personal spaces take the org offer only", () => {
       resourceId: INT_ON,
       after: { orgId: ctx.orgId, mode: "available", reason: "personal_space_audience" },
     });
+    // Both rows an offer keeps go with it from now on.
+    expect(applied.offerRows).toBe(2);
+    const keptRows = await db
+      .select({ packageId: spacePackages.packageId, placedByOffer: spacePackages.placedByOffer })
+      .from(spacePackages)
+      .where(and(eq(spacePackages.spaceId, personal), eq(spacePackages.placedByOffer, true)));
+    expect(keptRows.map((r) => r.packageId).sort()).toEqual([INT_ON, OFFERED].sort());
     // (b) deleted rows, schedule disabled, audits.
     expect(await rowsOf(personal)).toEqual([INT_ON, OFFERED, OWN_AGENT, SYSTEM].sort());
     expect(await rowsOf(team)).toEqual([INT_ON, TEAM_AGENT].sort());
@@ -213,6 +220,7 @@ describe("0059 — personal spaces take the org offer only", () => {
     const again = await run(true);
     expect(again).toEqual({
       offers: [],
+      offerRows: 0,
       deleted: [],
       notificationsDeleted: 0,
     });

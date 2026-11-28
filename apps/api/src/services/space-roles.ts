@@ -27,12 +27,11 @@ import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import {
-  assignableSpaceLevelPermissions,
+  knownSpaceLevelPermissions,
   describeMissingRead,
   missingReadGrants,
   partitionSpacePermissions,
   presetPermissions,
-  RESOLVED_SPACE_PERMISSIONS,
 } from "../lib/permissions.ts";
 
 /** One entry of `GET /api/roles`; `id` is null for a preset (it has no row). */
@@ -44,7 +43,7 @@ export interface SpaceRoleWire {
   name: string;
   description: string | null;
   permissions: string[];
-  /** Whether the role resolves `studio:read`, never listed in `permissions`; `true` on a preset. */
+  /** Whether holders of the role see the Studio: a display attribute, not a permission. */
   shows_studio: boolean;
   /**
    * Stored entries this deployment cannot name — always empty for a preset.
@@ -101,10 +100,7 @@ function presetWire(preset: SpaceRolePreset): SpaceRoleWire {
     key: preset,
     name: preset,
     description: null,
-    // Without the resolved grants `shows_studio` carries, so it is what a write accepts back.
-    permissions: [...presetPermissions(preset)]
-      .filter((permission) => !RESOLVED_SPACE_PERMISSIONS.has(permission))
-      .sort(),
+    permissions: [...presetPermissions(preset)].sort(),
     shows_studio: true,
     // A preset is code, not a row: nothing can be stored on it that the
     // deployment does not name.
@@ -141,7 +137,7 @@ export async function listSpaceRoles(orgId: string): Promise<SpaceRoleWire[]> {
  * named, never added: that would grant what the author did not pick.
  */
 function normalizePermissions(permissions: string[]): string[] {
-  const known = assignableSpaceLevelPermissions();
+  const known = knownSpaceLevelPermissions();
   if (permissions.length > known.size) {
     throw invalidRequest(
       `A role can hold at most ${known.size} permissions — the whole vocabulary — ` +
@@ -154,11 +150,8 @@ function normalizePermissions(permissions: string[]): string[] {
   for (const permission of permissions) {
     if (!known.has(permission)) {
       throw invalidRequest(
-        RESOLVED_SPACE_PERMISSIONS.has(permission)
-          ? `'${permission}' is not stored in a role's permissions: it follows the role's ` +
-              `shows_studio. See GET /api/roles/vocabulary for the permissions a role can hold.`
-          : `Unknown space-level permission '${permission}'. ` +
-              `See GET /api/roles/vocabulary for the permissions a role can hold.`,
+        `Unknown space-level permission '${permission}'. ` +
+          `See GET /api/roles/vocabulary for the permissions a role can hold.`,
         "permissions",
       );
     }
@@ -341,9 +334,11 @@ function roleInUse(key: string, counts: RoleHolders): never {
 /**
  * Holders are counted rather than left to `ON DELETE RESTRICT`, whose error
  * names neither the role nor how many people would lose access. The row is locked
- * `FOR UPDATE` first; every writer naming a custom role share-locks it (`lockOrgSpaceRole`), so it
- * is counted (409) or answers 404. A pending invitation, validated outside its insert's
- * transaction, can still slip past; acceptance then skips the vanished role.
+ * `FOR UPDATE` first. A `space_members` insert naming the role holds it `FOR KEY SHARE` until
+ * commit (the explicit `lockOrgSpaceRole`, or the foreign key's own check), so that member is
+ * counted (409) or the role answers 404. A pending invitation or OIDC signup assignment is
+ * counted too; one validated outside its insert's transaction can still slip past, and
+ * acceptance then skips the vanished role.
  */
 export async function deleteSpaceRole(orgId: string, id: string): Promise<SpaceRoleWire> {
   return db.transaction(async (tx) => {

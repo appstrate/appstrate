@@ -35,7 +35,7 @@ function setAuthenticatedUser(
   user: { id: string; email: string; emailVerified: boolean; name: string },
   profile: AuthProfile | null,
 ) {
-  rememberSignedIn(localStorage, true);
+  rememberSignedIn(true);
   authStore.setState({
     user: { id: user.id, email: user.email, emailVerified: user.emailVerified, name: user.name },
     profile,
@@ -60,7 +60,7 @@ let initialized = false;
 function initAuth() {
   if (initialized) return;
   initialized = true;
-  syncAuth(sessionExpected(localStorage)).catch(() => {
+  syncAuth(sessionExpected()).catch(() => {
     clearSession();
   });
 }
@@ -126,7 +126,7 @@ export function useAuth() {
   const login = useCallback(
     // `callbackURL`: where an unverified account's re-sent verification link lands.
     async (email: string, password: string, callbackURL?: string) => {
-      rememberSignedIn(localStorage, true);
+      rememberSignedIn(true);
       const result = await authClient.signIn.email({ email, password, callbackURL });
       if (result.error) throw toLoginError(result.error);
       const profile = await fetchProfile();
@@ -146,7 +146,7 @@ export function useAuth() {
       callbackURL: string,
     ): Promise<{ emailVerificationRequired: boolean }> => {
       // OSS only: in OIDC mode `HostedAuthGate` redirects before the register form renders.
-      rememberSignedIn(localStorage, true);
+      rememberSignedIn(true);
       const result = await authClient.signUp.email({
         email,
         password,
@@ -174,7 +174,7 @@ export function useAuth() {
       // re-renders to /login, which starts a new OIDC login before the logout redirect —
       // re-logging the user in.
       const { startOidcLogout } = await import("../modules/oidc/lib/oidc");
-      rememberSignedIn(localStorage, false);
+      rememberSignedIn(false);
       startOidcLogout(redirectTo);
     } else {
       await authClient.signOut();
@@ -192,7 +192,7 @@ export function useAuth() {
 
   const signInWithSocial = useCallback(
     async (provider: "google" | "github", callbackURL?: string) => {
-      rememberSignedIn(localStorage, true);
+      rememberSignedIn(true);
       await authClient.signIn.social({
         provider,
         callbackURL: callbackURL ?? "/",
@@ -244,7 +244,7 @@ export function useAuth() {
   }, []);
 
   const startMagicLink = useCallback(async (email: string) => {
-    rememberSignedIn(localStorage, true);
+    rememberSignedIn(true);
     const result = await authClient.signIn.magicLink({
       email,
       callbackURL: "/",

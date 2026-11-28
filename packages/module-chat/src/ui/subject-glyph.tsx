@@ -5,7 +5,7 @@ import { BookOpenIcon, CircleUserIcon } from "lucide-react";
 import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
 import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import { KnownAgentGlyph } from "./agent-glyph.tsx";
-import { subjectName } from "./tool-presentation.ts";
+import { subjectIconSrc, subjectName } from "./tool-presentation.ts";
 
 /** The glyph of what a call acted on: the integration's logo, the agent's tile, the user. */
 export function SubjectGlyph({
@@ -17,7 +17,12 @@ export function SubjectGlyph({
 }) {
   switch (subject.kind) {
     case "integration":
-      return <IntegrationIcon src={subject.icon} className={`${className} shrink-0 rounded-sm`} />;
+      return (
+        <IntegrationIcon
+          src={subjectIconSrc(subject)}
+          className={`${className} shrink-0 rounded-sm`}
+        />
+      );
     case "agent":
       return (
         <KnownAgentGlyph

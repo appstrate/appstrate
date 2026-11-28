@@ -96,7 +96,7 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     expect(blob.refreshToken).toBe("rt-hooks");
     expect(blob.accountId).toBe("acc-123");
     expect(blob.email).toBe("user@example.com");
-    expect(blob.needsReconnection).toBe(false);
+    expect("needsReconnection" in blob).toBe(false);
   });
 
   it("requiredIdentityClaims gate: rejects token whose hook can't surface the required slot", async () => {

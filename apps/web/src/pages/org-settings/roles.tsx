@@ -22,7 +22,7 @@ import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
 import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import {
   spaceRoleDescription,
-  spaceRoleLabel,
+  catalogRoleLabel,
   useCreateRole,
   useDeleteRole,
   useRoleVocabulary,
@@ -200,7 +200,7 @@ export function OrgSettingsRolesPage() {
                   rows={presets}
                   rowKey={(role) => role.key}
                   rowAction={openRole}
-                  rowLabel={(role) => spaceRoleLabel(role, t) ?? role.name}
+                  rowLabel={(role) => catalogRoleLabel(role, t)}
                   {...tableState}
                 />
               </SettingsGroup>
@@ -269,7 +269,7 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
   return (
     <Modal
       onClose={onClose}
-      title={spaceRoleLabel(role, t) ?? role.name}
+      title={catalogRoleLabel(role, t)}
       className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-lg"
     >
       <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
@@ -300,7 +300,7 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
             )}
             {role.shows_studio && (
               <div className="grid gap-1 px-3 py-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
-                <dt className="text-sm font-medium">{permissionResourceLabel("studio", t)}</dt>
+                <dt className="text-sm font-medium">{t("products.studio", { ns: "common" })}</dt>
                 <dd className="text-muted-foreground text-sm">{t("roles.showsStudio")}</dd>
               </div>
             )}

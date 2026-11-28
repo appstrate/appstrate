@@ -8,7 +8,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
-const KEY = "appstrate-sidebar-width";
+import { LOCAL_STORAGE_KEYS, storageKey } from "@appstrate/ui/local-storage";
+
+const KEY = storageKey(LOCAL_STORAGE_KEYS.sidebarWidth);
 const storage = installFakeStorage();
 
 const { SIDEBAR_WIDTH, sidebarMaxWidth, sidebarWidthCss, clampSidebarWidth, useSidebarWidthStore } =

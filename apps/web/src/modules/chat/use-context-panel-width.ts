@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useState, type RefObject } from "react";
+import { LOCAL_STORAGE_KEYS } from "@appstrate/ui/local-storage";
 import { createPanelWidthStore } from "../../stores/panel-width-store";
 
 const MIN_WIDTH = 300;
 const DEFAULT_WIDTH = 400;
 const MAX_RATIO = 0.6;
 
-const useContextPanelWidthStore = createPanelWidthStore("appstrate-chat-context-width", (width) =>
-  Math.max(width, MIN_WIDTH),
+const useContextPanelWidthStore = createPanelWidthStore(
+  LOCAL_STORAGE_KEYS.chatPanelWidth,
+  (width) => Math.max(width, MIN_WIDTH),
 );
 
 /**

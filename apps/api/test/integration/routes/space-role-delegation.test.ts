@@ -17,7 +17,7 @@ const app = getTestApp();
 
 interface ListedSpace {
   id: string;
-  role: { key: string } | null;
+  role: { preset_role?: string } | null;
 }
 
 describe("space role delegation", () => {
@@ -53,7 +53,7 @@ describe("space role delegation", () => {
   async function roleKey(ctx: TestContext, spaceId: string): Promise<string | undefined> {
     const response = await request(ctx, "/api/spaces", "GET");
     const body = (await response.json()) as { data: ListedSpace[] };
-    return body.data.find((space) => space.id === spaceId)?.role?.key;
+    return body.data.find((space) => space.id === spaceId)?.role?.preset_role;
   }
 
   it("an invite grant cannot replace an existing explicit role, even with a permitted bundle", async () => {

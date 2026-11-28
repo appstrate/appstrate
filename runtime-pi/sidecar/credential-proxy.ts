@@ -368,17 +368,22 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   const targetHost = templateHost(targetUrl);
   // Journaled on the template's host: a `{{field}}` stays as written, never its value.
   const journalStarted = performance.now();
+  const journalStartedAtMs = Date.now();
   const journalCall = (outcome: string, answeredBy: CredentialsResponse | null) =>
     deps.journal({
       method,
       host: targetHost,
       outcome,
       durationMs: performance.now() - journalStarted,
+      startedAtMs: journalStartedAtMs,
       credential: answeredBy ? { revision: answeredBy.credentialRevision } : null,
     });
-  const failedCall = (err: unknown): ApiCallFailure => {
+  // `undispatched` runs when the failed request sent nothing: a replay's refusal then leaves the
+  // first attempt, which did reach the upstream, as the call's record.
+  const failedCall = (err: unknown, undispatched?: () => void): ApiCallFailure => {
     const { failure, dispatched } = wrapRequestError(err, integrationId, targetHost);
     if (dispatched) journalCall(failure.code, null);
+    else undispatched?.();
     return failure;
   };
 
@@ -568,7 +573,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
         credentialInjection = r.credentialInjection;
         answered = r.credentialInjection === "inject" && r.credentialsForwarded ? fresh : null;
       } catch (err) {
-        const failure = failedCall(err);
+        const failure = failedCall(err, () => journalCall(String(upstream.status), answered));
         args.signal?.throwIfAborted();
         return failure;
       }

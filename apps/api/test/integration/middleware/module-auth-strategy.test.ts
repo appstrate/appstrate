@@ -312,9 +312,9 @@ describe("module auth strategy pipeline", () => {
       expect(previewed.status, await previewed.clone().text()).toBe(200);
       expect(previewed.headers.get("X-View-As-Active")).toBe("1");
       const listed = (await previewed.json()) as {
-        data: Array<{ role: { key: string }; permissions: string[] }>;
+        data: Array<{ role: { preset_role?: string }; permissions: string[] }>;
       };
-      expect(listed.data[0]?.role.key).toBe("viewer");
+      expect(listed.data[0]?.role.preset_role).toBe("viewer");
       expect(listed.data[0]?.permissions).not.toContain("agents:write");
 
       // The same strategy WITHOUT `deferOrgResolution` resolves its own org and

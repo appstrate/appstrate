@@ -496,6 +496,7 @@ describe("performTokenRequest — a general token request", () => {
       ).catch((e: unknown) => (e as RefreshError).kind);
     expect(await kind(400, { error: "invalid_grant" })).toBe("revoked");
     expect(await kind(401, { error: "invalid_client" })).toBe("client_rejected");
+    expect(await kind(400, { error: "invalid_scope" })).toBe("misconfigured");
     expect(await kind(503, { error: "temporarily_unavailable" })).toBe("transient");
   });
 });

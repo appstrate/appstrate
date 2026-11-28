@@ -163,19 +163,19 @@ const offerToOrg = (packageId: string, mode: "available" | "on_by_default" = "av
   app.request(`/api/packages/${packageId}/org-offer`, {
     method: "PUT",
     headers: { ...owner(), "Content-Type": "application/json" },
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify({ org_offer: mode }),
   });
 
 /** `DELETE …/org-offer` by the organization owner. */
 const withdrawOffer = (packageId: string) =>
   app.request(`/api/packages/${packageId}/org-offer`, { method: "DELETE", headers: owner() });
 
-/** `POST …/shares` with a `space` target. */
+/** `POST …/shares` into a space. */
 const shareWithSpace = (headers: Headers, packageId: string, spaceId: string) =>
   app.request(`/api/packages/${packageId}/shares`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ target: { kind: "space", spaceId } }),
+    body: JSON.stringify({ spaceId }),
   });
 
 const listShares = (headers: Headers, packageId: string) =>
@@ -341,10 +341,11 @@ describe("authority — `<type>:share` in the home space", () => {
     expect(res.status, await res.clone().text()).toBe(201);
     const body = (await res.json()) as {
       object: string;
-      target: { kind: string; spaceId: string; name: string };
+      spaceId: string;
+      space_name: string;
     };
     expect(body.object).toBe("package_share");
-    expect(body.target).toEqual({ kind: "space", spaceId: openId, name: "Open" });
+    expect([body.spaceId, body.space_name]).toEqual([openId, "Open"]);
   });
 
   it("refuses the home's viewer with 403", async () => {
@@ -371,7 +372,7 @@ describe("authority — `<type>:share` in the home space", () => {
     const res = await app.request(`/api/packages/${AGENT}/shares`, {
       method: "POST",
       headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ target: { kind: "space", spaceId: teamId } }),
+      body: JSON.stringify({ spaceId: teamId }),
     });
     await expectProblem(res, 403);
 
@@ -389,38 +390,42 @@ describe("authority — `<type>:share` in the home space", () => {
     // problem and sends the caller looking in the wrong place.
     await expectRejectedField(
       await shareWithSpace(author.headers(homeId), AGENT, "app_legacy"),
-      "target.spaceId",
+      "spaceId",
     );
     expect(await placementsOutside(AGENT, homeId)).toEqual([]);
   });
 
   it("refuses a revoke target that is no space id with 400, not a 404", async () => {
-    // The target is a space id and nothing else: a malformed one, or a user id,
+    // The path names a space id and nothing else: a malformed one, or a user id,
     // is a bad id and not a missing placement.
     for (const target of ["spc_nope", recipient.userId]) {
       await expectProblem(await revokeShare(author.headers(homeId), AGENT, target), 400, {
         code: "invalid_request",
-        param: "target",
+        param: "spaceId",
       });
     }
   });
 
-  it("refuses a body with an unknown key or an unknown target kind", async () => {
+  it("refuses a body with an unknown key", async () => {
     await expectRejectedField(
       await app.request(`/api/packages/${AGENT}/shares`, {
         method: "POST",
         headers: { ...author.headers(homeId), "Content-Type": "application/json" },
-        body: JSON.stringify({ target: { kind: "space", spaceId: openId }, note: "hi" }),
+        body: JSON.stringify({ spaceId: openId, note: "hi" }),
       }),
       "note",
     );
-    // `everyone` is unknown, and `user` is retired: a person is no share target.
-    for (const target of [{ kind: "everyone" }, { kind: "user", userId: recipient.userId }]) {
+    // A person is no share target, and the retired `target` envelope is gone: the body names a
+    // space and nothing else.
+    for (const body of [
+      { user_id: recipient.userId },
+      { target: { kind: "space", spaceId: openId } },
+    ]) {
       await expectProblem(
         await app.request(`/api/packages/${AGENT}/shares`, {
           method: "POST",
           headers: { ...author.headers(homeId), "Content-Type": "application/json" },
-          body: JSON.stringify({ target }),
+          body: JSON.stringify(body),
         }),
         400,
       );
@@ -495,11 +500,11 @@ describe("authority — `<type>:share` in the home space", () => {
     const res = await listShares(author.headers(homeId), AGENT);
     expect(res.status, await res.clone().text()).toBe(200);
     const body = (await res.json()) as {
-      data: { target: Record<string, unknown>; shared_by: { user_id: string } | null }[];
+      data: { spaceId: string; space_name: string; shared_by: { user_id: string } | null }[];
     };
     expect(body.data).toHaveLength(1);
     const [entry] = body.data;
-    expect(entry!.target).toEqual({ kind: "space", spaceId: openId, name: "Open" });
+    expect([entry!.spaceId, entry!.space_name]).toEqual([openId, "Open"]);
     expect(entry!.shared_by?.user_id).toBe(author.userId);
   });
 
@@ -542,30 +547,30 @@ describe("authority — `<type>:share` in the home space", () => {
       );
 
     const anonymous = (await (await listShares(owner(), AGENT)).json()) as {
-      data: { target: Record<string, unknown>; shared_by: { user_id: string } | null }[];
+      data: { spaceId: string; space_name: string; shared_by: { user_id: string } | null }[];
     };
     // The share still stands, and its target is still named — only the sharer
     // is withheld.
     expect(anonymous.data).toHaveLength(1);
-    expect(anonymous.data[0]!.target.spaceId).toBe(openId);
+    expect(anonymous.data[0]!.spaceId).toBe(openId);
     expect(anonymous.data[0]!.shared_by).toBeNull();
   });
 
   it("records the SPACE in the audit trail of a share and of its withdrawal", async () => {
     expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(201);
     const shared = await getDbRow(auditEvents, eq(auditEvents.action, "package.shared"));
-    expect(shared.after).toEqual({ spaceId: teamId, targetKind: "space" });
+    expect(shared.after).toEqual({ spaceId: teamId });
 
     expect((await revokeShare(owner(), AGENT, teamId)).status).toBe(204);
     const unshared = await getDbRow(auditEvents, eq(auditEvents.action, "package.unshared"));
-    expect(unshared.after).toEqual({ spaceId: teamId, targetKind: "space", authority: "home" });
+    expect(unshared.after).toEqual({ spaceId: teamId, authority: "home" });
   });
 });
 
 describe("offered is not activated", () => {
   beforeEach(async () => {
     const offered = await offerToOrg(AGENT);
-    expect(offered.status, await offered.clone().text()).toBe(200);
+    expect(offered.status, await offered.clone().text()).toBe(201);
   });
 
   /**
@@ -968,7 +973,7 @@ describe("a personal space takes only the offer", () => {
   });
 
   it("takes the catalogue integration once the organization offers it", async () => {
-    expect((await offerToOrg(CATALOGUE, "available")).status).toBe(200);
+    expect((await offerToOrg(CATALOGUE, "available")).status).toBe(201);
     expect((await takeUpOffer(recipient.headers(), CATALOGUE)).status).toBe(201);
   });
 
@@ -999,7 +1004,7 @@ describe("a personal space takes only the offer", () => {
   });
 
   it("lets the owner switch off what no longer qualifies", async () => {
-    expect((await offerToOrg(AGENT, "on_by_default")).status).toBe(200);
+    expect((await offerToOrg(AGENT, "on_by_default")).status).toBe(201);
     expect(await agentIndexIds(recipient.headers())).toContain(AGENT);
     const off = await app.request(`/api/spaces/${recipient.personalSpaceId}/packages/${AGENT}`, {
       method: "DELETE",
@@ -1055,7 +1060,7 @@ describe("a personal space takes only the offer", () => {
         ?.activation.find((entry) => entry.spaceId === recipient.personalSpaceId)?.activate;
     expect(cell(await library(recipient.headers()), CATALOGUE)).toBe("not_offered");
 
-    expect((await offerToOrg(CATALOGUE, "available")).status).toBe(200);
+    expect((await offerToOrg(CATALOGUE, "available")).status).toBe(201);
     expect(cell(await library(recipient.headers()), CATALOGUE)).toBe("allowed");
   });
 });
@@ -1066,7 +1071,7 @@ describe("an offer whose version disappeared after it was made", () => {
   // The placement then names nothing to run, and the launch must say so rather
   // than fall back to the author's draft.
   it("activates, then answers 404 `no_published_version` at launch — never the draft", async () => {
-    expect((await offerToOrg(AGENT)).status).toBe(200);
+    expect((await offerToOrg(AGENT)).status).toBe(201);
     const activated = await takeUpOffer(recipient.headers(), AGENT);
     expect(activated.status, await activated.clone().text()).toBe(201);
 
@@ -1114,7 +1119,7 @@ describe("activating is the fourth door closed: it needs `share`, or a placement
     // …and BOTH acts are audited, each as itself: the audience changed, and
     // the package became active in Team.
     const shared = await getDbRow(auditEvents, eq(auditEvents.action, "package.shared"));
-    expect(shared.after).toEqual({ spaceId: teamId, targetKind: "space" });
+    expect(shared.after).toEqual({ spaceId: teamId });
     const activated = await getDbRow(auditEvents, eq(auditEvents.action, "package.activated"));
     expect(activated.after).toEqual({ spaceId: teamId });
   });
@@ -1179,7 +1184,7 @@ describe("activating is the fourth door closed: it needs `share`, or a placement
     // `operator` preset in their own space, which carries no
     // `integrations:uninstall` and no `<type>:write`. Ownership is the
     // authorization, both ways.
-    expect((await offerToOrg(AGENT)).status).toBe(200);
+    expect((await offerToOrg(AGENT)).status).toBe(201);
     expect((await takeUpOffer(guest.headers(), AGENT)).status).toBe(201);
 
     const removed = await app.request(`/api/spaces/${guest.personalSpaceId}/packages/${AGENT}`, {
@@ -1598,7 +1603,7 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
 
   it("on: a run is unaffected — a bundle is assembled server-side, never copied", async () => {
     await setRestrictCopy(true);
-    expect((await offerToOrg(AGENT)).status).toBe(200);
+    expect((await offerToOrg(AGENT)).status).toBe(201);
     expect((await takeUpOffer(viewer.headers(), AGENT)).status).toBe(201);
     const launched = await app.request(`/api/agents/${AGENT}/run`, {
       method: "POST",

@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import type { DataColumn } from "../../components/data-table";
 import { CellText } from "../../components/table-cells";
 import { useSpaceSeatColumns } from "../../components/space-seat-columns";
-import type { RoleObject, SpaceRoleOption } from "../../hooks/use-roles";
+import type { SpaceRoleOption } from "../../hooks/use-roles";
 import type { components } from "../../api/client";
 
 type OrgMember = components["schemas"]["OrgMember"];
@@ -19,7 +19,6 @@ type OrgMemberSpace = components["schemas"]["OrgMemberSpace"];
 export function useUserSpaceColumns({
   member,
   editable,
-  roles,
   roleOptions,
   isChangingRole,
   onChangeRole,
@@ -27,7 +26,6 @@ export function useUserSpaceColumns({
   /** The person whose spaces these are; their org role is what an `org_role` seat reads as. */
   member: Pick<OrgMember, "userId" | "role">;
   editable: (space: OrgMemberSpace) => boolean;
-  roles: RoleObject[] | undefined;
   roleOptions: SpaceRoleOption[];
   isChangingRole: boolean;
   onChangeRole: (space: OrgMemberSpace, value: string) => void;
@@ -42,7 +40,6 @@ export function useUserSpaceColumns({
     }),
     seatName: (space) => space.name,
     editable,
-    roles,
     roleOptions,
     isChangingRole,
     onChangeRole,

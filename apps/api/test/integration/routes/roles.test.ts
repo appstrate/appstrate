@@ -217,8 +217,6 @@ describe("custom space roles", () => {
       expect(offered).toContain("agents:write");
       expect(offered).not.toContain("members:invite");
       expect(offered).not.toContain("roles:write");
-      // `studio:read` is resolved from `shows_studio`, never stored, so it is not offered.
-      expect(offered).not.toContain("studio:read");
 
       // Grantability is the API-key allowlist, not a second hand-kept table:
       // `integrations:configure` is deliberately session-only.
@@ -246,7 +244,6 @@ describe("custom space roles", () => {
     it("defaults to true on create, is stored when false, and a preset always shows it", async () => {
       const shown = await createRole({ key: "shown" });
       expect(shown.shows_studio).toBe(true);
-      expect(shown.permissions).not.toContain("studio:read");
 
       const hidden = await createRole({ key: "hidden", shows_studio: false });
       expect(hidden.shows_studio).toBe(false);
@@ -256,7 +253,6 @@ describe("custom space roles", () => {
       const { data } = (await (await req("GET", "/api/roles")).json()) as { data: RoleWire[] };
       for (const preset of data.filter((r) => r.kind === "preset")) {
         expect(preset.shows_studio, preset.key).toBe(true);
-        expect(preset.permissions, preset.key).not.toContain("studio:read");
       }
     });
 
@@ -276,17 +272,16 @@ describe("custom space roles", () => {
       expect((await listed(role.id)).shows_studio).toBe(true);
     });
 
-    it("refuses studio:read inside permissions on create and on update", async () => {
+    it("refuses an unknown permission, on create and on update", async () => {
       const created = await post(
-        validBody({ key: "studio-in-list", permissions: ["agents:read", "studio:read"] }),
+        validBody({ key: "unknown-in-list", permissions: ["agents:read", "nope:read"] }),
       );
       const problem = await expectProblem(created, 400, { param: "permissions" });
-      expect(problem.detail).toContain("studio:read");
-      expect(problem.detail).toContain("shows_studio");
+      expect(problem.detail).toContain("Unknown space-level permission 'nope:read'");
 
-      const role = await createRole({ key: "studio-patched" });
+      const role = await createRole({ key: "unknown-patched" });
       await expectProblem(
-        await patch(role.id, { permissions: ["agents:read", "studio:read"] }),
+        await patch(role.id, { permissions: ["agents:read", "nope:read"] }),
         400,
         { param: "permissions" },
       );
@@ -505,13 +500,13 @@ describe("custom space roles", () => {
 
     it("409s while the org's personal_space_role names it, and deletes once it does not", async () => {
       const role = await createRole({ key: "personal-default" });
-      const patch = (value: string) =>
+      const patch = (value: { preset_role: string } | { custom_role_id: string }) =>
         app.request(`/api/orgs/${owner.orgId}/settings`, {
           method: "PATCH",
           headers: { Cookie: owner.cookie, "Content-Type": "application/json" },
           body: JSON.stringify({ personal_space_role: value }),
         });
-      expect((await patch(role.id)).status).toBe(200);
+      expect((await patch({ custom_role_id: role.id })).status).toBe(200);
 
       const problem = await expectProblem(await del(role.id), 409, { code: "role_in_use" });
       expect(problem.org_default).toBe(true);
@@ -519,7 +514,7 @@ describe("custom space roles", () => {
       expect(problem.pending_invitation_count).toBe(0);
       expect(problem.detail).toContain("default role in personal spaces");
 
-      expect((await patch("operator")).status).toBe(200);
+      expect((await patch({ preset_role: "operator" })).status).toBe(200);
       expect((await del(role.id)).status).toBe(204);
     });
 
@@ -607,20 +602,16 @@ describe("custom space roles", () => {
       async () => {
         const role = await createRole({ key: "wait-setting" });
         const res = await writeBehindDelete(role.id, () =>
-          req("PATCH", `/api/orgs/${owner.orgId}/settings`, { personal_space_role: role.id }),
+          req("PATCH", `/api/orgs/${owner.orgId}/settings`, {
+            personal_space_role: { custom_role_id: role.id },
+          }),
         );
         await expectProblem(res, 404);
         const [org] = await db
-          .select({
-            settings: organizations.orgSettings,
-            personalSpaceRoleId: organizations.personalSpaceRoleId,
-          })
+          .select({ personalSpaceRoleId: organizations.personalSpaceRoleId })
           .from(organizations)
           .where(eq(organizations.id, owner.orgId));
         expect(org?.personalSpaceRoleId).toBeNull();
-        expect(
-          (org?.settings as { personal_space_role?: string } | null)?.personal_space_role,
-        ).toBeUndefined();
       },
     );
 

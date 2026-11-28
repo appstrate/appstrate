@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
 import { chatSessions, llmUsage, modelProviderCredentials, orgModels } from "@appstrate/db/schema";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
-import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
+import { encryptCredentials } from "@appstrate/connect";
 import { truncateAll, db } from "../../helpers/db.ts";
 import {
   createTestContext,
@@ -72,17 +72,14 @@ describe("resolveChatModel", () => {
     });
   }
 
-  /** Whether the stored blob of a credential is flagged as needing a reconnect. */
+  /** Whether the credential's row is flagged as needing a reconnect. */
   async function storedNeedsReconnection(credentialId: string): Promise<boolean> {
     const [row] = await db
-      .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
+      .select({ flagged: modelProviderCredentials.needsReconnection })
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, credentialId))
       .limit(1);
-    return (
-      decryptCredentials<{ needsReconnection?: boolean }>(row!.credentialsEncrypted)
-        .needsReconnection === true
-    );
+    return row!.flagged;
   }
 
   it("refuses an aliased subscription row (invalid legacy state) — falls to the gateway path", async () => {
@@ -202,7 +199,6 @@ describe("resolveChatModel", () => {
         accessToken: "other-token",
         refreshToken: "other-refresh",
         expiresAt: Date.now() + 3_600_000,
-        needsReconnection: false,
       }),
       createdBy: other.id,
     });

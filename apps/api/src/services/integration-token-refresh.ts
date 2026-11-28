@@ -228,7 +228,6 @@ async function doRefresh(
     {
       credentials: newCreds,
       expiresAt,
-      needsReconnection: false,
       ...(responseScopes !== null ? { scopesGranted: responseScopes } : {}),
     },
   );
@@ -255,10 +254,16 @@ async function exchangeFailureVerdict(
       await markIntegrationConnectionNeedsReconnection(log.connectionId, "refresh_token_revoked");
       return new RefreshVerdictError("dead", "refresh_token_revoked", { cause: err });
     case "client_rejected":
-      logger.error("Integration refresh refused — the token endpoint rejected the OAuth client", {
-        ...log,
-        error: err.message,
-      });
+    case "misconfigured":
+      // A manifest or client defect (RFC 6749 §5.2): a reconnect cannot fix it, so never counted.
+      logger.error(
+        "Integration refresh refused — the token endpoint rejected the OAuth client or request",
+        {
+          ...log,
+          oauthError: err.oauthError,
+          error: err.message,
+        },
+      );
       return new RefreshVerdictError("retry", "oauth_client_rejected", { cause: err });
     case "transient": {
       const env = getEnv();

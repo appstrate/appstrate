@@ -32,8 +32,9 @@ const {
   readStoredPreview,
   takeViewAsStopped,
   toViewAsPersona,
-  STORAGE_KEY,
 } = await import("../view-as-store.ts");
+const { LOCAL_STORAGE_KEYS, storageKey } = await import("@appstrate/ui/local-storage");
+const STORAGE_KEY = storageKey(LOCAL_STORAGE_KEYS.viewAs);
 const { orgKeys } = await import("../../lib/query-keys.ts");
 const { orgStore } = await import("../org-store.ts");
 const { spaceStore } = await import("../space-store.ts");
@@ -416,6 +417,7 @@ function listedSpace(
 ): SpaceObject {
   return {
     object: "space",
+    shows_studio: true,
     orgId: "org_a",
     icon: null,
     color: null,
@@ -426,7 +428,7 @@ function listedSpace(
     credential_proxy_open: true,
     personal: false,
     access: "member",
-    role: { kind: "preset", key: "operator", name: "operator" },
+    role: { preset_role: "operator", name: "operator" },
     permissions: [],
     created_by: null,
     createdAt: "2026-01-01T00:00:00Z",
@@ -513,7 +515,7 @@ describe("banner", () => {
       listedSpace({
         id: "spc_1",
         name: "Marketing",
-        role: { kind: "preset", key: "viewer", name: "viewer" },
+        role: { preset_role: "viewer", name: "viewer" },
       }),
       listedSpace({ id: "spc_2", name: "Ventes" }),
     ];

@@ -8,6 +8,7 @@ import { describe, expect, it } from "bun:test";
 import type { UIMessage } from "ai";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { conversationTools } from "../src/ui/conversation-tools.ts";
+import { presentationSubject } from "../src/ui/tool-presentation.ts";
 
 /** An MCP text result, as the chat stores it. */
 const mcp = (payload: unknown, extra: Record<string, unknown> = {}) => ({
@@ -27,7 +28,7 @@ const GMAIL = {
   kind: "integration",
   id: "@appstrate/gmail",
   display_name: "Gmail",
-  icon: "https://example.test/gmail.svg",
+  icons: [{ src: "https://example.test/gmail.svg" }],
 } as const;
 const GITHUB = { kind: "integration", id: "@acme/github", display_name: "GitHub" } as const;
 
@@ -136,7 +137,7 @@ describe("conversationTools", () => {
             state: "output-error",
             input: {},
             errorText: "boom",
-            ...presented({ title: "x", subject: GMAIL }, { durationMs: 7 }),
+            ...presented({ call: "proxied_request", subject: GMAIL }, { durationMs: 7 }),
           }),
           call("live", "get_me", { state: "input-available", input: {} }),
         ]),
@@ -154,17 +155,17 @@ describe("conversationTools", () => {
           state: "output-available",
           input: { tool: "appstrate_gmail__api_call" },
           output: mcp({ results: [{ status: 200 }] }),
-          ...presented({ title: "API call", method: "GET", subject: GMAIL }),
+          ...presented({ call: "proxied_request", method: "GET", subject: GMAIL }),
         }),
         call("ko", "call_integration_tool", {
           state: "output-error",
           input: { tool: "acme_github__create_issue" },
           errorText: "403 Resource not accessible",
-          ...presented({ title: "Create issue", subject: GITHUB }),
+          ...presented({ call: "remote_tool", title: "Create issue", subject: GITHUB }),
         }),
       ]),
     ]);
-    expect(calls.map((c) => c.presentation?.subject?.id)).toEqual([
+    expect(calls.map((c) => presentationSubject(c.presentation)?.id)).toEqual([
       "@appstrate/gmail",
       "@acme/github",
     ]);

@@ -36,6 +36,7 @@ import { useTurnClock } from "./use-turn-clock.ts";
 import { showStep } from "./turn-status.ts";
 import { deriveToolPhase } from "./tool-result.ts";
 import type { StoredResults } from "./use-call-presentation.ts";
+import { presentationSubject } from "./tool-presentation.ts";
 import { forgetRevealedToolCalls, useRevealedToolCalls } from "./reveal-tool-call.ts";
 import { DISCLOSURE_PANEL_CLASS, DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
 
@@ -85,7 +86,7 @@ export function ActivityGroup({
   const subjects = React.useMemo(
     () =>
       callIds.flatMap((id): PresentationSubject[] => {
-        const subject = stored.get(id)?.presentation?.subject;
+        const subject = presentationSubject(stored.get(id)?.presentation);
         return subject ? [subject] : [];
       }),
     [callIds, stored],

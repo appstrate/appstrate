@@ -9,7 +9,11 @@ import {
 import type { z } from "zod";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
-import type { ModelApiShape, PiModelDialect } from "@appstrate/core/sidecar-types";
+import type {
+  CredentialDeathCause,
+  ModelApiShape,
+  PiModelDialect,
+} from "@appstrate/core/sidecar-types";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type {
@@ -428,7 +432,11 @@ export type EnrichedSchedule = ScheduleWireDto & {
 // `Record<OrgRole, ReadonlySet<Permission>>` role-grant matrix in
 // `apps/api/src/lib/permissions.ts` (an exhaustive Record fails when a
 // role is added to one side and not the other).
-import type { OrgRole, SpaceAssignment, SpaceRolePreset } from "@appstrate/core/permissions";
+import type {
+  OrgRole,
+  SpaceAssignment,
+  spaceRoleReferenceSchema,
+} from "@appstrate/core/permissions";
 export type { OrgRole };
 
 /** Re-exported from core so the OpenAPI `SpaceAssignment` component can be
@@ -464,14 +472,17 @@ export interface OrganizationMember {
   email?: string;
   /** The spaces this member reaches, among those whose member list the caller may read. */
   spaces: OrganizationMemberSpace[];
-  /** Their own role in their personal space, overriding the org default; `null` = follows it. */
-  personal_space_role: SpaceRoleAssignment | null;
-  /** Their role there by the org default alone; both `null` without `members:change-role`. */
-  personal_space_default_role: SpaceMember["role"];
+  /** Their own override of the org default in their personal space; `null` = no override. Omitted without `members:change-role`. */
+  personal_space_role?: SpaceRoleAssignment | null;
+  /** Their role there by the org default alone. Omitted without `members:change-role`. */
+  personal_space_default_role?: SpaceRoleNamedReference;
 }
 
 /** A role given to someone: one preset, or one custom role. */
-export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
+export type SpaceRoleAssignment = z.infer<typeof spaceRoleReferenceSchema>;
+
+/** A role as responses serve it: the reference plus its display `name`. */
+export type SpaceRoleNamedReference = SpaceRoleAssignment & { name: string };
 
 /** One space an org member reaches — the per-member projection of `GET /api/spaces/:id/members`. */
 export interface OrganizationMemberSpace {
@@ -535,6 +546,10 @@ export interface MeConnectionEntry {
   scopes_granted: string[];
   connected_at: string;
   needs_reconnection: boolean;
+  /** Why the credential died; null while healthy, or when the cause is not recorded. */
+  needs_reconnection_cause: CredentialDeathCause | null;
+  /** When it died (RFC 3339); null under the same conditions as the cause. */
+  needs_reconnection_at: string | null;
   expiresAt: string | null;
   /** Human-friendly identity (`account_email`, sub claim). */
   identity: string;
@@ -1189,6 +1204,8 @@ export interface ModelProviderCredentialInfo {
   oauth_email?: string | null;
   /** True when the credential is dead (an OAuth `invalid_grant`, or undecryptable). */
   needs_reconnection?: boolean;
+  needs_reconnection_cause?: CredentialDeathCause | null;
+  needs_reconnection_at?: string | null;
   /** `user` for a personal credential (usable and editable by {@link owner_id} only); `org` for an organization or built-in one. */
   owner_type: ModelCredentialOwner;
   /** The owning member's user id for a personal credential; `null` for `org`. */
@@ -1343,6 +1360,8 @@ export interface SpaceInfo {
    * door for every role; runs keep their connections. Always `true` on a personal space.
    */
   credential_proxy_open: boolean;
+  /** Whether the caller's role in this space shows the Studio surface. */
+  shows_studio: boolean;
   /**
    * Whether this is one member's personal space (RBAC spec §3.6). Reached by
    * its owner alone — organization owners and admins included — takes no other
@@ -1359,7 +1378,7 @@ export interface SpaceInfo {
   /** Whether the caller may enter — a `closed` space is listed as `"none"`. */
   access: "member" | "none";
   /** The caller's role here, or `null` when they have none. */
-  role: { kind: "preset" | "custom"; key: string; name: string } | null;
+  role: SpaceRoleNamedReference | null;
   /** The caller's effective permission set in this space, ceiling applied. */
   permissions: string[];
   created_by: string | null;
@@ -1386,7 +1405,7 @@ export interface SpaceMember {
   org_role: OrgRole;
   /** Explicit row, org role (owner/admin), or the open space's default. */
   source: "explicit" | "org_role" | "open_space";
-  role: { kind: "preset" | "custom"; key: string; name: string } | null;
+  role: SpaceRoleNamedReference | null;
   /** When the explicit row was written; null for an implicit member. */
   createdAt: string | null;
 }

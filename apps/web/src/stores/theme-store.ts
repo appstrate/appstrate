@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from "zustand";
-import { persistedValue } from "./local-storage";
+import { LOCAL_STORAGE_KEYS, createLocalStore, scalarCodec } from "@appstrate/ui/local-storage";
 import { THEME_COLORS } from "./theme-colors";
 
 export type Theme = "dark" | "light" | "system";
-
-const STORAGE_KEY = "appstrate-theme";
 
 function getSystemTheme(): "dark" | "light" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -38,7 +36,7 @@ function parseStoredTheme(value: string | null): Theme {
   return value && (THEMES as readonly string[]).includes(value) ? (value as Theme) : "system";
 }
 
-const storedTheme = persistedValue(STORAGE_KEY, parseStoredTheme);
+const storedTheme = createLocalStore(LOCAL_STORAGE_KEYS.theme, scalarCodec(parseStoredTheme));
 const stored = storedTheme.read();
 
 export const useTheme = create<ThemeState>()((set) => ({

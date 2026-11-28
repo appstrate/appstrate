@@ -2,6 +2,7 @@
 
 import { sql, type SQL } from "drizzle-orm";
 import { db, toRows } from "@appstrate/db/client";
+import { decryptCredentials } from "@appstrate/connect";
 
 /** `database` is injected for tests that probe a second embedded database. */
 export type PendingDatabase = { execute(query: SQL): PromiseLike<unknown> };
@@ -95,11 +96,41 @@ export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
     removeWhen: "the release that drops `package_shares`: delete this entry and its test case.",
   },
   {
+    script: "scripts/migration/0058-model-credential-needs-reconnection-mirror.ts",
+    after: "0114",
+    // EXACTLY `0058`'s scan: an unflagged model credential whose blob still says flagged. A blob
+    // that cannot be decrypted is not counted, as `0058` leaves it alone. The column is the only
+    // authority on a model credential's death, so until this runs such a credential reads as alive.
+    pending: async (database) => {
+      const rows = toRows<{ blob: string }>(
+        await database.execute(
+          sql`SELECT credentials_encrypted AS blob FROM model_provider_credentials WHERE needs_reconnection = false`,
+        ),
+      );
+      let pending = 0;
+      for (const { blob } of rows) {
+        try {
+          if (decryptCredentials<{ needsReconnection?: boolean }>(blob).needsReconnection === true)
+            pending++;
+        } catch {
+          // Unreadable: `0058` lists it and leaves it alone.
+        }
+      }
+      return pending;
+    },
+    consequence:
+      "Model credentials flagged dead only inside their encrypted blob (migration 0114 added the " +
+      "column defaulting to false, `0058` not run). The column is the only authority on a model credential's death, " +
+      "so until it runs those credentials read as alive and are used again.",
+    removeWhen:
+      "the release after the one that makes the column the only authority: delete this entry and its test case.",
+  },
+  {
     script: "scripts/migration/0059-personal-space-audience.ts",
     after: "0117",
     // EXACTLY what `0059` fixes: an organization package's row in a personal space outside its
-    // home with no offer to that organization (before its step (a) offers the enabled
-    // integrations), plus the notifications of the retired kind.
+    // home that no offer to that organization keeps (none, or a row that is not a decision about
+    // it), plus the notifications of the retired kind.
     pending: (database) =>
       count(
         database,
@@ -111,8 +142,8 @@ export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
           WHERE p.org_id IS NOT NULL
             AND p.org_id = s.org_id
             AND sp.space_id IS DISTINCT FROM p.home_space_id
-            AND NOT EXISTS (SELECT 1 FROM org_package_offers o
-              WHERE o.org_id = s.org_id AND o.package_id = p.id)
+            AND (sp.placed_by_offer = false OR NOT EXISTS (SELECT 1 FROM org_package_offers o
+              WHERE o.org_id = s.org_id AND o.package_id = p.id))
       )::int + (SELECT count(*) FROM notifications WHERE type = 'package_shared')::int AS pending
     `,
       ),
@@ -122,7 +153,23 @@ export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
       "0117 applied, `0059` not). The API refuses to switch such packages on again, so they must " +
       "be brought under the rule first.",
     removeWhen:
-      "the release after the one that ships `0059`: delete this entry, its test case and the README note.",
+      "the release after the one that ships `0059`: delete this entry, its test case and the README note, " +
+      "and add the drizzle migration that validates `notifications_type_valid` (a fresh install never ran `0059`).",
+  },
+  {
+    script: "scripts/migration/0060-personal-space-preset-role.ts",
+    after: "0118",
+    // EXACTLY `0060`'s `WHERE`: a row still holding the retired document key.
+    pending: (database) =>
+      count(
+        database,
+        sql`SELECT count(*)::int AS pending FROM organizations WHERE org_settings ? 'personal_space_role'`,
+      ),
+    consequence:
+      "Personal-space default roles not moved: organizations still hold `personal_space_role` in " +
+      "org_settings (migration 0118 applied, `0060` not). Until it runs, every preset default below " +
+      "`admin` is ignored and their members get `admin` in their personal space.",
+    removeWhen: "the release after the one that ships `0060`: delete this entry and its test case.",
   },
 ];
 

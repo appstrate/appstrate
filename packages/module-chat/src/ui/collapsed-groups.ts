@@ -5,26 +5,25 @@
  * storage (private mode, quota) never breaks folding: the fold then holds in memory until reload.
  */
 
+import { LOCAL_STORAGE_KEYS, createLocalStore, jsonCodec } from "@appstrate/ui/local-storage";
 import { SESSION_GROUP_KEYS, type SessionGroupKey } from "./session-groups.ts";
-
-export const COLLAPSED_GROUPS_KEY = "appstrate-chat-collapsed-groups";
 
 const GROUP_KEYS: ReadonlySet<string> = new Set(SESSION_GROUP_KEYS);
 
-/** The stored folded keys; garbage, unknown keys and an unreadable storage read as « none folded ». */
+/** Garbage and unknown keys read as « none folded ». */
+const stored = createLocalStore(
+  LOCAL_STORAGE_KEYS.chatCollapsedGroups,
+  jsonCodec((value): SessionGroupKey[] =>
+    Array.isArray(value)
+      ? value.filter(
+          (key): key is SessionGroupKey => typeof key === "string" && GROUP_KEYS.has(key),
+        )
+      : [],
+  ),
+);
+
 export function readCollapsedGroups(): ReadonlySet<SessionGroupKey> {
-  try {
-    const stored: unknown = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) ?? "[]");
-    return new Set(
-      Array.isArray(stored)
-        ? stored.filter(
-            (key): key is SessionGroupKey => typeof key === "string" && GROUP_KEYS.has(key),
-          )
-        : [],
-    );
-  } catch {
-    return new Set();
-  }
+  return new Set(stored.read());
 }
 
 /** `current` with `key` folded or unfolded, written through to the storage when it accepts it. */
@@ -36,10 +35,6 @@ export function setGroupFolded(
   const next = new Set(current);
   if (folded) next.add(key);
   else next.delete(key);
-  try {
-    localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...next]));
-  } catch {
-    // Private mode or a full quota: the fold holds until the page reloads.
-  }
+  stored.write([...next]);
   return next;
 }

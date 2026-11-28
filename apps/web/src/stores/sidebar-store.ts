@@ -1,16 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from "zustand";
+import {
+  LOCAL_STORAGE_KEYS,
+  createLocalStore,
+  scalarCodec,
+  type LocalStorageEntry,
+} from "@appstrate/ui/local-storage";
 import { createPanelWidthStore } from "./panel-width-store";
 import { persistedScalar } from "./persisted-scalar-store";
 
 /** Sidebar open state, persisted. One store PER PRODUCT so the chat never re-folds Studio's. */
-function createSidebarStore(storageKey: string) {
-  return create(persistedScalar(storageKey, (raw) => raw !== "false", "open", "setOpen"));
+function createSidebarStore(entry: LocalStorageEntry) {
+  const stored = createLocalStore(
+    entry,
+    scalarCodec((raw) => raw !== "false"),
+  );
+  return create(persistedScalar(stored, "open", "setOpen"));
 }
 
-export const useSidebarStore = createSidebarStore("appstrate-sidebar");
-export const useChatSidebarStore = createSidebarStore("appstrate-chat-sidebar");
+export const useSidebarStore = createSidebarStore(LOCAL_STORAGE_KEYS.sidebar);
+export const useChatSidebarStore = createSidebarStore(LOCAL_STORAGE_KEYS.chatSidebar);
 
 /**
  * The sidebar's desktop width bounds, in px, in both products. The default is shadcn's
@@ -44,6 +54,7 @@ export function sidebarWidthCss(width: number | null): string {
 }
 
 /** The sidebar's width, one for both products. */
-export const useSidebarWidthStore = createPanelWidthStore("appstrate-sidebar-width", (width) =>
-  clampSidebarWidth(width),
+export const useSidebarWidthStore = createPanelWidthStore(
+  LOCAL_STORAGE_KEYS.sidebarWidth,
+  clampSidebarWidth,
 );

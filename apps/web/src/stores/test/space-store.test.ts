@@ -15,7 +15,7 @@ const { authStore } = await import("../auth-store.ts");
 const { orgStore } = await import("../org-store.ts");
 const { rememberedSpaceKey, spaceStore } = await import("../space-store.ts");
 
-const KEY = "appstrate_last_space";
+const KEY = "appstrate:web:lastSpace";
 const persisted = () => JSON.parse(storage.getItem(KEY) ?? "{}");
 const signIn = (id: string) =>
   authStore.setState({ user: { id, email: `${id}@test.com`, emailVerified: true } });

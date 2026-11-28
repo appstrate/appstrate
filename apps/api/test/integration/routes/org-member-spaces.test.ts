@@ -28,7 +28,7 @@ interface MemberSpace {
   id: string;
   name: string;
   source: string;
-  role: { kind: string; key: string; name: string } | null;
+  role: { preset_role?: string; custom_role_id?: string; name: string } | null;
 }
 
 interface OrgMember {
@@ -110,7 +110,7 @@ describe("GET /api/orgs/{orgId} — members[].spaces", () => {
       id: privateId,
       name: "Private",
       source: "explicit",
-      role: { kind: "preset", key: "viewer", name: "viewer" },
+      role: { preset_role: "viewer", name: "viewer" },
     });
     // The open default space is reached implicitly; the closed one not at all.
     const outsiderSpaces = members.find((m) => m.userId === outsider.user.id)!.spaces;

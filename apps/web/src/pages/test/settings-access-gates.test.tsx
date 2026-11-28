@@ -41,6 +41,7 @@ type Space = components["schemas"]["SpaceObject"];
 function space(overrides: Partial<Space> = {}): Space {
   return {
     object: "space",
+    shows_studio: true,
     id: "spc_team",
     orgId: "org_gates",
     name: "Equipe",
@@ -191,7 +192,7 @@ describe("a settings page whose module is off", () => {
       "/workspace-settings/oauth",
       "/workspace-settings/auth",
     ] as const) {
-      expect(routeVerdict(path, all, {}, false)).toBe("absent");
+      expect(routeVerdict(path, all, true, {}, false)).toBe("absent");
     }
   });
 });

@@ -165,7 +165,7 @@ test.describe("Organization invitation flow", () => {
     // The invite path is stashed in the same key handleOidcCallback consumes,
     // so after re-login the user returns to the invitation (not onboarding).
     await expect
-      .poll(() => page.evaluate(() => sessionStorage.getItem("appstrate_oidc_redirect")))
+      .poll(() => page.evaluate(() => sessionStorage.getItem("appstrate:auth:oidcRedirect")))
       .toBe(`/invite/${token}`);
 
     await ctx.close();

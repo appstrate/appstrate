@@ -547,16 +547,14 @@ export async function listDeliveries(
 
 export function buildEventEnvelope(params: {
   eventType: string;
-  run: Record<string, unknown>;
+  subject: Record<string, unknown>;
   payloadMode: "full" | "summary";
 }): { eventId: string; payload: Record<string, unknown> } {
   const eventId = prefixedId("evt");
 
-  // Default the inner `object` discriminator to "run" so run-lifecycle
-  // callers don't have to set it; callers for non-run events (e.g.
-  // `dispatchRunConnectionMissingWebhook`) put their own discriminator
-  // on the `run` payload before calling.
-  const execObj: Record<string, unknown> = { object: "run", ...params.run };
+  // The inner `object` discriminator defaults to "run"; callers for non-run events (e.g.
+  // `dispatchRunConnectionMissingWebhook`) set their own on `params.subject`.
+  const execObj: Record<string, unknown> = { object: "run", ...params.subject };
 
   // Summary mode: strip result and input
   if (params.payloadMode === "summary") {
@@ -609,18 +607,19 @@ async function getDeliveryQueue(): Promise<JobQueue<DeliveryJobData>> {
 }
 
 /**
- * Dispatch webhook events for a run status change.
- * Called from the run pipeline after status transitions.
+ * Queue a delivery of `eventType` to every matching webhook. `subject` is the event's `data.object`
+ * (a run, a run attempt, a credential…): the caller sets its `object` discriminator, which defaults
+ * to `run`.
  *
  * Fires both **org-level** webhooks (pinned to the org, `space_id IS NULL`)
- * and **space-level** webhooks pinned to the run's space. A `null` `spaceId` (an event with no
+ * and **space-level** webhooks pinned to the event's space. A `null` `spaceId` (an event with no
  * space) reaches org-level webhooks only. A webhook's package filter is matched against
- * `run.packageId`; absent, only webhooks without a filter receive the event.
+ * `subject.packageId`; absent, only webhooks without a filter receive the event.
  */
 export async function dispatchWebhookEvents(
   scope: { orgId: string; spaceId: string | null },
   eventType: WebhookEventType,
-  run: Record<string, unknown>,
+  subject: Record<string, unknown>,
 ): Promise<void> {
   const rows = await db
     .select({
@@ -646,11 +645,11 @@ export async function dispatchWebhookEvents(
 
   for (const wh of rows) {
     if (!wh.events?.includes(eventType)) continue;
-    if (wh.packageId && wh.packageId !== run.packageId) continue;
+    if (wh.packageId && wh.packageId !== subject.packageId) continue;
 
     const { eventId, payload } = buildEventEnvelope({
       eventType,
-      run,
+      subject,
       payloadMode: wh.payloadMode as "full" | "summary",
     });
 
@@ -670,7 +669,7 @@ export async function sendTestPing(
   const eventType = "test.ping";
   const envelope = buildEventEnvelope({
     eventType,
-    run: { id: "run_test", packageId: "test", status: "success" },
+    subject: { id: "run_test", packageId: "test", status: "success" },
     payloadMode: webhook.payloadMode,
   });
   const queue = await getDeliveryQueue();

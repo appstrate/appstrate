@@ -46,8 +46,8 @@ import { useConversationTabs } from "./use-conversation-tabs";
 const SUMMARY_ROWS = 3;
 
 /**
- * Whether a call reached a connected integration, read off its tool: a call still running, one
- * refused before it resolved, or one stored before presentations existed carries no subject.
+ * Whether a call reached a connected integration, read off its tool: a call still running or one
+ * refused before it resolved carries no subject.
  */
 function reachedIntegration({ toolName }: ConversationToolCall): boolean {
   return toolName === "call_integration_tool";
@@ -394,7 +394,16 @@ function SummaryActivity({
                   />
                 )
               }
-              onSeeAll={calls.length > SUMMARY_ROWS ? seeAll("tools") : undefined}
+              onSeeAll={
+                calls.length > SUMMARY_ROWS
+                  ? () => {
+                      if (calls.some((call) => call.lookup)) {
+                        dispatch({ type: "show-lookups", show: true });
+                      }
+                      dispatch({ type: "select-tab", tab: "tools" });
+                    }
+                  : undefined
+              }
             >
               {reachedRead === "error" ? <ErrorState error={reached.query.error} compact /> : null}
               {callRows.map((call) => (

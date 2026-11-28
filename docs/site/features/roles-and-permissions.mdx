@@ -45,7 +45,7 @@ An organization can have several owners and always keeps at least one. See [Orga
 | `runner`   | Launch, nothing else | Run agents and see only your own runs, their files and memory. A runner cannot read an agent's content, skills, schedules or end-users.                                                                                                                                             |
 | `viewer`   | Look                 | The read permissions of `operator`.                                                                                                                                                                                                                                                 |
 
-`runner` and `viewer` are not ordered: a runner launches what it cannot read, a viewer reads what it cannot launch. `chat:read` and `mcp:read` go to all five presets, `chat:write` and `mcp:invoke` to all but `viewer` (see [Chat](/using-appstrate/chat) and [MCP server](/using-appstrate/mcp-clients)). `webhooks:*` goes to `admin` and `builder` (see [Webhooks](/features/webhooks)). `studio:read` goes to all five presets.
+`runner` and `viewer` are not ordered: a runner launches what it cannot read, a viewer reads what it cannot launch. `chat:read` and `mcp:read` go to all five presets, `chat:write` and `mcp:invoke` to all but `viewer` (see [Chat](/using-appstrate/chat) and [MCP server](/using-appstrate/mcp-clients)). `webhooks:*` goes to `admin` and `builder` (see [Webhooks](/features/webhooks)).
 
 ## The permission catalog
 
@@ -80,7 +80,6 @@ Modules add more: `org-webhooks`, `oauth-clients` and `access-grants` (owners an
 | `space-settings`   | `write`                                                                                          |
 | `space-members`    | `read`, `invite`, `remove`, `change-role`                                                        |
 | `credential-proxy` | `call`, `call-own`                                                                               |
-| `studio`           | `read`                                                                                           |
 
 Notes on the less obvious ones:
 
@@ -90,7 +89,7 @@ Notes on the less obvious ones:
 - `credential-proxy:call` reaches every connection usable in the space and a run's own connections. `credential-proxy:call-own` is the narrower grant, limited to the caller's own connections outside a run, and `call` implies it. A `viewer` holds neither.
 - `model-provider-credentials:connect` lets a member attach a personal model credential, `write` manages the organization's.
 - `agents:run` alone gives a summary view of an agent (identity, input form, integrations), without its prompt or skills.
-- `studio:read` opens the Studio's screens in the interface (display only, not an API barrier): without it the REST API and MCP clients answer the same grants, and the chat keeps working. It is resolved from the role, never stored or picked in the permission list: every preset holds it, and a custom role holds it unless its **Show the Studio** box (`shows_studio`, on by default) is cleared.
+- Showing the Studio's screens in the interface is not a permission but a display attribute of the role, `shows_studio` (display only, not an API barrier): without it the REST API and MCP clients answer the same permissions, and the chat keeps working. Every preset shows the Studio, and a custom role does unless its **Show the Studio** box (`shows_studio`, on by default) is cleared.
 - Editing a package is governed by its **home space**, not by the space you are browsing from. See [Library and sharing](/features/library).
 
 ## Custom roles
@@ -115,7 +114,7 @@ curl -X POST https://your-instance/api/roles \
 - Only organization owners and admins define roles (`roles:write`, `roles:delete`). Space admins can **assign** them, within the permissions they hold.
 - Role ids are `srl_` followed by a UUID and never change, so assignments follow edits. Presets are code and cannot be edited.
 - A role may not hold organization-level permissions.
-- `shows_studio` (default `true`) decides whether the role's holders see the Studio. `studio:read` itself is not accepted in `permissions` (`400`) and is not offered by the vocabulary. A `PATCH` without `shows_studio` leaves it as stored.
+- `shows_studio` (default `true`) decides whether the role's holders see the Studio. It is not part of `permissions`. A `PATCH` without `shows_studio` leaves it as stored.
 - Every unknown permission is a `400` naming it. A permission that acts on a resource needs that resource's read: `schedules:write` requires `schedules:read`, for example. A set missing a read is a `400` naming each missing read, never silently widened. `agents:run` needs `runs:read` or `runs:read-all` rather than `agents:read`, so a launcher can run agents it cannot read. The vocabulary endpoint states the exact rule (`requires_one_of`).
 - Deleting a role that is assigned, pending in an invitation, or the organization's default for personal spaces is a `409 role_in_use`.
 

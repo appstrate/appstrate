@@ -21,13 +21,15 @@ import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "../src/pi-chat/pi-events.ts";
 import { activityGroupOf, conversationTools } from "../src/ui/conversation-tools.ts";
-import { callPresentation, showCall } from "../src/ui/tool-presentation.ts";
+import { callPresentation, presentationSubject, showCall } from "../src/ui/tool-presentation.ts";
 import { resultMetadataOf } from "../src/ui/use-call-presentation.ts";
 import { streamedMessage, stubPlatformMcp, toolCallEvents } from "./pi-turn.ts";
 import { inertTurnSpaces } from "./turn-spaces.ts";
 
 const GMAIL = { kind: "integration", id: "@appstrate/gmail", display_name: "Gmail" } as const;
 const GITHUB = { kind: "integration", id: "@acme/github", display_name: "GitHub" } as const;
+const GMAIL_CALL = { call: "proxied_request", subject: GMAIL } as const;
+const GITHUB_TOOL = { call: "remote_tool", title: "Create issue", subject: GITHUB } as const;
 
 const t = (key: string, params?: Record<string, string | number>) =>
   ({ "tool.verb.GET": "Lecture" })[key] ?? String(params?.defaultValue ?? key);
@@ -70,7 +72,7 @@ const EVENTS: AgentSessionEvent[] = [
     {
       content: text({ results: [] }),
       details: {},
-      presentation: { count: 1, items: [GITHUB] },
+      presentation: { call: "search", count: 1, items: [GITHUB] },
     },
   ),
   ...call(
@@ -89,7 +91,7 @@ const EVENTS: AgentSessionEvent[] = [
       content: [{ type: "text", text: "403 Resource not accessible" }],
       details: {},
       relayed: true,
-      presentation: { title: "Create issue", subject: GITHUB },
+      presentation: GITHUB_TOOL,
     },
     true,
     12,
@@ -102,7 +104,7 @@ const EVENTS: AgentSessionEvent[] = [
     {
       content: text({ results: [{ index: 0, status: 200 }] }),
       details: {},
-      presentation: { method: "GET", subject: GMAIL },
+      presentation: { call: "proxied_request", method: "GET", subject: GMAIL },
     },
   ),
 ];
@@ -173,7 +175,7 @@ describe("a turn's tool calls, from the engine's chunks", () => {
     const card = (id: string) => callPresentation({ resultProviderMetadata: stored.get(id) });
     for (const c of calls) expect(card(c.toolCallId)).toEqual(c.presentation);
     // The failed GitHub call keeps its integration on the card as in the panel.
-    expect(card("g1")?.subject).toEqual(GITHUB);
+    expect(presentationSubject(card("g1"))).toEqual(GITHUB);
   });
 });
 
@@ -231,11 +233,11 @@ const OUTCOMES: Record<
         },
         true,
       ),
-      { subject: GMAIL },
+      GMAIL_CALL,
     ),
     failed: true,
-    result: { presentation: { subject: GMAIL } },
-    shown: { status: "error", error: NOT_SENT.detail, presentation: { subject: GMAIL } },
+    result: { presentation: GMAIL_CALL },
+    shown: { status: "error", error: NOT_SENT.detail, presentation: GMAIL_CALL },
   },
   // One request answered, one refused: not an error.
   partial_batch: {
@@ -250,7 +252,7 @@ const OUTCOMES: Record<
         },
         false,
       ),
-      { subject: GMAIL },
+      GMAIL_CALL,
     ),
     failed: false,
     result: {},
@@ -260,12 +262,12 @@ const OUTCOMES: Record<
   relayed_401: {
     answer: presented(
       { content: [{ type: "text", text: "401 Bad credentials" }], isError: true },
-      { title: "Create issue", subject: GITHUB },
+      GITHUB_TOOL,
       true,
     ),
     failed: true,
-    result: { relayed: true, presentation: { title: "Create issue", subject: GITHUB } },
-    shown: { status: "error", error: "401 Bad credentials", presentation: { subject: GITHUB } },
+    result: { relayed: true, presentation: GITHUB_TOOL },
+    shown: { status: "error", error: "401 Bad credentials", presentation: GITHUB_TOOL },
   },
   // The integration has no usable connection here: refused before any exchange.
   missing_connection: {
@@ -281,7 +283,7 @@ const OUTCOMES: Record<
         },
         true,
       ),
-      { subject: GMAIL },
+      GMAIL_CALL,
     ),
     failed: true,
     result: {},

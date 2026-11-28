@@ -17,12 +17,11 @@ import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 import { ChatConversationList } from "../src/ui/thread-list.tsx";
 import { ChatTransportProvider } from "../src/ui/runtime-context.ts";
 import { sessionsQueryKey, type SessionsCache } from "../src/ui/sessions.ts";
-import {
-  COLLAPSED_GROUPS_KEY,
-  readCollapsedGroups,
-  setGroupFolded,
-} from "../src/ui/collapsed-groups.ts";
+import { readCollapsedGroups, setGroupFolded } from "../src/ui/collapsed-groups.ts";
+import { LOCAL_STORAGE_KEYS, storageKey } from "@appstrate/ui/local-storage";
 import { transportOf } from "./fake-request.ts";
+
+const COLLAPSED_GROUPS_KEY = storageKey(LOCAL_STORAGE_KEYS.chatCollapsedGroups);
 
 const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 

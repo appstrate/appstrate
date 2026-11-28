@@ -163,7 +163,7 @@ export function ConnectionPickerFields({
   // What « Enregistrer » would bind, and the stored members it drops (said until it does).
   const problems = picker.problemsOf([...ticked, ...picker.unavailableIds]);
   // A dead row named in a problem line offers « Reconnecter » there, next to its replacement.
-  const renewedInProblems = new Set(
+  const deadInProblems = new Set(
     problems.flatMap((problem) => (problem.kind === "dead" ? [problem.conn.id] : [])),
   );
   const typeLabel = (authKey: string): string | null => {
@@ -191,7 +191,7 @@ export function ConnectionPickerFields({
           {listedCandidates.map((c) => {
             const imposed = imposedIds.includes(c.id);
             const checked = imposed || ticked.includes(c.id);
-            const renew = canRenew(c) && !renewedInProblems.has(c.id);
+            const renew = canRenew(c) && !deadInProblems.has(c.id);
             return (
               <div key={c.id} className="flex items-start justify-between gap-2">
                 <CheckboxField

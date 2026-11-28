@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
-const SIGNED_IN_KEY = "appstrate_signed_in";
+import { LOCAL_STORAGE_KEYS, createLocalStore } from "@appstrate/ui/local-storage";
+
+const signedIn = createLocalStore(LOCAL_STORAGE_KEYS.signedIn, {
+  parse: (raw) => raw !== null,
+  serialize: (value) => (value ? "1" : null),
+});
 
 /** Whether the next boot should expect a session: the cookie itself is httpOnly. */
-export function sessionExpected(storage: Storage): boolean {
-  return storage.getItem(SIGNED_IN_KEY) !== null;
+export function sessionExpected(): boolean {
+  return signedIn.read();
 }
 
 /** Set on a session and before any sign-in attempt. A hint: a stale value corrects itself in one boot. */
-export function rememberSignedIn(storage: Storage, signedIn: boolean): void {
-  if (signedIn) storage.setItem(SIGNED_IN_KEY, "1");
-  else storage.removeItem(SIGNED_IN_KEY);
+export function rememberSignedIn(value: boolean): void {
+  signedIn.write(value);
 }
 
 export interface SessionReads<User, Profile> {

@@ -58,20 +58,31 @@ export interface ParsedTokenResponse {
  * error object (some IdPs answer `200 {"error":"invalid_grant"}`).
  *
  * A dead authorization code or refresh token is signaled by
- * `{ "error": "invalid_grant" }` (RFC 6749 §5.2). Any other failure (network,
- * 5xx, non-JSON body, other 4xx, other OAuth error codes, a 2xx with neither
+ * `{ "error": "invalid_grant" }` (RFC 6749 §5.2). A refused client
+ * (`"client_rejected"`) or a request the client or manifest cannot get right
+ * (`"misconfigured"`) says nothing about the grant. Any other failure (network,
+ * 5xx, non-JSON body, other 4xx, unknown error codes, a 2xx with neither
  * `access_token` nor `error`) is treated as transient because the credential
- * might still be valid — except a refused client (`"client_rejected"`).
+ * might still be valid.
  *
  * Both the initial token exchange (token-exchange.ts) and the refresh flow
  * (token-refresh.ts) read the response through {@link readTokenResponse} so
  * that revocation handling stays symmetric.
  */
-export type TokenErrorKind = "revoked" | "client_rejected" | "transient";
+export type TokenErrorKind = "revoked" | "client_rejected" | "misconfigured" | "transient";
 
 const CLIENT_REJECTED_ERRORS: ReadonlySet<string> = new Set([
   "invalid_client",
   "unauthorized_client",
+]);
+
+/**
+ * The scope or the grant type is wrong, whatever the grant's state. `invalid_request` is not here:
+ * providers also answer it for a dead refresh token, so it stays transient and is counted.
+ */
+const MISCONFIGURED_ERRORS: ReadonlySet<string> = new Set([
+  "invalid_scope",
+  "unsupported_grant_type",
 ]);
 
 interface TokenErrorClassification {
@@ -109,9 +120,13 @@ function redactErrorDescription(description: string): string {
  * Only `invalid_grant` maps to `"revoked"` — a dead authorization code or
  * refresh token, where retrying is pointless and the stored PKCE state should
  * be dropped. `invalid_client` / `unauthorized_client` map to `"client_rejected"`:
- * the grant is untouched, only fixing the client registration helps. Any other
- * code or a body with no string `error` stays `"transient"`: an ambiguous signal
- * never declares a credential dead.
+ * the grant is untouched, only fixing the client registration helps.
+ * `invalid_scope` / `unsupported_grant_type` map to
+ * `"misconfigured"`: the scope or grant type is a manifest or
+ * client defect that a reconnect cannot fix. Any other code (including
+ * `unsupported_response_type`, an authorization-endpoint code outside §5.2) or a
+ * body with no string `error` stays `"transient"`: an ambiguous signal never
+ * declares a credential dead.
  *
  * `error_description` is redacted here, at the source, so every consumer that
  * folds it into `Error.message` gets the sanitized value.
@@ -131,7 +146,9 @@ export function classifyTokenErrorBody(body: unknown): TokenErrorClassification 
       ? "revoked"
       : error !== undefined && CLIENT_REJECTED_ERRORS.has(error)
         ? "client_rejected"
-        : "transient";
+        : error !== undefined && MISCONFIGURED_ERRORS.has(error)
+          ? "misconfigured"
+          : "transient";
   return { kind, error, errorDescription };
 }
 

@@ -81,6 +81,8 @@ column connection_calls.actor_id text not null
 column connection_calls.actor_type text not null
 column connection_calls.api_key_id text
 column connection_calls.auth_method text not null
+column connection_calls.call_id uuid
+column connection_calls.called_at timestamp with time zone
 column connection_calls.chat_session_id text
 column connection_calls.connection_id uuid
 column connection_calls.created_at timestamp with time zone not null default now()
@@ -93,7 +95,7 @@ column connection_calls.org_id uuid not null
 column connection_calls.outcome text not null
 column connection_calls.owner_id text
 column connection_calls.owner_type text
-column connection_calls.request_id text not null
+column connection_calls.request_id text
 column connection_calls.run_id text
 column connection_calls.space_id text not null
 column device_codes.attempts integer not null default 0
@@ -152,6 +154,8 @@ column integration_connections.identity_claims jsonb
 column integration_connections.integration_package_id text not null
 column integration_connections.label text not null
 column integration_connections.needs_reconnection boolean not null default false
+column integration_connections.needs_reconnection_at timestamp with time zone
+column integration_connections.needs_reconnection_cause text
 column integration_connections.oauth_resource text
 column integration_connections.org_id uuid not null
 column integration_connections.origin_space_id text
@@ -231,6 +235,8 @@ column model_provider_credentials.expires_at timestamp with time zone
 column model_provider_credentials.id uuid not null default gen_random_uuid()
 column model_provider_credentials.label text not null
 column model_provider_credentials.needs_reconnection boolean not null default false
+column model_provider_credentials.needs_reconnection_at timestamp with time zone
+column model_provider_credentials.needs_reconnection_cause text
 column model_provider_credentials.org_id uuid not null
 column model_provider_credentials.owner_user_id text
 column model_provider_credentials.provider_id text not null
@@ -440,6 +446,7 @@ column organizations.icon text
 column organizations.id uuid not null default gen_random_uuid()
 column organizations.name text not null
 column organizations.org_settings jsonb not null default '{}'::jsonb
+column organizations.personal_space_preset_role text
 column organizations.personal_space_role_id text
 column organizations.slug text not null
 column organizations.updated_at timestamp with time zone not null default now()
@@ -781,6 +788,8 @@ constraint integration_connections integration_connections_end_user_is_space CHE
 constraint integration_connections integration_connections_end_user_not_shared CHECK (((cardinality(shared_space_ids) = 0) OR (user_id IS NOT NULL)))
 constraint integration_connections integration_connections_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint integration_connections integration_connections_label_normalized CHECK (((label <> ''::text) AND (label !~ '^[ \u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]|[ \u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]$'::text) AND (label !~ '[\u0001-\u001F\u007F-\u009F\u00AD\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0\U000E0000-\U000E007F]'::text) AND ((char_length(label) + regexp_count(label, '[\U00010000-\U0010FFFF]'::text)) <= 80)))
+constraint integration_connections integration_connections_needs_reconnection_cause_valid CHECK (((needs_reconnection_cause IS NULL) OR (needs_reconnection_cause = ANY (ARRAY['refresh_token_revoked'::text, 'refresh_token_missing'::text, 'refresh_failures_exhausted'::text, 'unrefreshable'::text, 'credentials_undecryptable'::text]))))
+constraint integration_connections integration_connections_needs_reconnection_record CHECK ((needs_reconnection OR ((needs_reconnection_cause IS NULL) AND (needs_reconnection_at IS NULL))))
 constraint integration_connections integration_connections_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint integration_connections integration_connections_origin_is_org CHECK (((origin_space_id IS NULL) OR (space_id IS NULL)))
 constraint integration_connections integration_connections_origin_space_org_fk FOREIGN KEY (origin_space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE SET NULL (origin_space_id)
@@ -824,6 +833,8 @@ constraint llm_usage llm_usage_run_id_org_id_fk FOREIGN KEY (run_id, org_id) REF
 constraint llm_usage llm_usage_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL
 constraint llm_usage llm_usage_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE SET NULL
 constraint model_provider_credentials model_provider_credentials_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint model_provider_credentials model_provider_credentials_needs_reconnection_cause_valid CHECK (((needs_reconnection_cause IS NULL) OR (needs_reconnection_cause = ANY (ARRAY['refresh_token_revoked'::text, 'refresh_token_missing'::text, 'refresh_failures_exhausted'::text, 'unrefreshable'::text, 'credentials_undecryptable'::text]))))
+constraint model_provider_credentials model_provider_credentials_needs_reconnection_record CHECK ((needs_reconnection OR ((needs_reconnection_cause IS NULL) AND (needs_reconnection_at IS NULL))))
 constraint model_provider_credentials model_provider_credentials_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint model_provider_credentials model_provider_credentials_owner_user_id_user_id_fk FOREIGN KEY (owner_user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint model_provider_credentials model_provider_credentials_pkey PRIMARY KEY (id)
@@ -902,9 +913,9 @@ constraint org_proxies org_proxies_pkey PRIMARY KEY (id)
 constraint org_proxies org_proxies_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
 constraint organizations organizations_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint organizations organizations_icon_length CHECK ((octet_length(icon) <= 16384))
+constraint organizations organizations_personal_space_preset_valid CHECK (((personal_space_preset_role IS NULL) OR (personal_space_preset_role = ANY (ARRAY['admin'::text, 'builder'::text, 'operator'::text, 'runner'::text, 'viewer'::text]))))
 constraint organizations organizations_personal_space_role_fk FOREIGN KEY (personal_space_role_id, id) REFERENCES space_roles(id, org_id) ON DELETE RESTRICT
-constraint organizations organizations_personal_space_role_one_shape CHECK (((personal_space_role_id IS NULL) OR (NOT (org_settings ? 'personal_space_role'::text))))
-constraint organizations organizations_personal_space_role_preset CHECK (((NOT (org_settings ? 'personal_space_role'::text)) OR COALESCE(((org_settings ->> 'personal_space_role'::text) = ANY (ARRAY['admin'::text, 'builder'::text, 'operator'::text, 'runner'::text, 'viewer'::text])), false)))
+constraint organizations organizations_personal_space_role_one_shape CHECK ((num_nonnulls(personal_space_preset_role, personal_space_role_id) <= 1))
 constraint organizations organizations_pkey PRIMARY KEY (id)
 constraint organizations organizations_slug_unique UNIQUE (slug)
 constraint package_dist_tags package_dist_tags_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
@@ -1266,6 +1277,7 @@ index CREATE UNIQUE INDEX storage_deletion_jobs_pkey ON public.storage_deletion_
 index CREATE UNIQUE INDEX uploads_pkey ON public.uploads USING btree (id)
 index CREATE UNIQUE INDEX uq_chat_messages_session_message ON public.chat_messages USING btree (session_id, message_id)
 index CREATE UNIQUE INDEX uq_chat_sessions_id_org_id ON public.chat_sessions USING btree (id, org_id)
+index CREATE UNIQUE INDEX uq_connection_calls_run_call ON public.connection_calls USING btree (run_id, call_id) WHERE (call_id IS NOT NULL)
 index CREATE UNIQUE INDEX uq_files_id_org_id ON public.files USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_files_run_output_dedup ON public.files USING btree (run_id, sha256, name) WHERE (purpose = 'agent_output'::file_purpose)
 index CREATE UNIQUE INDEX uq_integration_conn_id_org_id ON public.integration_connections USING btree (id, org_id)

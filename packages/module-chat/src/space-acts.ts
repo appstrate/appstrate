@@ -26,7 +26,7 @@ export function describeSpaceActs(space: ContextSpace): string {
   return `${describeSpace(space)} — can: ${actsText(space.can)}`;
 }
 
-const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+export const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** One line per distinct set of acts, naming every space that has it, sorted. */
 function groupedLines(spaces: readonly ContextSpace[]): string[] {

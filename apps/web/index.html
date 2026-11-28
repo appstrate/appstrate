@@ -11,9 +11,10 @@
     <meta name="theme-color" content="#fafafa" />
     <title>Appstrate</title>
     <script>
-      // Key must match STORAGE_KEY in stores/theme-store.ts
+      // Key must match storageKey(LOCAL_STORAGE_KEYS.theme) (@appstrate/ui/local-storage);
+      // stores/test/theme-preload-key.test.ts holds the two together.
       (function () {
-        var t = localStorage.getItem("appstrate-theme") || "system";
+        var t = localStorage.getItem("appstrate:web:theme") || "system";
         if (t === "system")
           t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
         document.documentElement.classList.add(t);

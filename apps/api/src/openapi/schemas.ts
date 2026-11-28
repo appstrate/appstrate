@@ -2,6 +2,7 @@
 
 import { MODEL_ERROR_CATEGORIES, MODEL_ERROR_REASONS } from "@appstrate/core/model-error";
 import {
+  orgOfferModeValues,
   orgRoleEnum,
   packageSourceValues,
   packageTypeValues,
@@ -10,11 +11,16 @@ import {
 } from "@appstrate/db/schema";
 import { MODEL_BINDINGS, MODEL_CREDENTIAL_OWNERS, MODEL_PAYERS } from "@appstrate/core/model-payer";
 import { runStatusValues } from "@appstrate/core/run-status";
+import { NEEDS_RECONNECTION_RECORD_PROPERTIES } from "./needs-reconnection-record.ts";
 import {
   RUN_AND_WAIT_RESUME_INSTRUCTION,
   RUN_RESULT_INLINE_MAX_BYTES,
 } from "@appstrate/core/run-and-wait-client";
-import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import {
+  SPACE_ROLE_ID_REGEX,
+  SPACE_ROLE_PRESETS,
+  SPACE_VISIBILITIES,
+} from "@appstrate/core/permissions";
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import {
   MODEL_REASONING_LEVELS,
@@ -55,12 +61,31 @@ import {
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
-/**
- * Prefix a custom space-role id carries. Only the prefix is published: the
- * server's full `srl_`+UUID rule is stricter, and a spec that pinned it would
- * turn a server-side id-shape change into a client-side break.
- */
-export const SPACE_ROLE_ID_PATTERN = "^srl_";
+/** Custom space-role id pattern, the server's own `srl_`+UUID rule. */
+export const SPACE_ROLE_ID_PATTERN = SPACE_ROLE_ID_REGEX.source;
+
+/** The wire reference to one space role: exactly one of `preset_role` / `custom_role_id`, never a bare string. */
+export const SPACE_ROLE_REFERENCE_ONE_OF = [
+  {
+    type: "object",
+    required: ["preset_role"],
+    properties: { preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] } },
+    additionalProperties: false,
+  },
+  {
+    type: "object",
+    required: ["custom_role_id"],
+    properties: { custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN } },
+    additionalProperties: false,
+  },
+];
+
+/** A role as responses serve it: the reference plus the role's display `name` (a preset's is its key). */
+const SPACE_ROLE_NAMED_REFERENCE_ONE_OF = SPACE_ROLE_REFERENCE_ONE_OF.map((ref) => ({
+  ...ref,
+  required: [...ref.required, "name"],
+  properties: { ...ref.properties, name: { type: "string" } },
+}));
 
 const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
   TOKEN_USAGE_COUNTERS.map((counter) => [counter, { type: "integer", minimum: 0 }]),
@@ -138,7 +163,7 @@ const PACKAGE_HOME_PROPERTIES = {
   home_shareable: {
     type: "boolean",
     description:
-      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
+      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{spaceId}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
   },
 } as const;
 
@@ -208,13 +233,9 @@ export const ORG_SETTINGS_PROPERTIES = {
       "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH.",
   },
   personal_space_role: {
-    type: "string",
-    oneOf: [
-      { type: "string", enum: [...SPACE_ROLE_PRESETS] },
-      { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
-    ],
+    oneOf: SPACE_ROLE_REFERENCE_ONE_OF,
     description:
-      "The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH.",
+      "The role an organization member or guest holds by default in their own personal space, as a role reference: `{ preset_role }` (`admin`, `builder`, `operator`, `runner`, `viewer`) or `{ custom_role_id }` (the id of one of this organization's custom space roles, `srl_…`). Defaults to `{ preset_role: \"admin\" }`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH.",
   },
 };
 
@@ -878,7 +899,7 @@ export const schemas = {
   SpacePackage: {
     type: "object",
     description:
-      "A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the placement behind it is withdrawn: the share is revoked (`DELETE /api/packages/{scope}/{name}/shares/{target}`), or the package's home moves out of the space with `keep_in_previous_home: false`. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it.",
+      "A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the placement behind it is withdrawn: the share is revoked (`DELETE /api/packages/{scope}/{name}/shares/{spaceId}`), or the package's home moves out of the space with `keep_in_previous_home: false`. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it.",
     // The spacePackageSelect projection emits every field unconditionally
     // (package_type/package_source come from the join). `object` is spec-only
     // (not on the SpacePackage shared type). Stored input values and their locks
@@ -1000,14 +1021,7 @@ export const schemas = {
     type: "object",
     // `email`/`displayName` are best-effort joins (getOrgMembers emits
     // `?? undefined` when the user/profile row is missing) — NOT required.
-    required: [
-      "userId",
-      "role",
-      "joinedAt",
-      "spaces",
-      "personal_space_role",
-      "personal_space_default_role",
-    ],
+    required: ["userId", "role", "joinedAt", "spaces"],
     properties: {
       userId: { type: "string" },
       displayName: { type: "string" },
@@ -1022,33 +1036,13 @@ export const schemas = {
       },
       personal_space_role: {
         description:
-          "The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null`: they follow the organization default. Always `null` for an owner or admin, who hold `admin` there, and for every member when the caller lacks `members:change-role`: only a caller who may change it reads it.",
-        oneOf: [
-          { type: "null" },
-          {
-            type: "object",
-            required: ["preset_role"],
-            properties: { preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] } },
-            additionalProperties: false,
-          },
-          {
-            type: "object",
-            required: ["custom_role_id"],
-            properties: { custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN } },
-            additionalProperties: false,
-          },
-        ],
+          "The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null` means only \"no override\": the member follows the organization default (`personal_space_default_role`). An owner or admin cannot have one (`null`): they hold `admin` there. Omitted when the caller lacks `members:change-role`: only a caller who may change it reads it.",
+        oneOf: [{ type: "null" }, ...SPACE_ROLE_REFERENCE_ONE_OF],
       },
       personal_space_default_role: {
-        type: ["object", "null"],
-        required: ["kind", "key", "name"],
         description:
-          "The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it.",
-        properties: {
-          kind: { type: "string", enum: ["preset", "custom"] },
-          key: { type: "string" },
-          name: { type: "string" },
-        },
+          "The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. A role reference (`preset_role` or `custom_role_id`) plus its display `name`. Omitted when the caller lacks `members:change-role`, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it.",
+        oneOf: SPACE_ROLE_NAMED_REFERENCE_ONE_OF,
       },
     },
   },
@@ -1065,13 +1059,7 @@ export const schemas = {
           "How the member reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
       },
       role: {
-        type: ["object", "null"],
-        required: ["kind", "key", "name"],
-        properties: {
-          kind: { type: "string", enum: ["preset", "custom"] },
-          key: { type: "string" },
-          name: { type: "string" },
-        },
+        oneOf: [{ type: "null" }, ...SPACE_ROLE_NAMED_REFERENCE_ONE_OF],
       },
     },
   },
@@ -2118,7 +2106,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: [...scheduleDisabledReasonValues, null],
         description:
-          "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more — or an imposed set (an admin pin, an enforced org default, or that enforcement) was removed while the schedule's own `connection_overrides` set strictly narrowed it (only connections of it, fewer than it holds, `[]` included), which added nothing under it and would bind fewer connections as written without it; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin closed to additions or an enforced org default (`override_outranked`), binding a floor plus additions above the per-integration cap (`connection_set_too_large`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. `package_removed`: the agent's placement in the space was withdrawn (`DELETE /api/packages/{scope}/{name}/shares/{target}`, or a home move leaving the space); re-enabling it fails every fire until the agent is placed there again. Cleared by re-enabling.",
+          "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more — or an imposed set (an admin pin, an enforced org default, or that enforcement) was removed while the schedule's own `connection_overrides` set strictly narrowed it (only connections of it, fewer than it holds, `[]` included), which added nothing under it and would bind fewer connections as written without it; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin closed to additions or an enforced org default (`override_outranked`), binding a floor plus additions above the per-integration cap (`connection_set_too_large`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. `package_removed`: the agent's placement in the space was withdrawn (`DELETE /api/packages/{scope}/{name}/shares/{spaceId}`, or a home move leaving the space); re-enabling it fails every fire until the agent is placed there again. Cleared by re-enabling.",
       },
       cron_expression: { type: "string" },
       timezone: { type: "string" },
@@ -2371,6 +2359,13 @@ export const schemas = {
       },
       oauth_email: { type: ["string", "null"] },
       needs_reconnection: { type: "boolean" },
+      ...NEEDS_RECONNECTION_RECORD_PROPERTIES,
+      needs_reconnection_cause: {
+        ...NEEDS_RECONNECTION_RECORD_PROPERTIES.needs_reconnection_cause,
+        description:
+          NEEDS_RECONNECTION_RECORD_PROPERTIES.needs_reconnection_cause.description +
+          " A credential whose stored secret cannot be decrypted reads `credentials_undecryptable`, derived rather than stored, with `needs_reconnection_at` `null`.",
+      },
       owner_type: {
         type: "string",
         enum: [...MODEL_CREDENTIAL_OWNERS],
@@ -2991,6 +2986,7 @@ export const schemas = {
       "access",
       "role",
       "permissions",
+      "shows_studio",
       "created_by",
       "createdAt",
       "updatedAt",
@@ -3044,19 +3040,18 @@ export const schemas = {
         description: "Whether the caller may enter this space",
       },
       role: {
-        type: ["object", "null"],
-        required: ["kind", "key", "name"],
-        properties: {
-          kind: { type: "string", enum: ["preset", "custom"] },
-          key: { type: "string" },
-          name: { type: "string" },
-        },
+        oneOf: [{ type: "null" }, ...SPACE_ROLE_NAMED_REFERENCE_ONE_OF],
         description: "The caller's role in this space, or null when they have none",
       },
       permissions: {
         type: "array",
         items: { type: "string" },
         description: "The caller's effective permission set in this space, ceiling applied",
+      },
+      shows_studio: {
+        type: "boolean",
+        description:
+          "Whether the caller's role in this space shows the Studio's screens in the interface (`false` when they have no role). A display attribute of the role, not a permission and not a boundary: the REST API and an MCP client answer the role's permissions either way.",
       },
       created_by: {
         type: ["string", "null"],
@@ -3083,13 +3078,7 @@ export const schemas = {
           "How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
       },
       role: {
-        type: ["object", "null"],
-        required: ["kind", "key", "name"],
-        properties: {
-          kind: { type: "string", enum: ["preset", "custom"] },
-          key: { type: "string" },
-          name: { type: "string" },
-        },
+        oneOf: [{ type: "null" }, ...SPACE_ROLE_NAMED_REFERENCE_ONE_OF],
       },
       createdAt: {
         type: ["string", "null"],
@@ -3126,7 +3115,7 @@ export const schemas = {
       "updatedAt",
     ],
     description:
-      "A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle.",
+      "A space role: one of the platform presets (read-only, `id: null`) or an organization-defined bundle.",
     properties: {
       object: { type: "string", enum: ["role"] },
       kind: { type: "string", enum: ["preset", "custom"] },
@@ -3143,15 +3132,14 @@ export const schemas = {
         description:
           "Space-level permission strings the role grants on this deployment, sorted. " +
           "A custom bundle is projected through the same vocabulary enforcement uses, so " +
-          "this array is always one a `PATCH` accepts back: never `studio:read`, which " +
-          "`shows_studio` carries.",
+          "this array is always one a `PATCH` accepts back.",
       },
       shows_studio: {
         type: "boolean",
         description:
-          "Whether holders of the role see the Studio (they resolve `studio:read`). A display " +
-          "setting, not a boundary: the REST API and an MCP client answer the role's other " +
-          "permissions either way. Always `true` for a preset.",
+          "Whether holders of the role see the Studio's screens in the interface. A display " +
+          "attribute, not a permission and not a boundary: the REST API and an MCP client answer " +
+          "the role's permissions either way. Always `true` for a preset.",
       },
       unavailable_permissions: {
         type: "array",
@@ -3329,7 +3317,7 @@ export const schemas = {
         ...PACKAGE_HOME_PROPERTIES,
         org_offer: {
           type: ["string", "null"],
-          enum: ["available", "on_by_default", null],
+          enum: [...orgOfferModeValues, null],
           description:
             "The offer to the organization, or `null` when there is none. An offer in either mode PLACES the package in every space of it that holds no `space_packages` row of its own. `on_by_default`: it is also ACTIVE there (a row always wins; `enabled = false` keeps it off). `available`: it is placed and listed but off until the space switches it on (`POST /api/spaces/{id}/packages`).",
         },
@@ -3383,7 +3371,7 @@ export const schemas = {
       ...PACKAGE_PLACEMENT_STATE_PROPERTIES,
       org_offer: {
         type: ["string", "null"],
-        enum: ["available", "on_by_default", null],
+        enum: [...orgOfferModeValues, null],
         description: "The offer to the organization (`org_offer` of the library entry).",
       },
       org_offerable: {
@@ -3411,35 +3399,18 @@ export const schemas = {
       ...PACKAGE_PLACEMENT_STATE_PROPERTIES,
     },
   },
-  ShareTarget: {
-    type: "object",
-    description:
-      'Where a package is placed outside its home: a team space the caller can reach. A personal space is never a target (`409 personal_space_takes_offers_only`): it receives packages through the organization offer (`PUT /api/packages/{scope}/{name}/org-offer`) only. A person is not a target either: `kind: "user"` is a 400.',
-    required: ["kind", "spaceId"],
-    properties: {
-      kind: { type: "string", enum: ["space"] },
-      spaceId: { type: "string", description: "Team space id (`spc_…`) the caller can reach." },
-    },
-    additionalProperties: false,
-  },
-  ShareTargetView: {
-    type: "object",
-    description: "A share's subject as the server renders it back: a team space.",
-    required: ["kind", "spaceId", "name"],
-    properties: {
-      kind: { type: "string", enum: ["space"] },
-      spaceId: { type: "string", description: "Space id (`spc_…`)." },
-      name: { type: "string", description: "The space's name." },
-    },
-  },
   PackageShare: {
     type: "object",
     description:
       "One entry of a package's AUDIENCE: a space the package is placed in outside its home — its `space_packages` row there. The placement grants READ; whether the space RUNS the package is the row's `enabled`.",
-    required: ["object", "target", "shared_by", "enabled", "createdAt"],
+    required: ["object", "spaceId", "space_name", "shared_by", "enabled", "createdAt"],
     properties: {
       object: { type: "string", enum: ["package_share"] },
-      target: { $ref: "#/components/schemas/ShareTargetView" },
+      spaceId: {
+        type: "string",
+        description: "The team space (`spc_…`) the package is placed in.",
+      },
+      space_name: { type: "string", description: "That space's name." },
       shared_by: {
         type: ["object", "null"],
         description:
@@ -3472,7 +3443,7 @@ export const schemas = {
       packageId: { type: "string", description: "Package id (`@scope/name`)." },
       org_offer: {
         type: "string",
-        enum: ["available", "on_by_default"],
+        enum: [...orgOfferModeValues],
         description: "The mode the offer now has.",
       },
     },

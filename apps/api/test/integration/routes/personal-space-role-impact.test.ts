@@ -5,7 +5,7 @@
  * `personal_space_role` would stop. The claims: who is counted (a member or guest following the
  * default, with an enabled schedule they run in their own personal space), who is not (an
  * override, an owner or admin, a disabled schedule), that a role granting `agents:run` stops
- * nothing, and how the door refuses (foreign role, missing guard, malformed `role`).
+ * nothing, and how the door refuses (foreign role, missing guard, malformed reference).
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -18,9 +18,11 @@ import { seedPackage, seedSchedule, seedSpaceMember, seedSpaceRole } from "../..
 
 const app = getTestApp();
 
+/** `role` is a preset key or a custom role id; each goes in its own query parameter. */
 function impact(actor: TestContext, role: string) {
+  const param = role.startsWith("srl_") ? "custom_role_id" : "preset_role";
   return app.request(
-    `/api/orgs/${actor.orgId}/personal-space-role/impact?role=${encodeURIComponent(role)}`,
+    `/api/orgs/${actor.orgId}/personal-space-role/impact?${param}=${encodeURIComponent(role)}`,
     { headers: { Cookie: actor.cookie } },
   );
 }
@@ -120,7 +122,7 @@ describe("GET /api/orgs/{orgId}/personal-space-role/impact", () => {
     const other = await createTestContext({ orgSlug: "elsewhere" });
     const foreign = await seedSpaceRole({ orgId: other.orgId, permissions: ["agents:read"] });
     const res = await impact(owner, foreign.id);
-    await expectProblem(res, 404, { code: "not_found", param: "role" });
+    await expectProblem(res, 404, { code: "not_found", param: "custom_role_id" });
   });
 
   it("403s a caller without org:settings", async () => {
@@ -135,5 +137,14 @@ describe("GET /api/orgs/{orgId}/personal-space-role/impact", () => {
       headers: { Cookie: owner.cookie },
     });
     expect(missing.status).toBe(400);
+  });
+
+  it("400s a query naming both references", async () => {
+    const own = await seedSpaceRole({ orgId: owner.orgId });
+    const both = await app.request(
+      `/api/orgs/${owner.orgId}/personal-space-role/impact?preset_role=viewer&custom_role_id=${own.id}`,
+      { headers: { Cookie: owner.cookie } },
+    );
+    expect(both.status).toBe(400);
   });
 });

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from "zustand";
-import { persistedJson } from "./local-storage";
+import { createLocalStore, jsonCodec, type LocalStorageEntry } from "@appstrate/ui/local-storage";
 
 /** A stored width, clamped; anything else (absent, unreadable, not positive) is null = the default. */
 export function parseStoredWidth(value: unknown, clamp: (width: number) => number): number | null {
@@ -9,12 +9,15 @@ export function parseStoredWidth(value: unknown, clamp: (width: number) => numbe
 }
 
 /**
- * A resizable panel's width, remembered per browser under `key` (null = the panel's default).
+ * A resizable panel's width, remembered per browser under `entry` (null = the panel's default).
  * `setLive` follows the pointer during a drag without writing; `commit` stores the final width,
  * rounded, and null resets it. `dragging` lets the layout drop its transitions meanwhile.
  */
-export function createPanelWidthStore(key: string, clamp: (width: number) => number) {
-  const stored = persistedJson(key, (value) => parseStoredWidth(value, clamp));
+export function createPanelWidthStore(entry: LocalStorageEntry, clamp: (width: number) => number) {
+  const stored = createLocalStore(
+    entry,
+    jsonCodec((value) => parseStoredWidth(value, clamp)),
+  );
   return create<{
     width: number | null;
     dragging: boolean;

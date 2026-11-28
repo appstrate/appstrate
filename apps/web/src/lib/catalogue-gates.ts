@@ -47,7 +47,7 @@ export function activationGate(
 }
 
 /**
- * The recipient's removal (`DELETE …/shares/{space}`): a placement someone else put in this space,
+ * The recipient's removal (`DELETE …/shares/{spaceId}`): a placement someone else put in this space,
  * which the caller may switch off there (a personal space's owner always may) — the same verdict
  * as the switch, so no control offers what the server refuses.
  */

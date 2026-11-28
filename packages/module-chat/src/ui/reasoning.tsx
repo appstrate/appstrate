@@ -91,8 +91,8 @@ function titleOf(parts: readonly { type: string; text?: string }[], start: numbe
 }
 
 /**
- * Running = message running ∧ this group is its tail, so the group settles once
- * a text or tool part follows, and on a turn stopped or failed mid-reasoning.
+ * Streaming = the message is running ∧ this group is its last part: it settles once a text or tool
+ * part follows, or when the turn stops or fails.
  */
 export const ReasoningGroup: ReasoningGroupComponent = ({ startIndex, endIndex, children }) => {
   const { t } = useChatHost();

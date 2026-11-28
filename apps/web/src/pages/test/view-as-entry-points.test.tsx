@@ -50,6 +50,7 @@ const header = { "X-Org-Id": ORG_ID };
 function space(): components["schemas"]["SpaceObject"] {
   return {
     object: "space",
+    shows_studio: true,
     id: SPACE_ID,
     orgId: ORG_ID,
     name: "Marketing",

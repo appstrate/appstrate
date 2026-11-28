@@ -4,7 +4,7 @@ import { useId, type ReactNode } from "react";
 import { ArrowLeftIcon, MessageSquareIcon, WrenchIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ConversationToolCall } from "@appstrate/module-chat/conversation-tools";
-import type { ShownCall } from "@appstrate/module-chat/tool-presentation";
+import { subjectIconSrc, type ShownCall } from "@appstrate/module-chat/tool-presentation";
 import { ToolCallDetail } from "@appstrate/module-chat/tool-call-detail";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
@@ -47,7 +47,7 @@ const GLYPH_CLASS = "flex size-8 shrink-0 items-center justify-center rounded-lg
  */
 export function ToolCallIcon({ call, shown }: { call: ConversationToolCall; shown: ShownCall }) {
   if (shown.subject?.kind === "integration") {
-    return <IntegrationIcon src={shown.subject.icon} className="size-4 rounded-sm" />;
+    return <IntegrationIcon src={subjectIconSrc(shown.subject)} className="size-4 rounded-sm" />;
   }
   const { Icon } = shown;
   return <Icon aria-hidden="true" className={cn("size-4", TOOL_STATUS_TONE[call.status])} />;

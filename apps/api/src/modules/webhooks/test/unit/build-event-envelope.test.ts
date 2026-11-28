@@ -12,7 +12,7 @@ describe("buildEventEnvelope", () => {
   it("builds a valid event envelope in full mode", () => {
     const { eventId, payload } = buildEventEnvelope({
       eventType: "run.success",
-      run: {
+      subject: {
         id: "run_123",
         status: "success",
         result: "output data",
@@ -40,7 +40,7 @@ describe("buildEventEnvelope", () => {
     // to the constant means a version bump cannot leave this payload stale.
     const { payload } = buildEventEnvelope({
       eventType: "run.success",
-      run: { id: "run_123", status: "success" },
+      subject: { id: "run_123", status: "success" },
       payloadMode: "full",
     });
 
@@ -50,7 +50,7 @@ describe("buildEventEnvelope", () => {
   it("strips result and input in summary mode", () => {
     const { payload } = buildEventEnvelope({
       eventType: "run.success",
-      run: { id: "run_123", status: "success", result: "output", input: "input" },
+      subject: { id: "run_123", status: "success", result: "output", input: "input" },
       payloadMode: "summary",
     });
 
@@ -66,7 +66,7 @@ describe("buildEventEnvelope", () => {
     // must be able to branch on package.ephemeral without an extra DB call.
     const { payload } = buildEventEnvelope({
       eventType: "run.success",
-      run: {
+      subject: {
         id: "run_123",
         status: "success",
         packageId: "@inline/r-abc",
@@ -82,7 +82,7 @@ describe("buildEventEnvelope", () => {
   it("omits the package marker for classic (non-inline) runs", () => {
     const { payload } = buildEventEnvelope({
       eventType: "run.success",
-      run: { id: "run_123", status: "success", packageId: "@acme/agent" },
+      subject: { id: "run_123", status: "success", packageId: "@acme/agent" },
       payloadMode: "full",
     });
 
@@ -96,7 +96,7 @@ describe("buildEventEnvelope", () => {
     // self-describing. The envelope passes the caller's `object` through.
     const { payload } = buildEventEnvelope({
       eventType: "run.connection_missing",
-      run: {
+      subject: {
         object: "run_attempt",
         packageId: "@acme/agent",
         actor: { type: "user", id: "u1" },
@@ -113,7 +113,7 @@ describe("buildEventEnvelope", () => {
   it("defaults the inner `object` to 'run' when the caller omits it", () => {
     const { payload } = buildEventEnvelope({
       eventType: "run.success",
-      run: { id: "run_xyz", status: "success" },
+      subject: { id: "run_xyz", status: "success" },
       payloadMode: "full",
     });
 
@@ -166,7 +166,7 @@ describe("credential.needs_reconnection body", () => {
     (
       buildEventEnvelope({
         eventType: "credential.needs_reconnection",
-        run: credentialWebhookObject(params),
+        subject: credentialWebhookObject(params),
         payloadMode: "full",
       }).payload as { type: string; data: { object: unknown } }
     ).data.object;

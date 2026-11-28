@@ -12,10 +12,8 @@ import { createStore } from "zustand/vanilla";
 import type { components } from "../api/schema";
 import { queryClient } from "../lib/query-client";
 import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
-import { persistedJson } from "./local-storage";
+import { LOCAL_STORAGE_KEYS, createLocalStore, jsonCodec } from "@appstrate/ui/local-storage";
 import { getCurrentOrgId, orgStore } from "./org-store";
-
-export const STORAGE_KEY = "appstrate_view_as";
 
 /** Banner labels are captured on entry: resolving them later needs reads the preview may forbid. */
 const personaSchema = z.object({
@@ -50,10 +48,12 @@ interface ViewAsState {
 }
 
 const storedPreviewSchema = personaSchema.extend({ returnSpaceId: z.string().min(1).nullable() });
-const persistedPreview = persistedJson(
-  STORAGE_KEY,
-  (value) => (value === null ? null : storedPreviewSchema.safeParse(value).data),
-  () => undefined,
+const persistedPreview = createLocalStore(
+  LOCAL_STORAGE_KEYS.viewAs,
+  jsonCodec(
+    (value) => (value === null ? null : storedPreviewSchema.safeParse(value).data),
+    () => undefined,
+  ),
 );
 
 export function readStoredPreview(): Pick<

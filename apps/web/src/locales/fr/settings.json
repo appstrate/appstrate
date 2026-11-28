@@ -1116,7 +1116,6 @@
   "permissions.resource.spaces": "Espaces",
   "permissions.resource.llm-proxy": "Proxy LLM",
   "permissions.resource.org-integrations": "Intégrations de l’organisation",
-  "permissions.resource.studio": "Studio",
   "permissions.resource.oauth-clients": "Clients OAuth",
   "permissions.resource.org-webhooks": "Webhooks de l’organisation",
   "permissions.resource.billing": "Facturation",

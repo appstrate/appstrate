@@ -18,13 +18,12 @@ import { TableRowActions } from "../../components/table-row-actions";
 import { rowActionsColumn } from "../../components/row-actions-column";
 import { CellEmpty, CellText } from "../../components/table-cells";
 import { useSpaceSeatColumns } from "../../components/space-seat-columns";
-import type { RoleObject, SpaceRoleOption } from "../../hooks/use-roles";
+import type { SpaceRoleOption } from "../../hooks/use-roles";
 import { memberLabel } from "../../lib/members";
 import type { SpaceMemberObject } from "../../hooks/use-space-members";
 
 export function useSpaceMemberColumns({
   editable,
-  roles,
   roleOptions,
   isChangingRole,
   onChangeRole,
@@ -35,7 +34,6 @@ export function useSpaceMemberColumns({
 }: {
   /** Whether this row's role is the caller's to change. */
   editable: (member: SpaceMemberObject) => boolean;
-  roles: RoleObject[] | undefined;
   roleOptions: SpaceRoleOption[];
   isChangingRole: boolean;
   onChangeRole: (member: SpaceMemberObject, value: string) => void;
@@ -50,7 +48,6 @@ export function useSpaceMemberColumns({
     seat: (member) => member,
     seatName: memberLabel,
     editable,
-    roles,
     roleOptions,
     isChangingRole,
     onChangeRole,
