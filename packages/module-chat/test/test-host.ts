@@ -9,7 +9,7 @@ import type { ChatHost } from "../src/ui/runtime-context.ts";
 export function testHost(overrides: Partial<ChatHost> = {}): ChatHost {
   return {
     openFile: () => {},
-    openRun: () => {},
+    openThreadItem: () => {},
     useFileImageSrc: () => null,
     t: (key) => key,
     can: () => true,

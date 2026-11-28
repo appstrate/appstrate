@@ -52,7 +52,7 @@ import type {
   ChatTranslate,
   ChatTransport,
   OpenFile,
-  OpenRun,
+  OpenThreadItem,
   SelectConversation,
   UploadFile,
   UseFileImageSrc,
@@ -66,9 +66,10 @@ export type {
   GetHeaders,
   OpenFile,
   OpenFileTarget,
-  OpenRun,
+  OpenThreadItem,
   RenderSpaces,
   SelectConversation,
+  ThreadItem,
 } from "./runtime-context.ts";
 export { ChatConversationList, ChatConversationRenameButton } from "./thread-list.tsx";
 export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
@@ -192,8 +193,8 @@ export interface ChatPageProps {
    * to deep tool UIs via context, not props.
    */
   onOpenFile: OpenFile;
-  /** Shows a run of the conversation in the host's panel (see `OpenRun`). Pass a stable function. */
-  onOpenRun: OpenRun;
+  /** Shows a call or a run in the host's panel (see `OpenThreadItem`). Pass a stable function. */
+  onOpenThreadItem: OpenThreadItem;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
    * `runtime-context.ts`): the authenticated image
@@ -237,7 +238,7 @@ export function ChatPage({
   initialComposerDraft,
   onConversationChange,
   onOpenFile,
-  onOpenRun,
+  onOpenThreadItem,
   useFileImageSrc,
   uploadFile,
   t,
@@ -353,7 +354,7 @@ export function ChatPage({
   const host = useMemo<ChatHost>(
     () => ({
       openFile: onOpenFile,
-      openRun: onOpenRun,
+      openThreadItem: onOpenThreadItem,
       useFileImageSrc,
       t,
       can,
@@ -375,7 +376,7 @@ export function ChatPage({
     }),
     [
       onOpenFile,
-      onOpenRun,
+      onOpenThreadItem,
       useFileImageSrc,
       t,
       can,

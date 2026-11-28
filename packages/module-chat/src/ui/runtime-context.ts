@@ -126,11 +126,21 @@ export type OpenFile = (file: OpenFileTarget) => void;
 export type OpenFileTarget = { id: string; name: string; spaceId?: string } | { local: File };
 
 /**
- * Shows a run a conversation launched in the host's context panel, open on its line, where its
- * result, files and log follow it live. The thread's run card opens it on a click: the module owns
- * no run detail of its own, as it owns no file viewer.
+ * What the thread names and the host's context panel details: a tool call, by its call id, or a
+ * run a conversation launched, by its run id. The panel locates it back in the thread by the same
+ * shape (`reveal-tool-call.ts`).
  */
-export type OpenRun = (run: { id: string }) => void;
+export interface ThreadItem {
+  kind: "call" | "run";
+  id: string;
+}
+
+/**
+ * Shows a thread item in the host's context panel, open on its line: a call's input and output, a
+ * run's result, files and log, followed live. The thread's call lines and run cards open theirs on
+ * a click: the module owns no detail of its own, as it owns no file viewer.
+ */
+export type OpenThreadItem = (item: ThreadItem) => void;
 
 /**
  * The host's authenticated image-preview hook: a stored file id → an object
@@ -173,7 +183,7 @@ export type ChatTranslate = (key: string, params?: Record<string, string | numbe
  */
 export interface ChatHost {
   openFile: OpenFile;
-  openRun: OpenRun;
+  openThreadItem: OpenThreadItem;
   useFileImageSrc: UseFileImageSrc;
   t: ChatTranslate;
   can: ChatCan;

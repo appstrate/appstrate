@@ -3,7 +3,8 @@
 import { useRef, useState, type Dispatch, type ReactNode } from "react";
 import { FilesIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { revealRun, revealToolCall } from "@appstrate/module-chat/reveal-tool-call";
+import { revealThreadItem } from "@appstrate/module-chat/reveal-tool-call";
+import type { ThreadItem } from "@appstrate/module-chat/ui";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
@@ -33,7 +34,6 @@ import {
   type ConversationSidebarState,
   type ConversationSidebarTab,
   type LocalSidebarFile,
-  type RevealTarget,
   type SidebarFile,
   type SidebarOrigin,
   type StoredSidebarFile,
@@ -217,7 +217,7 @@ function ConversationContext({
   /** The phone's sheet has no header toggle beside it: it carries its own close. */
   closable: boolean;
   /** "See in the thread": bring a call's or a run's card into view, where the panel leaves room for it. */
-  onShowInThread: (target: RevealTarget) => void;
+  onShowInThread: (item: ThreadItem) => void;
 }) {
   // The desktop column stays mounted while closed (for its transition): its
   // reads wait until it is open. The phone's sheet unmounts its content when closed.
@@ -291,7 +291,11 @@ function ConversationContext({
                 openRunId={openRunId(state)}
                 missing={revealMissed(state)}
                 onOpenChange={(run, open) =>
-                  dispatch(open ? { type: "show-run", runId: run.id } : { type: "close-run" })
+                  dispatch(
+                    open
+                      ? { type: "show-item", item: { kind: "run", id: run.id } }
+                      : { type: "close-item" },
+                  )
                 }
                 onShowInThread={(run) => onShowInThread({ kind: "run", id: run.id })}
                 onSelectFile={(file) => dispatch({ type: "show-file", file, from: "runs" })}
@@ -315,8 +319,8 @@ function ConversationContext({
                 onOpenChange={(call, open) =>
                   dispatch(
                     open
-                      ? { type: "show-tool-call", toolCallId: call.toolCallId }
-                      : { type: "close-tool-call" },
+                      ? { type: "show-item", item: { kind: "call", id: call.toolCallId } }
+                      : { type: "close-item" },
                   )
                 }
                 onShowInThread={(call) => onShowInThread({ kind: "call", id: call.toolCallId })}
@@ -353,23 +357,21 @@ export function ConversationSidebar({
   const panelRef = useRef<HTMLElement>(null);
   const [dragging, setDragging] = useState(false);
   // The card "See in the thread" waits to reveal until the phone's sheet has closed.
-  const pendingReveal = useRef<RevealTarget | null>(null);
+  const pendingReveal = useRef<ThreadItem | null>(null);
   const { activeTab } = useConversationTabs(state.activeTab);
-  const reveal = (target: RevealTarget) => {
-    const found =
-      target.kind === "run" ? revealRun(target.id) : revealToolCall({ toolCallId: target.id });
+  const reveal = (item: ThreadItem) => {
     // Missed, the panel opens again on the call or the run to say so.
-    dispatch({ type: "revealed", target, found });
+    dispatch({ type: "revealed", item, found: revealThreadItem(item) });
   };
-  const showInThread = (target: RevealTarget) => {
+  const showInThread = (item: ThreadItem) => {
     if (desktop) {
       // The panel floats beside the thread: the card is revealed in place.
-      reveal(target);
+      reveal(item);
       return;
     }
     // The phone's sheet covers the thread: it closes first, and the card is revealed once it has,
     // in place of the focus the sheet would give back to its trigger (`finalFocus`).
-    pendingReveal.current = target;
+    pendingReveal.current = item;
     dispatch({ type: "toggle" });
   };
   // The summary takes a little more than a list; a call opening on its line resizes nothing.
@@ -446,11 +448,11 @@ export function ConversationSidebar({
             showCloseButton={false}
             className="bg-canvas flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
             finalFocus={() => {
-              const target = pendingReveal.current;
-              if (!target) return true;
+              const item = pendingReveal.current;
+              if (!item) return true;
               pendingReveal.current = null;
               // The revealed card takes the focus, not the toggle that opened the sheet.
-              reveal(target);
+              reveal(item);
               return false;
             }}
           >

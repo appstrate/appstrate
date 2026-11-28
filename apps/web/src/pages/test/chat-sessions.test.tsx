@@ -15,6 +15,7 @@ import {
   ChatHostProvider,
   type ChatHost,
   type ChatTransport,
+  type ThreadItem,
 } from "../../../../../packages/module-chat/src/ui/runtime-context.ts";
 import { FileAttachment } from "../../../../../packages/module-chat/src/ui/file-attachment.tsx";
 import { ChatRunProgressCard } from "../../../../../packages/module-chat/src/ui/chat-run-progress-card.tsx";
@@ -86,7 +87,7 @@ function renderConversationList(qc: QueryClient, can: (permission: string) => bo
 function hostWith(granted: string[]): ChatHost {
   return {
     openFile: () => {},
-    openRun: () => {},
+    openThreadItem: () => {},
     useFileImageSrc: () => "blob:thumbnail",
     t: (key) => key,
     can: (permission) => granted.includes(permission),
@@ -267,7 +268,7 @@ describe("chat run card", () => {
   }
 
   it("opens its run in the host's panel on a click", () => {
-    const opened: { id: string }[] = [];
+    const opened: ThreadItem[] = [];
     function Probe() {
       const tree = ChatRunProgressCard({
         runId: "run_1",
@@ -281,11 +282,13 @@ describe("chat run card", () => {
       return null;
     }
     render(
-      <ChatHostProvider value={{ ...hostWith(["runs:read"]), openRun: (run) => opened.push(run) }}>
+      <ChatHostProvider
+        value={{ ...hostWith(["runs:read"]), openThreadItem: (item) => opened.push(item) }}
+      >
         <Probe />
       </ChatHostProvider>,
     );
-    expect(opened).toEqual([{ id: "run_1" }]);
+    expect(opened).toEqual([{ kind: "run", id: "run_1" }]);
   });
 
   it("is no button on a launch failure: no run to open, its message on the card", () => {

@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { AgentListItem, EnrichedRun } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
 import { RunStatusBadge } from "./status-badge";
 import { RunIdentity } from "./run-identity";
-import { useRunPageHref, type RunPageTarget } from "../hooks/use-run-page-href";
+import { useRunPageHref } from "../hooks/use-run-page-href";
 import { SpaceNameOf } from "./space-name";
 
 /**
@@ -29,6 +28,8 @@ export function RunRow({
   /** « Tous les espaces »: the row names its run's space. */
   spanning?: boolean;
 }) {
+  const href = useRunPageHref(run);
+  const className = "flex min-h-16 items-center gap-3 px-4 py-3";
   const content = (
     <>
       <RunIdentity run={run} agent={{ name: agentName, identity: agent }} />
@@ -36,38 +37,16 @@ export function RunRow({
       <RunStatusBadge status={run.status} unread={run.unread} />
     </>
   );
-
-  return (
-    <RunLink run={run} className="flex min-h-16 items-center gap-3 px-4 py-3">
-      {content}
-    </RunLink>
-  );
-}
-
-/**
- * A run's row, whatever it draws of the run: the run's link ({@link useRunPageHref}), hovering like
- * a list row, else a plain row.
- */
-export function RunLink({
-  run,
-  className,
-  children,
-}: {
-  run: RunPageTarget & Pick<EnrichedRun, "runNumber">;
-  className: string;
-  children: ReactNode;
-}) {
-  const href = useRunPageHref(run);
   return href ? (
     <Link
       to={href}
       state={{ runNumber: run.runNumber }}
       className={cn(className, "hover:bg-muted/50 transition-colors")}
     >
-      {children}
+      {content}
     </Link>
   ) : (
-    <div className={className}>{children}</div>
+    <div className={className}>{content}</div>
   );
 }
 

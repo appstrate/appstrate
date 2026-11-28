@@ -21,7 +21,7 @@ import {
   SelectConversationProvider,
   type AttachTarget,
   type OpenFile,
-  type OpenRun,
+  type OpenThreadItem,
 } from "@appstrate/module-chat/ui";
 import { bindChatPreferencesUser } from "@appstrate/module-chat/preferences";
 import { useAuth } from "../../hooks/use-auth";
@@ -143,9 +143,9 @@ export function ChatModulePage() {
       }),
     [],
   );
-  // A run the thread's card opens shows in the Runs tab, open on its line.
-  const presentRun = useCallback<OpenRun>(
-    (run) => dispatchSidebar({ type: "show-run", runId: run.id }),
+  // A call or a run the thread opens shows on its line of its tab: Tools or Runs.
+  const presentThreadItem = useCallback<OpenThreadItem>(
+    (item) => dispatchSidebar({ type: "show-item", item }),
     [],
   );
   // A picked file's object URL lives while the panel holds it. The panel starts empty, so
@@ -201,7 +201,7 @@ export function ChatModulePage() {
             initialComposerDraft={initialComposerDraft}
             onConversationChange={onConversationChange}
             onOpenFile={presentFile}
-            onOpenRun={presentRun}
+            onOpenThreadItem={presentThreadItem}
             useFileImageSrc={useFileImageSrc}
             uploadFile={uploadFile}
             t={translate}

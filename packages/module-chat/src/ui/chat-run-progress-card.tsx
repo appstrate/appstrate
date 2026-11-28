@@ -18,7 +18,7 @@
  * `run.running` once running; once terminal it settles on the final outcome (a failed
  * or timed-out run's own error message when it carries one). The live execution time and a
  * link to the run's page sit on the right. Clicking
- * the card opens the run in the host's context panel (`openRun`), where its result, files and log
+ * the card opens the run in the host's context panel (`openThreadItem`), where its result, files and log
  * follow it; the launch call's raw input and output stay in the panel's Tools tab.
  *
  * Before the tool returns a `run_…` id there is no SSE yet: the badge falls back to the tool-call phase.
@@ -216,7 +216,7 @@ export function ChatRunProgressCard({
   // every chunk, and the filter walked the whole log array each time.
   const visible = React.useMemo(() => visibleLogEntries(logs), [logs]);
   const current = useLogTicker(visible);
-  const { lang, openFile, openRun, t, linkInSpace } = useChatHost();
+  const { lang, openFile, openThreadItem, t, linkInSpace } = useChatHost();
   // A card that mounted already complete belongs to history: never let N old
   // runs fight over the panel. A card mounted for a live call presents through
   // the exact same host opener as a direct file click.
@@ -284,7 +284,7 @@ export function ChatRunProgressCard({
           type="button"
           aria-label={t("run.details")}
           className="hover:bg-muted/50 absolute inset-0 z-0 rounded-lg"
-          onClick={() => openRun({ id: runId })}
+          onClick={() => openThreadItem({ kind: "run", id: runId })}
         />
       ) : null}
       <RunLine

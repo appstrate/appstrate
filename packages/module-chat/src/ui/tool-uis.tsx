@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The chat agent's MCP tool calls in the thread. A call is a step of its activity group
- * (`ToolStep`): a line with what it acted on, its name, its target, then its duration and, when
- * it failed, a small red cross. Its full (technical) input / output opens under the line as raw
- * JSON: parsing arbitrary API payloads into a field table reads worse than monospace JSON, and
- * JSON keeps every field intact.
+ * The chat agent's MCP tool calls in the thread. A call is a line (`ThreadCallLine`): what it
+ * acted on, its name, its target, then its duration and, when it failed, a small red cross. The
+ * thread names, the context panel details: clicking the line opens the call there, its input and
+ * output with it. The line is a step under its group's rail (`ToolStep`), or the group's own line
+ * when the call is its one step.
  *
  * A failure is softened, never hidden: its message stays under the line, muted, and the cross
- * ends the line; the HTTP status is in the call's detail. Tone is driven by the actual result
+ * ends the line, named with the HTTP status. Tone is driven by the actual result
  * (`deriveToolPhase`), not the verb.
  *
  * What a call must keep in view whatever its group's fold is drawn under the group's line
@@ -22,14 +22,12 @@ import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { ArrowUpRightIcon } from "lucide-react";
 import { formatDuration } from "@appstrate/core/format";
 import { useChatHost } from "./runtime-context.ts";
-import { ToolCallDetail } from "./tool-call-detail.tsx";
 import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
 import { CallSpace } from "./call-space.tsx";
-import { ActivityId, ActivityLine } from "./activity-line.tsx";
-import { CallStep } from "./call-step.tsx";
-import { useActivityMode } from "./activity-mode.ts";
+import { ActivityId, ActivityLine, ActivityTrigger } from "./activity-line.tsx";
+import { CallLine, CallName } from "./call-step.tsx";
 import {
   extractAgentLabel,
   extractRunFiles,
@@ -54,12 +52,7 @@ import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { showCall } from "./tool-presentation.ts";
 import { cardSpaceOf, type StoredResult } from "./use-call-presentation.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
-import {
-  definedEntries,
-  deriveToolPhase,
-  extractErrorMessage,
-  httpStatusOf,
-} from "./tool-result.ts";
+import { deriveToolPhase, extractErrorMessage, httpStatusOf } from "./tool-result.ts";
 
 /**
  * `invoke_operation` operationId that kicks off an integration connect flow.
@@ -135,76 +128,104 @@ function RunLaunchCard({
 /** `invoke_operation`'s arguments, as its cards read them. */
 type InvokeOperationArgs = { operation_id?: string; path_params?: { packageId?: string } };
 
+/** A call as its thread line reads it: the assistant-ui part, and what its stored part says. */
+type LineCall = Parameters<typeof deriveToolPhase>[0] & {
+  readonly toolCallId: string;
+  readonly timing?: unknown;
+  readonly providerMetadata?: unknown;
+  readonly stored?: StoredResult | undefined;
+};
+
 /**
- * A tool call as a step of its activity group: named as the context panel names it (`showCall`),
- * with what a search found beside it. Its label shimmers while it runs; its detail opens under
- * it. The group's one step has no line of its own (`bare`): the group's header names it, and
- * opening the group opens on what follows the label and the detail.
+ * A call's line in the thread: its name is a button opening the call in the context panel, which
+ * holds its input and output (the thread names, the panel details). What a search found, the space
+ * and the duration follow it; a failure ends it with its cross, its message under it. `clock`: the
+ * line is its group's, the turn's status while the turn runs; the turn's clock ("" until its first
+ * tick) stands for what the call says after its name.
  */
-export function ToolStep(props: ToolCardProps) {
-  const { t, lang } = useChatHost();
-  const anchor = useRevealAnchor(props.toolCallId);
-  const solo = useActivityMode()?.solo ?? false;
-  const [readerOpen, setReaderOpen] = React.useState(false);
-  const presentation = props.stored?.presentation;
-  const phase = deriveToolPhase(props);
-  const { Icon, subject, label, idText } = showCall({ ...props, presentation }, t);
+export function ThreadCallLine({
+  call,
+  lead,
+  label,
+  idText,
+  running,
+  clock,
+}: {
+  call: LineCall;
+  lead: React.ReactNode;
+  label: string;
+  idText?: string | undefined;
+  running: boolean;
+  clock?: string | undefined;
+}) {
+  const { t, lang, openThreadItem } = useChatHost();
+  const anchor = useRevealAnchor(call.toolCallId);
+  const presentation = call.stored?.presentation;
   // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on every render of
-  // this step, and during a stream the thread re-renders per chunk.
-  const unwrapped = React.useMemo(() => unwrapMcpResult(props.result), [props.result]);
+  // this line, and during a stream the thread re-renders per chunk.
+  const unwrapped = React.useMemo(() => unwrapMcpResult(call.result), [call.result]);
+  const failed = deriveToolPhase(call) === "error";
   const status = httpStatusOf(unwrapped);
-  const durationMs = readDurationMs(props.timing);
-  const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
-  const spaceId = cardSpaceOf(props);
+  const durationMs = readDurationMs(call.timing);
+  const spaceId = cardSpaceOf(call);
 
   return (
-    <CallStep
-      {...anchor}
-      bare={solo}
-      open={readerOpen}
-      onOpenChange={setReaderOpen}
-      className={`rounded-sm ${REVEAL_RING_CLASS}`}
+    <div {...anchor} className={`rounded-sm ${REVEAL_RING_CLASS}`}>
+      <CallLine
+        lead={lead}
+        control={
+          <ActivityTrigger onClick={() => openThreadItem({ kind: "call", id: call.toolCallId })}>
+            <CallName label={label} idText={idText} running={running} />
+          </ActivityTrigger>
+        }
+        trailing={
+          clock !== undefined ? (
+            clock ? (
+              <span className="shrink-0 tabular-nums">{clock}</span>
+            ) : null
+          ) : (
+            <>
+              {presentation?.count !== undefined ? (
+                <span className="flex shrink-0 items-center gap-1.5 text-xs">
+                  <SubjectStack subjects={presentation.items ?? []} />
+                  {t("tool.search.count", { count: presentation.count })}
+                </span>
+              ) : null}
+              <CallSpace spaceId={spaceId} />
+              {durationMs !== undefined ? (
+                <span className="shrink-0 text-xs tabular-nums">
+                  {formatDuration(durationMs, lang)}
+                </span>
+              ) : null}
+            </>
+          )
+        }
+        failure={
+          failed
+            ? { label: status === undefined ? t("tool.failed") : t("tool.failedHttp", { status }) }
+            : undefined
+        }
+        errorText={failed ? extractErrorMessage(unwrapped) : undefined}
+      />
+    </div>
+  );
+}
+
+/** A tool call as a step under its activity group's rail, named as the context panel names it. */
+export function ToolStep(props: ToolCardProps) {
+  const { t } = useChatHost();
+  const { Icon, subject, label, idText } = showCall(
+    { ...props, presentation: props.stored?.presentation },
+    t,
+  );
+  return (
+    <ThreadCallLine
+      call={props}
       lead={subject ? <SubjectGlyph subject={subject} /> : <Icon aria-hidden />}
       label={label}
       idText={idText}
-      running={phase === "running"}
-      trailing={
-        presentation?.count !== undefined || spaceId || durationMs !== undefined ? (
-          <>
-            {presentation?.count !== undefined ? (
-              <span className="flex shrink-0 items-center gap-1.5 text-xs">
-                <SubjectStack subjects={presentation.items ?? []} />
-                {t("tool.search.count", { count: presentation.count })}
-              </span>
-            ) : null}
-            <CallSpace spaceId={spaceId} />
-            {durationMs !== undefined ? (
-              <span className="shrink-0 text-xs tabular-nums">
-                {formatDuration(durationMs, lang)}
-              </span>
-            ) : null}
-          </>
-        ) : undefined
-      }
-      failure={
-        phase === "error"
-          ? { label: status === undefined ? t("tool.failed") : t("tool.failedHttp", { status }) }
-          : undefined
-      }
-      errorText={errorMsg}
-    >
-      <ToolCallDetail
-        t={t}
-        input={props.args}
-        output={unwrapped}
-        metadata={definedEntries({
-          tool_call_id: props.toolCallId,
-          is_error: props.isError,
-          http_status: status,
-          duration_ms: durationMs,
-        })}
-      />
-    </CallStep>
+      running={deriveToolPhase(props) === "running"}
+    />
   );
 }
 

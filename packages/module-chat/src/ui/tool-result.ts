@@ -144,15 +144,3 @@ export function extractErrorMessage(unwrapped: unknown): string | undefined {
   }
   return undefined;
 }
-
-/** Pick the defined entries of a record (drops undefined/null) for display. */
-export function definedEntries(
-  source: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  if (!source) return out;
-  for (const [k, v] of Object.entries(source)) {
-    if (v !== undefined && v !== null) out[k] = v;
-  }
-  return out;
-}

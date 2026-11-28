@@ -360,7 +360,7 @@ function SummaryRunLine({
     <button
       type="button"
       className={BUTTON_LINE_CLASS}
-      onClick={() => dispatch({ type: "show-run", runId: run.id })}
+      onClick={() => dispatch({ type: "show-item", item: { kind: "run", id: run.id } })}
     >
       <SummaryLine
         bareIcon
@@ -397,7 +397,7 @@ function CallLine({
     <button
       type="button"
       className={BUTTON_LINE_CLASS}
-      onClick={() => dispatch({ type: "show-tool-call", toolCallId: call.toolCallId })}
+      onClick={() => dispatch({ type: "show-item", item: { kind: "call", id: call.toolCallId } })}
     >
       <SummaryLine
         icon={<ToolCallIcon shown={shown} />}

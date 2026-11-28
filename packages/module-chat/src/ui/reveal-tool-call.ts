@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bring a tool call's card, or a run's, into view in the thread, from the context panel: a call's
- * activity group opens (a folded one does not mount its cards) and the card is ringed while it
- * holds the focus. A run's card is drawn whatever its group's fold, so no group opens for it.
+ * Bring a tool call's line, or a run's card, into view in the thread, from the context panel: a
+ * call's activity group opens (a folded one does not mount its steps; a lone call is the group's
+ * line) and the anchored element is ringed while it holds the focus. A run's card is drawn
+ * whatever its group's fold, so no group opens for it.
  */
 
 import * as React from "react";
 import { flushSync } from "react-dom";
+import type { ThreadItem } from "./runtime-context.ts";
 
 interface RevealState {
   /** Calls whose group was opened for them, until the reader folds it. */
@@ -66,12 +68,14 @@ export function useRevealAnchor(toolCallId: string | undefined, runId?: string) 
   };
 }
 
-/** True only when the card took the focus; false when the thread draws none for it. */
-function revealCard(attribute: string, id: string, opened: ReadonlySet<string>): boolean {
+/** True only when the item's element took the focus; false when the thread draws none for it. */
+export function revealThreadItem({ kind, id }: ThreadItem): boolean {
   const thread = document.querySelector("[data-chat-thread]");
   if (!thread) return false;
-  // Synchronous, so an opened group's card is on the page below.
+  // A call's group opens for it. Synchronous, so the opened group's line is on the page below.
+  const opened = kind === "call" ? new Set(state.opened).add(id) : state.opened;
   flushSync(() => write({ opened, marked: id }));
+  const attribute = kind === "call" ? "data-tool-call-id" : "data-run-id";
   const card = thread.querySelector<HTMLElement>(`[${attribute}="${CSS.escape(id)}"]`);
   if (!card) {
     write({ ...state, marked: null });
@@ -81,16 +85,4 @@ function revealCard(attribute: string, id: string, opened: ReadonlySet<string>):
   const control = card.querySelector<HTMLElement>("button, a[href]");
   (control ?? card).focus({ preventScroll: true });
   return card.contains(document.activeElement);
-}
-
-export function revealToolCall(call: { toolCallId: string }): boolean {
-  return revealCard(
-    "data-tool-call-id",
-    call.toolCallId,
-    new Set(state.opened).add(call.toolCallId),
-  );
-}
-
-export function revealRun(runId: string): boolean {
-  return revealCard("data-run-id", runId, state.opened);
 }

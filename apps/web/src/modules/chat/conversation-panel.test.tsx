@@ -24,6 +24,8 @@ const { ConversationSummary } = await import("./conversation-summary.tsx");
 const { ConversationFiles } = await import("./conversation-sidebar.tsx");
 const { ConversationRuns } = await import("./conversation-runs-tab.tsx");
 const { ConversationToolsList } = await import("./conversation-tools-tab.tsx");
+const { INITIAL_CONVERSATION_SIDEBAR_STATE, conversationSidebarReducer, openToolCallId } =
+  await import("./conversation-sidebar-state.ts");
 const { publishLiveConversation, withdrawLiveConversation } =
   await import("@appstrate/module-chat/live-conversation");
 const { ChatTransportProvider } = await import("@appstrate/module-chat/ui");
@@ -467,6 +469,20 @@ describe("the Tools tab, open", () => {
     });
     expect(rowsOf(html)).toBe(2);
     expect(html).toContain('aria-expanded="true"');
+  });
+
+  it("lists and opens a hidden lookup the thread opened, as one opened from the summary", () => {
+    // The thread's line opens its call through the host, mapped to the reducer's one action.
+    const state = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-item",
+      item: { kind: "call", id: "call_l1" },
+    });
+    expect(state).toMatchObject({ expanded: true, activeTab: "tools", showLookups: false });
+    const html = tools([[toolPart("call_a"), toolPart("call_l1", { lookup: true })]], {
+      openToolCallId: openToolCallId(state),
+    });
+    expect(rowsOf(html)).toBe(2);
+    expect(html.split('aria-expanded="true"').length - 1).toBe(1);
   });
 
   it("lists the calls under their turn", () => {

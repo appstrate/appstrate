@@ -125,8 +125,8 @@ describe("conversation sidebar state", () => {
 
   it("closes a file opened from an open run back to the Runs tab, the run still open", () => {
     const run = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-run",
-      runId: "run_1",
+      type: "show-item",
+      item: { kind: "run", id: "run_1" },
     });
     const fromRun = conversationSidebarReducer(run, {
       type: "show-file",
@@ -175,13 +175,13 @@ describe("conversation sidebar state", () => {
 describe("conversation sidebar tool calls", () => {
   it("opens a call on its line of the Tools tab and folds it back, the list staying", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-tool-call",
-      toolCallId: "call_1",
+      type: "show-item",
+      item: { kind: "call", id: "call_1" },
     });
     expect(open).toMatchObject({ expanded: true, activeTab: "tools" });
     expect(openToolCallId(open)).toBe("call_1");
 
-    const folded = conversationSidebarReducer(open, { type: "close-tool-call" });
+    const folded = conversationSidebarReducer(open, { type: "close-item" });
     expect(folded).toMatchObject({ expanded: true, activeTab: "tools" });
     expect(openToolCallId(folded)).toBeNull();
   });
@@ -192,29 +192,27 @@ describe("conversation sidebar tool calls", () => {
       tab: "summary",
     });
     const fromSummary = conversationSidebarReducer(onSummary, {
-      type: "show-tool-call",
-      toolCallId: "call_1",
+      type: "show-item",
+      item: { kind: "call", id: "call_1" },
     });
     expect(fromSummary).toMatchObject({ expanded: true, activeTab: "tools" });
     expect(openToolCallId(fromSummary)).toBe("call_1");
 
     // Folding it stays on the list it opened on.
-    expect(conversationSidebarReducer(fromSummary, { type: "close-tool-call" }).activeTab).toBe(
-      "tools",
-    );
+    expect(conversationSidebarReducer(fromSummary, { type: "close-item" }).activeTab).toBe("tools");
 
     // Opening another folds the first.
     const other = conversationSidebarReducer(fromSummary, {
-      type: "show-tool-call",
-      toolCallId: "call_2",
+      type: "show-item",
+      item: { kind: "call", id: "call_2" },
     });
     expect(openToolCallId(other)).toBe("call_2");
   });
 
   it("holds the open call only while the Tools tab shows", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-tool-call",
-      toolCallId: "call_1",
+      type: "show-item",
+      item: { kind: "call", id: "call_1" },
     });
     expect(openToolCallId({ ...open, activeTab: "summary" })).toBeNull();
   });
@@ -226,10 +224,10 @@ describe("conversation sidebar tool calls", () => {
     });
     expect(shown.showLookups).toBe(true);
     const open = conversationSidebarReducer(shown, {
-      type: "show-tool-call",
-      toolCallId: "call_1",
+      type: "show-item",
+      item: { kind: "call", id: "call_1" },
     });
-    const folded = conversationSidebarReducer(open, { type: "close-tool-call" });
+    const folded = conversationSidebarReducer(open, { type: "close-item" });
     expect(folded.showLookups).toBe(true);
     const elsewhere = conversationSidebarReducer(folded, { type: "select-tab", tab: "summary" });
     const reopened = conversationSidebarReducer(
@@ -244,8 +242,8 @@ describe("conversation sidebar tool calls", () => {
 
   it("folds the open call on a tab choice, a reopening and a conversation change", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-tool-call",
-      toolCallId: "call_1",
+      type: "show-item",
+      item: { kind: "call", id: "call_1" },
     });
     const tab = conversationSidebarReducer(open, { type: "select-tab", tab: "tools" });
     expect(openToolCallId(tab)).toBeNull();
@@ -260,14 +258,14 @@ describe("conversation sidebar tool calls", () => {
 
   it("leaves the panel as it is when the thread holds the call's card", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-tool-call",
-      toolCallId: "call_1",
+      type: "show-item",
+      item: { kind: "call", id: "call_1" },
     });
     // The phone's sheet closed to show the card, and the card was there.
     const closed = conversationSidebarReducer(open, { type: "toggle" });
     const found = conversationSidebarReducer(closed, {
       type: "revealed",
-      target: { kind: "call", id: "call_1" },
+      item: { kind: "call", id: "call_1" },
       found: true,
     });
     expect(found.expanded).toBe(false);
@@ -276,13 +274,13 @@ describe("conversation sidebar tool calls", () => {
 
   it("opens again on the Tools list, the call open and saying so, when the thread does not hold its card", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-tool-call",
-      toolCallId: "call_1",
+      type: "show-item",
+      item: { kind: "call", id: "call_1" },
     });
     const closed = conversationSidebarReducer(open, { type: "toggle" });
     const missed = conversationSidebarReducer(closed, {
       type: "revealed",
-      target: { kind: "call", id: "call_1" },
+      item: { kind: "call", id: "call_1" },
       found: false,
     });
     expect(missed).toMatchObject({ expanded: true, activeTab: "tools" });
@@ -291,49 +289,53 @@ describe("conversation sidebar tool calls", () => {
 
     // Another call, or the call folded, no longer carry the miss.
     const other = conversationSidebarReducer(missed, {
-      type: "show-tool-call",
-      toolCallId: "call_2",
+      type: "show-item",
+      item: { kind: "call", id: "call_2" },
     });
     expect(revealMissed(other)).toBe(false);
-    expect(revealMissed(conversationSidebarReducer(missed, { type: "close-tool-call" }))).toBe(
-      false,
-    );
+    expect(revealMissed(conversationSidebarReducer(missed, { type: "close-item" }))).toBe(false);
   });
 });
 
 describe("conversation sidebar runs", () => {
   it("opens a run on its line of the Runs tab, from the thread's card too, and folds it back", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-run",
-      runId: "run_1",
+      type: "show-item",
+      item: { kind: "run", id: "run_1" },
     });
     expect(open).toMatchObject({ expanded: true, activeTab: "runs" });
     expect(openRunId(open)).toBe("run_1");
 
     // Opening another folds the first.
-    const other = conversationSidebarReducer(open, { type: "show-run", runId: "run_2" });
+    const other = conversationSidebarReducer(open, {
+      type: "show-item",
+      item: { kind: "run", id: "run_2" },
+    });
     expect(openRunId(other)).toBe("run_2");
 
-    const folded = conversationSidebarReducer(other, { type: "close-run" });
+    const folded = conversationSidebarReducer(other, { type: "close-item" });
     expect(folded).toMatchObject({ expanded: true, activeTab: "runs" });
     expect(openRunId(folded)).toBeNull();
   });
 
   it("holds the open run only while the Runs tab shows, apart from the open call", () => {
     const run = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-run",
-      runId: "run_1",
+      type: "show-item",
+      item: { kind: "run", id: "run_1" },
     });
     expect(openRunId({ ...run, activeTab: "tools" })).toBeNull();
-    const call = conversationSidebarReducer(run, { type: "show-tool-call", toolCallId: "call_1" });
+    const call = conversationSidebarReducer(run, {
+      type: "show-item",
+      item: { kind: "call", id: "call_1" },
+    });
     expect(openToolCallId(call)).toBe("call_1");
     expect(openRunId(call)).toBeNull();
   });
 
   it("folds the open run on a tab choice, a reopening and a conversation change", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-run",
-      runId: "run_1",
+      type: "show-item",
+      item: { kind: "run", id: "run_1" },
     });
     expect(openRunId(conversationSidebarReducer(open, { type: "select-tab", tab: "runs" }))).toBe(
       null,
@@ -346,25 +348,43 @@ describe("conversation sidebar runs", () => {
 
   it("opens again on the Runs list, the run open and saying so, when the thread does not hold its card", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-run",
-      runId: "run_1",
+      type: "show-item",
+      item: { kind: "run", id: "run_1" },
     });
     const closed = conversationSidebarReducer(open, { type: "toggle" });
     const found = conversationSidebarReducer(closed, {
       type: "revealed",
-      target: { kind: "run", id: "run_1" },
+      item: { kind: "run", id: "run_1" },
       found: true,
     });
     expect(found.expanded).toBe(false);
 
     const missed = conversationSidebarReducer(closed, {
       type: "revealed",
-      target: { kind: "run", id: "run_1" },
+      item: { kind: "run", id: "run_1" },
       found: false,
     });
     expect(missed).toMatchObject({ expanded: true, activeTab: "runs" });
     expect(openRunId(missed)).toBe("run_1");
     expect(revealMissed(missed)).toBe(true);
-    expect(revealMissed(conversationSidebarReducer(missed, { type: "close-run" }))).toBe(false);
+    expect(revealMissed(conversationSidebarReducer(missed, { type: "close-item" }))).toBe(false);
+  });
+});
+
+describe("conversation sidebar items", () => {
+  it("holds one item open at a time, a call or a run, each on its own tab", () => {
+    const call = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-item",
+      item: { kind: "call", id: "call_1" },
+    });
+    const run = conversationSidebarReducer(call, {
+      type: "show-item",
+      item: { kind: "run", id: "run_1" },
+    });
+    expect(run).toMatchObject({ expanded: true, activeTab: "runs" });
+    expect(openRunId(run)).toBe("run_1");
+    // The run took the call's place: back on the Tools tab, no call is open.
+    expect(openToolCallId({ ...run, activeTab: "tools" })).toBeNull();
+    expect(revealMissed({ ...run, activeTab: "tools", revealMissed: true })).toBe(false);
   });
 });
