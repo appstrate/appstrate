@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useId, type Dispatch, type ReactNode } from "react";
-import { ActivityIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { AgentListItem } from "@appstrate/shared-types";
 import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
 import {
@@ -35,7 +35,8 @@ import {
   IntegrationLogoStackSkeleton,
 } from "../../components/integration-logo-stack";
 import { ErrorState } from "../../components/page-states";
-import { RowSpaceName, RunLink } from "../../components/run-row";
+import { PackageIcon } from "../../components/package-icon";
+import { RowSpaceName } from "../../components/run-row";
 import { RunStatusBadge } from "../../components/status-badge";
 import { Waiting } from "../../components/loading-skeletons";
 import { SkeletonLine } from "../../components/skeleton-line";
@@ -303,12 +304,15 @@ function folding(sections: ReturnType<typeof useSummarySections>, id: SummarySec
  */
 function SummaryLine({
   icon,
+  bareIcon,
   label,
   detail,
   space,
   trailing,
 }: {
   icon: ReactNode;
+  /** The icon sizes itself (an identity tile), so the lead does not force its glyph to 16px. */
+  bareIcon?: boolean;
   label: string;
   detail?: ReactNode;
   space?: ReactNode;
@@ -316,7 +320,9 @@ function SummaryLine({
 }) {
   return (
     <>
-      <ActivityLead className="text-muted-foreground">{icon}</ActivityLead>
+      <ActivityLead className={cn("text-muted-foreground", bareIcon && "[&_svg]:size-auto")}>
+        {icon}
+      </ActivityLead>
       {/* The detail takes only the room left (basis 0): the name truncates once it has none, never over the outcome. */}
       <span className="flex min-w-0 flex-1 items-baseline gap-2">
         <span className="min-w-0 truncate font-medium">{label}</span>
@@ -334,28 +340,46 @@ type ConversationRun = ReturnType<typeof useConversationRuns>["runs"][number];
 type ConversationFile = ReturnType<typeof useConversationFiles>["files"][number];
 
 /**
- * A run on one line, leading to its page as the Runs tab's rows do (`RunLink`), naming its space
- * in a list spanning spaces.
+ * A run on one line, led by its agent's tile and opening on its line of the Runs tab, naming its
+ * space in a list spanning spaces. Its page is one click away in the open run.
  */
-function RunLine({
+function SummaryRunLine({
   run,
   agentName,
+  agent,
   spanning,
+  dispatch,
 }: {
   run: ConversationRun;
   agentName: string;
+  agent: AgentListItem | undefined;
   spanning: boolean;
+  dispatch: Dispatch<ConversationSidebarAction>;
 }) {
   return (
-    <RunLink run={run} className={LINE_CLASS}>
+    <button
+      type="button"
+      className={BUTTON_LINE_CLASS}
+      onClick={() => dispatch({ type: "show-run", runId: run.id })}
+    >
       <SummaryLine
-        icon={<ActivityIcon />}
+        bareIcon
+        icon={
+          <PackageIcon
+            type="agent"
+            id={run.packageId ?? agentName}
+            name={agentName}
+            icon={agent?.icon}
+            color={agent?.color}
+            size="xs"
+          />
+        }
         label={agentName}
         detail={<span className="min-w-0 truncate text-xs">{`#${run.runNumber}`}</span>}
         space={spanning ? <RowSpaceName spaceId={run.spaceId} /> : null}
         trailing={<RunStatusBadge status={run.status} unread={run.unread} compact />}
       />
-    </RunLink>
+    </button>
   );
 }
 
@@ -542,11 +566,13 @@ function SummaryActivity({
               onSeeAll={runs.total > SUMMARY_ROWS ? seeAll("runs") : undefined}
             >
               {runRows.map((run) => (
-                <RunLine
+                <SummaryRunLine
                   key={run.id}
                   run={run}
                   agentName={runs.agentName(run)}
+                  agent={run.packageId ? runs.agentById.get(run.packageId) : undefined}
                   spanning={runs.spanning}
+                  dispatch={dispatch}
                 />
               ))}
             </SummaryGroup>

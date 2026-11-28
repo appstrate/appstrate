@@ -46,7 +46,7 @@ export function RunRow({
 
 /**
  * A run's row, whatever it draws of the run: the run's link ({@link useRunPageHref}), hovering like
- * a list row, else a plain row. {@link RunRow}, and the chat summary's one-line runs.
+ * a list row, else a plain row.
  */
 export function RunLink({
   run,

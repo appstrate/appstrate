@@ -325,6 +325,16 @@ describe("the summary, open", () => {
     expect(html).toContain(i18n.t("chat:context.tools.status.error"));
   });
 
+  it("draws a run as a button opening it in the panel, led by its agent's tile", () => {
+    const html = summary([], [makeRun({ id: "run_4", runNumber: 4, package_ephemeral: false })]);
+    const line = html.slice(html.indexOf("<button"), html.indexOf("</button>"));
+    expect(line).toContain("#4");
+    expect(line).toContain('type="button"');
+    expect(line).not.toContain("lucide-activity");
+    // The run's page is one click away in the open run, not from the line.
+    expect(html).not.toContain("<a ");
+  });
+
   it("keeps what the cache holds while the panel closes: no skeleton, no read lost", () => {
     const html = summary([], [makeRun({ id: "run_9", runNumber: 9 })], { active: false });
     expect(html).toContain("Rapport");

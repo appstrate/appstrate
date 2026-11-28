@@ -940,7 +940,8 @@ canvas and floats beside the thread: its cards and its previewed file are `Card`
 takes a shadow outside what floats over the page. It opens on the Summary, which reads
 without scrolling: the title and its gist, then the activity in one view (its runs, its
 files and its integration calls, lookups included, the latest of each on one line, a
-failure on its own line, each group leading to its tab), then models, access and details
+failure on its own line, each group leading to its tab; a run line leads with its agent's tile and
+opens the run on its line of Runs, as a call opens on its line of Tools), then models, access and details
 folded to one line each (`Collapsible`, remembered per browser). Beside it,
 Runs, Files and Tools, each named in words on every format: a narrow panel drops the
 tabs' icons, tightens them and scrolls them sideways past its width. Each group of the
