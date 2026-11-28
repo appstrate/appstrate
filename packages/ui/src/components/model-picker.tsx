@@ -52,7 +52,6 @@ const SEARCHABLE_FROM = 8;
 const INHERIT = "__inherit__";
 
 function groupTitle(group: PickerGroup, labels: ModelPickerLabels): string {
-  if (group.kind === "config") return group.name ?? labels.kinds.org;
   const kind =
     group.kind === "org"
       ? labels.kinds.org

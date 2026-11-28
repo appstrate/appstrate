@@ -21,7 +21,8 @@ export function turnModelSentenceKey(message: unknown): "model.answeredBy" | "mo
     : "model.answeredBy";
 }
 
-function turnModelId(message: unknown): string | null {
+/** The org-model id a turn names; `null` when it carries none. */
+export function turnModelId(message: unknown): string | null {
   return turnMetadataFromMessage(sourceMessage(message))?.modelId ?? null;
 }
 

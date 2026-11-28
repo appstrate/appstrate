@@ -73,7 +73,8 @@ import { ContextIndicator } from "./context-gauge.tsx";
 import { ComposerPanelProvider } from "./composer-panel.ts";
 import { draftCrossesThreshold, estimateDraftTokens } from "./model-fit.ts";
 import { ConversationContextProvider, useConversationContext } from "./use-conversation-context.ts";
-import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
+import { useModelPicker } from "./model-picker.ts";
+import { turnModelId, turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import {
   AttachmentChip,
   AttachmentThumbnail,
@@ -893,15 +894,18 @@ function TurnLimitNotice() {
  * not reached a finish chunk yet.
  */
 export function MessageError() {
-  const { t, can, modelConfigs } = useChatHost();
-  const personalModelCredentials = personalConnectionsAllowed(modelConfigs);
+  const { t, can, modelConfigs, modelId: selectedId } = useChatHost();
+  const models = useModelPicker()?.models;
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
-  const errorState = React.useMemo(
-    () => turnErrorState(message, t, can, personalModelCredentials),
-    [message, t, can, personalModelCredentials],
-  );
+  const errorState = React.useMemo(() => {
+    // The failed turn's own model; a refusal that never reached a finish chunk names none, and
+    // the request went out under the selected one.
+    const failedId = turnModelId(message) ?? selectedId;
+    const model = models?.find((candidate) => candidate.id === failedId);
+    return turnErrorState(message, t, can, personalConnectionsAllowed(modelConfigs, model));
+  }, [message, t, can, modelConfigs, models, selectedId]);
   const aui = useAui();
   if (!errorState) return null;
   return (

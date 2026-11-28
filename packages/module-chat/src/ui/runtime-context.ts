@@ -212,9 +212,10 @@ export interface ChatHost {
    */
   modelConfigs: readonly PickerConfig[] | undefined;
   /**
-   * The credentials that name the model picker's groups: the organization's (when the caller
-   * may read them) and the caller's own, with the upstream models each serves. The shell
-   * builds them from its provider registry; empty until they load.
+   * The caller's own connections, which name the personal groups of the model picker and tell
+   * a dead key from none. Each carries the models it serves: the server's `serves_model_ids`
+   * (organization models, by id). Never the organization's, never another member's; empty until
+   * they load.
    */
   modelCredentials: readonly PickerCredential[];
   /** A byte count in the language the host renders (`2,0 Ko` in French). */

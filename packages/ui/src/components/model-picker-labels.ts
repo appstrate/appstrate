@@ -16,7 +16,6 @@ export function buildModelPickerLabels(t: Translate<Record<string, string>>): Mo
     orgConnectionMissing: t("modelPicker.reason.orgConnectionMissing"),
     personalRequired: t("modelPicker.reason.personalRequired"),
     personalReconnect: t("modelPicker.reason.personalReconnect"),
-    notSchedulable: t("modelPicker.reason.notSchedulable"),
   };
   return {
     kinds: {

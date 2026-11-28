@@ -11,8 +11,8 @@
  * model), `org` (an organization connection of its configuration), `user` (one of the caller's
  * own connections), or `null` (none serves it). The model's configuration (`config_id`) says
  * what would: an organization connection to add or reconnect, or — when it allows them — the
- * caller's own connection. The groups are that, plus the caller's own connections to NAME the
- * group (« Ma clé perso »).
+ * caller's own connection. The groups are that, plus the caller's own connections to NAME a
+ * personal group (« Ma clé perso »); an organization group is named by its configuration.
  */
 
 import type { ModelPayer } from "@appstrate/core/model-payer";
@@ -29,20 +29,22 @@ export interface PickerModel {
   provider_name?: string | null;
   /** Its model configuration; `null` for a built-in model and a managed alias. */
   config_id?: string | null;
-  aliased?: boolean;
   billed_to?: PickerPayer;
   enabled?: boolean;
   needs_reconnection?: boolean;
   is_default?: boolean;
 }
 
-/** A connection that names a group: the organization's, or one of the caller's own. */
+/** One of the caller's own connections: it names a personal group and tells a dead key from none. */
 export interface PickerCredential {
   id: string;
   label: string;
-  owner: "org" | "me";
+  /** The configuration it serves. */
+  configId: string | null;
   /** A subscription (« Abonnement perso »), as opposed to an API key. */
   subscription: boolean;
+  /** Dead: its owner must reconnect it. */
+  needsReconnection: boolean;
   /** The models (`GET /api/models` ids) it serves: its `serves_model_ids`. */
   modelIds: readonly string[];
 }
@@ -56,12 +58,7 @@ export interface PickerConfig {
 }
 
 export type PickerReasonKind =
-  | "disabled"
-  | "orgUnavailable"
-  | "orgConnectionMissing"
-  | "personalRequired"
-  | "personalReconnect"
-  | "notSchedulable";
+  "disabled" | "orgUnavailable" | "orgConnectionMissing" | "personalRequired" | "personalReconnect";
 
 export interface PickerEntry {
   model: PickerModel;
@@ -70,8 +67,7 @@ export interface PickerEntry {
   blocked: PickerReasonKind | null;
 }
 
-/** `config`: a group named by its configuration alone (the organization's default model). */
-export type PickerGroupKind = "org" | "personal" | "system" | "config";
+export type PickerGroupKind = "org" | "personal" | "system";
 
 export interface PickerGroup {
   key: string;
@@ -86,26 +82,44 @@ export interface PickerGroup {
 }
 
 export interface PickerContext {
-  /** The caller's own connections, and the organization's when the caller may read them. */
+  /** The caller's own connections (never the organization's, never another member's). */
   credentials?: readonly PickerCredential[];
-  /** The organization's model configurations (`GET /api/model-configs`); empty until known. */
+  /**
+   * The organization's model configurations (`GET /api/model-configs`); `undefined` until known,
+   * while which configuration would serve an unserved model is not: it carries no reason yet.
+   */
   configs?: readonly PickerConfig[];
   /** The caller may add or reconnect a connection of their own (`model-provider-credentials:connect`). */
   canConnect?: boolean;
-  /** A schedule runs alone: only an organization connection serves it. */
+  /**
+   * No human pays: only an organization connection serves the call. A schedule runs alone, and so
+   * do the API keys and end users the organization's default model serves.
+   */
   scheduled?: boolean;
 }
 
-const KIND_ORDER = { config: 0, org: 0, personal: 1, system: 2 } as const;
+const KIND_ORDER = { org: 0, personal: 1, system: 2 } as const;
+
+/**
+ * The connection that serves first among those that can: the server tries a subscription before
+ * a key (its marginal cost is nil), then the oldest, which is list order. One helper for every
+ * surface that says who serves.
+ */
+export function preferSubscription<T>(
+  connections: readonly T[],
+  isSubscription: (connection: T) => boolean,
+): T | undefined {
+  return connections.find(isSubscription) ?? connections[0];
+}
 
 function servingCredential(
   model: PickerModel,
   own: readonly PickerCredential[],
 ): PickerCredential | undefined {
-  // The server tries subscriptions first, then keys.
-  return [...own]
-    .sort((a, b) => Number(b.subscription) - Number(a.subscription))
-    .find((credential) => credential.modelIds.includes(model.id));
+  return preferSubscription(
+    own.filter((credential) => credential.modelIds.includes(model.id)),
+    (credential) => credential.subscription,
+  );
 }
 
 interface Placement {
@@ -127,17 +141,24 @@ function orgPlacement(
   return {
     key: `org:${configId ?? "managed"}`,
     kind: "org",
-    // A managed alias hides its configuration: it is just « Clé org ».
-    name: config?.label ?? (model.aliased ? null : (model.provider_name ?? null)),
+    // A managed alias hides its provider (`provider_name` is null): it is just « Clé org ».
+    name: config?.label ?? model.provider_name ?? null,
     subscription: false,
     needs: null,
     blocked: model.enabled === false ? "disabled" : blocked,
   };
 }
 
+/** Why no organization connection serves a model: a dead one to reconnect, or none. */
+function unservedByOrg(model: PickerModel, config: PickerConfig | undefined): PickerReasonKind {
+  const dead = config
+    ? config.org_connection === "needs_reconnection"
+    : model.needs_reconnection === true;
+  return dead ? "orgUnavailable" : "orgConnectionMissing";
+}
+
 function place(model: PickerModel, context: PickerContext): Placement {
-  const credentials = context.credentials ?? [];
-  const own = credentials.filter((credential) => credential.owner === "me");
+  const own = context.credentials ?? [];
   const disabled = model.enabled === false;
   const config = context.configs?.find((candidate) => candidate.id === model.config_id);
   const scheduled = context.scheduled === true;
@@ -158,9 +179,13 @@ function place(model: PickerModel, context: PickerContext): Placement {
   if (model.billed_to === "user") {
     // A schedule has no payer of its own: the organization's connection serves it, or nothing.
     if (scheduled) {
-      return config?.org_connection === "active"
-        ? orgPlacement(model, config, null)
-        : orgPlacement(model, config, "notSchedulable");
+      return orgPlacement(
+        model,
+        config,
+        config?.org_connection === "active" || !context.configs
+          ? null
+          : unservedByOrg(model, config),
+      );
     }
     const serving = servingCredential(model, own);
     return {
@@ -173,9 +198,15 @@ function place(model: PickerModel, context: PickerContext): Placement {
     };
   }
 
-  // Nothing serves it for the caller: say what would.
-  const reconnect = model.needs_reconnection === true;
+  // Nothing serves it for the caller: say what would. Until the configurations are known, no
+  // reason is definitive.
+  if (!context.configs) return orgPlacement(model, undefined, null);
   if (config?.personal_connections_allowed && !scheduled) {
+    // The caller's own dead connection is theirs to reconnect; a dead organization one is not,
+    // they can only add their own.
+    const dead = own.some(
+      (credential) => credential.configId === config.id && credential.needsReconnection,
+    );
     const service = config.label;
     return {
       key: `personal-needs:${config.id}`,
@@ -184,13 +215,12 @@ function place(model: PickerModel, context: PickerContext): Placement {
       subscription: false,
       needs: {
         service,
-        fix: context.canConnect === true ? (reconnect ? "reconnect" : "add") : null,
+        fix: context.canConnect === true ? (dead ? "reconnect" : "add") : null,
       },
-      blocked: disabled ? "disabled" : reconnect ? "personalReconnect" : "personalRequired",
+      blocked: disabled ? "disabled" : dead ? "personalReconnect" : "personalRequired",
     };
   }
-  const orgDead = config ? config.org_connection === "needs_reconnection" : reconnect;
-  return orgPlacement(model, config, orgDead ? "orgUnavailable" : "orgConnectionMissing");
+  return orgPlacement(model, config, unservedByOrg(model, config));
 }
 
 /**
