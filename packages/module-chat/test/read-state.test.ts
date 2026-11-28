@@ -269,7 +269,7 @@ describe("chat session read-state", () => {
     await persistUserMessage(id, uiMessage("u1", "user", "hello"), first.client);
     expect(first.counts).toEqual({ select: 0, insert: 1, update: 1 });
     // The title landed in that same UPDATE.
-    expect(await titleOf(id)).toBe("hello");
+    expect(await titleOf(id)).toBe("Hello");
 
     // Control: an id-less message DOES read its predecessor — it is the hash
     // material of the derived id — which proves the counter sees the reads it

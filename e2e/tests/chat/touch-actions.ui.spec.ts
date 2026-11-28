@@ -99,6 +99,40 @@ test.describe("chat actions on a touchscreen", () => {
   });
 });
 
+test.describe("the open conversation's « … » on a phone", () => {
+  test.use({ hasTouch: true });
+
+  test("the header names the conversation and opens the row's menu from the bottom, the drawer closed", async ({
+    authedPage: page,
+    orgOnlyClient,
+    browserCtx,
+  }) => {
+    const sessions = `/orgs/${browserCtx.org.orgId}/chat/sessions`;
+    const created = await orgOnlyClient.post(sessions, { title: "Budget mobile" });
+    expect(created.status()).toBe(201);
+    const { id } = await created.json();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/chat/${id}`);
+    // The list's drawer is closed (unmounted): the page publishes the trail.
+    await expect(page.locator("[data-trail]:visible")).toContainText("Budget mobile");
+    const actions = page.getByRole("button", { name: "Actions de la conversation", exact: true });
+    await expect(actions).toHaveCSS("width", "44px");
+    await expect(actions).toHaveCSS("height", "44px");
+    await actions.tap();
+    const menu = page.getByTestId("sheet-menu");
+    await expect(menu).toContainText("Budget mobile");
+    await expect(menu.getByTestId("chat-menu-spaces")).toBeVisible();
+    await expect(menu.getByRole("button", { name: "Renommer", exact: true })).toBeVisible();
+    await menu.getByRole("button", { name: "Supprimer", exact: true }).tap();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Supprimer" }).tap();
+    // Deleting the open conversation leaves it for a new one.
+    await expect(page).toHaveURL(/\/chat$/);
+    await expect
+      .poll(async () => (await orgOnlyClient.get(`${sessions}/${id}`)).status())
+      .toBe(404);
+  });
+});
+
 test("a keyboard user sees the focused conversation action and returns to it", async ({
   authedPage: page,
   orgOnlyClient,

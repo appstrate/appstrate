@@ -4,7 +4,7 @@
  * The context panel. Closed, its reads wait (`active` false), and nothing it draws in the meantime
  * is an error or an empty list made up from a read that never ran. Open, each group of the summary
  * stands on its own read. The Tools tab lists the calls by turn, lookups behind a switch, and a
- * call's detail.
+ * call's detail. The Info tab shows its sections open.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -21,6 +21,7 @@ const { makeRun } = await import("../../test/run-fixture.ts");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { formatDuration } = await import("../../lib/format-duration.ts");
 const { ConversationSummary } = await import("./conversation-summary.tsx");
+const { ConversationInfo } = await import("./conversation-info.tsx");
 const { ConversationFiles, ConversationRuns } = await import("./conversation-sidebar.tsx");
 const { ConversationToolsList, ShownToolCall } = await import("./conversation-tools-tab.tsx");
 const { publishLiveConversation, withdrawLiveConversation } =
@@ -168,6 +169,7 @@ function unstamped(part: ReturnType<typeof toolPart>) {
 describe("the context panel, closed", () => {
   const panes: [string, React.ReactElement<{ active: boolean }>][] = [
     ["Résumé", <ConversationSummary conversationId="chs_1" active={false} dispatch={noop} />],
+    ["Infos", <ConversationInfo conversationId="chs_1" active={false} />],
     ["Runs", <ConversationRuns conversationId="chs_1" active={false} />],
     ["Fichiers", <ConversationFiles conversationId="chs_1" active={false} onSelect={noop} />],
     [
@@ -211,6 +213,7 @@ describe("the context panel, closed", () => {
     const views = (active: boolean) => (
       <ChatTransportProvider value={TRANSPORT}>
         <ConversationSummary conversationId="chs_1" active={active} dispatch={noop} />
+        <ConversationInfo conversationId="chs_1" active={active} />
         <ConversationRuns conversationId="chs_1" active={active} />
         <ConversationFiles conversationId="chs_1" active={active} onSelect={noop} />
         <ConversationToolsList
@@ -308,6 +311,12 @@ describe("the summary, open", () => {
     const html = summary([toolPart("call_p")], []);
     expect(html).not.toContain(i18n.t("chat:context.summary.integrations"));
     expect(html).toContain(i18n.t("chat:context.summary.noActivity"));
+    expect(html).toContain(i18n.t("chat:context.summary.noActivityHint"));
+  });
+
+  it("says an unsaved conversation has no summary yet, as the other tabs do", () => {
+    const html = render(<ConversationSummary conversationId={null} active dispatch={noop} />);
+    expect(html).toContain(i18n.t("chat:context.unsaved"));
   });
 
   it("shows a failure on its own run and call line", () => {
@@ -406,6 +415,28 @@ describe("the summary, open", () => {
     });
     expect(html).toContain("#11");
     expect(html).not.toContain(i18n.t("common:error.generic"));
+  });
+});
+
+describe("the Info tab, open", () => {
+  const usage = i18n.t("chat:context.summary.usageTitle");
+  const access = i18n.t("chat:context.summary.access");
+  const details = i18n.t("chat:context.summary.details");
+
+  it("shows models and tokens, access and details as open sections", () => {
+    const queryClient = memberSpaceClient(spaces);
+    seedConversation(queryClient, [[]]);
+    const html = render(<ConversationInfo conversationId="chs_1" active />, queryClient);
+    for (const title of [usage, access, details]) expect(html).toContain(title);
+    expect(html).toContain("chs_1");
+    expect(html).not.toContain("aria-expanded");
+  });
+
+  it("shows the access alone for a conversation not stored yet", () => {
+    const html = render(<ConversationInfo conversationId={null} active />);
+    expect(html).toContain(access);
+    expect(html).not.toContain(usage);
+    expect(html).not.toContain(details);
   });
 });
 

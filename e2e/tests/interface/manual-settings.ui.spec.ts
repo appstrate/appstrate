@@ -210,7 +210,7 @@ test("browser Back can be cancelled without unmounting the edited form", async (
   await expect(page).toHaveURL(/preferences\/appearance/);
 });
 
-test("the trail shows a conversation's name, and « Renommer » renames it: Annuler writes nothing, Renommer writes to its own target", async ({
+test("the trail shows a conversation's name, and the header's « … » renames it: Annuler writes nothing, Renommer writes to its own target", async ({
   authedPage: page,
   apiClient,
   browserCtx,
@@ -239,7 +239,11 @@ test("the trail shows a conversation's name, and « Renommer » renames it: Annu
   await expect(trail).toContainText("Rename A");
   await expect(trail.getByRole("textbox")).toHaveCount(0);
 
-  const openRename = () => page.getByRole("button", { name: "Renommer", exact: true }).click();
+  // The open conversation's « … » in the header: the same menu as its row.
+  const openRename = async () => {
+    await page.getByRole("button", { name: "Actions de la conversation", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Renommer", exact: true }).click();
+  };
   const dialog = page.getByRole("dialog", { name: "Renommer la conversation" });
   await openRename();
   const name = dialog.getByRole("textbox", { name: "Nom" });

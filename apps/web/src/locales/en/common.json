@@ -531,6 +531,7 @@
   "nav.sidebar": "Sidebar",
   "nav.sidebarDescription": "Displays the mobile sidebar.",
   "nav.toggleSidebar": "Toggle sidebar",
+  "nav.resizeSidebar": "Resize sidebar",
   "nav.toggleSidebarIn": "Toggle sidebar ({{current}})",
   "nav.toggleSidebarNotifications_one": "{{label}}, {{count}} unread notification",
   "nav.toggleSidebarNotifications_other": "{{label}}, {{count}} unread notifications",
