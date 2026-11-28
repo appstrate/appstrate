@@ -10,6 +10,10 @@
 -- (`model_provider_credentials.base_url_override`, `org_models.provider_id`,
 -- `org_models.credential_id`). `org_models.provider_id` turns nullable so a new model needs none.
 --
+-- Tenant integrity: `model_configs` is unique on `(id, org_id)` and the three `config_id` foreign
+-- keys are composite `(config_id, org_id)`, so a row can only point at a configuration of its own
+-- organization (a NULL `config_id` is not checked: MATCH SIMPLE).
+--
 -- Dropped: the CHECK tying an alias to a credential, the composite FK naming a model's credential
 -- and provider (and the unique index on the credential side it needed), and the two per-binding
 -- unique indexes, replaced by one per (configuration, model) among non-aliased rows.
@@ -45,9 +49,10 @@ CREATE INDEX "idx_model_configs_org_id" ON "model_configs" USING btree ("org_id"
 CREATE INDEX "idx_model_configs_created_by" ON "model_configs" USING btree ("created_by");--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_model_configs_family" ON "model_configs" USING btree ("org_id","provider_id") WHERE "model_configs"."base_url" IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_model_configs_endpoint" ON "model_configs" USING btree ("org_id","provider_id","base_url") WHERE "model_configs"."base_url" IS NOT NULL;--> statement-breakpoint
-ALTER TABLE "model_provider_credentials" ADD CONSTRAINT "model_provider_credentials_config_id_model_configs_id_fk" FOREIGN KEY ("config_id") REFERENCES "public"."model_configs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "model_provider_pairings" ADD CONSTRAINT "model_provider_pairings_config_id_model_configs_id_fk" FOREIGN KEY ("config_id") REFERENCES "public"."model_configs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "org_models" ADD CONSTRAINT "org_models_config_id_model_configs_id_fk" FOREIGN KEY ("config_id") REFERENCES "public"."model_configs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_model_configs_id_org_id" ON "model_configs" USING btree ("id","org_id");--> statement-breakpoint
+ALTER TABLE "model_provider_credentials" ADD CONSTRAINT "model_provider_credentials_config_id_org_id_fk" FOREIGN KEY ("config_id","org_id") REFERENCES "public"."model_configs"("id","org_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "model_provider_pairings" ADD CONSTRAINT "model_provider_pairings_config_id_org_id_fk" FOREIGN KEY ("config_id","org_id") REFERENCES "public"."model_configs"("id","org_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "org_models" ADD CONSTRAINT "org_models_config_id_org_id_fk" FOREIGN KEY ("config_id","org_id") REFERENCES "public"."model_configs"("id","org_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "idx_model_provider_credentials_config_id" ON "model_provider_credentials" USING btree ("config_id");--> statement-breakpoint
 CREATE INDEX "idx_model_provider_pairings_config_id" ON "model_provider_pairings" USING btree ("config_id");--> statement-breakpoint
 CREATE INDEX "idx_org_models_config_id" ON "org_models" USING btree ("config_id");--> statement-breakpoint

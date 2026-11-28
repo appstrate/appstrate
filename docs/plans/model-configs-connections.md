@@ -1,6 +1,6 @@
 # Modèles — configurations et connexions
 
-Statut : **plan, rien d'exécuté.** Base lue : `origin/main` @ `5033c5da1` (2026-11-28).
+Statut : **implémenté** (#2453, issue #2451) ; écarts au plan en §10. Base lue : `origin/main` @ `5033c5da1` (2026-11-28).
 Origine : échange avec Olivier — unifier clés d'org et clés perso, dissocier « clé » et connexion,
 unifier la sélection d'un modèle.
 Lecture de code seule : rien n'a été mesuré en prod, l'interface n'a pas été ouverte.
@@ -84,7 +84,7 @@ Actées :
 - D4 — abonnement autorisé en connexion d'org.
 - D5 — unification par famille de catalogue.
 
-À confirmer avec Olivier avant le lot 2 :
+Retenues telles quelles dans #2453 (non revalidées avec Olivier, à lui confirmer à la relecture) :
 
 - **Q1 — ordre de service** ci-dessus.
 - **Q2 — plusieurs connexions d'org par configuration.** Le plan les autorise sans ordre réglable (la
@@ -103,15 +103,15 @@ Actées :
 
 ```
 model_configs
-  id, org_id, family_id, label,
+  id, org_id, provider_id, label,        -- provider_id : le fournisseur représentant de la famille
   base_url                      -- NULL sauf fournisseur à endpoint libre
   personal_connections_allowed  -- booléen
   created_by, created_at, updated_at
   unique (org_id, family_id) where base_url is null
   unique (org_id, family_id, base_url) where base_url is not null
 
-model_provider_credentials      -- renommée model_connections au lot 5
-  + config_id  not null  → model_configs
+model_provider_credentials      -- renommée model_connections au lot 3 (pas fait, §10)
+  + config_id  not null  → model_configs  (clé étrangère composite (config_id, org_id), §10)
   - base_url_override           -- remonté sur la configuration
   (provider_id reste : c'est le type de connexion, anthropic ou claude-code)
 
@@ -154,7 +154,8 @@ Aucun écran modifié dans ce lot.
 ### Lot 2 — bascule (une PR)
 
 **2a. Migration + script de données.** Migration drizzle : nouvelles colonnes nullables, table
-`model_configs`. Script `scripts/migration/00NN-model-configs.ts`, puis seconde migration qui pose
+`model_configs` (0119). Script `scripts/migration/0062-model-configs.ts`, puis, **à la release
+suivante** (garde de démarrage `PENDING_DATA_SCRIPTS`, `removeWhen`), seconde migration qui pose
 les `NOT NULL` et supprime les colonnes retirées. Le script :
 
 1. Mode lecture seule d'abord : compte les organisations concernées par Q4, les doublons de modèles
@@ -183,12 +184,12 @@ nouveau code de refus traduit.
 ```
 GET|POST        /api/model-configs
 PATCH|DELETE    /api/model-configs/:id
-PUT             /api/model-configs/:id/models        (remplace POST /api/models/apply)
-POST            /api/model-configs/:id/discover      (remplace /model-provider-credentials/discover)
-GET|POST        /api/model-configs/:id/connections
-PATCH|DELETE    /api/model-connections/:id
-POST            /api/model-connections/:id/test
 ```
+
+Construit autrement que prévu : `POST /api/models/apply` (choix des modèles d'une configuration, avec
+`config_id` dans le corps), `POST /api/model-provider-credentials/discover` et les routes plates des
+identifiants (`/api/model-provider-credentials`, avec `config_id` dans le corps) restent ; il n'y a ni
+`/model-configs/:id/models`, ni `/discover`, ni `/connections`, ni `/model-connections`.
 
 Sur le fil, `binding: org | user | managed | system` disparaît ; un modèle expose qui le sert pour
 l'appelant et pourquoi il est indisponible le cas échéant. OpenAPI, `generate:api`, baseline.
@@ -294,3 +295,27 @@ accroché à une clé ; le perso est un réglage de l'admin sur la configuration
 - https://www.librechat.ai/docs/configuration/librechat_yaml/object_structure/custom_endpoint
 - https://docs.openwebui.com/features/experimental/direct-connections
 - https://ui.shadcn.com/docs/changelog/2025-10-new-components
+
+## 10. Écarts à l'implémentation (#2453)
+
+- **Schéma** : la colonne s'appelle `provider_id` (représentant de la famille), pas `family_id`. Les
+  trois clés `config_id` (identifiants, modèles, appairages) sont des clés étrangères composites
+  `(config_id, org_id)` vers `model_configs(id, org_id)` : une ligne ne peut pointer que vers une
+  configuration de sa propre organisation.
+- **`NOT NULL` et colonnes retirées** (`base_url_override`, `org_models.provider_id`,
+  `org_models.credential_id`) : pas dans la même PR. `config_id` reste nullable une release ; le
+  script `0062` le remplit et la garde de démarrage refuse de démarrer tant qu'une ligne n'en a pas.
+- **Script `0062`** : fusionne seulement les modèles non aliasés (l'index unique est partiel) ;
+  rapporte les champs perdus à la fusion, les configurations créées pour un fournisseur non
+  enregistré et celles créées sur l'endpoint par défaut d'une passerelle pour un modèle sans
+  connexion (un endpoint que personne n'a choisi). Le comptage de Q4 n'a pas été fait : le rapport
+  liste le changement de service par modèle.
+- **API** : voir §5 2c. Nouveaux refus : `model_config_exists`, `model_config_has_connections`,
+  `model_config_required`, `connection_provider_mismatch`, `model_org_connection_required` ;
+  `personal_connections_disabled` remplace `personal_model_credentials_disabled`.
+  `credential_in_use`, `model_scheduled`, `personal_credential_custom_endpoint` et
+  `personal_credential_not_bindable` sont retirés.
+- **`@appstrate/core`** : `MODEL_BINDINGS` / `ModelBinding` retirés (majeure).
+- **Reste à faire** : le renommage `model_provider_credentials` → `model_connections` (lot 3,
+  seul dans sa PR), la seconde migration (`NOT NULL`, colonnes retirées) et la passe
+  `/audit-legacy`. Rien de cela n'est dans #2453.

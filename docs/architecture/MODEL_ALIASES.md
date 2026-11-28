@@ -257,8 +257,8 @@ calls on a member-paid model keep the personal credential it launched with
 model's configuration, serves the model and its configuration allows personal
 connections; a launch credential that no longer belongs to the recorded payer
 (`runs.payer_user_id`) returns no model, and one removed mid-run, or personal
-connections switched off on the configuration, makes the run's next call served as
-the model now is for nobody (organization connections only). Any other run is served
+connections switched off on the configuration, makes `loadRunModel` return no model:
+the run ends instead of falling back to another payer. Any other run is served
 as the model is now. A payer changes mid-call only through an administrator's act on
 the configuration or its connections. The sidecar's token door (`/internal/oauth-token/{credentialId}`) gives a
 subscription's token only to a platform run pinned to it. A personal

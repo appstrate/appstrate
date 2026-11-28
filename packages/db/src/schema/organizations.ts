@@ -312,6 +312,9 @@ export const modelConfigs = pgTable(
     uniqueIndex("uq_model_configs_endpoint")
       .on(t.orgId, t.providerId, t.baseUrl)
       .where(sql`${t.baseUrl} IS NOT NULL`),
+    // Target of the composite `(config_id, org_id)` FKs below: a connection, a model or a
+    // pairing can only point at a configuration of its own organization.
+    uniqueIndex("uq_model_configs_id_org_id").on(t.id, t.orgId),
   ],
 );
 
@@ -354,7 +357,7 @@ export const modelProviderCredentials = pgTable(
      * filled every row (the boot guard refuses to start before); the follow-up release
      * sets NOT NULL.
      */
-    configId: uuid("config_id").references(() => modelConfigs.id, { onDelete: "cascade" }),
+    configId: uuid("config_id"),
     /**
      * Denormalized OAuth token expiry — duplicates `blob.expiresAt` from the
      * encrypted blob to enable an efficient SQL filter in the background
@@ -427,6 +430,13 @@ export const modelProviderCredentials = pgTable(
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_model_provider_credentials_created_by").on(t.createdBy),
     index("idx_model_provider_credentials_config_id").on(t.configId),
+    // Tenant integrity: the configuration belongs to the row's organization. NULL `config_id`
+    // passes (MATCH SIMPLE) while the column is nullable.
+    foreignKey({
+      name: "model_provider_credentials_config_id_org_id_fk",
+      columns: [t.configId, t.orgId],
+      foreignColumns: [modelConfigs.id, modelConfigs.orgId],
+    }).onDelete("cascade"),
     check(
       "model_provider_credentials_needs_reconnection_cause_valid",
       sql`needs_reconnection_cause IS NULL OR needs_reconnection_cause IN (${sql.raw(CREDENTIAL_DEATH_CAUSES.map((v) => `'${v}'`).join(", "))})`,
@@ -508,7 +518,7 @@ export const modelProviderPairings = pgTable(
      * The configuration a new connection joins, when the mint named one. NULL: the
      * redeem finds or creates the provider's configuration (`ensureModelConfig`).
      */
-    configId: uuid("config_id").references(() => modelConfigs.id, { onDelete: "cascade" }),
+    configId: uuid("config_id"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /** When the token was redeemed, whether or not the redeem produced a credential. NULL = never redeemed. */
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
@@ -540,6 +550,13 @@ export const modelProviderPairings = pgTable(
   (table) => [
     index("idx_model_provider_pairings_org_id").on(table.orgId),
     index("idx_model_provider_pairings_config_id").on(table.configId),
+    // Tenant integrity: the configuration belongs to the row's organization. NULL `config_id`
+    // passes (MATCH SIMPLE) while the column is nullable.
+    foreignKey({
+      name: "model_provider_pairings_config_id_org_id_fk",
+      columns: [table.configId, table.orgId],
+      foreignColumns: [modelConfigs.id, modelConfigs.orgId],
+    }).onDelete("cascade"),
     // NOTE — there is deliberately no `expires_at` index.
     //
     // There was one, partial on `consumed_at IS NULL`, justified as "only
@@ -600,7 +617,7 @@ export const orgModels = pgTable(
      * until script 0062 has filled every row (the boot guard refuses to start before);
      * the follow-up release sets NOT NULL.
      */
-    configId: uuid("config_id").references(() => modelConfigs.id, { onDelete: "cascade" }),
+    configId: uuid("config_id"),
     /**
      * RETIRED — the provider is the configuration's. Only
      * `scripts/migration/0062-model-configs.ts` reads it; the follow-up release drops it.
@@ -638,6 +655,13 @@ export const orgModels = pgTable(
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_org_models_created_by").on(table.createdBy),
     index("idx_org_models_config_id").on(table.configId),
+    // Tenant integrity: the configuration belongs to the row's organization. NULL `config_id`
+    // passes (MATCH SIMPLE) while the column is nullable.
+    foreignKey({
+      name: "org_models_config_id_org_id_fk",
+      columns: [table.configId, table.orgId],
+      foreignColumns: [modelConfigs.id, modelConfigs.orgId],
+    }).onDelete("cascade"),
     // One direct row per (configuration, model), so usage cannot split across
     // duplicates. Deliberate aliases keep their own reporting identity.
     uniqueIndex("uq_org_models_config_model")

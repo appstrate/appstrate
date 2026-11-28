@@ -713,6 +713,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "uq_model_configs_id_org_id": {
+          "name": "uq_model_configs_id_org_id",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -947,15 +968,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "model_provider_credentials_config_id_model_configs_id_fk": {
-          "name": "model_provider_credentials_config_id_model_configs_id_fk",
-          "tableFrom": "model_provider_credentials",
-          "tableTo": "model_configs",
-          "columnsFrom": ["config_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "model_provider_credentials_created_by_user_id_fk": {
           "name": "model_provider_credentials_created_by_user_id_fk",
           "tableFrom": "model_provider_credentials",
@@ -971,6 +983,15 @@
           "tableTo": "user",
           "columnsFrom": ["owner_user_id"],
           "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "model_provider_credentials_config_id_org_id_fk": {
+          "name": "model_provider_credentials_config_id_org_id_fk",
+          "tableFrom": "model_provider_credentials",
+          "tableTo": "model_configs",
+          "columnsFrom": ["config_id", "org_id"],
+          "columnsTo": ["id", "org_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1134,15 +1155,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "model_provider_pairings_config_id_model_configs_id_fk": {
-          "name": "model_provider_pairings_config_id_model_configs_id_fk",
-          "tableFrom": "model_provider_pairings",
-          "tableTo": "model_configs",
-          "columnsFrom": ["config_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "model_provider_pairings_credential_id_fk": {
           "name": "model_provider_pairings_credential_id_fk",
           "tableFrom": "model_provider_pairings",
@@ -1150,6 +1162,15 @@
           "columnsFrom": ["credential_id"],
           "columnsTo": ["id"],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "model_provider_pairings_config_id_org_id_fk": {
+          "name": "model_provider_pairings_config_id_org_id_fk",
+          "tableFrom": "model_provider_pairings",
+          "tableTo": "model_configs",
+          "columnsFrom": ["config_id", "org_id"],
+          "columnsTo": ["id", "org_id"],
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -1547,15 +1568,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "org_models_config_id_model_configs_id_fk": {
-          "name": "org_models_config_id_model_configs_id_fk",
-          "tableFrom": "org_models",
-          "tableTo": "model_configs",
-          "columnsFrom": ["config_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "org_models_created_by_user_id_fk": {
           "name": "org_models_created_by_user_id_fk",
           "tableFrom": "org_models",
@@ -1563,6 +1575,15 @@
           "columnsFrom": ["created_by"],
           "columnsTo": ["id"],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "org_models_config_id_org_id_fk": {
+          "name": "org_models_config_id_org_id_fk",
+          "tableFrom": "org_models",
+          "tableTo": "model_configs",
+          "columnsFrom": ["config_id", "org_id"],
+          "columnsTo": ["id", "org_id"],
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

@@ -77,6 +77,9 @@ async function model(
     providerId: string;
     credentialId?: string;
     enabled?: boolean;
+    aliased?: boolean;
+    label?: string;
+    cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
     minute: number;
   },
 ): Promise<string> {
@@ -84,11 +87,13 @@ async function model(
     .insert(orgModels)
     .values({
       orgId: ctx.orgId,
-      label: fields.modelId,
+      label: fields.label ?? fields.modelId,
       modelId: fields.modelId,
       providerId: fields.providerId,
       credentialId: fields.credentialId ?? null,
       enabled: fields.enabled ?? true,
+      aliased: fields.aliased ?? false,
+      cost: fields.cost ?? null,
       createdAt: at(fields.minute),
     })
     .returning({ id: orgModels.id });
@@ -281,6 +286,26 @@ describe("0062 — model configurations", () => {
     expect((await modelRow(ids.alphaA))!.configId).toBe(find("openai-compatible", GW_A)!.id);
     expect((await modelRow(ids.alphaB))!.configId).toBe(find("openai-compatible", GW_B)!.id);
 
+    // Labels: the provider's display name, `host · name` for a gateway endpoint.
+    const gwName = getModelProvider("openai-compatible")!.displayName;
+    expect(openai.label).toBe(getModelProvider("openai")!.displayName);
+    expect(find("openai-compatible", GW_A)!.label).toBe(`gw-a.example.test · ${gwName}`);
+    expect(find("openai-compatible", GW_B)!.label).toBe(`gw-b.example.test · ${gwName}`);
+
+    // The report: org B's `claude` model was unbound and is now served by its org key; nothing
+    // else changes, nothing was created that nobody chose, no merge lost a field.
+    expect(lines).toContain(
+      `  [${b.orgId}] serving changes: model ${ids.claude} (claude-sonnet-4-5) unbound -> ${ids.claudeKey}`,
+    );
+    expect(lines.filter((l) => l.includes("serving changes:"))).toHaveLength(1);
+    expect(lines).toContain("models whose serving organization connection changes: 1");
+    expect(lines).toContain("rows of a provider no loaded module registers (own configuration): 0");
+    expect(lines).toContain("configurations created for a provider no loaded module registers: 0");
+    expect(lines).toContain(
+      "configurations created on a gateway default endpoint for an unbound model: 0",
+    );
+    expect(lines).toContain("merges that drop differing fields: 0");
+
     // Org B: its own configuration, personal connections allowed (setting absent).
     const [claudeConfig] = await configsOf(b.orgId);
     expect(claudeConfig).toMatchObject({
@@ -325,7 +350,7 @@ describe("0062 — model configurations", () => {
     expect(await pending()).toBe(0);
   });
 
-  it("joins an unbound gateway model to the provider's default endpoint configuration", async () => {
+  it("an unbound gateway model creates, and flags, a configuration on the provider's default endpoint", async () => {
     const orphan = await model(b, {
       modelId: "anything",
       providerId: "openai-compatible",
@@ -333,26 +358,172 @@ describe("0062 — model configurations", () => {
     });
 
     await run(true);
-    const cfg = await db
+    const [cfg] = await db
       .select()
       .from(modelConfigs)
       .where(eq(modelConfigs.id, (await modelRow(orphan))!.configId!));
-    expect(cfg[0]!.providerId).toBe("openai-compatible");
+    expect(cfg!.providerId).toBe("openai-compatible");
+    expect(cfg!.baseUrl).toBe(getModelProvider("openai-compatible")!.defaultBaseUrl);
+    expect(lines.some((l) => l.includes(`[${b.orgId}] UNCHOSEN ENDPOINT`))).toBe(true);
+    expect(lines).toContain(
+      "configurations created on a gateway default endpoint for an unbound model: 1",
+    );
     expect(await pending()).toBe(0);
   });
 
-  it("gives a provider no loaded module registers a configuration of its own id", async () => {
-    const stray = await connection(b, "retired-provider", { minute: 9 });
-    const strayModel = await model(b, { modelId: "m", providerId: "retired-provider", minute: 9 });
+  it("an unbound gateway model reuses an existing default-endpoint configuration without flagging it", async () => {
+    const orphan = await model(a, {
+      modelId: "anything",
+      providerId: "openai-compatible",
+      minute: 9,
+    });
 
     await run(true);
-    const [conn] = await db
-      .select({ configId: modelProviderCredentials.configId })
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, stray));
-    const [cfg] = await db.select().from(modelConfigs).where(eq(modelConfigs.id, conn!.configId!));
-    expect(cfg!.providerId).toBe("retired-provider");
-    expect((await modelRow(strayModel))!.configId).toBe(cfg!.id);
+    expect((await modelRow(orphan))!.configId).toBe(await connectionConfig(ids.gwDefault));
+    expect(await configsOf(a.orgId)).toHaveLength(5);
+    expect(lines.some((l) => l.includes("UNCHOSEN ENDPOINT"))).toBe(false);
+    expect(lines).toContain(
+      "configurations created on a gateway default endpoint for an unbound model: 0",
+    );
+  });
+
+  it("reports a model bound to a personal connection as served by none when no organization connection serves it", async () => {
+    const personal = await connection(b, "openai", { ownerUserId: b.user.id, minute: 8 });
+    const bound = await model(b, {
+      modelId: "gpt-x",
+      providerId: "openai",
+      credentialId: personal,
+      minute: 8,
+    });
+
+    await run(true);
+    expect(lines).toContain(
+      `  [${b.orgId}] serving changes: model ${bound} (gpt-x) personal connection ${personal} -> none`,
+    );
+    expect(lines).toContain("models whose serving organization connection changes: 2");
+  });
+
+  it("keeps an alias beside its backing row: same connection and model id, nothing merged, pointers untouched", async () => {
+    const alias = await model(a, {
+      modelId: "gpt-5.5",
+      providerId: "openai",
+      credentialId: ids.orgKey,
+      aliased: true,
+      label: "public alias",
+      minute: 6,
+    });
+    const aliasAgent = `@${a.org.slug}/alias-agent`;
+    await seedAgent({ id: aliasAgent, orgId: a.orgId, createdBy: a.user.id });
+    await seedSpacePackage(a.defaultSpaceId, aliasAgent, { modelId: alias });
+
+    await run(true);
+    const openai = (await configsOf(a.orgId)).find((c) => c.providerId === "openai")!;
+    expect(await modelRow(alias)).toMatchObject({ aliased: true, configId: openai.id });
+    expect((await modelRow(ids.kept))!.configId).toBe(openai.id);
+    const [placement] = await db
+      .select({ modelId: spacePackages.modelId })
+      .from(spacePackages)
+      .where(eq(spacePackages.packageId, aliasAgent));
+    expect(placement!.modelId).toBe(alias);
+    // The one merge is still the disabled plain duplicate.
+    expect(lines.filter((l) => l.includes("merged into"))).toHaveLength(1);
+  });
+
+  it("among duplicates that are all enabled, the oldest is kept", async () => {
+    // The newer row is inserted first, so row order cannot decide it.
+    const newer = await model(b, { modelId: "claude-x", providerId: "anthropic", minute: 20 });
+    const older = await model(b, { modelId: "claude-x", providerId: "anthropic", minute: 10 });
+
+    await run(true);
+    expect(await modelRow(newer)).toBeUndefined();
+    expect((await modelRow(older))!.configId).not.toBeNull();
+  });
+
+  it("reports the fields a merge drops", async () => {
+    const cost = { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 };
+    const kept = await model(b, { modelId: "claude-x", providerId: "anthropic", minute: 10 });
+    const dropped = await model(b, {
+      modelId: "claude-x",
+      providerId: "anthropic",
+      label: "Claude X (old label)",
+      cost,
+      enabled: false,
+      minute: 11,
+    });
+
+    await run(true);
+    expect(await modelRow(dropped)).toBeUndefined();
+    const line = lines.find((l) => l.includes(`merge drops from ${dropped}`))!;
+    expect(line).toContain('label "Claude X (old label)" (kept "claude-x")');
+    expect(line).toContain("cost");
+    expect(lines).toContain("merges that drop differing fields: 1");
+    expect((await modelRow(kept))!.configId).not.toBeNull();
+  });
+
+  it("a partial resume: a connection and model added after a first --apply join the existing configuration", async () => {
+    await run(true);
+    const before = await configsOf(a.orgId);
+    const anthropic = before.find((c) => c.providerId === "anthropic")!;
+    const lateConnection = await connection(a, "anthropic", { minute: 30 });
+    const lateModel = await model(a, {
+      modelId: "claude-late",
+      providerId: "anthropic",
+      minute: 30,
+    });
+    expect(await pending()).toBe(2);
+
+    lines.length = 0;
+    await run(true);
+    expect(await connectionConfig(lateConnection)).toBe(anthropic.id);
+    expect((await modelRow(lateModel))!.configId).toBe(anthropic.id);
+    expect(await configsOf(a.orgId)).toEqual(before);
     expect(await pending()).toBe(0);
+  });
+
+  it("gives a provider no loaded module registers a configuration of its own id, endpoint override included", async () => {
+    const OLD = "https://old.example.test/v1";
+    const stray = await connection(b, "retired-provider", { minute: 9 });
+    const strayModel = await model(b, { modelId: "m", providerId: "retired-provider", minute: 9 });
+    const strayEndpoint = await connection(b, "retired-provider", {
+      baseUrlOverride: OLD,
+      minute: 10,
+    });
+
+    await run(true);
+    const configOf = async (id: string) =>
+      (
+        await db
+          .select()
+          .from(modelConfigs)
+          .where(eq(modelConfigs.id, (await connectionConfig(id))!))
+      )[0]!;
+    const family = await configOf(stray);
+    const endpoint = await configOf(strayEndpoint);
+    expect(family).toMatchObject({ providerId: "retired-provider", baseUrl: null });
+    expect(endpoint).toMatchObject({ providerId: "retired-provider", baseUrl: OLD });
+    expect(endpoint.id).not.toBe(family.id);
+    expect((await modelRow(strayModel))!.configId).toBe(family.id);
+    expect(lines.some((l) => l.includes("UNREGISTERED PROVIDER"))).toBe(true);
+    expect(lines).toContain("rows of a provider no loaded module registers (own configuration): 3");
+    expect(lines).toContain("configurations created for a provider no loaded module registers: 2");
+    expect(await pending()).toBe(0);
+  });
+
+  it("a row cannot point at another organization's configuration", async () => {
+    await run(true);
+    const [foreign] = await configsOf(b.orgId);
+    await expect(
+      (async () => {
+        await db
+          .update(modelProviderCredentials)
+          .set({ configId: foreign!.id })
+          .where(eq(modelProviderCredentials.id, ids.orgKey));
+      })(),
+    ).rejects.toThrow();
+    await expect(
+      (async () => {
+        await db.update(orgModels).set({ configId: foreign!.id }).where(eq(orgModels.id, ids.kept));
+      })(),
+    ).rejects.toThrow();
   });
 });

@@ -18,14 +18,21 @@
  *   module in `MODULES` registers it);
  * - a model bound to a connection (`credential_id`) joins that connection's configuration, an
  *   unbound one its provider's family configuration (a gateway's: its default endpoint);
- * - two models landing on the same (configuration, model id) are one: the enabled one is kept,
- *   then the oldest; `organizations.default_model_id`, `space_packages.model_id` and
+ * - two NON-aliased models landing on the same (configuration, model id) are one (the new unique
+ *   index is partial on `aliased = false`; an alias keeps its own row and pointers, even when it
+ *   shares its backing model's id): the enabled one is kept, then the oldest;
+ *   `organizations.default_model_id`, `space_packages.model_id` and
  *   `package_schedules.model_id_override` are repointed to it and the others deleted
- *   (`runs.model_id` and `llm_usage` are history and are not touched);
+ *   (`runs.model_id` and `llm_usage` are history and are not touched); the fields of the deleted
+ *   row that differ from the kept one (label, cost, capabilities) are lost and reported;
  * - the retired `personal_model_credentials` key is removed from `org_settings`.
  *
- * The report lists, per model, the organization connection that served it before (its binding)
- * and the one serving it after (the oldest organization connection of its configuration that
+ * Two kinds of configuration are created without anyone having chosen them and are flagged
+ * apart: one for a provider no loaded module registers, and one on a gateway provider's
+ * `defaultBaseUrl` for an unbound gateway model (an endpoint nobody picked: edit or delete it).
+ *
+ * The report lists, per model, the connection that served it before (its binding, personal or
+ * not) and the organization connection serving it after (the oldest organization connection of its configuration that
  * serves the model), every difference by id. Personal connections are not compared: who pays
  * with one depends on the caller.
  *
@@ -67,12 +74,33 @@ interface ModelRow {
   id: string;
   org_id: string;
   model_id: string;
+  label: string;
   provider_id: string | null;
   credential_id: string | null;
   config_id: string | null;
   enabled: boolean;
+  aliased: boolean;
+  input: unknown;
+  context_window: number | null;
+  max_tokens: number | null;
+  reasoning: boolean | null;
+  cost: unknown;
   created_at: Date | string;
 }
+
+/** What a merge drops: the fields of the model kept that differ from the one deleted. */
+const MERGED_FIELDS = [
+  ["label", "label"],
+  ["cost", "cost"],
+  ["input", "input"],
+  ["context_window", "context window"],
+  ["max_tokens", "max tokens"],
+  ["reasoning", "reasoning"],
+] as const;
+const differingFields = (keep: ModelRow, drop: ModelRow): string[] =>
+  MERGED_FIELDS.filter(([k]) => JSON.stringify(keep[k]) !== JSON.stringify(drop[k])).map(
+    ([k, name]) => `${name} ${JSON.stringify(drop[k])} (kept ${JSON.stringify(keep[k])})`,
+  );
 
 interface ConfigRow {
   id: string;
@@ -145,6 +173,9 @@ export async function runModelConfigs(options: {
   out(`organizations to migrate: ${orgIds.length}`);
 
   let unregistered = 0;
+  let unregisteredConfigs = 0;
+  let unchosenEndpoints = 0;
+  let lossyMerges = 0;
   let servingChanges = 0;
   for (const orgId of orgIds) {
     const work = async (tx: typeof db) => {
@@ -161,7 +192,8 @@ export async function runModelConfigs(options: {
       );
       const models = toRows<ModelRow>(
         await tx.execute(sql`
-          SELECT id, org_id, model_id, provider_id, credential_id, config_id, enabled, created_at
+          SELECT id, org_id, model_id, label, provider_id, credential_id, config_id, enabled,
+                 aliased, input, context_window, max_tokens, reasoning, cost, created_at
           FROM org_models WHERE org_id = ${orgId} ORDER BY created_at, id`),
       );
       const configs = toRows<ConfigRow>(
@@ -172,9 +204,22 @@ export async function runModelConfigs(options: {
       const byKey = new Map(configs.map((c) => [configKey(c.provider_id, c.base_url), c]));
       const byId = new Map(configs.map((c) => [c.id, c]));
 
-      const ensure = async (providerId: string, baseUrl: string | null): Promise<ConfigRow> => {
+      const ensure = async (
+        providerId: string,
+        baseUrl: string | null,
+        flag?: "unregistered" | "unchosen-endpoint",
+      ): Promise<ConfigRow> => {
         const existing = byKey.get(configKey(providerId, baseUrl));
         if (existing) return existing;
+        if (flag === "unregistered") {
+          unregisteredConfigs++;
+          out(`  [${orgId}] UNREGISTERED PROVIDER: creating a configuration for ${providerId}`);
+        } else if (flag === "unchosen-endpoint") {
+          unchosenEndpoints++;
+          out(
+            `  [${orgId}] UNCHOSEN ENDPOINT: creating a configuration on ${providerId}'s default endpoint ${baseUrl} for an unbound model`,
+          );
+        }
         const label = configLabel(providerId, baseUrl);
         out(`  [${orgId}] config ${providerId}${baseUrl ? ` @ ${baseUrl}` : ""} — "${label}"`);
         const created: ConfigRow = apply
@@ -209,7 +254,11 @@ export async function runModelConfigs(options: {
             `  [${orgId}] unregistered provider, own configuration: connection ${c.id} ${c.provider_id}`,
           );
         }
-        const cfg = await ensure(key.providerId, key.baseUrl);
+        const cfg = await ensure(
+          key.providerId,
+          key.baseUrl,
+          getModelProvider(c.provider_id) ? undefined : "unregistered",
+        );
         credConfig.set(c.id, cfg.id);
         if (apply) {
           await tx.execute(
@@ -235,7 +284,7 @@ export async function runModelConfigs(options: {
         if (!getModelProvider(providerId)) {
           unregistered++;
           out(`  [${orgId}] unregistered provider, own configuration: model ${m.id} ${providerId}`);
-          target.set(m.id, (await ensure(providerId, null)).id);
+          target.set(m.id, (await ensure(providerId, null, "unregistered")).id);
           continue;
         }
         // An unbound gateway model served nothing before (a personal connection could not carry
@@ -243,14 +292,24 @@ export async function runModelConfigs(options: {
         const baseUrl = isGatewayProvider(providerId)
           ? (getModelProvider(providerId)?.defaultBaseUrl ?? null)
           : null;
-        target.set(m.id, (await ensure(configProviderOf(providerId), baseUrl)).id);
+        target.set(
+          m.id,
+          (
+            await ensure(
+              configProviderOf(providerId),
+              baseUrl,
+              baseUrl ? "unchosen-endpoint" : undefined,
+            )
+          ).id,
+        );
       }
 
-      // Duplicates on (configuration, model id): keep the enabled one, then the oldest.
+      // Duplicates on (configuration, model id) among non-aliased rows: keep the enabled one,
+      // then the oldest.
       const groups = new Map<string, ModelRow[]>();
       for (const m of models) {
         const cfg = target.get(m.id);
-        if (!cfg) continue;
+        if (!cfg || m.aliased) continue;
         const k = `${cfg}\u0000${m.model_id}`;
         groups.set(k, [...(groups.get(k) ?? []), m]);
       }
@@ -262,6 +321,11 @@ export async function runModelConfigs(options: {
         );
         for (const d of drop) {
           out(`  [${orgId}] duplicate model ${d.id} (${d.model_id}) merged into ${keep!.id}`);
+          const lost = differingFields(keep!, d);
+          if (lost.length > 0) {
+            lossyMerges++;
+            out(`  [${orgId}] merge drops from ${d.id}: ${lost.join("; ")}`);
+          }
           target.delete(d.id);
           if (!apply) continue;
           await tx.execute(
@@ -296,18 +360,24 @@ export async function runModelConfigs(options: {
             configProviderId: cfg.provider_id,
             personalConnectionsAllowed: false,
             modelId: m.model_id,
-            aliased: false,
+            aliased: m.aliased,
             payerUserId: null,
           })[0]?.id ?? null;
-        const before =
-          m.credential_id &&
-          credentials.find((c) => c.id === m.credential_id)?.owner_user_id === null
-            ? m.credential_id
-            : null;
+        const boundTo = m.credential_id
+          ? credentials.find((c) => c.id === m.credential_id)
+          : undefined;
+        // A personal binding served its owner only: whatever organization connection serves the
+        // model now (or none) is a change.
+        const before = boundTo?.id ?? null;
         if (before !== after) {
           servingChanges++;
+          const was = !boundTo
+            ? "unbound"
+            : boundTo.owner_user_id === null
+              ? boundTo.id
+              : `personal connection ${boundTo.id}`;
           out(
-            `  [${orgId}] serving changes: model ${m.id} (${m.model_id}) ${before ?? "unbound"} -> ${after ?? "none"}`,
+            `  [${orgId}] serving changes: model ${m.id} (${m.model_id}) ${was} -> ${after ?? "none"}`,
           );
         }
         if (apply && !m.config_id) {
@@ -333,6 +403,11 @@ export async function runModelConfigs(options: {
   }
 
   out(`rows of a provider no loaded module registers (own configuration): ${unregistered}`);
+  out(`configurations created for a provider no loaded module registers: ${unregisteredConfigs}`);
+  out(
+    `configurations created on a gateway default endpoint for an unbound model: ${unchosenEndpoints}`,
+  );
+  out(`merges that drop differing fields: ${lossyMerges}`);
   out(`models whose serving organization connection changes: ${servingChanges}`);
   if (!apply) {
     out("0062: DRY RUN — nothing written. Re-run with --apply to commit.");
