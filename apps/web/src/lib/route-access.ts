@@ -215,19 +215,24 @@ export const isOverlayPath = (path: string) =>
 /** The overlay tree's not-found routes: an unmatched address under an overlay is answered there, not by the dashboard. */
 export const OVERLAY_NOT_FOUND_PATHS = OVERLAY_PREFIXES.map((prefix) => `${prefix}/*`);
 
-/** Opens the Studio's screens; a role without it keeps the chat and every other product. */
-export const STUDIO_PERMISSION = "studio:read";
-
 /** The Studio's screens: every gated route outside the chat and the overlays. */
 function requiresStudio(path: RoutePath): boolean {
   return "anyOf" in ROUTE_ACCESS[path] && !isUnder(path, "/chat") && !isOverlayPath(path);
 }
 
-/** Whether a set of grants opens a gated route: its own permissions, and the Studio's for its screens. */
-export function grantsRoute(path: RoutePath, can: (permission: Permission) => boolean): boolean {
+/**
+ * Whether a set of grants opens a gated route: its own permissions, and for the Studio's screens
+ * a role that shows the Studio (`showsStudio`, a display attribute of the role in that space; a
+ * role that hides it keeps the chat and every other product).
+ */
+export function grantsRoute(
+  path: RoutePath,
+  can: (permission: Permission) => boolean,
+  showsStudio: boolean,
+): boolean {
   const access: RouteAccess = ROUTE_ACCESS[path];
   if (!("anyOf" in access)) return false;
-  return access.anyOf.some(can) && (!requiresStudio(path) || can(STUDIO_PERMISSION));
+  return access.anyOf.some(can) && (!requiresStudio(path) || showsStudio);
 }
 
 /** `absent`: the route does not exist here (module not loaded, or team-space route in a personal space). */
@@ -236,6 +241,7 @@ type RouteVerdict = "absent" | "granted" | "denied";
 export function routeVerdict(
   path: RoutePath,
   can: (permission: Permission) => boolean,
+  showsStudio: boolean,
   features: Readonly<Record<string, boolean | undefined>>,
   inPersonalSpace: boolean,
 ): RouteVerdict {
@@ -243,5 +249,5 @@ export function routeVerdict(
   if (access.feature && !features[access.feature]) return "absent";
   if (access.teamSpaceOnly && inPersonalSpace) return "absent";
   if ("open" in access) return "granted";
-  return grantsRoute(path, can) ? "granted" : "denied";
+  return grantsRoute(path, can, showsStudio) ? "granted" : "denied";
 }

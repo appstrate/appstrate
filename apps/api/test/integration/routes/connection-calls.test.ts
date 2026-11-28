@@ -47,6 +47,9 @@ interface Page {
   hasMore: boolean;
 }
 
+/** A start well before the recording time, so `called_at` cannot pass for `createdAt`. */
+const CALLED_AT = new Date("2026-01-02T03:04:05.000Z");
+
 describe("connection call journal routes", () => {
   /** The org owner: holds `integrations:configure` in every team space. */
   let ctx: TestContext;
@@ -82,6 +85,7 @@ describe("connection call journal routes", () => {
       outcome: "200",
       durationMs: 12,
       requestId: "req_1",
+      calledAt: CALLED_AT,
       ...overrides,
     };
   }
@@ -141,6 +145,8 @@ describe("connection call journal routes", () => {
         outcome: "unauthorized_target",
         duration_ms: 12,
         request_id: "req_2",
+        called_at: CALLED_AT.toISOString(),
+        call_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       });
     });
 
@@ -444,6 +450,18 @@ describe("connection call journal routes", () => {
         { connectionId: theirs, outcome: "500", ownerType: "end_user", ownerId: endUser.id },
         { connectionId: foreign, outcome: "203", ownerType: null, ownerId: null },
       ]);
+    });
+
+    it("stores a call retried under the same (run, call id) once, and mints an id for a call with none", async () => {
+      const callId = crypto.randomUUID();
+      await recordConnectionCalls([call(null, { runId: "run_1", callId, requestId: null })]);
+      await recordConnectionCalls([call(null, { runId: "run_1", callId, requestId: null })]);
+      await recordConnectionCalls([call(null)]);
+
+      const written = await rows();
+      expect(written).toHaveLength(2);
+      expect(written.find((row) => row.callId === callId)).toMatchObject({ requestId: null });
+      expect(written.filter((row) => row.callId !== callId)[0]!.callId).toMatch(/^[0-9a-f-]{36}$/);
     });
 
     it("records a call whose connection is gone, with no owner", async () => {

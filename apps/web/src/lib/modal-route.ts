@@ -83,7 +83,7 @@ interface OverlayExit {
   /** The background's history entry; `null` when it has none (a pasted link, a reload). */
   backgroundIndex: number | null;
   /** Puts another page under the overlay, one with no history entry. */
-  replaceBackground: (pathname: string) => void;
+  replaceBackground: (pathname: string, search: string) => void;
 }
 
 const OverlayContext = createContext<OpenOverlay | null>(null);
@@ -132,13 +132,16 @@ export function useOverlayState(): {
     overlay: { path: location.pathname, background: page },
     exit: {
       backgroundIndex: background?.index ?? null,
-      replaceBackground: (pathname) => {
+      replaceBackground: (pathname, pageSearch) => {
         const { search, hash, state } = location;
         navigate(
           { pathname: location.pathname, search, hash },
           {
             replace: true,
-            state: withBackground(state, { location: { ...HOME, pathname }, index: null }),
+            state: withBackground(state, {
+              location: { ...HOME, pathname, search: pageSearch },
+              index: null,
+            }),
           },
         );
       },
@@ -198,7 +201,7 @@ export function useReplacePage(): (pathname: string, search: string) => void {
   const exit = useContext(OverlayExitContext);
   const navigate = useNavigate();
   return (pathname, search) => {
-    if (exit) exit.replaceBackground(pathname);
+    if (exit) exit.replaceBackground(pathname, search);
     else navigate({ pathname, search }, { replace: true });
   };
 }

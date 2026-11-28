@@ -6,6 +6,7 @@ import { PROXY_STATUS_HEADER, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION, SCOPE_TOKEN_RE } from "@appstrate/core/integration";
 import { INTEGRATION_CALLBACK_TEMPLATES } from "../../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
+import { NEEDS_RECONNECTION_RECORD_PROPERTIES } from "../needs-reconnection-record.ts";
 import { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "@appstrate/shared-types";
 
 /**
@@ -330,6 +331,8 @@ export const integrationConnectionSchema = {
     "identity_claims",
     "scopes_granted",
     "needs_reconnection",
+    "needs_reconnection_cause",
+    "needs_reconnection_at",
     "expiresAt",
     "owner_type",
     "owner_id",
@@ -350,6 +353,7 @@ export const integrationConnectionSchema = {
     identity_claims: { type: ["object", "null"], additionalProperties: true },
     scopes_granted: { type: "array", items: { type: "string" } },
     needs_reconnection: { type: "boolean" },
+    ...NEEDS_RECONNECTION_RECORD_PROPERTIES,
     expiresAt: { type: ["string", "null"], format: "date-time" },
     owner_type: { type: "string", enum: ["user", "end_user"] },
     owner_id: { type: "string" },

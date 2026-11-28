@@ -38,7 +38,12 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
-import { listOrgOffers, placementReadFilter, placementRowJoin } from "./package-placement.ts";
+import {
+  isPersonalSpace,
+  listOrgOffers,
+  placementReadFilter,
+  placementRowJoin,
+} from "./package-placement.ts";
 import { getLatestVersionId } from "./package-versions.ts";
 import {
   governingIntegrationManifest,
@@ -132,16 +137,6 @@ export function mayLandInPersonalSpace(
   spaceId: string,
 ): boolean {
   return pkg.homeSpaceId === spaceId || pkg.orgOffer !== null || isActiveByDefault(pkg);
-}
-
-/** Is `spaceId` a personal space (`spaces.owner_user_id` set)? Read inside the caller's transaction. */
-async function isPersonalSpace(tx: Tx, spaceId: string): Promise<boolean> {
-  const [row] = await tx
-    .select({ ownerUserId: spaces.ownerUserId })
-    .from(spaces)
-    .where(eq(spaces.id, spaceId))
-    .limit(1);
-  return row?.ownerUserId != null;
 }
 
 /** 409 `personal_space_takes_offers_only`: the package is not offered to the organization. */
@@ -734,7 +729,7 @@ export function isPublished(row: { source: string | null; latestVersionId: numbe
   return row.source === "system" || row.latestVersionId != null;
 }
 
-const DEFAULT_PACKAGE_HINT_LIMIT = 15;
+export const DEFAULT_PACKAGE_HINT_LIMIT = 15;
 
 /**
  * Options every hint listing takes. `homeWritable` is a callback rather than a
@@ -836,8 +831,8 @@ interface ActiveAgentHint extends PackageHint {
 }
 
 interface ActiveAgentHintsResult {
-  agents: ActiveAgentHint[];
-  /** True when the catalog exceeded `limit`, `agents` then empty (reach it via search). */
+  data: ActiveAgentHint[];
+  /** True when the catalog exceeded `limit`, `data` then empty (reach it via search). */
   truncated: boolean;
   /** Total active agents. */
   total: number;
@@ -867,11 +862,11 @@ export async function listActiveAgentHints(
     await selectorlessLaunchManifests(rows),
     scope,
   );
-  const agents = items.map((item, i) => ({
+  const data = items.map((item, i) => ({
     ...item,
     inactive_required_integrations: inactive[i]!,
   }));
-  return { agents, truncated, total };
+  return { data, truncated, total };
 }
 
 /** One entry in the active-skill hint exposed via get_me. */
@@ -882,8 +877,8 @@ interface ActiveSkill extends PackageHint {
 }
 
 interface ActiveSkillsResult {
-  skills: ActiveSkill[];
-  /** True when the catalog exceeded `limit`, `skills` then empty (reach it via search). */
+  data: ActiveSkill[];
+  /** True when the catalog exceeded `limit`, `data` then empty (reach it via search). */
   truncated: boolean;
   /** Total active skills. */
   total: number;
@@ -908,7 +903,7 @@ export async function listActiveSkills(
     }),
     opts,
   );
-  return { skills: items, truncated, total };
+  return { data: items, truncated, total };
 }
 
 /** The run gate: is this package active in this space (RBAC spec §6.10)? The row wins, system packages included; with no row the deployment default decides. Carries the org boundary itself. */
@@ -1148,7 +1143,7 @@ export async function listConnectableIntegrations(
   scope: SpaceScope,
   connected: ReadonlySet<string>,
   opts: { canConfigure: boolean },
-): Promise<{ integrations: string[]; truncated: boolean; total: number }> {
+): Promise<{ data: string[]; truncated: boolean; total: number }> {
   const active = await listActivePackages(scope.orgId, [scope.spaceId], "integration");
   const open = active.filter(
     (row) => !connected.has(row.id) && !isRuntimeBoundIntegration(row.draftManifest),
@@ -1178,6 +1173,6 @@ export async function listConnectableIntegrations(
     .map((row) => row.id)
     .sort();
   return ids.length > DEFAULT_PACKAGE_HINT_LIMIT
-    ? { integrations: [], truncated: true, total: ids.length }
-    : { integrations: ids, truncated: false, total: ids.length };
+    ? { data: [], truncated: true, total: ids.length }
+    : { data: ids, truncated: false, total: ids.length };
 }

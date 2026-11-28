@@ -17,6 +17,7 @@
  * asserted there rather than through markup this renderer cannot produce.
  */
 
+import type { components } from "@/api/schema";
 import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -56,7 +57,9 @@ await i18n.loadNamespaces(["chat", "settings"]);
  * role only comes back for a CLOSED space the caller has not joined — which
  * the listing does include.
  */
-function spaceFixture(role: { kind: "preset" | "custom"; key: string; name: string } | null) {
+type Role = components["schemas"]["SpaceObject"]["role"];
+
+function spaceFixture(role: Role) {
   return {
     object: "space" as const,
     id: SPACE_ID,
@@ -85,7 +88,7 @@ function spaceFixture(role: { kind: "preset" | "custom"; key: string; name: stri
  */
 function summary(options: {
   seedSpaces: boolean;
-  spaceRole?: { kind: "preset" | "custom"; key: string; name: string } | null;
+  spaceRole?: Role;
   /** Extra rows of the space listing, beside the working space. */
   otherSpaces?: ReturnType<typeof spaceFixture>[];
   /** The conversation's stored scope (`undefined`: loading); none stored yet by default. */
@@ -144,7 +147,7 @@ describe("the chat access summary", () => {
     // The working space's role is the specific standing the label names.
     const html = summary({
       seedSpaces: true,
-      spaceRole: { kind: "preset", key: "operator", name: "operator" },
+      spaceRole: { preset_role: "operator", name: "operator" },
     });
     expect(html).toContain(i18n.t("settings:roles.preset.operator"));
   });
@@ -152,7 +155,7 @@ describe("the chat access summary", () => {
   it("renders a custom role under the name its author typed, not a slug", () => {
     const html = summary({
       seedSpaces: true,
-      spaceRole: { kind: "custom", key: "analyste", name: "Analyste" },
+      spaceRole: { custom_role_id: "srl_analyste", name: "Analyste" },
     });
     expect(html).toContain("Analyste");
   });
@@ -169,7 +172,7 @@ describe("the chat access summary", () => {
     const space = i18n.t("settings:roles.preset.operator");
     const html = summary({
       seedSpaces: true,
-      spaceRole: { kind: "preset", key: "operator", name: "operator" },
+      spaceRole: { preset_role: "operator", name: "operator" },
     });
     expect(html).toContain(i18n.t("chat:access.roleLine", { org, space }));
   });
@@ -179,7 +182,7 @@ describe("the chat access summary", () => {
     const runAgents = i18n.t("chat:access.capability.runAgents");
     const granted = i18n.t("chat:access.granted");
     const acting = {
-      ...spaceFixture({ kind: "preset", key: "operator", name: "operator" }),
+      ...spaceFixture({ preset_role: "operator", name: "operator" }),
       id: "spc_b",
       isDefault: false,
       permissions: ["chat:write", "chat:read", "mcp:read", "mcp:invoke", "agents:run", "runs:read"],
@@ -201,7 +204,7 @@ describe("the chat access summary", () => {
     const granted = i18n.t("chat:access.granted");
     const chatPermissions = ["chat:write", "chat:read", "mcp:read", "mcp:invoke"];
     const origin = {
-      ...spaceFixture({ kind: "preset", key: "operator", name: "operator" }),
+      ...spaceFixture({ preset_role: "operator", name: "operator" }),
       id: "spc_origin",
       isDefault: false,
       permissions: chatPermissions,
@@ -232,7 +235,7 @@ describe("the chat access summary", () => {
   it("names, in « Tous les espaces », the spaces granting each granted row, and none out of it", () => {
     const chatPermissions = ["chat:write", "chat:read", "mcp:read", "mcp:invoke", "files:read"];
     const studio = {
-      ...spaceFixture({ kind: "preset", key: "operator", name: "operator" }),
+      ...spaceFixture({ preset_role: "operator", name: "operator" }),
       id: "spc_studio",
       name: "Studio",
       isDefault: false,

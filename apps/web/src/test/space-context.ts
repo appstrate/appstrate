@@ -3,7 +3,6 @@
 import type { ReactElement } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import { render } from "./render.tsx";
-import { STUDIO_PERMISSION } from "../lib/route-access.ts";
 import { spyOn } from "bun:test";
 import { authStore } from "../stores/auth-store.ts";
 import { orgStore } from "../stores/org-store.ts";
@@ -67,7 +66,8 @@ export const testSpace = (
   object: "space",
   orgId: "org_1",
   access: "member",
-  permissions: studio ? [STUDIO_PERMISSION, ...permissions] : permissions,
+  permissions,
+  shows_studio: studio,
   personal: false,
   isDefault: id === "spc_a",
   name,

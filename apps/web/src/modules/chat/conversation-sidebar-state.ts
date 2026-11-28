@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type ConversationSidebarTab = "summary" | "runs" | "files" | "tools";
+export type ConversationSidebarTab = "summary" | "runs" | "files" | "tools" | "info";
 
 export interface StoredSidebarFile {
   id: string;

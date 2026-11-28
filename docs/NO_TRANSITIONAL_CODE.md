@@ -307,7 +307,7 @@ Two consequences worth stating, because they are where this gets uncomfortable:
   spelling at all — warning on any key the running version does not read covers
   retired names, typos and every future removal, and never expires. It is
   implemented as `warnOnUnreadEnvKeys` (`apps/api/src/lib/unread-env-keys.ts`),
-  one boot line; its namespace rule and limits are in `docs/ENV.md` § Unread keys.
+  one boot line over a declared list of platform namespaces (`PLATFORM_ENV_NAMESPACES`, so a removal never shrinks it); its namespace rule and limits are in `docs/ENV.md` § Unread keys.
 - **A guard that is load-bearing for CURRENT data is not a guard.** If deleting
   it breaks something that works today, it was never transitional and §4 does
   not reach it. The AFPS retired-key handling is the live example: its "tolerate"

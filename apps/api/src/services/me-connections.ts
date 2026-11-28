@@ -30,7 +30,7 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { actorFilter, type Actor } from "../lib/actor.ts";
-import { displayAccountId } from "@appstrate/core/integration";
+import { displayAccountId, type IntegrationManifest } from "@appstrate/core/integration";
 import { boundSpacesOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { asRecord } from "@appstrate/core/safe-json";
@@ -44,7 +44,7 @@ import { activeHereSql } from "./package-activation.ts";
 import { listPackagePlacements } from "./space-packages.ts";
 import { readOAuthClientRegistrations, reconnectMethods } from "./reconnect-methods.ts";
 import {
-  parseIntegrationManifest,
+  governingIntegrationManifest,
   readPublishedIntegrationManifests,
 } from "./integration-service.ts";
 import { placementRowJoin } from "./package-placement.ts";
@@ -156,14 +156,15 @@ async function reconnectSpaces(
         .map((s) => s.id);
       if (!spaceIds.length) return;
       const packageIds = [...new Set(connections.map((r) => r.packageId))];
-      const [placements, { manifests, unpublished }, registrations] = await Promise.all([
+      const [placements, published, registrations] = await Promise.all([
         listPackagePlacements(orgId, packageIds, spaceIds, "integration"),
         readPublishedIntegrationManifests(packageIds, orgId),
         readOAuthClientRegistrations(orgId, packageIds, spaceIds),
       ]);
-      for (const id of unpublished) {
-        const parsed = parseIntegrationManifest(drafts.get(id));
-        if (parsed.ok) manifests.set(id, parsed.manifest);
+      const manifests = new Map<string, IntegrationManifest>();
+      for (const id of packageIds) {
+        const manifest = governingIntegrationManifest(id, published, drafts.get(id));
+        if (manifest) manifests.set(id, manifest);
       }
       const byPackage = Map.groupBy(placements, (p) => p.packageId);
       const methodAvailable = reconnectMethods(manifests, registrations);
@@ -205,6 +206,8 @@ export async function listMeConnections(
       shareAllSpaces: integrationConnections.shareAllSpaces,
       scopesGranted: integrationConnections.scopesGranted,
       needsReconnection: integrationConnections.needsReconnection,
+      needsReconnectionCause: integrationConnections.needsReconnectionCause,
+      needsReconnectionAt: integrationConnections.needsReconnectionAt,
       expiresAt: integrationConnections.expiresAt,
       label: integrationConnections.label,
       identityClaims: integrationConnections.identityClaims,
@@ -410,6 +413,8 @@ export async function listMeConnections(
       scopes_granted: row.scopesGranted ?? [],
       connected_at: toISORequired(row.createdAt),
       needs_reconnection: row.needsReconnection,
+      needs_reconnection_cause: row.needsReconnectionCause,
+      needs_reconnection_at: row.needsReconnectionAt?.toISOString() ?? null,
       expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
       identity,
       auth_key: row.authKey,

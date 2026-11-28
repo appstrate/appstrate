@@ -51,6 +51,8 @@ beforeEach(async () => {
 async function seedConnection(
   actor: { userId: string } | { endUserId: string },
   where: { spaceId: string | null; originSpaceId: string | null },
+  flag?: { cause: "refresh_token_revoked"; at: Date },
+  label = "Mail",
 ): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
@@ -63,7 +65,14 @@ async function seedConnection(
       ...actor,
       credentialsEncrypted: "x",
       scopesGranted: [],
-      label: "Mail",
+      label,
+      ...(flag
+        ? {
+            needsReconnection: true,
+            needsReconnectionCause: flag.cause,
+            needsReconnectionAt: flag.at,
+          }
+        : {}),
     })
     .returning({ id: integrationConnections.id });
   return row!.id;
@@ -147,6 +156,25 @@ describe("GET /api/me/connections: where a renewal starts", () => {
       { spaceId: null, originSpaceId: origin.id },
     );
     await expectRenewal(authHeaders(owner), id, owner.defaultSpaceId);
+  });
+
+  it("serves the recorded death cause and its date, or null/null for a live row", async () => {
+    const where = { spaceId: owner.defaultSpaceId, originSpaceId: null };
+    const flaggedId = await seedConnection({ userId: owner.user.id }, where, {
+      cause: "refresh_token_revoked",
+      at: new Date("2026-03-01T10:00:00.000Z"),
+    });
+    const liveId = await seedConnection({ userId: owner.user.id }, where, undefined, "Mail live");
+    expect(await listed(authHeaders(owner), flaggedId)).toMatchObject({
+      needs_reconnection: true,
+      needs_reconnection_cause: "refresh_token_revoked",
+      needs_reconnection_at: "2026-03-01T10:00:00.000Z",
+    });
+    expect(await listed(authHeaders(owner), liveId)).toMatchObject({
+      needs_reconnection: false,
+      needs_reconnection_cause: null,
+      needs_reconnection_at: null,
+    });
   });
 
   it("withholds renewal when the published integration no longer declares the row's auth", async () => {

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The "exactly one role reference" body shape, in one place: three routes differ only in what
- * sits beside the role, and `assignmentColumns` assumes the xor rule and its message held.
+ * The "exactly one role reference" rule for a body that carries fields beside the role (a space
+ * id, a user reference): a flat object, the form the OpenAPI request-body comparison reads. A body
+ * that is the role alone uses core's `spaceRoleReferenceSchema`.
  */
 
 import { z } from "zod";

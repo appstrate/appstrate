@@ -297,7 +297,7 @@ describe("a forwarded tool", () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
     try {
-      const presentation = { title: "List models" };
+      const presentation = { call: "operation", method: "GET", tag: "Zebra" };
       transport.answers.remote = remote({
         [OPERATION_SPACES_META_KEY]: [],
         [TOOL_PRESENTATION_META_KEY]: presentation,
@@ -323,7 +323,7 @@ describe("a forwarded tool", () => {
         resultProviderMetadata: { appstrate: { presentation } },
       });
       // Out of the stored output: a replay that finds no text in it sends the output's JSON.
-      expect(JSON.stringify("output" in part ? part.output : null)).not.toContain("List models");
+      expect(JSON.stringify("output" in part ? part.output : null)).not.toContain("Zebra");
       const next: UIMessage = { id: "u2", role: "user", parts: [{ type: "text", text: "ok" }] };
       const { estimateTokens } = await loadPiCodingAgentSdk();
       const turn = buildStructuredPiTurn([USER, message, next], REPLAY_MODEL, {
@@ -333,7 +333,7 @@ describe("a forwarded tool", () => {
       });
       const replayed = JSON.stringify(turn.history);
       expect(replayed).toContain("platform response");
-      expect(replayed).not.toContain("List models");
+      expect(replayed).not.toContain("Zebra");
     } finally {
       await built.close();
     }

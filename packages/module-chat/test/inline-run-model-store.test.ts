@@ -48,9 +48,9 @@ describe("the inline-run model preference", () => {
     const data = installStorage();
     bindInlineRunModelUser("usr_a");
     setInlineRunModelEnabled(true);
-    expect(data.get("appstrate.chat.inlineRunModel:usr_a")).toBe("on");
+    expect(data.get("appstrate:chat:inlineRunModel:usr_a")).toBe("on");
     setInlineRunModelEnabled(false);
-    expect(data.has("appstrate.chat.inlineRunModel:usr_a")).toBe(false);
+    expect(data.has("appstrate:chat:inlineRunModel:usr_a")).toBe(false);
   });
 
   it("is kept per user: one account's choice never carries over to another", () => {
@@ -67,8 +67,8 @@ describe("the inline-run model preference", () => {
 
   it("is bound with the other composer preferences in one call", () => {
     const data = installStorage();
-    data.set("appstrate.chat.inlineRunModel:usr_a", "on");
-    data.set("appstrate.chat.packageAuthoring:usr_a", "off");
+    data.set("appstrate:chat:inlineRunModel:usr_a", "on");
+    data.set("appstrate:chat:packageAuthoring:usr_a", "off");
 
     bindChatPreferencesUser("usr_a");
 

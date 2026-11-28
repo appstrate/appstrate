@@ -19,6 +19,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { dirname } from "node:path";
+import apiManifest from "../../package.json";
 
 /** Where `specifier` resolves to when imported from `fromDir`. */
 function resolveFrom(specifier: string, fromDir: string): string {
@@ -53,5 +54,25 @@ describe("better-auth instance identity", () => {
       resolveFrom("better-auth/oauth2", api),
     );
     expect(resolveFrom("jose", core)).toBe(resolveFrom("jose", api));
+  });
+
+  it("resolves one better-call for better-auth, the oauth provider and cimd", () => {
+    const api = import.meta.dir;
+    const facade = packageDir("better-auth/oauth2", api);
+    const provider = packageDir("@better-auth/oauth-provider", api);
+    const cimd = packageDir("@better-auth/cimd", api);
+
+    const fromFacade = resolveFrom("better-call", facade);
+    expect(resolveFrom("better-call", provider)).toBe(fromFacade);
+    expect(resolveFrom("better-call", cimd)).toBe(fromFacade);
+  });
+
+  it("pins every better-auth package of apps/api to one version", () => {
+    const deps: Record<string, string> = apiManifest.dependencies;
+    const family = Object.entries(deps).filter(
+      ([name]) => name === "better-auth" || name.startsWith("@better-auth/"),
+    );
+    expect(family.length).toBeGreaterThan(1);
+    expect(new Set(family.map(([, version]) => version)).size).toBe(1);
   });
 });

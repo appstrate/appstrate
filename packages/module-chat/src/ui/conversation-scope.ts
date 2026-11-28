@@ -7,6 +7,10 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 import { actsIn, useChatHost, type ChatHost } from "./runtime-context.ts";
+import {
+  readAppstrateToolPartMetadata,
+  type AppstrateToolPartMetadata,
+} from "@appstrate/core/chat-turn-metadata";
 import { callOutcome } from "./tool-presentation.ts";
 
 export interface ConversationScope {
@@ -118,24 +122,24 @@ export function limitedSpaceOf(
 /**
  * The space a tool call acted in, as the engine stamped it on the call
  * (`providerMetadata.appstrate.spaceId`): read from the call, never from the conversation's present
- * limit, which can change afterwards. `undefined` for a call that acts in no space. A failure's
- * resolved spaces ride on the stored part's `resultProviderMetadata` (`callOutcome`).
+ * limit, which can change afterwards. `undefined` for a call that acts in no space. The resolved
+ * spaces ride on the stored part's `resultProviderMetadata` (`callOutcome`), success or failure.
  */
 export function callSpaceOf(part: {
   providerMetadata?: unknown;
-  result?: unknown;
   resultProviderMetadata?: unknown;
 }): string | undefined {
+  return outcomeSpaceOf(callOutcome(part), part.providerMetadata);
+}
+
+/** `callSpaceOf` for an outcome already parsed off the stored part. */
+export function outcomeSpaceOf(
+  outcome: AppstrateToolPartMetadata | undefined,
+  providerMetadata: unknown,
+): string | undefined {
   // A settled tool knows the execution scope, including a target named by path or a
   // genuinely organization-wide call with an empty list. Without a resolved scope, use the input stamp.
-  const resolved =
-    (part.result as { actedSpaceIds?: unknown } | undefined)?.actedSpaceIds ??
-    callOutcome(part)?.actedSpaceIds;
-  if (Array.isArray(resolved)) {
-    const target = resolved[resolved.length - 1];
-    return typeof target === "string" ? target : undefined;
-  }
-  const stamp = (part.providerMetadata as { appstrate?: { spaceId?: unknown } } | undefined)
-    ?.appstrate?.spaceId;
-  return typeof stamp === "string" && stamp ? stamp : undefined;
+  const resolved = outcome?.actedSpaceIds;
+  if (resolved) return resolved[resolved.length - 1];
+  return readAppstrateToolPartMetadata(providerMetadata)?.spaceId;
 }

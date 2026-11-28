@@ -162,7 +162,7 @@ describe("setOrgOffer", () => {
       await setOrgOffer("@acme/notes", mode);
       expect(put).toHaveBeenCalledWith("/api/packages/{scope}/{name}/org-offer", {
         params: { path: { scope: "@acme", name: "notes" } },
-        body: { mode },
+        body: { org_offer: mode },
       });
       expect(del).not.toHaveBeenCalled();
       mock.restore();

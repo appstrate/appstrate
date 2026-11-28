@@ -5,7 +5,7 @@ import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/
 import type { AppEnv } from "../types/index.ts";
 import { listSpacesForPrincipal } from "../services/spaces.ts";
 import type { Permission, SpaceGrant } from "./permissions.ts";
-import { toSpaceRoleWire, type SpaceRoleRef } from "./space-role.ts";
+import { toSpaceRoleReference, type SpaceRoleRef } from "./space-role.ts";
 import { forbidden, notFound, type ApiError } from "./errors.ts";
 import { dispatchPin } from "./internal-dispatch.ts";
 import {
@@ -155,7 +155,7 @@ export function toReachableSpaceWire(space: ReachableSpace) {
   return {
     id: space.id,
     name: space.name,
-    role: toSpaceRoleWire(space.role)!.name,
+    role: toSpaceRoleReference(space.role).name,
     permissions: [...space.permissions],
     credentialProxyOpen: space.credentialProxyOpen,
   };

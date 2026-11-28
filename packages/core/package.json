@@ -110,6 +110,7 @@
     "./mcp-presentation": "./src/mcp-presentation.ts",
     "./mcp-result": "./src/mcp-result.ts",
     "./mcp-spaces": "./src/mcp-spaces.ts",
+    "./me-context": "./src/me-context.ts",
     "./realtime-url": "./src/realtime-url.ts",
     "./model-selectable": "./src/model-selectable.ts"
   },

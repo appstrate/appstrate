@@ -16,6 +16,8 @@ const storage = installFakeStorage({
 
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { SidebarTips } = await import("../sidebar-tips.tsx");
+const { authStore } = await import("../../stores/auth-store.ts");
+await import("../../stores/sidebar-tips-store.ts");
 const { memberSpaceClient, renderInSpace, testSpace } = await import("../../test/space-context.ts");
 
 await i18nReady;
@@ -26,6 +28,8 @@ function tips(
   permissions: string[],
   { userId = "u_1", path = "/" }: { userId?: string; path?: string } = {},
 ) {
+  // The tips store follows the auth store: signing the user in binds their dismissed cards.
+  authStore.setState({ user: { id: userId, email: "u@example.test", emailVerified: true } });
   const queryClient = memberSpaceClient([testSpace("spc_a", permissions)]);
   queryClient.setQueryData(["get", "/api/me/connections", {}], { object: "list", data: [] });
   return renderInSpace(<SidebarTips />, {
@@ -54,7 +58,7 @@ describe("SidebarTips", () => {
   });
 
   it("puts the first step on top, the next one peeking, and names it on the turn control", () => {
-    const html = tips(["spaces:read", "integrations:read"]);
+    const html = tips(["spaces:read", "integrations:read", "integrations:connect"]);
     expect(stack(html)).toEqual(["connect:0", "catalogue:1"]);
     expect(html).toContain("Branchez vos outils");
     expect(html).toContain('href="/integrations"');
@@ -66,15 +70,23 @@ describe("SidebarTips", () => {
   });
 
   it("leaves out a card the person dismissed", () => {
-    storage.setItem("appstrate-sidebar-tips:u_dismissed", JSON.stringify(["connect"]));
-    expect(stack(tips(["spaces:read", "integrations:read"], { userId: "u_dismissed" }))).toEqual([
-      "catalogue:0",
-    ]);
+    storage.setItem("appstrate:web:sidebarTips:u_dismissed", JSON.stringify(["connect"]));
+    expect(
+      stack(
+        tips(["spaces:read", "integrations:read", "integrations:connect"], {
+          userId: "u_dismissed",
+        }),
+      ),
+    ).toEqual(["catalogue:0"]);
   });
 
   it("says nothing of the page already on screen", () => {
-    expect(stack(tips(["spaces:read", "integrations:read"], { path: "/integrations" }))).toEqual([
-      "catalogue:0",
-    ]);
+    expect(
+      stack(
+        tips(["spaces:read", "integrations:read", "integrations:connect"], {
+          path: "/integrations",
+        }),
+      ),
+    ).toEqual(["catalogue:0"]);
   });
 });

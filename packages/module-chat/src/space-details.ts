@@ -10,10 +10,36 @@
  */
 
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
+import { flattenName } from "@appstrate/core/mcp-spaces";
+import { getMeResultSchema } from "@appstrate/core/me-context";
 import { logger } from "./logger.ts";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
+import { compare } from "./space-acts.ts";
 
 /** About 2k tokens. */
 export const CHAT_CONTEXT_DETAILS_BUDGET_CHARS = 8_000;
+
+/** At most this many spaces are read per turn, in the order the caller gives them; the rest are counted. */
+export const MAX_DETAIL_SPACES = 20;
+
+/**
+ * The spaces a turn reads, in priority order: the origin space, the caller's personal space, the
+ * spaces the conversation touched, then the others by name and id.
+ */
+export function orderDetailSpaces<T extends { id: string; name: string }>(
+  spaces: readonly T[],
+  priority: readonly (string | null | undefined)[],
+): T[] {
+  const rank = new Map<string, number>();
+  for (const id of priority) if (id != null && !rank.has(id)) rank.set(id, rank.size);
+  const rest = rank.size;
+  const rankOf = (id: string) => rank.get(id) ?? rest;
+  return [...spaces].sort(
+    (a, b) =>
+      rankOf(a.id) - rankOf(b.id) ||
+      (rankOf(a.id) < rest ? 0 : compare(a.name, b.name) || compare(a.id, b.id)),
+  );
+}
 
 /** How many `get_me` run at once: a huge organization must not flood the connection the skills share. */
 const READ_CONCURRENCY = 4;
@@ -63,66 +89,84 @@ export interface SpaceDetail {
 
 export type SpaceDetailsClient = Pick<AppstrateMcpClient, "callTool">;
 
-const record = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
-const text = (value: unknown): string => (typeof value === "string" ? value : "");
-const withId = <T extends { id: string }>(entries: T[]): T[] => entries.filter((entry) => entry.id);
+const record = (value: unknown): Record<string, unknown> => asRecordOrNull(value) ?? {};
 
-/** The `get_me` payload of one space, or `undefined` when it is not a 200 answer. */
+/** The `get_me` payload of one space, or `undefined` when it is not a well-formed 200 answer. */
 function parseDetail(space: DetailSpace, result: unknown): SpaceDetail | undefined {
-  const outcome = record(record(result).structuredContent);
-  if (record(result).isError === true || outcome.status !== 200) return undefined;
-  const body = record(outcome.body);
-  if (record(body.space).id !== space.id) return undefined;
-  const total = (value: unknown, listed: unknown[] | null): number =>
-    listed === null ? 0 : Math.max(typeof value === "number" ? value : 0, listed.length);
-  const connectable = space.integrations
-    ? list(body.connectable_integrations).map(text).filter(Boolean)
-    : null;
+  const answer = record(result);
+  const outcome = record(answer.structuredContent);
+  if (answer.isError === true || outcome.status !== 200) {
+    logger.warn("get_me of a space did not answer a context — left out", {
+      spaceId: space.id,
+      status: outcome.status,
+      isError: answer.isError === true,
+    });
+    return undefined;
+  }
+  const parsed = getMeResultSchema.safeParse(outcome);
+  if (!parsed.success) {
+    logger.warn("get_me of a space answered a context of an unexpected shape — left out", {
+      spaceId: space.id,
+      issues: parsed.error.issues
+        .slice(0, 5)
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`),
+    });
+    return undefined;
+  }
+  const { body } = parsed.data;
+  const {
+    connections,
+    connectable_integrations: connectableEnvelope,
+    agents: agentsEnvelope,
+  } = body;
+  if (
+    body.space?.id !== space.id ||
+    connections === undefined ||
+    connectableEnvelope === undefined ||
+    agentsEnvelope === undefined
+  ) {
+    logger.warn(
+      "get_me of a space answered another space or a context without its lists — left out",
+      {
+        spaceId: space.id,
+        answeredSpaceId: body.space?.id,
+      },
+    );
+    return undefined;
+  }
+  const total = (value: number, listed: unknown[] | null): number =>
+    listed === null ? 0 : Math.max(value, listed.length);
+  const connectable = space.integrations ? connectableEnvelope.data : null;
   const agents = space.agents
-    ? withId(
-        list(body.agents).map((item) => {
-          const entry = record(item);
-          return {
-            id: text(entry.packageId),
-            name: text(entry.display_name),
-            description: text(entry.description),
-            published: entry.published === true,
-            homeWritable: entry.home_writable === true,
-            takesInput: entry.takes_input === true,
-            inactiveRequired: list(entry.inactive_required_integrations).map(text),
-          };
-        }),
-      )
+    ? agentsEnvelope.data.map((entry) => ({
+        id: entry.packageId,
+        name: entry.display_name,
+        description: entry.description,
+        published: entry.published,
+        homeWritable: entry.home_writable,
+        takesInput: entry.takes_input,
+        inactiveRequired: entry.inactive_required_integrations,
+      }))
     : null;
   return {
     space,
     integrations: space.integrations
-      ? withId(
-          list(body.connections).map((item) => {
-            const entry = record(item);
-            return {
-              id: text(entry.integration_package_id),
-              name: text(entry.name),
-              active: entry.active === true,
-              needsReconnection: entry.needs_reconnection === true,
-              connections: withId(
-                list(entry.connections).map((connection) => {
-                  const c = record(connection);
-                  return { id: text(c.id), label: text(c.label), owned: c.owned_by_actor === true };
-                }),
-              ),
-            };
-          }),
-        )
+      ? connections.map((entry) => ({
+          id: entry.integration_package_id,
+          name: entry.name,
+          active: entry.active,
+          needsReconnection: entry.needs_reconnection === true,
+          connections: entry.connections.map((c) => ({
+            id: c.id,
+            label: c.label,
+            owned: c.owned_by_actor,
+          })),
+        }))
       : null,
     connectable: connectable ?? [],
-    connectableTotal: total(body.connectable_integrations_total, connectable),
+    connectableTotal: total(connectableEnvelope.total, connectable),
     agents,
-    agentsTotal: total(body.agents_total, agents),
+    agentsTotal: total(agentsEnvelope.total, agents),
   };
 }
 
@@ -138,12 +182,7 @@ export async function readSpaceDetails(
 ): Promise<SpaceDetail[]> {
   const read = (space: DetailSpace): Promise<SpaceDetail | undefined> =>
     client.callTool({ name: "get_me", arguments: { space_id: space.id } }, { signal }).then(
-      (result) => {
-        const detail = parseDetail(space, result);
-        if (!detail)
-          logger.warn("get_me of a space answered no context — left out", { spaceId: space.id });
-        return detail;
-      },
+      (result) => parseDetail(space, result),
       (err: unknown) => {
         logger.warn("get_me of a space failed — left out", {
           spaceId: space.id,
@@ -165,11 +204,7 @@ export async function readSpaceDetails(
   return details.filter((detail): detail is SpaceDetail => detail !== undefined);
 }
 
-const oneLine = (value: string, max: number): string => {
-  const flat = value.replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-};
-const label = (value: string): string => oneLine(value, 80);
+const label = (value: string): string => flattenName(value, 80);
 const head = (id: string, name: string): string => {
   const shown = label(name);
   return shown && shown !== id ? `\`${id}\` (${shown})` : `\`${id}\``;
@@ -177,7 +212,6 @@ const head = (id: string, name: string): string => {
 const names = (spaces: readonly DetailSpace[]): string =>
   spaces.map((space) => label(space.name)).join(", ");
 const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
-const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** How much of each entry is rendered, the same for every space: the most that fits the budget. */
 const LEVELS = ["full", "names", "counts"] as const;
@@ -279,7 +313,8 @@ function agentLines(details: readonly SpaceDetail[], level: Level): string[] {
       ].filter(Boolean);
       return `${label(space.name)}${notes.length ? ` (${notes.join("; ")})` : ""}`;
     });
-    const description = level === "full" ? oneLine(agent.description, DESCRIPTION_MAX_CHARS) : "";
+    const description =
+      level === "full" ? flattenName(agent.description, DESCRIPTION_MAX_CHARS) : "";
     return `- ${head(id, agent.name)} — in ${where.join(", ")}${agent.takesInput ? "; takes input" : ""}${
       description ? `. ${description}` : ""
     }`;
@@ -389,9 +424,16 @@ function showsEntries(detail: SpaceDetail): boolean {
  */
 export function formatSpaceDetails(
   details: readonly SpaceDetail[],
+  unread: number,
   budget = CHAT_CONTEXT_DETAILS_BUDGET_CHARS,
 ): { text: string; shown: string[] } {
-  if (details.length === 0) return { text: "", shown: [] };
+  if (details.length === 0 && unread === 0) return { text: "", shown: [] };
+  const unreadLine =
+    unread > 0
+      ? [
+          `${unread} ${unread === 1 ? "space" : "spaces"} not read; call \`get_me\` with \`space_id\` for ${unread === 1 ? "it" : "one of them"}.`,
+        ]
+      : [];
   const spaces = [...details].sort(
     (a, b) => compare(a.space.name, b.space.name) || compare(a.space.id, b.space.id),
   );
@@ -399,10 +441,19 @@ export function formatSpaceDetails(
   for (const level of LEVELS) {
     const text = [
       SPACE_DETAILS_HEADING,
-      ...(level === "counts" ? renderCounts(spaces) : renderLists(spaces, level)),
+      ...(spaces.length === 0
+        ? []
+        : level === "counts"
+          ? renderCounts(spaces)
+          : renderLists(spaces, level)),
+      ...unreadLine,
     ].join("\n");
     if (text.length <= budget) return { text, shown };
   }
-  const text = `${SPACE_DETAILS_HEADING}\nNot detailed here, for room: \`get_me\` with a space's \`space_id\` lists what it holds.`;
+  const text = [
+    SPACE_DETAILS_HEADING,
+    "Not detailed here, for room: `get_me` with a space's `space_id` lists what it holds.",
+    ...unreadLine,
+  ].join("\n");
   return { text: text.length <= budget ? text : "", shown: [] };
 }

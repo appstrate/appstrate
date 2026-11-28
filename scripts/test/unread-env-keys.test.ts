@@ -13,7 +13,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { platformReadEnvKeys } from "../../apps/api/src/lib/platform-env-keys.ts";
-import { findUnreadEnvKeys } from "../../packages/env/src/index.ts";
+import { FOREIGN_ENV_NAMESPACES } from "../../packages/env/test/foreign-env-namespaces.ts";
+import {
+  PLATFORM_ENV_NAMESPACES,
+  envNamespace,
+  findUnreadEnvKeys,
+} from "../../packages/env/src/index.ts";
 import { moduleEnvSchemas } from "../lib/module-env-schemas.ts";
 import { trackedFiles } from "../lib/tracked-files.ts";
 import { readEnvExampleVars } from "../verify-env-docs.ts";
@@ -37,6 +42,15 @@ describe("unread-env-keys over this repository", () => {
     const content = readFileSync(join(REPO_ROOT, relative), "utf-8");
     const unread = findUnreadEnvKeys(readEnvExampleVars(content), READ);
     expect(unread, "a shipped example would trigger the boot warning").toEqual([]);
+  });
+
+  it("every key the platform reads sits under a declared namespace", () => {
+    const undeclared = [...READ].filter(
+      (key) =>
+        !PLATFORM_ENV_NAMESPACES.has(envNamespace(key)) &&
+        !FOREIGN_ENV_NAMESPACES.has(envNamespace(key)),
+    );
+    expect(undeclared, "declare the namespace in PLATFORM_ENV_NAMESPACES").toEqual([]);
   });
 
   it("no module schema key falls under a platform namespace unread", async () => {

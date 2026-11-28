@@ -33,7 +33,7 @@ interface SpaceItem {
   default_role: SpaceRolePreset;
   personal: boolean;
   access: "member" | "none";
-  role: { kind: string; key: string; name: string } | null;
+  role: { preset_role?: string; custom_role_id?: string; name: string } | null;
   permissions: string[];
 }
 
@@ -136,8 +136,8 @@ describe("space membership", () => {
 
       const implicitItem = await pick(implicitly);
       const explicitItem = await pick(explicitly);
-      expect(implicitItem.role).toEqual({ kind: "preset", key: "builder", name: "builder" });
-      expect(explicitItem.role).toEqual({ kind: "preset", key: "viewer", name: "viewer" });
+      expect(implicitItem.role).toEqual({ preset_role: "builder", name: "builder" });
+      expect(explicitItem.role).toEqual({ preset_role: "viewer", name: "viewer" });
       // And the sets differ where the presets differ.
       expect(implicitItem.permissions).toContain("agents:write");
       expect(explicitItem.permissions).not.toContain("agents:write");
@@ -262,7 +262,7 @@ describe("space membership", () => {
       );
 
       const space = (await (await getSpace(owner.defaultSpaceId, target)).json()) as SpaceItem;
-      expect(space.role?.key).toBe("runner");
+      expect(space.role?.preset_role).toBe("runner");
       expect(space.permissions).toContain("agents:run");
       expect(space.permissions).not.toContain("agents:read");
     });

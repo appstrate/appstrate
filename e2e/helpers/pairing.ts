@@ -14,7 +14,7 @@ import type { ApiClient } from "./api-client.ts";
  * the organization's settings).
  */
 export const SETTINGS_PATH = "/preferences/models";
-export const STORAGE_KEY = "appstrate_pending_pairings";
+export const STORAGE_KEY = "appstrate:web:pendingPairings";
 export const SUCCESS_TOAST = "Abonnement connecté avec succès";
 /** The label the simulated helper names the credential with. */
 export const CREDENTIAL_LABEL = "E2E pairing";

@@ -5,6 +5,7 @@ import { useRowSpaceGrants } from "./use-permissions";
 import { useCurrentSpaceId } from "./use-current-space";
 import { ACROSS_SPACES_POLL_MS } from "../lib/across-spaces";
 import { ACROSS_SPACES } from "../lib/query-keys";
+import { scopeHeader } from "../lib/scoping-headers";
 
 /** Org/space context for queries. Headers are passed explicitly so they are part of the React Query key (a scope switch refetches). */
 export function useOrgScope(targetSpaceId?: string) {
@@ -13,10 +14,7 @@ export function useOrgScope(targetSpaceId?: string) {
   const spaceId = targetSpaceId ?? workingSpaceId;
   return {
     enabled: !!orgId && !!spaceId,
-    header: {
-      "X-Org-Id": orgId ?? undefined,
-      "X-Space-Id": spaceId ?? undefined,
-    },
+    header: scopeHeader(orgId, spaceId),
   };
 }
 

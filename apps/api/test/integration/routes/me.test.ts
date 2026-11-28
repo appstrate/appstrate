@@ -610,25 +610,28 @@ describe("Me API (/api/me)", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         agents: {
-          packageId: string;
-          display_name: string;
-          takes_input: boolean;
-          published: boolean;
-        }[];
-        agents_truncated: boolean;
-        agents_total: number;
+          data: {
+            packageId: string;
+            display_name: string;
+            takes_input: boolean;
+            published: boolean;
+          }[];
+          truncated: boolean;
+          total: number;
+        };
       };
 
-      const ids = new Set(body.agents.map((a) => a.packageId));
+      const ids = new Set(body.agents.data.map((a) => a.packageId));
       expect(ids.has("@ctx/triage")).toBe(true);
       expect(ids.has("@ctx/disabled")).toBe(false);
       expect(ids.has("@ctx/uninstalled")).toBe(false);
-      const triage = body.agents.find((a) => a.packageId === "@ctx/triage");
+      const triage = body.agents.data.find((a) => a.packageId === "@ctx/triage");
       expect(triage?.display_name).toBe("Triage");
       expect(triage?.takes_input).toBe(true);
       // No `latest` dist-tag was seeded → draft-only agent → must run with version=draft.
       expect(triage?.published).toBe(false);
-      expect(body.agents_truncated).toBe(false);
+      expect(body.agents.truncated).toBe(false);
+      expect(body.agents.total).toBe(body.agents.data.length);
     });
 
     it("names each listed agent's required integrations not active in the space", async () => {
@@ -700,9 +703,11 @@ describe("Me API (/api/me)", () => {
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        agents: { packageId: string; inactive_required_integrations: string[] }[];
+        agents: { data: { packageId: string; inactive_required_integrations: string[] }[] };
       };
-      const byId = new Map(body.agents.map((a) => [a.packageId, a.inactive_required_integrations]));
+      const byId = new Map(
+        body.agents.data.map((a) => [a.packageId, a.inactive_required_integrations]),
+      );
       expect(byId.get("@ctx/blocked")).toEqual(["@ctx/svc-off"]);
       expect(byId.get("@ctx/ready")).toEqual([]);
       expect(byId.get("@ctx/published-blocked")).toEqual(["@ctx/svc-off"]);
@@ -745,19 +750,21 @@ describe("Me API (/api/me)", () => {
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        skills: { packageId: string; display_name: string; version: string | null }[];
-        skills_truncated: boolean;
-        skills_total: number;
+        skills: {
+          data: { packageId: string; display_name: string; version: string | null }[];
+          truncated: boolean;
+          total: number;
+        };
       };
 
-      const ids = new Set(body.skills.map((s) => s.packageId));
+      const ids = new Set(body.skills.data.map((s) => s.packageId));
       expect(ids.has("@ctx/web-research")).toBe(true);
       expect(ids.has("@ctx/skill-disabled")).toBe(false);
       expect(ids.has("@ctx/skill-uninstalled")).toBe(false);
-      const skill = body.skills.find((s) => s.packageId === "@ctx/web-research");
+      const skill = body.skills.data.find((s) => s.packageId === "@ctx/web-research");
       expect(skill?.display_name).toBe("Web Research");
       expect(skill?.version).toBe("1.2.0");
-      expect(body.skills_truncated).toBe(false);
+      expect(body.skills.truncated).toBe(false);
     });
 
     it("lists agents and skills whole by id, or withholds them past the cap", async () => {
@@ -770,27 +777,23 @@ describe("Me API (/api/me)", () => {
       for (const n of ["b", "a"]) await seedActive(`@ctx/${n}`, "agent");
       const read = async () =>
         (await (await app.request("/api/me/context", { headers: authHeaders(ctx) })).json()) as {
-          agents: { packageId: string }[];
-          agents_truncated: boolean;
-          agents_total: number;
-          skills: { packageId: string }[];
-          skills_truncated: boolean;
-          skills_total: number;
+          agents: { data: { packageId: string }[]; truncated: boolean; total: number };
+          skills: { data: { packageId: string }[]; truncated: boolean; total: number };
         };
 
       const whole = await read();
-      expect(whole.agents.map((a) => a.packageId)).toEqual(["@ctx/a", "@ctx/b", "@zsys/agent"]);
+      expect(whole.agents.data.map((a) => a.packageId)).toEqual([
+        "@ctx/a",
+        "@ctx/b",
+        "@zsys/agent",
+      ]);
 
       // 15 is the cap: 16 active agents and 16 active skills list none of theirs.
       for (let i = 0; i < 13; i++) await seedActive(`@ctx/agent-${i}`, "agent");
       for (let i = 0; i < 16; i++) await seedActive(`@ctx/skill-${i}`, "skill");
       const capped = await read();
-      expect(capped.agents).toEqual([]);
-      expect(capped.agents_truncated).toBe(true);
-      expect(capped.agents_total).toBe(16);
-      expect(capped.skills).toEqual([]);
-      expect(capped.skills_truncated).toBe(true);
-      expect(capped.skills_total).toBe(16);
+      expect(capped.agents).toEqual({ data: [], truncated: true, total: 16 });
+      expect(capped.skills).toEqual({ data: [], truncated: true, total: 16 });
     });
 
     it("answers with identity and org role alone when the request names no space", async () => {
@@ -860,18 +863,16 @@ describe("Me API (/api/me)", () => {
         const res = await app.request("/api/me/context", { headers });
         expect(res.status).toBe(200);
         return (await res.json()) as {
-          connectable_integrations: string[];
-          connectable_integrations_truncated: boolean;
-          connectable_integrations_total: number;
+          connectable_integrations: { data: string[]; truncated: boolean; total: number };
         };
       };
       const expected = (body: Awaited<ReturnType<typeof read>>) => {
-        expect(body.connectable_integrations).toContain("@ctx/slack");
+        expect(body.connectable_integrations.data).toContain("@ctx/slack");
         for (const id of ["@ctx/gmail", "@ctx/open", "@ctx/off", "@ctx/elsewhere"]) {
-          expect(body.connectable_integrations).not.toContain(id);
+          expect(body.connectable_integrations.data).not.toContain(id);
         }
-        expect(body.connectable_integrations_truncated).toBe(false);
-        expect(body.connectable_integrations_total).toBe(body.connectable_integrations.length);
+        expect(body.connectable_integrations.truncated).toBe(false);
+        expect(body.connectable_integrations.total).toBe(body.connectable_integrations.data.length);
       };
       expected(await read(authHeaders(ctx)));
       // A space API key reads the same, under the same pair of grants.
@@ -892,8 +893,7 @@ describe("Me API (/api/me)", () => {
           scopes,
         });
         const none = await read({ Authorization: `Bearer ${blind.rawKey}` });
-        expect(none.connectable_integrations).toEqual([]);
-        expect(none.connectable_integrations_total).toBe(0);
+        expect(none.connectable_integrations).toEqual({ data: [], truncated: false, total: 0 });
       }
     });
 
@@ -932,8 +932,8 @@ describe("Me API (/api/me)", () => {
       const read = async (headers: Record<string, string>) => {
         const res = await app.request("/api/me/context", { headers });
         expect(res.status).toBe(200);
-        return ((await res.json()) as { connectable_integrations: string[] })
-          .connectable_integrations;
+        return ((await res.json()) as { connectable_integrations: { data: string[] } })
+          .connectable_integrations.data;
       };
       // The owner governs the space's integrations: the lock does not stop them connecting.
       expect(await read(authHeaders(ctx))).toEqual(
@@ -961,9 +961,7 @@ describe("Me API (/api/me)", () => {
         const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
         expect(res.status).toBe(200);
         return (await res.json()) as {
-          connectable_integrations: string[];
-          connectable_integrations_truncated: boolean;
-          connectable_integrations_total: number;
+          connectable_integrations: { data: string[]; truncated: boolean; total: number };
         };
       };
 
@@ -1002,16 +1000,22 @@ describe("Me API (/api/me)", () => {
           .where(eq(integrationConnections.id, broken));
 
         const body = await read();
-        expect(body.connectable_integrations).toEqual(["@ctx/api-key", "@ctx/registered"]);
-        expect(body.connectable_integrations_total).toBe(2);
-        expect(body.connectable_integrations_truncated).toBe(false);
+        expect(body.connectable_integrations).toEqual({
+          data: ["@ctx/api-key", "@ctx/registered"],
+          truncated: false,
+          total: 2,
+        });
       });
 
       it("lists in id order, whatever the seeding order", async () => {
         for (const id of ["@ctx/c", "@ctx/a", "@ctx/b"]) {
           await seedActive(id, { auths: { k: { type: "api_key" } } });
         }
-        expect((await read()).connectable_integrations).toEqual(["@ctx/a", "@ctx/b", "@ctx/c"]);
+        expect((await read()).connectable_integrations.data).toEqual([
+          "@ctx/a",
+          "@ctx/b",
+          "@ctx/c",
+        ]);
       });
 
       it("withholds the whole list past the cap, never a prefix", async () => {
@@ -1020,10 +1024,10 @@ describe("Me API (/api/me)", () => {
             auths: { k: { type: "api_key" } },
           });
         }
-        expect(await read()).toMatchObject({
-          connectable_integrations: [],
-          connectable_integrations_truncated: true,
-          connectable_integrations_total: 16,
+        expect((await read()).connectable_integrations).toEqual({
+          data: [],
+          truncated: true,
+          total: 16,
         });
       });
     });

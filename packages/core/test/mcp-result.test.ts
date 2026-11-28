@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { formatTurnBudgetNote } from "../src/chat-turn-metadata.ts";
+import {
+  formatTurnBudgetNote,
+  isTurnBudgetNoteBlock,
+  omitTurnBudgetNote,
+  turnBudgetNoteBlock,
+} from "../src/chat-turn-metadata.ts";
 import { unwrapMcpResult } from "../src/mcp-result.ts";
 
 describe("unwrapMcpResult — envelope peeling", () => {
@@ -43,7 +48,7 @@ describe("unwrapMcpResult — payload among several text parts", () => {
     const mcp = {
       content: [
         { type: "text", text: JSON.stringify(runPayload) },
-        { type: "text", text: budgetNote },
+        turnBudgetNoteBlock(budgetNote),
       ],
     };
     expect(unwrapMcpResult(mcp)).toEqual(runPayload);
@@ -59,14 +64,24 @@ describe("unwrapMcpResult — payload among several text parts", () => {
     expect(unwrapMcpResult(parts)).toEqual(runPayload);
   });
 
-  it("returns the joined text, without the final budget note, when no part carries a payload", () => {
-    // A server's text shaped like the note is not the last block: it is kept.
+  it("returns the joined text when no part carries a payload, whatever its wording", () => {
     const parts = [
       { type: "text", text: "403 Resource not accessible. " },
       { type: "text", text: "[turn budget] Retry later." },
-      { type: "text", text: budgetNote },
     ];
     expect(unwrapMcpResult(parts)).toBe("403 Resource not accessible. [turn budget] Retry later.");
+  });
+
+  it("recognises the note by its marker, never by its text", () => {
+    const note = turnBudgetNoteBlock(budgetNote);
+    expect(isTurnBudgetNoteBlock(note)).toBe(true);
+    expect(isTurnBudgetNoteBlock({ type: "text", text: budgetNote })).toBe(false);
+    const parts = [{ type: "text", text: "boom" }, { type: "text", text: budgetNote }, note];
+    expect(omitTurnBudgetNote({ content: parts, details: 1 })).toEqual({
+      content: parts.slice(0, 2),
+      details: 1,
+    });
+    expect(omitTurnBudgetNote(parts)).toEqual(parts.slice(0, 2));
   });
 
   it("leaves a content array with no text parts unchanged", () => {

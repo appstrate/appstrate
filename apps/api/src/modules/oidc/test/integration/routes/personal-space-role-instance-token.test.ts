@@ -90,7 +90,7 @@ describe("personal-space override through an MCP instance token", () => {
   });
 
   it("reports the override and the floor, and withholds what the bundle does not grant", async () => {
-    // A bundle, not `viewer`: every preset grants `studio:read`, a custom role can hide it.
+    // A bundle, not `viewer`: every preset shows the Studio, a custom role can hide it.
     const role = await seedSpaceRole({
       orgId: owner.orgId,
       key: "reader",
@@ -119,15 +119,21 @@ describe("personal-space override through an MCP instance token", () => {
     expect(res.status, await res.clone().text()).toBe(200);
     const own = (
       (await res.json()) as {
-        data: { personal: boolean; role: { kind: string; key: string }; permissions: string[] }[];
+        data: {
+          personal: boolean;
+          role: { custom_role_id?: string; name: string };
+          permissions: string[];
+          shows_studio: boolean;
+        }[];
       }
     ).data.filter((s) => s.personal);
     expect(own).toHaveLength(1);
-    expect(own[0]!.role).toMatchObject({ kind: "custom", key: "reader" });
+    expect(own[0]!.role).toMatchObject({ custom_role_id: role.id });
     for (const permission of ["agents:read", ...DELETES]) {
       expect(own[0]!.permissions).toContain(permission);
     }
-    for (const permission of ["studio:read", "agents:write", "agents:run"]) {
+    expect(own[0]!.shows_studio).toBe(false);
+    for (const permission of ["agents:write", "agents:run"]) {
       expect(own[0]!.permissions).not.toContain(permission);
     }
   });
@@ -156,9 +162,9 @@ describe("personal-space override through an MCP instance token", () => {
       },
     });
     const own = (
-      (await memberSees.json()) as { data: { personal: boolean; role: { key: string } }[] }
+      (await memberSees.json()) as { data: { personal: boolean; role: { preset_role?: string } }[] }
     ).data.filter((s) => s.personal);
-    expect(own[0]!.role).toMatchObject({ key: "viewer" });
+    expect(own[0]!.role).toMatchObject({ preset_role: "viewer" });
 
     const del = await app.request(url, { method: "DELETE", headers: { Authorization: bearer } });
     expect(del.status, await del.clone().text()).toBe(204);

@@ -16,28 +16,11 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { organizations, spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
+import { expectDbViolation } from "../../helpers/assertions.ts";
 import { seedSpaceRole } from "../../helpers/seed.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { ensurePersonalSpace } from "@appstrate/db/provision-org";
-
-/**
- * Drizzle wraps a driver error: `message` is the failed SQL, and the constraint
- * name — the thing under test — is on `cause`. Asserting on `message` would
- * pass for ANY failure of that statement, which is the trap this helper exists
- * to avoid.
- */
-async function expectDbViolation(promise: Promise<unknown>, constraint: RegExp): Promise<void> {
-  let caught: unknown;
-  try {
-    await promise;
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught, "the statement was expected to be refused by the database").toBeDefined();
-  const cause = (caught as { cause?: { message?: string } }).cause;
-  expect(String(cause?.message ?? caught)).toMatch(constraint);
-}
 
 function personalRow(ctx: TestContext, userId: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -137,8 +120,8 @@ describe("spaces — personal-space constraints", () => {
   });
 });
 
-describe("organizations — personal-space default constraints (migration 0115)", () => {
-  it("refuses a custom default of another organization and a stored key that is no preset", async () => {
+describe("organizations — personal-space default constraints (migration 0118)", () => {
+  it("refuses a custom default of another organization, a non-preset role and both columns at once", async () => {
     await truncateAll();
     const ctx = await createTestContext({ orgSlug: "default-owner" });
     const other = await createTestContext({ orgSlug: "default-other" });
@@ -149,11 +132,14 @@ describe("organizations — personal-space default constraints (migration 0115)"
       write({ personalSpaceRoleId: foreign.id }),
       /organizations_personal_space_role_fk/,
     );
-    for (const value of ["superuser", null, 5]) {
-      await expectDbViolation(
-        write({ orgSettings: { personal_space_role: value } }),
-        /organizations_personal_space_role_preset/,
-      );
-    }
+    await expectDbViolation(
+      write({ personalSpacePresetRole: "superuser" as "admin" }),
+      /organizations_personal_space_preset_valid/,
+    );
+    const own = await seedSpaceRole({ orgId: ctx.orgId, permissions: ["agents:read"] });
+    await expectDbViolation(
+      write({ personalSpacePresetRole: "viewer", personalSpaceRoleId: own.id }),
+      /organizations_personal_space_role_one_shape/,
+    );
   });
 });

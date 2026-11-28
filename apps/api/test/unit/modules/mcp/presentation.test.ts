@@ -5,10 +5,15 @@
 import { describe, it, expect } from "bun:test";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
-import { readToolPresentation, type PresentationSubject } from "@appstrate/core/mcp-presentation";
+import {
+  readToolPresentation,
+  type PresentationSubject,
+  type ToolPresentation,
+} from "@appstrate/core/mcp-presentation";
 import { getCatalog } from "../../../../src/modules/mcp/catalog.ts";
 import { collectModuleOpenApi } from "../../../../../../scripts/lib/module-openapi.ts";
 import { presentTools, withPresentation } from "../../../../src/modules/mcp/presentation.ts";
+import { manifestIcons } from "../../../../src/modules/mcp/tool-icons.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 
 // The catalog reads the platform app's operations.
@@ -25,15 +30,18 @@ function tool(descriptor: Partial<Tool> & { name: string }, result: CallToolResu
   } satisfies AppstrateToolDefinition;
 }
 
+const subjectOf = (presentation: ToolPresentation | undefined) =>
+  presentation && "subject" in presentation ? presentation.subject : undefined;
+
 async function call(definition: AppstrateToolDefinition, args: Record<string, unknown> = {}) {
-  const [presented] = presentTools([definition]);
+  const [presented] = presentTools([definition], "req_1");
   const result = await presented!.handler(args, {} as never);
   return { result, presentation: readToolPresentation(result._meta) };
 }
 
 describe("presentTools", () => {
   it("keeps what a handler stamped, and stamps nothing a tool knows nothing of", async () => {
-    const own = { count: 3 };
+    const own = { call: "search", count: 3, items: [] } satisfies ToolPresentation;
     const stamped = await call(tool({ name: "search" }, withPresentation(text({}), own)));
     expect(stamped.presentation).toEqual(own);
     const plain = await call(tool({ name: "read", annotations: { title: "Read" } }, text({})));
@@ -47,7 +55,7 @@ describe("presentTools", () => {
     const { presentation } = await call(tool({ name: "invoke_operation" }, text({})), {
       operation_id: op.operationId,
     });
-    expect(presentation).toMatchObject({ tag: op.tags[0], method: "DELETE" });
+    expect(presentation).toMatchObject({ call: "operation", tag: op.tags[0], method: "DELETE" });
     const unknown = await call(tool({ name: "invoke_operation" }, text({})), {
       operation_id: "noSuchOperation",
     });
@@ -95,7 +103,7 @@ describe("presentTools", () => {
         operation_id,
         path_params,
       });
-      expect(presentation?.subject).toEqual(subject);
+      expect(subjectOf(presentation)).toEqual(subject);
     }
   });
 
@@ -113,22 +121,25 @@ describe("presentTools", () => {
     });
     expect(invoked.result).toMatchObject({
       isError: true,
-      content: [{ type: "text", text: "database unreachable" }],
+      structuredContent: { code: "internal_error", request_id: "req_1", kind: "tool_refusal" },
     });
+    // The detail stays in the log: the model sees a generic sentence.
+    expect(JSON.stringify(invoked.result)).not.toContain("database unreachable");
     // What the call aimed at, although it failed.
-    expect(invoked.presentation?.subject).toEqual({ kind: "agent", id: "@acme/triage" });
+    expect(subjectOf(invoked.presentation)).toEqual({ kind: "agent", id: "@acme/triage" });
   });
 
   it("names the caller get_me answered for", async () => {
     const { presentation } = await call(
       tool({ name: "get_me" }, text({ status: 200, body: { user: { id: "usr_1", name: "Ada" } } })),
     );
-    expect(presentation?.subject).toEqual({ kind: "user", id: "usr_1", display_name: "Ada" });
+    expect(presentation?.call).toBe("caller");
+    expect(subjectOf(presentation)).toEqual({ kind: "user", id: "usr_1", display_name: "Ada" });
   });
 });
 
 describe("tool icons", () => {
-  const [presented] = presentTools([tool({ name: "search" }, text({}))]);
+  const [presented] = presentTools([tool({ name: "search" }, text({}))], "req_1");
   const icons = presented!.descriptor.icons ?? [];
 
   it("gives a platform tool one inline SVG per theme", () => {
@@ -141,7 +152,7 @@ describe("tool icons", () => {
   });
 
   it("leaves a tool it draws no icon for as it is", () => {
-    const [unknown] = presentTools([tool({ name: "x" }, text({}))]);
+    const [unknown] = presentTools([tool({ name: "x" }, text({}))], "req_1");
     expect(unknown!.descriptor.icons).toBeUndefined();
   });
 });
@@ -175,4 +186,35 @@ describe("operation tags ↔ chat locales", () => {
       expect(keyed.filter((tag) => !inTree.has(tag)).sort()).toEqual([]);
     });
   }
+});
+
+describe("manifestIcons", () => {
+  it("keeps an image URL as it is, with the type a data URI declares", () => {
+    expect(manifestIcons("https://example.test/a.svg")).toEqual([
+      { src: "https://example.test/a.svg" },
+    ]);
+    expect(manifestIcons("data:image/png;base64,AAAA")).toEqual([
+      { src: "data:image/png;base64,AAAA", mimeType: "image/png" },
+    ]);
+  });
+
+  it("drops an image URL an MCP client may not load", () => {
+    expect(manifestIcons("http://example.test/a.svg")).toBeUndefined();
+    expect(manifestIcons("data:text/html;base64,AAAA")).toBeUndefined();
+  });
+
+  it("points an Iconify id, Lucide's included, at its SVG file", () => {
+    expect(manifestIcons("logos:slack-icon")).toEqual([
+      { src: "https://api.iconify.design/logos/slack-icon.svg", mimeType: "image/svg+xml" },
+    ]);
+    expect(manifestIcons("lucide:bot")?.[0]?.src).toBe("https://api.iconify.design/lucide/bot.svg");
+  });
+
+  it("draws an emoji as an inline SVG, and a value nothing can draw as none", () => {
+    const [emoji] = manifestIcons("emoji:🚜") ?? [];
+    expect(emoji?.mimeType).toBe("image/svg+xml");
+    expect(decodeURIComponent(emoji?.src ?? "")).toContain("🚜");
+    expect(manifestIcons("icon.png")).toBeUndefined();
+    expect(manifestIcons(undefined)).toBeUndefined();
+  });
 });

@@ -115,7 +115,7 @@ test("resetting an explicit viewer explains and confirms the default operator ac
     (await before.json()).data.find(
       (member: { userId: string }) => member.userId === target.userId,
     ),
-  ).toMatchObject({ source: "explicit", role: { key: "viewer" } });
+  ).toMatchObject({ source: "explicit", role: { preset_role: "viewer" } });
   await dialog
     .getByRole("button", { name: /Rétablir le rôle par défaut|Restore default role/i })
     .click();
@@ -124,7 +124,7 @@ test("resetting an explicit viewer explains and confirms the default operator ac
   const after = await orgOnlyClient.get(`/spaces/${spaceId}/members`);
   expect(
     (await after.json()).data.find((member: { userId: string }) => member.userId === target.userId),
-  ).toMatchObject({ source: "open_space", role: { key: "operator" } });
+  ).toMatchObject({ source: "open_space", role: { preset_role: "operator" } });
 });
 
 test("space settings retain edits and expose a forbidden save response", async ({

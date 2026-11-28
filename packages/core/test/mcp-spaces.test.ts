@@ -3,7 +3,10 @@
 import { describe, it, expect } from "bun:test";
 import {
   ACTIVE_IN_SPACES_HINT,
+  SPACE_LIST_INLINE_MAX,
   describeSpace,
+  describeSpaceList,
+  flattenName,
   projectActiveInSpaces,
   spaceActs,
   spaceIdRefusal,
@@ -87,6 +90,27 @@ describe("spaceIdRefusal", () => {
   });
 });
 
+describe("spaces above the inline cap", () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `spc_${i}`, name: `S${i}`, role: "admin" }));
+
+  it("describes each space up to the cap and only counts them above it", () => {
+    expect(describeSpaceList(many(SPACE_LIST_INLINE_MAX))).toContain("`spc_0`");
+    const text = describeSpaceList(many(SPACE_LIST_INLINE_MAX + 1));
+    expect(text).toContain(`${SPACE_LIST_INLINE_MAX + 1} spaces`);
+    expect(text).toContain("get_me");
+    expect(text).not.toContain("`spc_0`");
+  });
+
+  it("keeps every id in `accepted` of a refusal while its text only counts", () => {
+    const spaces = many(SPACE_LIST_INLINE_MAX + 2);
+    const refusal = spaceIdRefusal(spaces, "spc_nope");
+    expect(refusal?.accepted).toHaveLength(spaces.length);
+    expect(refusal?.error).not.toContain("`spc_0`");
+    expect(refusal?.error).toContain(`${spaces.length} spaces`);
+  });
+});
+
 describe("projectActiveInSpaces", () => {
   const problem = (code: string) => ({
     code,
@@ -112,5 +136,22 @@ describe("projectActiveInSpaces", () => {
 
   it("ignores a code it does not know", () => {
     expect(projectActiveInSpaces(problem("forbidden"), () => [])).toBeUndefined();
+  });
+});
+
+describe("flattenName", () => {
+  it("makes a name one line a heading cannot open", () => {
+    expect(flattenName("Team\n## Forged\r\n\u0007heading")).toBe("Team ## Forged heading");
+    expect(flattenName("  a b  ")).toBe("a b");
+  });
+
+  it("bounds the length", () => {
+    expect(flattenName("x".repeat(300))).toHaveLength(100);
+  });
+
+  it("is applied to the name of a described space", () => {
+    expect(describeSpace({ id: "spc_1", name: "A\n## B", role: "admin" })).toBe(
+      "A ## B (`spc_1`, role admin)",
+    );
   });
 });

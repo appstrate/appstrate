@@ -41,19 +41,19 @@ A share targets a **team space**. There is no sharing with a person: a personal 
 curl -X POST https://your-instance/api/packages/@acme/support-triage/shares \
   -H "Cookie: ..." -H "X-Org-Id: <org id>" -H "X-Space-Id: spc_..." \
   -H "Content-Type: application/json" \
-  -d '{ "target": { "kind": "space", "spaceId": "spc_..." } }'
+  -d '{ "spaceId": "spc_..." }'
 ```
 
-- `target` is `{ "kind": "space", "spaceId": "spc_..." }`. Another kind is a `400`, and a personal space is `409 personal_space_takes_offers_only`.
+- `spaceId` names a team space you can reach. A personal space is `409 personal_space_takes_offers_only`.
 - The package must have a **published version**. An offer of an unpublished package is `409 package_has_no_version`.
 - You can only target a space you can reach, and not the package's own home (`409 share_target_is_home`).
 - Sharing the same pair twice is idempotent.
-- `GET /api/packages/{scope}/{name}/shares` lists the audience. `DELETE /api/packages/{scope}/{name}/shares/{target}` withdraws that share. If the organization still offers the package, the space keeps its local activation decision. `target` is a space id. The sharer (holding `<type>:share` in the home space) or the recipient space (holding the type's deactivation permission there) may withdraw it, and every enabled [schedule](/features/scheduling) there is disabled with `disabled_reason: package_removed` if the space loses the package.
+- `GET /api/packages/{scope}/{name}/shares` lists the audience. `DELETE /api/packages/{scope}/{name}/shares/{spaceId}` withdraws that share. If the organization still offers the package, the space keeps its local activation decision. `spaceId` is the id of the space that holds the share. The sharer (holding `<type>:share` in the home space) or the recipient space (holding the type's deactivation permission there) may withdraw it, and every enabled [schedule](/features/scheduling) there is disabled with `disabled_reason: package_removed` if the space loses the package.
 - The `share` permission belongs to the `admin` and `builder` presets, and API keys never carry it.
 
 ## Offer to the organization
 
-An organization owner or admin can offer a package to the organization from its catalog entry, in one of two modes: `PUT /api/packages/{scope}/{name}/org-offer` with the required body `{ "mode": "available" | "on_by_default" }`.
+An organization owner or admin can offer a package to the organization from its catalog entry, in one of two modes: `PUT /api/packages/{scope}/{name}/org-offer` with the required body `{ "org_offer": "available" | "on_by_default" }`.
 
 - **`available`**: the package is placed in every space of the organization, personal ones included, and stays off until a space switches it on. It costs nothing until then.
 - **`on_by_default`**: the package is active in every space without a row of its own. A space can switch it off locally.

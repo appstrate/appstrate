@@ -25,7 +25,7 @@ import { parseFileUri } from "@appstrate/core/file-uri";
 import { db } from "@appstrate/db/client";
 import { chatSessions, files } from "@appstrate/db/schema";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
-import { fileSpaceId, touchedSpaceIds, touchSessionSpace } from "../src/persistence.ts";
+import { fileSpaceId, touchedSpaceIds, touchSessionSpaces } from "../src/persistence.ts";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 
@@ -85,7 +85,7 @@ async function fileTools() {
       { id: personal, name: "Mon espace", role: "admin", permissions },
       { id: colleague.defaultSpaceId, name: "Default", role: "operator", permissions },
     ],
-    touch: (spaceId) => touchSessionSpace(session, spaceId),
+    touch: (spaceId) => touchSessionSpaces(session, [spaceId]),
     fileSpace: async (uri) => {
       const fileId = parseFileUri(uri);
       return fileId

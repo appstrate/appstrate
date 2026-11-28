@@ -15,6 +15,7 @@ import type {
   IntegrationToolCatalogEntry,
 } from "@appstrate/core/integration";
 import type { ResolutionFieldError } from "@appstrate/core/api-errors";
+import type { CredentialDeathCause } from "@appstrate/core/sidecar-types";
 
 export type IntegrationManifestView = IntegrationManifest;
 export type IntegrationManifestAuth = NonNullable<IntegrationManifest["auths"]>[string];
@@ -80,6 +81,10 @@ export interface IntegrationConnection extends ConnectionReach {
   identity_claims: Record<string, unknown> | null;
   scopes_granted: string[];
   needs_reconnection: boolean;
+  /** Why the credential died; null while healthy, or when the cause is not recorded. */
+  needs_reconnection_cause: CredentialDeathCause | null;
+  /** When it died (RFC 3339); null under the same conditions as the cause. */
+  needs_reconnection_at: string | null;
   expiresAt: string | null;
   owner_type: "user" | "end_user";
   owner_id: string;

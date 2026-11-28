@@ -90,7 +90,7 @@ const offer = (id: string) =>
   app.request(`/api/packages/${id}/org-offer`, {
     method: "PUT",
     headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-    body: JSON.stringify({ mode: "on_by_default" }),
+    body: JSON.stringify({ org_offer: "on_by_default" }),
   });
 const deactivate = (id: string) =>
   app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/${id}`, {
@@ -146,7 +146,7 @@ describe("a package active by default takes no offer", () => {
       org_offerable: true,
       active_by_default: false,
     });
-    expect((await offer(CATALOGUE)).status).toBe(200);
+    expect((await offer(CATALOGUE)).status).toBe(201);
   });
 });
 
@@ -184,7 +184,7 @@ describe("an organization-published integration named in SYSTEM_INTEGRATIONS", (
       org_offerable: true,
       active_by_default: false,
     });
-    expect((await offer(ORG_LISTED)).status).toBe(200);
+    expect((await offer(ORG_LISTED)).status).toBe(201);
     expect(await db.select().from(orgPackageOffers)).toHaveLength(1);
 
     const seen = await libraryEntry(ORG_LISTED, second.id);
@@ -211,7 +211,7 @@ describe("an organization-published integration named in SYSTEM_INTEGRATIONS", (
     await seedPublishedVersion(ORG_LISTED, "1.0.0");
     const second = await seedSpace({ orgId: ctx.orgId, name: "Second" });
     const inSecond = authHeaders({ ...ctx, defaultSpaceId: second.id });
-    expect((await offer(ORG_LISTED)).status).toBe(200);
+    expect((await offer(ORG_LISTED)).status).toBe(201);
     await seedSpacePackage(second.id, ORG_LISTED, { enabled: true, placedByOffer: true });
     const detail = () => app.request(`/api/integrations/${ORG_LISTED}`, { headers: inSecond });
     const before = await detail();

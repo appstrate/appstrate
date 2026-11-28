@@ -5,7 +5,9 @@
 // Loop guard: a sessionStorage flag set before reloading, cleared on successful boot
 // (main.tsx). Still set on the next failure = the reload did not help (outage): don't loop.
 
-const RELOAD_FLAG = "appstrate:chunk-reload";
+import { SESSION_STORAGE_KEYS, storageKey } from "@appstrate/ui/local-storage";
+
+const RELOAD_FLAG = storageKey(SESSION_STORAGE_KEYS.chunkReload);
 
 const CHUNK_ERROR_RE =
   /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module/i;

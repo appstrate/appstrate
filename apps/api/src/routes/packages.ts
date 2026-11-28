@@ -303,7 +303,7 @@ export const githubImportSchema = z
   })
   .strict();
 
-export const packageOrgOfferSchema = z.object({ mode: z.enum(orgOfferModeValues) }).strict();
+export const packageOrgOfferSchema = z.object({ org_offer: z.enum(orgOfferModeValues) }).strict();
 
 export const forkSchema = z
   .object({
@@ -429,19 +429,14 @@ export const packageHomeSpaceSchema = z
 
 /**
  * Body of `POST /api/packages/{scope}/{name}/shares` (RBAC spec §6.10): a
- * team space the sharer reaches. A person is no target and a personal space
- * takes no share (`personal_space_takes_offers_only`).
+ * team space the sharer reaches. A personal space takes no share
+ * (`personal_space_takes_offers_only`).
  */
-export const shareTargetSchema = z
+export const sharePackageSchema = z
   .object({
-    target: z
-      .object({
-        kind: z.literal("space"),
-        spaceId: z.string().refine(isSpaceId, {
-          message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
-        }),
-      })
-      .strict(),
+    spaceId: z.string().refine(isSpaceId, {
+      message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
+    }),
   })
   .strict();
 
@@ -1901,18 +1896,18 @@ export function createPackagesRouter() {
           .set({ homeSpaceId: target })
           .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
         // `locked`, not `pkg`: the space left is the one this transaction holds.
-        const disabledScheduleIds = locked.homeSpaceId
+        const rehome = locked.homeSpaceId
           ? await reconcilePlacementsAfterRehome(tx, {
               packageId,
               newHomeSpaceId: target,
               previousHome: { spaceId: locked.homeSpaceId, keep: body.keep_in_previous_home },
             })
-          : [];
+          : { kept: false, disabledScheduleIds: [] };
         // The new home activates it, keeping a deliberate "off" (the move transfers authority, not what a space runs).
         const activation = await activatePackageWithin(tx, { orgId, spaceId: target }, packageId, {
           keepExistingDecision: true,
         });
-        return { ...activation, disabledScheduleIds };
+        return { ...activation, ...rehome };
       });
       await removeScheduleJobs(activation.disabledScheduleIds);
       // A personal old home is audited as its owner, never by space id (§3.6).
@@ -1930,7 +1925,7 @@ export function createPackagesRouter() {
         // `keptInPreviousHome: false` is a withdrawal of access; it rides on this event (one act, one entry).
         after: {
           homeSpaceId: target,
-          keptInPreviousHome: body.keep_in_previous_home,
+          keptInPreviousHome: activation.kept,
           ...(activation.disabledScheduleIds.length > 0
             ? { disabledScheduleIds: activation.disabledScheduleIds }
             : {}),
@@ -2072,12 +2067,11 @@ export function createPackagesRouter() {
     const accessible = await placementAccessSpaces(c);
     // Authority before the body is read.
     const pkg = await assertPackageShareAccessForPlacement(c, packageId);
-    const { target } = await readJsonBody(c, shareTargetSchema);
+    const { spaceId } = await readJsonBody(c, sharePackageSchema);
 
     // An unreachable space (someone else's personal space included) is a 404.
-    const destination = accessible.find((space) => space.id === target.spaceId);
-    if (!destination) throw notFound(`Space '${target.spaceId}' not found`);
-    const spaceId = destination.id;
+    const destination = accessible.find((space) => space.id === spaceId);
+    if (!destination) throw notFound(`Space '${spaceId}' not found`);
 
     // `sharePackage` re-decides authority under the locked home and refuses a personal
     // target before anything lands. The row lands ON when the caller holds the activation
@@ -2100,7 +2094,7 @@ export function createPackagesRouter() {
         action: "package.shared",
         resourceType: "package",
         resourceId: packageId,
-        after: { spaceId, targetKind: "space" },
+        after: { spaceId },
       });
       if (enabled) {
         await recordAuditFromContext(c, {
@@ -2135,13 +2129,12 @@ export function createPackagesRouter() {
     return c.json(listResponse(shares.map((share) => ({ object: "package_share", ...share }))));
   });
 
-  // The target is a space id, as the listing published it. Somebody else's
-  // personal space id is no handle here (404, §3.6).
-  router.delete(`/${SCOPED_PACKAGE_ROUTE}/shares/:target`, async (c) => {
+  // Somebody else's personal space id is no handle here (404, §3.6).
+  router.delete(`/${SCOPED_PACKAGE_ROUTE}/shares/:spaceId`, async (c) => {
     const packageId = getItemId(c);
-    const spaceId = c.req.param("target")!;
+    const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
-    assertSpaceId(spaceId, "target");
+    assertSpaceId(spaceId, "spaceId");
 
     const { authorityFor } = await assertPlacementRemovalAccess(c, packageId, spaceId);
     const { authority, disabledScheduleIds } = await revokePackageShare({
@@ -2158,7 +2151,6 @@ export function createPackagesRouter() {
       // Subject as `package.shared` records it; `authority` says which side withdrew.
       after: {
         spaceId,
-        targetKind: "space",
         authority,
         ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
       },
@@ -2175,7 +2167,7 @@ export function createPackagesRouter() {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
     const { pkg, authorizeHome } = await assertPackageOfferAccess(c, packageId);
-    const { mode } = await readJsonBody(c, packageOrgOfferSchema);
+    const { org_offer: mode } = await readJsonBody(c, packageOrgOfferSchema);
     const { created, previousMode } = await offerPackageToOrg({
       orgId,
       packageId,
@@ -2199,12 +2191,15 @@ export function createPackagesRouter() {
         after: { orgId, mode },
       });
     }
-    return c.json({
-      object: "package_org_offer",
-      packageId,
-      org_offer: mode,
-      warnings: await offerClosureWarnings(orgId, packageId, pkg.type),
-    });
+    return c.json(
+      {
+        object: "package_org_offer",
+        packageId,
+        org_offer: mode,
+        warnings: await offerClosureWarnings(orgId, packageId, pkg.type),
+      },
+      created ? 201 : 200,
+    );
   });
 
   router.delete(`/${SCOPED_PACKAGE_ROUTE}/org-offer`, async (c) => {

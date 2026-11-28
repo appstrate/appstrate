@@ -61,6 +61,9 @@ interface ConnectionDTO {
   shared_space_ids?: string[];
   /** Owner's own session only. */
   origin_space_id?: string | null;
+  needs_reconnection: boolean;
+  needs_reconnection_cause: string | null;
+  needs_reconnection_at: string | null;
 }
 
 describe("GET /api/integrations/:packageId/connections — own ∪ shared into the space", () => {
@@ -82,6 +85,8 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
     accountId: string;
     shared: boolean;
     needsReconnection?: boolean;
+    needsReconnectionCause?: "refresh_token_revoked";
+    needsReconnectionAt?: Date;
     originSpaceId?: string;
     sharedSpaceIds?: string[];
     createdAt?: Date;
@@ -103,6 +108,8 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
         scopesGranted: [],
         identityClaims: { email: `${opts.accountId}@example.com`, sub: `sub-${opts.accountId}` },
         needsReconnection: opts.needsReconnection ?? false,
+        needsReconnectionCause: opts.needsReconnectionCause ?? null,
+        needsReconnectionAt: opts.needsReconnectionAt ?? null,
         ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
       })
       .returning({ id: integrationConnections.id });
@@ -181,6 +188,31 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
     const ids = (await listAs(authHeaders(ctx))).map((c) => c.id);
     expect(ids).toContain(ownId);
     expect(ids).not.toContain(privateId);
+  });
+
+  it("serves the recorded death cause and its date, or null/null for a live row", async () => {
+    const at = new Date("2026-03-01T10:00:00.000Z");
+    const flaggedId = await seedConnection({
+      userId: ctx.user.id,
+      accountId: "flagged",
+      shared: false,
+      needsReconnection: true,
+      needsReconnectionCause: "refresh_token_revoked",
+      needsReconnectionAt: at,
+    });
+    const liveId = await seedConnection({ userId: ctx.user.id, accountId: "live", shared: false });
+
+    const rows = await listAs(authHeaders(ctx));
+    expect(rows.find((c) => c.id === flaggedId)).toMatchObject({
+      needs_reconnection: true,
+      needs_reconnection_cause: "refresh_token_revoked",
+      needs_reconnection_at: "2026-03-01T10:00:00.000Z",
+    });
+    expect(rows.find((c) => c.id === liveId)).toMatchObject({
+      needs_reconnection: false,
+      needs_reconnection_cause: null,
+      needs_reconnection_at: null,
+    });
   });
 
   it("labels a shared row with its owner's display name", async () => {

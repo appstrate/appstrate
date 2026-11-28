@@ -3,18 +3,18 @@
 import type { DataColumn } from "../components/data-table";
 import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { toggleValue } from "../lib/toggle-value";
-import { createKeyedLocalStore } from "./local-storage";
+import { LOCAL_STORAGE_KEYS, createLocalStore, jsonCodec } from "@appstrate/ui/local-storage";
 
 /** Hidden columns per table, persisted; a preference, so kept out of the URL (like the cards/table view). */
 
 const NONE: string[] = [];
 
 /** `null` until the reader picks: the table then shows its own default. */
-const hiddenColumns = createKeyedLocalStore<string[] | null>(
-  "appstrate-columns-",
-  (value) =>
+const hiddenColumns = createLocalStore(
+  LOCAL_STORAGE_KEYS.columnVisibility,
+  jsonCodec((value): string[] | null =>
     Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : null,
-  null,
+  ),
 );
 
 /**

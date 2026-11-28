@@ -4,6 +4,8 @@ import { packageSourceValues } from "@appstrate/db/schema";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { APPEARANCE_PROPERTIES, INACTIVE_REQUIRED_INTEGRATIONS } from "../schemas.ts";
+import { NEEDS_RECONNECTION_RECORD_PROPERTIES } from "../needs-reconnection-record.ts";
+import { DEFAULT_PACKAGE_HINT_LIMIT } from "../../services/space-packages.ts";
 import {
   agentPackageIdParam,
   connectionActionsSchema,
@@ -30,6 +32,34 @@ import {
   shareableSpacesSchema,
 } from "./integrations.ts";
 
+/**
+ * A capped list of `/api/me/context`, one envelope for every such list. Whole or withheld, never a
+ * prefix: past the cap `data` is empty, `truncated` is true, and `total` still counts every
+ * entry. `total` is always present and equals `data.length` when `truncated` is false.
+ */
+function cappedList(items: Record<string, unknown>, description: string) {
+  return {
+    type: "object",
+    description,
+    required: ["data", "truncated", "total"],
+    properties: {
+      data: {
+        type: "array",
+        description: "The entries, whole; empty when `truncated` is true.",
+        items,
+      },
+      truncated: {
+        type: "boolean",
+        description: `True when more than ${DEFAULT_PACKAGE_HINT_LIMIT} entries exist and \`data\` was withheld.`,
+      },
+      total: {
+        type: "integer",
+        description: "How many entries there are, listed or withheld.",
+      },
+    },
+  };
+}
+
 /** One connection on the account surface, as the list (`GET /api/me/connections`) returns it. */
 const meConnectionEntrySchema = {
   type: "object",
@@ -40,6 +70,8 @@ const meConnectionEntrySchema = {
     "scopes_granted",
     "connected_at",
     "needs_reconnection",
+    "needs_reconnection_cause",
+    "needs_reconnection_at",
     "expiresAt",
     "identity",
     "auth_key",
@@ -61,6 +93,7 @@ const meConnectionEntrySchema = {
     scopes_granted: { type: "array", items: { type: "string" } },
     connected_at: { type: "string", format: "date-time" },
     needs_reconnection: { type: "boolean" },
+    ...NEEDS_RECONNECTION_RECORD_PROPERTIES,
     expiresAt: {
       oneOf: [{ type: "string", format: "date-time" }, { type: "null" }],
     },
@@ -839,15 +872,9 @@ export const mePaths = {
                   space: [
                     "connections",
                     "connectable_integrations",
-                    "connectable_integrations_truncated",
-                    "connectable_integrations_total",
                     "recent_runs",
                     "agents",
-                    "agents_truncated",
-                    "agents_total",
                     "skills",
-                    "skills_truncated",
-                    "skills_total",
                   ],
                 },
                 properties: {
@@ -893,29 +920,16 @@ export const mePaths = {
                       },
                     },
                   },
-                  connectable_integrations: {
-                    type: "array",
-                    items: { type: "string" },
-                    description:
-                      "Ids of the integrations active in the current space that the caller has not " +
+                  connectable_integrations: cappedList(
+                    { type: "string" },
+                    "Ids of the integrations active in the current space that the caller has not " +
                       "connected and for which a connect flow can start (an `oauth2` auth needs a " +
                       "usable client), sorted by id. One whose only connection needs " +
                       "reconnection is not listed: it stays in `connections`, flagged " +
-                      "`needs_reconnection`. Whole or withheld: more than 15 and the list is " +
-                      "empty (`connectable_integrations_truncated` true), never a prefix. Empty " +
-                      "unless the caller holds `integrations:read` and `integrations:connect`; " +
-                      "one whose member connections the space blocks is listed only under " +
-                      "`integrations:configure`.",
-                  },
-                  connectable_integrations_truncated: {
-                    type: "boolean",
-                    description:
-                      "True when `connectable_integrations` was withheld for exceeding 15.",
-                  },
-                  connectable_integrations_total: {
-                    type: "integer",
-                    description: "How many connectable integrations there are, listed or withheld.",
-                  },
+                      "`needs_reconnection`. Empty unless the caller holds `integrations:read` and " +
+                      "`integrations:connect`; one whose member connections the space blocks is " +
+                      "listed only under `integrations:configure`.",
+                  ),
                   recent_runs: {
                     type: "array",
                     description:
@@ -1017,16 +1031,8 @@ export const mePaths = {
                       },
                     },
                   },
-                  agents: {
-                    type: "array",
-                    description:
-                      "Agents ACTIVE in the current space, ordered by id, each with the required " +
-                      "integrations that keep it from launching here. Only " +
-                      "present when the caller holds the `agents:run` permission; empty otherwise. " +
-                      "Listed whole or not at all: past 15 agents the list is empty, " +
-                      "`agents_truncated` is true, and the agents are reachable via the " +
-                      "`listAgents` operation (the MCP `search` tool finds them by keyword).",
-                    items: {
+                  agents: cappedList(
+                    {
                       type: "object",
                       required: [
                         "packageId",
@@ -1069,27 +1075,13 @@ export const mePaths = {
                         source: { type: "string", enum: [...packageSourceValues] },
                       },
                     },
-                  },
-                  agents_truncated: {
-                    type: "boolean",
-                    description:
-                      "True when more agents are active than the cap; `agents` is then empty " +
-                      "(full list via `listAgents`).",
-                  },
-                  agents_total: {
-                    type: "integer",
-                    description: "Total active agents, listed or not.",
-                  },
-                  skills: {
-                    type: "array",
-                    description:
-                      "Skills the caller could attach to an agent in the current space, " +
-                      "ordered by id. A catalogue read, not a runnable hint: only present when the " +
-                      "caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent " +
-                      "manifest's `dependencies.skills`. Listed whole or not at all: past 15 skills the " +
-                      "list is empty, `skills_truncated` is true, and the skills are reachable via the " +
-                      "`listSkills` operation (the MCP `search` tool finds them by keyword).",
-                    items: {
+                    "Agents ACTIVE in the current space, ordered by id, each with the required " +
+                      "integrations that keep it from launching here. Empty unless the " +
+                      "caller holds the `agents:run` permission. The full list " +
+                      "is the `listAgents` operation (the MCP `search` tool finds them by keyword).",
+                  ),
+                  skills: cappedList(
+                    {
                       type: "object",
                       required: [
                         "packageId",
@@ -1130,17 +1122,13 @@ export const mePaths = {
                         source: { type: "string", enum: [...packageSourceValues] },
                       },
                     },
-                  },
-                  skills_truncated: {
-                    type: "boolean",
-                    description:
-                      "True when more skills are active than the cap; `skills` is then empty " +
-                      "(full list via `listSkills`).",
-                  },
-                  skills_total: {
-                    type: "integer",
-                    description: "Total active skills, listed or not.",
-                  },
+                    "Skills the caller could attach to an agent in the current space, ordered by " +
+                      "id. A catalogue read, not a runnable hint: empty unless the caller " +
+                      "holds the `skills:read` permission. Skills are not run " +
+                      "directly: declare them under an agent manifest's `dependencies.skills`. The " +
+                      "full list is the `listSkills` operation (the MCP `search` tool finds them " +
+                      "by keyword).",
+                  ),
                 },
               },
               example: {
@@ -1185,9 +1173,11 @@ export const mePaths = {
                     ],
                   },
                 ],
-                connectable_integrations: ["@appstrate/slack"],
-                connectable_integrations_truncated: false,
-                connectable_integrations_total: 1,
+                connectable_integrations: {
+                  data: ["@appstrate/slack"],
+                  truncated: false,
+                  total: 1,
+                },
                 recent_runs: [
                   {
                     packageId: "@appstrate/triage",
@@ -1197,33 +1187,37 @@ export const mePaths = {
                     error: "Gmail token expired",
                   },
                 ],
-                agents: [
-                  {
-                    packageId: "@appstrate/triage",
-                    display_name: "Inbox Triage",
-                    description: "Sorts and labels incoming email.",
-                    takes_input: false,
-                    inactive_required_integrations: [],
-                    published: true,
-                    home_writable: false,
-                    source: "system",
-                  },
-                ],
-                agents_truncated: false,
-                agents_total: 1,
-                skills: [
-                  {
-                    packageId: "@appstrate/web-research",
-                    display_name: "Web Research",
-                    description: "Multi-source web search and synthesis.",
-                    version: "1.2.0",
-                    published: true,
-                    home_writable: false,
-                    source: "system",
-                  },
-                ],
-                skills_truncated: false,
-                skills_total: 1,
+                agents: {
+                  data: [
+                    {
+                      packageId: "@appstrate/triage",
+                      display_name: "Inbox Triage",
+                      description: "Sorts and labels incoming email.",
+                      takes_input: false,
+                      inactive_required_integrations: [],
+                      published: true,
+                      home_writable: false,
+                      source: "system",
+                    },
+                  ],
+                  truncated: false,
+                  total: 1,
+                },
+                skills: {
+                  data: [
+                    {
+                      packageId: "@appstrate/web-research",
+                      display_name: "Web Research",
+                      description: "Multi-source web search and synthesis.",
+                      version: "1.2.0",
+                      published: true,
+                      home_writable: false,
+                      source: "system",
+                    },
+                  ],
+                  truncated: false,
+                  total: 1,
+                },
               },
             },
           },

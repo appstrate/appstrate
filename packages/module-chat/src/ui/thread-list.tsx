@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Conversation list + the conversation's settings dialog. Plain React Query over
+ * Conversation list + the conversation's « … » menu. Plain React Query over
  * the session REST API (no assistant-ui thread-list runtime): the URL is the
  * single source of truth, selection just navigates. Mutations (rename/delete)
  * invalidate the list; the active conversation's first message invalidates it too
@@ -9,21 +9,23 @@
  *
  * Both pieces are mounted by the HOST SHELL, not by `ChatPage`: the list is the
  * chat's navigation (it sits in the shell sidebar, where Studio's nav sits) and
- * the settings button sits in the shell header's actions. They read the same two
- * contexts `ChatPage` publishes, so the host renders both below its own
+ * the open conversation's « … » sits in the shell header's actions. They read the
+ * same two contexts `ChatPage` publishes, so the host renders both below its own
  * `ChatTransportProvider` / `SelectConversationProvider`, and they share the
- * thread's React Query key, so one request feeds all of it. Renaming happens in
- * the settings dialog only: the header's trail shows the name, it does not edit it.
+ * thread's React Query key, so one request feeds all of it. A row and the header
+ * open the same menu (`ConversationActionsMenu`): the trail shows the name, it does
+ * not edit it.
  *
  * The list renders into the host's sidebar (a `SidebarProvider` must be above
  * it): it IS the chat's navigation, so it uses the same rows, groups and active
  * fill as Studio's, or the two products would not read as one app.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  ChevronDownIcon,
   EllipsisIcon,
   MessagesSquareIcon,
   PencilIcon,
@@ -44,6 +46,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Label } from "@appstrate/ui/components/label";
 import {
   Dialog,
@@ -85,6 +88,12 @@ import {
   SESSIONS_QUERY_KEY,
   type SessionSummary,
 } from "./sessions.ts";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
+import { readCollapsedGroups, setGroupFolded } from "./collapsed-groups.ts";
 import { ConversationGroupSkeleton } from "./conversation-skeleton.tsx";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
 import {
@@ -95,7 +104,7 @@ import {
   READING_TEXT_DENSE_CLASS,
   SEARCH_INPUT_CLASS,
 } from "./phone-text.ts";
-import { useSessions } from "./use-sessions.ts";
+import { useActiveSession, useSessions } from "./use-sessions.ts";
 
 const SEARCH_DEBOUNCE_MS = 250;
 const SEARCH_MAX_LENGTH = 200;
@@ -107,6 +116,16 @@ const GROUP_LABEL_KEY: Record<SessionGroupKey, string> = {
   month: "threads.group.month",
   older: "threads.group.older",
 };
+
+/** The folded date groups: read once on mount, written through on each toggle. */
+function useCollapsedGroups() {
+  const [collapsed, setCollapsed] = useState(readCollapsedGroups);
+  const setFolded = (key: SessionGroupKey, folded: boolean) => {
+    const next = setGroupFolded(collapsed, key, folded);
+    setCollapsed(next);
+  };
+  return [collapsed, setFolded] as const;
+}
 
 /** The trimmed search term, settled `delay` ms after the last keystroke (cleared at once). */
 function useDebouncedTerm(input: string, delay: number): string {
@@ -129,8 +148,8 @@ function useDebouncedTerm(input: string, delay: number): string {
  *
  * Every row is one line, for a writer as for a reader: the title, then one block
  * on the right — the tiles of the spaces the conversation touched (their names in
- * `title`, and in a writer's « … » menu), then its status when it has one
- * (generating, unread); a writer's « … » takes the whole block's place on hover.
+ * `title`, and in the row's « … »), then its status when it has one (generating,
+ * unread); the « … » takes the whole block's place on hover.
  * The date is the group's (« Aujourd'hui », …), not the row's.
  *
  * A conversation whose reply arrived while the user was elsewhere reads as
@@ -175,6 +194,7 @@ export function ChatConversationList({
   } = searching ? found : base;
   const now = useNowTick();
   const list = sessions ?? [];
+  const [collapsedGroups, setFolded] = useCollapsedGroups();
   const groups = searching ? [] : groupSessionsByDate(list, new Date(now));
   // Starting a conversation is a write, as are rename and delete; a reader also gets its own empty copy.
   const canWrite = can("chat:write");
@@ -309,17 +329,37 @@ export function ChatConversationList({
               : undefined
           }
         >
-          {isLoading && <ConversationGroupSkeleton canWrite={canWrite} dated={!searching} />}
+          {isLoading && <ConversationGroupSkeleton dated={!searching} />}
           {searching
             ? list.map(row)
-            : groups.map((group) => (
-                <li key={group.key} className="flex flex-col gap-1">
-                  <SidebarGroupLabel className="mt-1 h-6 px-2 text-sm md:text-[11px]">
-                    {t(GROUP_LABEL_KEY[group.key])}
-                  </SidebarGroupLabel>
-                  <ul className="flex flex-col gap-1">{group.sessions.map(row)}</ul>
-                </li>
-              ))}
+            : groups.map((group) => {
+                const folded = collapsedGroups.has(group.key);
+                const active = folded ? group.sessions.find((s) => s.id === activeId) : undefined;
+                return (
+                  <Collapsible
+                    key={group.key}
+                    render={<li className="flex flex-col gap-1" />}
+                    open={!folded}
+                    onOpenChange={(open) => setFolded(group.key, !open)}
+                  >
+                    <SidebarGroupLabel
+                      render={<CollapsibleTrigger />}
+                      className="group/label desktop-pointer:hover:bg-sidebar-accent desktop-pointer:hover:text-sidebar-accent-foreground desktop-pointer:h-6 desktop-pointer:text-[11px] mt-1 h-10 justify-start gap-1 px-2 text-left text-sm [&>svg]:size-3"
+                    >
+                      {t(GROUP_LABEL_KEY[group.key])}
+                      <ChevronDownIcon
+                        aria-hidden
+                        className="-rotate-90 transition-transform group-data-panel-open/label:rotate-0"
+                      />
+                    </SidebarGroupLabel>
+                    <CollapsibleContent render={<ul className="flex flex-col gap-1" />}>
+                      {group.sessions.map(row)}
+                    </CollapsibleContent>
+                    {/* A folded group still shows the open conversation, alone under its heading. */}
+                    {active && <ul className="flex flex-col gap-1">{row(active)}</ul>}
+                  </Collapsible>
+                );
+              })}
           {/* A plain button, not a menu row: a menu row closes the phone's
               drawer, and loading more must leave it open on the list. */}
           {hasNextPage && (
@@ -381,31 +421,147 @@ function ConversationRow({
   canWrite: boolean;
   renderSpaces: RenderSpaces;
 }) {
+  const select = useSelectConversation();
+
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        isActive={active}
+        onClick={() => select?.(session.id)}
+        size="lg"
+        // One line: a thumb's 48px on touch, Studio's 32px rows under a mouse. On touch the « … » is
+        // always there, at the right of the row: the padding keeps the row clear of it.
+        // The host's space tiles ring themselves in `--tile-ring`: the row's background in each
+        // of its states.
+        className={cn(
+          "desktop-pointer:h-8 desktop-pointer:pr-2 pr-11",
+          "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
+        )}
+      >
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <span
+            className={cn(
+              "block min-w-0 flex-1 truncate text-left leading-4 max-md:text-base max-md:leading-5",
+              unread && "font-semibold",
+            )}
+          >
+            {session.title ?? t("threads.new")}
+          </span>
+          {/* The right side, one block: the tiles of the spaces it touched, then its status when
+              it has one (generating, unread). Under a mouse the « … » takes the place of the whole
+              block on hover, on focus and while its popup is open, so the block is at least as
+              wide as the « … ». */}
+          <span
+            data-testid="chat-session-trailing"
+            className="desktop-pointer:min-w-6 desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0 desktop-pointer:group-has-[[data-popup-open]]/menu-item:opacity-0 flex shrink-0 items-center justify-end gap-2 transition-opacity"
+          >
+            {session.space_ids.length > 0 && (
+              <span data-testid="chat-session-space-tiles" className="flex items-center">
+                {renderSpaces(session.space_ids, { tilesOnly: true })}
+              </span>
+            )}
+            {session.generating ? (
+              <Spinner
+                data-testid="chat-session-status"
+                className="text-sidebar-foreground/70 size-3.5"
+                aria-label={t("threads.generating")}
+              />
+            ) : (
+              unread && (
+                <span
+                  data-testid="chat-session-status"
+                  className="bg-primary size-2 rounded-full"
+                  aria-label={t("threads.unread")}
+                  title={t("threads.unread")}
+                />
+              )
+            )}
+          </span>
+        </span>
+      </SidebarMenuButton>
+      {/* One « … », the same items on every format: always there and a thumb's size on touch,
+          revealed by hover or focus under a mouse. A reader's names the spaces alone. */}
+      <ConversationActionsMenu
+        session={session}
+        active={active}
+        t={t}
+        canWrite={canWrite}
+        renderSpaces={renderSpaces}
+      >
+        <button
+          type="button"
+          aria-label={t(canWrite ? "threads.actions.openFor" : "threads.actions.spacesFor", {
+            title: session.title ?? t("threads.new"),
+          })}
+          className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-2 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-popup-open:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
+        >
+          <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
+        </button>
+      </ConversationActionsMenu>
+    </SidebarMenuItem>
+  );
+}
+
+/** The classes of the element holding a conversation's spaces, in a menu's label or a popover. */
+const CONVERSATION_SPACES_CLASS = cn(
+  "text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)]",
+  NOTE_TEXT_CLASS,
+);
+
+/** The spaces a conversation reaches, by name; the caller wraps them. */
+function ConversationSpaces({
+  session,
+  t,
+  renderSpaces,
+}: {
+  session: SessionSummary;
+  t: ChatTranslate;
+  renderSpaces: RenderSpaces;
+}) {
+  // A row shows their tiles alone, and a touch has no hover to read their `title`.
+  return session.space_ids.length > 0
+    ? renderSpaces(session.space_ids)
+    : t("common:overview.title");
+}
+
+/**
+ * A conversation's « … »: the spaces it reaches, then for a writer « Renommer » and « Supprimer »,
+ * for a row and for the open conversation in the host's header alike. A reader's opens a popover
+ * with the spaces alone. `children` is the trigger. Below
+ * `md` the menu is a panel from the bottom, titled by the conversation. Deleting the `active`
+ * conversation leaves it for a new one.
+ */
+function ConversationActionsMenu({
+  session,
+  active,
+  t,
+  canWrite,
+  renderSpaces,
+  children,
+}: {
+  session: SessionSummary;
+  active: boolean;
+  t: ChatTranslate;
+  /** Renaming and deleting are writes: a reader's menu names the spaces alone. */
+  canWrite: boolean;
+  renderSpaces: RenderSpaces;
+  children: ReactElement;
+}) {
   const transport = useChatTransport();
   const select = useSelectConversation();
   const queryClient = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // Closing a dialog opened from a row hands the focus back to what opened it.
-  const dialogTrigger = useRef<HTMLButtonElement | null>(null);
-  const menuTrigger = useRef<HTMLButtonElement>(null);
-  const restoreDialogFocus = () =>
-    dialogTrigger.current?.isConnected ? dialogTrigger.current : true;
   const [deleting, setDeleting] = useState(false);
   const [deleteFailed, setDeleteFailed] = useState(false);
-  // The « … »'s two items; selecting one closes the menu.
-  const openRename = () => {
-    dialogTrigger.current = menuTrigger.current;
-    setRenaming(true);
-  };
-  const openDelete = () => {
-    dialogTrigger.current = menuTrigger.current;
-    setDeleteFailed(false);
-    setConfirmingDelete(true);
-  };
+  // Closing a dialog opened from the menu hands the focus back to its trigger. A trigger gone with
+  // its deleted conversation takes nothing: the next conversation's composer keeps its autofocus.
+  const menuTrigger = useRef<HTMLButtonElement>(null);
+  const restoreDialogFocus = () => (menuTrigger.current?.isConnected ? menuTrigger.current : false);
+  const title = session.title ?? t("threads.new");
 
   // The dialog stays open while the delete is in flight and on failure (it says
-  // so); it closes only once the row is gone.
+  // so); it closes only once the conversation is gone.
   const onDelete = async () => {
     if (!transport) return;
     setDeleting(true);
@@ -425,147 +581,78 @@ function ConversationRow({
   };
 
   return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        isActive={active}
-        onClick={() => select?.(session.id)}
-        size="lg"
-        // One line: a thumb's 48px on touch, Studio's 32px rows under a mouse. On touch a writer's
-        // « … » is always there, at the right of the row: the padding keeps the row clear of it.
-        // The host's space tiles ring themselves in `--tile-ring`: the row's background in each
-        // of its states.
-        className={cn(
-          "desktop-pointer:h-8",
-          canWrite && "desktop-pointer:pr-2 pr-11",
-          "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
-        )}
-      >
-        <span className="flex min-w-0 flex-1 items-center gap-2">
-          <span
-            className={cn(
-              "block min-w-0 flex-1 truncate text-left leading-4 max-md:text-base max-md:leading-5",
-              unread && "font-semibold",
-            )}
-          >
-            {session.title ?? t("threads.new")}
-          </span>
-          {/* The right side, one block: the tiles of the spaces it touched, then its status when
-              it has one (generating, unread). Under a mouse a writer's « … » takes the place of
-              the whole block on hover, on focus and while its menu is open, so the block is at
-              least as wide as the « … »; a reader has none, so for them hover changes nothing. */}
-          {(canWrite || session.space_ids.length > 0 || session.generating || unread) && (
-            <span
-              data-testid="chat-session-trailing"
-              className={cn(
-                "flex shrink-0 items-center justify-end gap-2",
-                canWrite &&
-                  "desktop-pointer:min-w-6 desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0 desktop-pointer:group-has-[[data-popup-open]]/menu-item:opacity-0 transition-opacity",
-              )}
-            >
-              {session.space_ids.length > 0 && (
-                <span data-testid="chat-session-space-tiles" className="flex items-center">
-                  {renderSpaces(session.space_ids, { tilesOnly: true })}
-                </span>
-              )}
-              {session.generating ? (
-                <Spinner
-                  data-testid="chat-session-status"
-                  className="text-sidebar-foreground/70 size-3.5"
-                  aria-label={t("threads.generating")}
-                />
-              ) : (
-                unread && (
-                  <span
-                    data-testid="chat-session-status"
-                    className="bg-primary size-2 rounded-full"
-                    aria-label={t("threads.unread")}
-                    title={t("threads.unread")}
-                  />
-                )
-              )}
-            </span>
-          )}
-        </span>
-      </SidebarMenuButton>
-      {/* One « … », the same items on every format: always there and a thumb's size on touch,
-          revealed by hover or focus under a mouse. Below `md` the menu is a panel from the bottom,
-          titled by the conversation. */}
-      {canWrite && (
+    <>
+      {canWrite ? (
         <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <button
-                type="button"
-                aria-label={t("threads.actions.openFor", {
-                  title: session.title ?? t("threads.new"),
-                })}
-                ref={menuTrigger}
-                className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-2 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-popup-open:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
-              />
-            }
-          >
-            <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="min-w-40"
-            sheetTitle={session.title ?? t("threads.new")}
-          >
-            {/* The spaces it reaches, by name: the row shows their tiles alone, and a touch has
-                no hover to read their `title`. */}
-            <DropdownMenuLabel
-              data-testid="chat-menu-spaces"
-              className={cn(
-                "text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)]",
-                NOTE_TEXT_CLASS,
-              )}
-            >
-              {session.space_ids.length > 0
-                ? renderSpaces(session.space_ids)
-                : t("common:overview.title")}
+          <DropdownMenuTrigger ref={menuTrigger} render={children} />
+          <DropdownMenuContent align="end" className="min-w-40" sheetTitle={title}>
+            <DropdownMenuLabel data-testid="chat-menu-spaces" className={CONVERSATION_SPACES_CLASS}>
+              <ConversationSpaces session={session} t={t} renderSpaces={renderSpaces} />
             </DropdownMenuLabel>
-            <DropdownMenuItem onClick={openRename}>
+            <DropdownMenuItem onClick={() => setRenaming(true)}>
               <PencilIcon />
               {t("threads.rename")}
             </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onClick={openDelete}>
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => {
+                setDeleteFailed(false);
+                setConfirmingDelete(true);
+              }}
+            >
               <Trash2Icon />
               {t("common:btn.delete")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      )}
-      <AlertDialog
-        open={confirmingDelete}
-        onOpenChange={(open) => !deleting && setConfirmingDelete(open)}
-      >
-        <AlertDialogContent data-testid="chat-delete-confirm" finalFocus={restoreDialogFocus}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("threads.delete.title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("threads.delete.description", { title: session.title ?? t("threads.new") })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {deleteFailed && (
-            <p role="alert" className="text-destructive text-sm">
-              {t("threads.delete.error")}
-            </p>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>{t("common:btn.cancel")}</AlertDialogCancel>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={deleting}
-              onClick={() => void onDelete()}
+      ) : (
+        // A reader has no action: a menu would be empty for assistive tech, so the spaces open
+        // in a popover (a panel from the bottom on a phone, as the menu's).
+        <Popover>
+          <PopoverTrigger render={children} />
+          <PopoverContent align="end" className="w-auto min-w-40 p-2">
+            <div
+              data-testid="chat-menu-spaces"
+              className={cn(CONVERSATION_SPACES_CLASS, "px-2 py-1.5")}
             >
-              {deleting && <Spinner className="mr-1.5 size-3.5" />}
-              {t("common:btn.delete")}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      {renaming && (
+              <ConversationSpaces session={session} t={t} renderSpaces={renderSpaces} />
+            </div>
+          </PopoverContent>
+        </Popover>
+      )}
+      {canWrite && (
+        <AlertDialog
+          open={confirmingDelete}
+          onOpenChange={(open) => !deleting && setConfirmingDelete(open)}
+        >
+          <AlertDialogContent data-testid="chat-delete-confirm" finalFocus={restoreDialogFocus}>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("threads.delete.title")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("threads.delete.description", { title })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {deleteFailed && (
+              <p role="alert" className="text-destructive text-sm">
+                {t("threads.delete.error")}
+              </p>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>{t("common:btn.cancel")}</AlertDialogCancel>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={deleting}
+                onClick={() => void onDelete()}
+              >
+                {deleting && <Spinner className="mr-1.5 size-3.5" />}
+                {t("common:btn.delete")}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+      {canWrite && renaming && (
         <ConversationRenameDialog
           session={session}
           t={t}
@@ -573,49 +660,53 @@ function ConversationRow({
           onClose={() => setRenaming(false)}
         />
       )}
-    </SidebarMenuItem>
+    </>
   );
 }
 
 /**
- * « Renommer » for the open conversation, a pencil in the host's header on every format. Renders
- * nothing until the conversation is known, or for a reader (renaming is a write).
+ * The open conversation's « … » in the host's header, on every format: the same menu as its row.
+ * Renders nothing until the conversation is stored. A reader gets it too, with the spaces alone
+ * (renaming and deleting are writes). The conversation is read like the trail reads it, so one
+ * opened outside the list's filter has it too.
  */
-export function ChatConversationRenameButton(props: {
-  activeId: string | null;
-  t: ChatTranslate;
-  can: ChatCan;
-}) {
-  return <ConversationRenameButton key={props.activeId} {...props} />;
-}
-
-function ConversationRenameButton({
+export function ChatConversationMenu({
   activeId,
   t,
   can,
+  renderSpaces,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
+  renderSpaces: RenderSpaces;
 }) {
-  const [open, setOpen] = useState(false);
-  const { data: sessions } = useSessions();
-  const session = activeId ? sessions?.find((s) => s.id === activeId) : undefined;
-  if (!session || !can("chat:write")) return null;
+  const transport = useChatTransport() ?? undefined;
+  const session = useActiveSession(transport, activeId ?? "", activeId !== null);
+  if (!session) return null;
+  const canWrite = can("chat:write");
+  // Named after what it opens: a reader's lists the spaces alone.
+  const label = t(canWrite ? "threads.actions.conversation" : "threads.actions.spaces");
   return (
-    <>
+    <ConversationActionsMenu
+      key={session.id}
+      session={session}
+      active
+      t={t}
+      canWrite={canWrite}
+      renderSpaces={renderSpaces}
+    >
       <Button
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label={t("threads.rename")}
-        title={t("threads.rename")}
-        onClick={() => setOpen(true)}
+        aria-label={label}
+        title={label}
+        data-testid="chat-conversation-menu"
       >
-        <PencilIcon className="size-4" />
+        <EllipsisIcon className="size-4" />
       </Button>
-      {open && <ConversationRenameDialog session={session} t={t} onClose={() => setOpen(false)} />}
-    </>
+    </ConversationActionsMenu>
   );
 }
 

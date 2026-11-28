@@ -34,32 +34,37 @@ const SPACE_LISTS = Object.keys(LIST_ROUTE) as SpaceList[];
 /** What the caller may do in one space: its effective set there, the org-level grants included. */
 export type SpaceGate = (permission: string) => boolean;
 
+/** What a space admits: its gate, and the space for what the gate does not carry (the Studio). */
+type SpaceAdmits = (can: SpaceGate, space: { shows_studio: boolean }) => boolean;
+
 /** A route's declaration, read uniformly: the permissions that open it, if any. */
 const accessOf = (path: RoutePath) =>
   ROUTE_ACCESS[path] as { anyOf?: readonly string[]; spansSpaces?: boolean };
 
 /** A space admits a route where its gate opens it. */
 const routeAdmits =
-  (path: RoutePath) =>
-  (can: SpaceGate): boolean =>
-    grantsRoute(path, can);
+  (path: RoutePath): SpaceAdmits =>
+  (can, space) =>
+    grantsRoute(path, can, space.shows_studio);
 
 /** A space admits a list where its gate grants the list route's own permissions, Studio or not. */
 export const listAdmits =
-  (list: SpaceList) =>
-  (can: SpaceGate): boolean =>
+  (list: SpaceList): ((can: SpaceGate) => boolean) =>
+  (can) =>
     ROUTE_ACCESS[LIST_ROUTE[list]].anyOf.some(can);
 
 /** The product a list is shown in: the Studio's screens also ask each space for the Studio. */
 export type ListSurface = "studio" | "chat";
 
-export const listAdmitsOn = (list: SpaceList, surface: ListSurface) =>
+export const listAdmitsOn = (list: SpaceList, surface: ListSurface): SpaceAdmits =>
   surface === "chat" ? listAdmits(list) : routeAdmits(LIST_ROUTE[list]);
 
 interface ListedSpace {
   id: string;
   access: string;
   permissions: readonly string[];
+  /** Whether the caller's role shows the Studio's screens in this space. */
+  shows_studio: boolean;
 }
 
 /** The API projects each space's effective grants, including the caller's organization grants. */
@@ -121,7 +126,7 @@ export function spaceChoice(
 
 /** The « Tous les espaces » is offered from two spaces granting at least one list's own permissions. */
 export function overviewOffered(spaces: readonly ListedSpace[] | undefined): boolean {
-  const admits = (can: SpaceGate) => SPACE_LISTS.some((list) => listAdmits(list)(can));
+  const admits: SpaceAdmits = (can) => SPACE_LISTS.some((list) => listAdmits(list)(can));
   return spacesWhere(spaces, admits).length >= 2;
 }
 

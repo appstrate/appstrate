@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { SESSION_STORAGE_KEYS, storageKey } from "@appstrate/ui/local-storage";
+
 /** OIDC PKCE helpers for the SPA: the Better Auth session cookie is the real auth, the OIDC tokens are discarded. */
 
 interface OidcConfig {
@@ -55,9 +57,9 @@ export function decodeStateRedirect(state: string): string | undefined {
   }
 }
 
-const OIDC_STATE_KEY = "appstrate_oidc_state";
-const OIDC_VERIFIER_KEY = "appstrate_oidc_verifier";
-const OIDC_REDIRECT_KEY = "appstrate_oidc_redirect";
+const OIDC_STATE_KEY = storageKey(SESSION_STORAGE_KEYS.oidcState);
+const OIDC_VERIFIER_KEY = storageKey(SESSION_STORAGE_KEYS.oidcVerifier);
+const OIDC_REDIRECT_KEY = storageKey(SESSION_STORAGE_KEYS.oidcRedirect);
 
 /** Authorize params for login and signup (the register page forwards `url.search`), plus PKCE state persistence. */
 async function initPkceFlow(

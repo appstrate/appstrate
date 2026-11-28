@@ -26,8 +26,6 @@ function member(overrides: Partial<OrgMember> & { userId: string }): OrgMember {
     role: "member",
     joinedAt: "2026-01-01T00:00:00Z",
     spaces: [],
-    personal_space_role: null,
-    personal_space_default_role: null,
     ...overrides,
   };
 }

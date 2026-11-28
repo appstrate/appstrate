@@ -244,7 +244,6 @@ describe("the `runner` preset", () => {
     "persistence:read",
     "runs:cancel",
     "runs:read",
-    "studio:read",
   ];
 
   /** The half of a preset's set that core defines, module contributions removed. */

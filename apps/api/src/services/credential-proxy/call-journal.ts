@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The writer of the call journal (`connection_calls`, described on the table). Best-effort like
- * `recordAudit`: a fault is logged and swallowed, so a call never depends on the journal; the route hands the promise to `trackAudit` (`services/audit.ts`), off its
- * response path, and graceful shutdown drains it.
+ * The writers of the call journal (`connection_calls`, described on the table).
+ * {@link recordConnectionCalls} is best-effort like `recordAudit`: a fault is logged and swallowed,
+ * so a proxied call never depends on the journal; its callers hand the promise to `trackAudit`
+ * (`services/audit.ts`), off their response path, and graceful shutdown drains it.
+ * {@link insertConnectionCalls} throws: the sidecar's journal route answers a fault with a 500, so
+ * the sidecar retries the batch.
  */
 
 import type { Context } from "hono";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionCalls, integrationConnections } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -42,14 +45,19 @@ export interface ConnectionCall {
   /** The upstream's HTTP status as a string, or the proxy's own problem code. */
   outcome: string;
   durationMs: number;
-  requestId: string;
+  /** The platform request that made the call; NULL for a call a run's sidecar reported. */
+  requestId: string | null;
+  /** When the call started. */
+  calledAt: Date;
+  /** The call's identity: minted by the sidecar for a run's call, else by the writer. */
+  callId?: string;
 }
 
 /** Who called, as the journal records it: read from the request by {@link proxyCaller} alone. */
-export type ProxyCaller = Pick<
-  ConnectionCall,
-  "apiKeyId" | "authMethod" | "requestId" | "chatSessionId"
->;
+export type ProxyCaller = Pick<ConnectionCall, "apiKeyId" | "authMethod" | "chatSessionId"> & {
+  /** A platform request always has its Request-Id: only a sidecar-reported row has none. */
+  requestId: string;
+};
 
 /**
  * The caller of a proxied call or MCP operation, from its request. A call naming a run records
@@ -90,13 +98,14 @@ async function connectionOwners(rows: readonly ConnectionCall[]): Promise<Map<st
 }
 
 /**
- * Writes the rows in one statement, in their order (the `id` sequence follows it). Never throws:
- * a database fault is logged and the rows are lost.
+ * Writes the rows in one statement, in their order (the `id` sequence follows it). Throws on a
+ * database fault.
  */
-export async function recordConnectionCalls(rows: readonly ConnectionCall[]): Promise<void> {
-  try {
-    const owners = await connectionOwners(rows);
-    await db.insert(connectionCalls).values(
+export async function insertConnectionCalls(rows: readonly ConnectionCall[]): Promise<void> {
+  const owners = await connectionOwners(rows);
+  await db
+    .insert(connectionCalls)
+    .values(
       rows.map((row) => {
         const owner = row.connectionId ? owners.get(row.connectionId) : null;
         return {
@@ -118,14 +127,28 @@ export async function recordConnectionCalls(rows: readonly ConnectionCall[]): Pr
           // A wall-clock difference: a clock stepped back mid-call reads negative.
           durationMs: Math.max(row.durationMs, 0),
           requestId: row.requestId,
+          calledAt: row.calledAt,
+          callId: row.callId ?? Bun.randomUUIDv7(),
         };
       }),
-    );
+    )
+    // A sidecar batch sent twice (its retry) is stored once: `(run_id, call_id)` is unique. The
+    // index is partial, so the conflict target repeats its predicate or Postgres matches none.
+    .onConflictDoNothing({
+      target: [connectionCalls.runId, connectionCalls.callId],
+      where: sql`${connectionCalls.callId} IS NOT NULL`,
+    });
+}
+
+/** {@link insertConnectionCalls} that never throws: a database fault is logged and the rows are lost. */
+export async function recordConnectionCalls(rows: readonly ConnectionCall[]): Promise<void> {
+  try {
+    await insertConnectionCalls(rows);
   } catch (err) {
     logger.error("recordConnectionCalls failed (the calls are unaffected)", {
       records: rows.length,
       integrationIds: [...new Set(rows.map((row) => row.integrationId))],
-      requestIds: [...new Set(rows.map((row) => row.requestId))],
+      requestIds: [...new Set(rows.map((row) => row.requestId).filter((id) => id !== null))],
       error: getErrorMessage(err),
     });
   }

@@ -281,7 +281,7 @@ describe("the default a new conversation starts on", () => {
       // A pick IS stored — under its own key, never the one that used to hold
       // the organization's default as well.
       setSelectedModel("model-a");
-      expect([...stored]).toEqual([["appstrate.chat.modelPick", "model-a"]]);
+      expect([...stored]).toEqual([["appstrate:chat:modelPick", "model-a"]]);
     } finally {
       Reflect.deleteProperty(globalThis, "localStorage");
     }

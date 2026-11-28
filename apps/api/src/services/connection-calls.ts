@@ -41,14 +41,19 @@ export interface ConnectionCallView {
   host: string | null;
   outcome: string;
   duration_ms: number;
-  request_id: string;
+  /** The platform request that made the call; NULL for a call a run's sidecar reported. */
+  request_id: string | null;
+  /** When the call started; NULL when not recorded. */
+  called_at: string | null;
+  /** The call's identity; NULL when not recorded. */
+  call_id: string | null;
 }
 
 export interface ConnectionCallFilters {
   connectionId?: string;
   actorId?: string;
   runId?: string;
-  /** Inclusive bounds on `created_at`. */
+  /** Inclusive bounds on when the row was written (`created_at`). */
   startDate?: Date;
   endDate?: Date;
 }
@@ -79,6 +84,8 @@ function toView(row: ConnectionCallRow): ConnectionCallView {
     outcome: row.outcome,
     duration_ms: row.durationMs,
     request_id: row.requestId,
+    called_at: row.calledAt?.toISOString() ?? null,
+    call_id: row.callId,
   };
 }
 

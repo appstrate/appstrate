@@ -156,7 +156,7 @@ describe("organizations service", () => {
       expect(await getOrgSettings(org.id)).toEqual({
         api_version: CURRENT_API_VERSION,
         personal_model_credentials: true,
-        personal_space_role: "admin",
+        personal_space_role: { preset_role: "admin" },
         future_key: "kept",
       } as never);
     });

@@ -44,7 +44,7 @@ export function UserDetailModal({
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { options: roleOptions, roles } = useSpaceRoleOptions();
+  const { options: roleOptions } = useSpaceRoleOptions();
   const { assign, isPending: isChangingSpaceRole } = useAssignSpaceRole();
 
   const columns = useUserSpaceColumns({
@@ -53,7 +53,6 @@ export function UserDetailModal({
     // being an admin everywhere.
     member,
     editable: (space) => space.source !== "org_role" && roleOptions.length > 0,
-    roles,
     roleOptions,
     isChangingRole: isChangingSpaceRole,
     onChangeRole: (space, value) =>

@@ -68,7 +68,6 @@ export class LoginSecretStrategy implements IntegrationConnectStrategy {
       identityClaims: {},
       scopesGranted: [],
       expiresAt: null,
-      needsReconnection: false,
       variables,
       ...(ctx.target ? {} : { packageId: ctx.integrationId, authKey: ctx.authKey }),
     });

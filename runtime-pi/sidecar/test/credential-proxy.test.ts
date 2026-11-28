@@ -19,6 +19,7 @@ import {
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 import type { DispatchedCall } from "../call-reporter.ts";
+import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 import { noJournal } from "./helpers/call-journal.ts";
 
 /** The credential scope of `integrationId` on the `conn-1` connection these tests bind. */
@@ -794,6 +795,46 @@ describe("executeApiCall — 401 retry path", () => {
     // The 401 replayed after the refresh is one call: its final attempt, on the fresh credential.
     expect(journaled.map((c) => [c.outcome, c.credential])).toEqual([
       ["200", { revision: "rev-b" }],
+    ]);
+  });
+
+  it("journals the 401 when its replay is refused before dispatch", async () => {
+    const carried: CredentialsResponse = {
+      credentials: { access_token: "tok-123" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer ",
+      credentialFieldName: "access_token",
+      credentialRevision: "rev-a",
+    };
+    const answers = [
+      async () => new Response("{}", { status: 401 }),
+      async () => {
+        throw new InvalidHeaderValueError("Authorization");
+      },
+    ];
+    const journaled: DispatchedCall[] = [];
+    const deps = makeDeps({
+      fetchFn: mock(async () => answers.shift()!()) as unknown as typeof fetch,
+      fetchCredentials: mock(async () => carried),
+      refreshCredentials: mock(async () => ({ ...carried, credentialRevision: "rev-b" })),
+      journal: (call) => journaled.push(call),
+    });
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok).toBe(false);
+    expect(journaled.map((c) => [c.outcome, c.credential])).toEqual([
+      ["401", { revision: "rev-a" }],
     ]);
   });
 

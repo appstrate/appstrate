@@ -9,6 +9,8 @@ export type { OrgRole } from "@appstrate/shared-types";
 // and covers all agent manifest fields (name, version, type, dependencies, input/output, timeout).
 
 import type { AgentManifest } from "@appstrate/core/validation";
+import type { orgSettingsReadSchema } from "@appstrate/core/permissions";
+import type { z } from "zod";
 export type { AgentManifest };
 
 // --- Loaded Package (manifest + prompt from DB) ---
@@ -121,7 +123,7 @@ export type AppEnv = {
      * non-session auth (API key, module strategies) or skipped entirely —
      * consumers must fall back to `getOrgSettings()` in that case.
      */
-    orgSettings?: import("@appstrate/shared-types").OrgSettings;
+    orgSettings?: z.output<typeof orgSettingsReadSchema>;
     /** Set by auth strategies that defer org resolution to X-Org-Id middleware. */
     deferOrgResolution?: boolean;
     /**

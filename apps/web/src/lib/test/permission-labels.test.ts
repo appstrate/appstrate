@@ -11,17 +11,14 @@ import { CORE_RESOURCE_ACTIONS } from "@appstrate/core/permissions";
 import fr from "../../locales/fr/settings.json";
 import en from "../../locales/en/settings.json";
 import { permissionLabel, permissionResourceLabel } from "../permission-labels.ts";
-import { STUDIO_PERMISSION } from "../route-access.ts";
 
 /**
  * The whole core catalog, so the API-key allowlist's core half (`apps/api/src/lib/permissions.ts`,
  * which the SPA's program cannot import) is covered whatever it grants.
  */
-const CORE_PERMISSIONS = Object.entries(CORE_RESOURCE_ACTIONS)
-  .flatMap(([resource, actions]) => actions.map((action) => `${resource}:${action}`))
-  // Listed by no screen as a permission: a role resolves it from `shows_studio`, which the role
-  // screens name with `roles.showsStudio`. Its resource label stays (the Studio row's group).
-  .filter((permission) => permission !== STUDIO_PERMISSION);
+const CORE_PERMISSIONS = Object.entries(CORE_RESOURCE_ACTIONS).flatMap(([resource, actions]) =>
+  actions.map((action) => `${resource}:${action}`),
+);
 
 /** The modules' contributions (`permissionsContribution()`), API-key-grantable ones included. */
 const MODULE_PERMISSIONS = [
@@ -50,9 +47,8 @@ describe.each([
 ])("permission labels (%s)", (_lang, bundle) => {
   const t = (key: string) => bundle[key] ?? key;
 
-  it("names the Studio row of the role screens, and the Studio as a resource", () => {
+  it("names the Studio row of the role screens", () => {
     expect(bundle["roles.showsStudio"]).toBeString();
-    expect(permissionResourceLabel("studio", t)).not.toBe("studio");
   });
 
   it.each([...CORE_PERMISSIONS, ...MODULE_PERMISSIONS])(
