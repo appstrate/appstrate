@@ -37,12 +37,12 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "ajv": "^8.20.0",
     "better-auth": "1.7.28",
-    "bullmq": "^6.7.8",
+    "bullmq": "^6.7.10",
     "cron-parser": "^5.10.6",
     "drizzle-orm": "^0.45.4",
     "fflate": "^0.8.3",
     "file-type": "^22.3.0",
-    "hono": "^4.13.21",
+    "hono": "^4.13.22",
     "ioredis": "^6.1.0",
     "jose": "^6.2.18",
     "nodemailer": "^10.6.1",
@@ -51,7 +51,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@aws-sdk/client-s3": "^3.1176.0",
+    "@aws-sdk/client-s3": "^3.1177.0",
     "@earendil-works/pi-coding-agent": "1.6.0",
     "@modelcontextprotocol/client": "^2.4.0",
     "@types/bun": "latest",
