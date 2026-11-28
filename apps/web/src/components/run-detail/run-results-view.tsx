@@ -279,8 +279,8 @@ export function RunResultsContent({
   );
 }
 
-/** The output as labelled facts, its raw JSON one toggle away. */
-function StructuredOutputBody({
+/** The output as labelled facts, its raw JSON one toggle away: the run page's and the chat panel's. */
+export function StructuredOutputBody({
   output,
   schema,
 }: {

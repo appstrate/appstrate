@@ -5,6 +5,7 @@ import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
   conversationSidebarReducer,
   heldLocalUrl,
+  openRunId,
   openToolCallId,
   revealMissed,
   shownFile,
@@ -120,6 +121,22 @@ describe("conversation sidebar state", () => {
       activeTab: "summary",
       selectedFile: null,
     });
+  });
+
+  it("closes a file opened from an open run back to the Runs tab, the run still open", () => {
+    const run = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-run",
+      runId: "run_1",
+    });
+    const fromRun = conversationSidebarReducer(run, {
+      type: "show-file",
+      file: file("file_a"),
+      from: "runs",
+    });
+    expect(shownFile(fromRun)).toEqual(file("file_a"));
+    const back = conversationSidebarReducer(fromRun, { type: "close-file" });
+    expect(back).toMatchObject({ expanded: true, activeTab: "runs", selectedFile: null });
+    expect(openRunId(back)).toBe("run_1");
   });
 
   it("holds a picked file's object URL while it shows, collapsed included, and lets go after", () => {
@@ -250,7 +267,7 @@ describe("conversation sidebar tool calls", () => {
     const closed = conversationSidebarReducer(open, { type: "toggle" });
     const found = conversationSidebarReducer(closed, {
       type: "revealed",
-      toolCallId: "call_1",
+      target: { kind: "call", id: "call_1" },
       found: true,
     });
     expect(found.expanded).toBe(false);
@@ -265,7 +282,7 @@ describe("conversation sidebar tool calls", () => {
     const closed = conversationSidebarReducer(open, { type: "toggle" });
     const missed = conversationSidebarReducer(closed, {
       type: "revealed",
-      toolCallId: "call_1",
+      target: { kind: "call", id: "call_1" },
       found: false,
     });
     expect(missed).toMatchObject({ expanded: true, activeTab: "tools" });
@@ -281,5 +298,73 @@ describe("conversation sidebar tool calls", () => {
     expect(revealMissed(conversationSidebarReducer(missed, { type: "close-tool-call" }))).toBe(
       false,
     );
+  });
+});
+
+describe("conversation sidebar runs", () => {
+  it("opens a run on its line of the Runs tab, from the thread's card too, and folds it back", () => {
+    const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-run",
+      runId: "run_1",
+    });
+    expect(open).toMatchObject({ expanded: true, activeTab: "runs" });
+    expect(openRunId(open)).toBe("run_1");
+
+    // Opening another folds the first.
+    const other = conversationSidebarReducer(open, { type: "show-run", runId: "run_2" });
+    expect(openRunId(other)).toBe("run_2");
+
+    const folded = conversationSidebarReducer(other, { type: "close-run" });
+    expect(folded).toMatchObject({ expanded: true, activeTab: "runs" });
+    expect(openRunId(folded)).toBeNull();
+  });
+
+  it("holds the open run only while the Runs tab shows, apart from the open call", () => {
+    const run = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-run",
+      runId: "run_1",
+    });
+    expect(openRunId({ ...run, activeTab: "tools" })).toBeNull();
+    const call = conversationSidebarReducer(run, { type: "show-tool-call", toolCallId: "call_1" });
+    expect(openToolCallId(call)).toBe("call_1");
+    expect(openRunId(call)).toBeNull();
+  });
+
+  it("folds the open run on a tab choice, a reopening and a conversation change", () => {
+    const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-run",
+      runId: "run_1",
+    });
+    expect(openRunId(conversationSidebarReducer(open, { type: "select-tab", tab: "runs" }))).toBe(
+      null,
+    );
+    const closed = conversationSidebarReducer(open, { type: "toggle" });
+    expect(openRunId(closed)).toBe("run_1");
+    expect(openRunId(conversationSidebarReducer(closed, { type: "toggle" }))).toBeNull();
+    expect(openRunId(conversationSidebarReducer(open, { type: "conversation-change" }))).toBeNull();
+  });
+
+  it("opens again on the Runs list, the run open and saying so, when the thread does not hold its card", () => {
+    const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-run",
+      runId: "run_1",
+    });
+    const closed = conversationSidebarReducer(open, { type: "toggle" });
+    const found = conversationSidebarReducer(closed, {
+      type: "revealed",
+      target: { kind: "run", id: "run_1" },
+      found: true,
+    });
+    expect(found.expanded).toBe(false);
+
+    const missed = conversationSidebarReducer(closed, {
+      type: "revealed",
+      target: { kind: "run", id: "run_1" },
+      found: false,
+    });
+    expect(missed).toMatchObject({ expanded: true, activeTab: "runs" });
+    expect(openRunId(missed)).toBe("run_1");
+    expect(revealMissed(missed)).toBe(true);
+    expect(revealMissed(conversationSidebarReducer(missed, { type: "close-run" }))).toBe(false);
   });
 });

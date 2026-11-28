@@ -729,7 +729,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   `OverviewCardAction` as its quiet footer action; a label and value fact grid is
   not a collection. Entity cards in lists: `PackageCard` (every package
   type, the dashboard's agents included), a run as
-  a dense list row is `RunRow` (the dashboard, the chat's context panel).
+  a dense list row is `RunRow` (the dashboard); the chat's context panel draws its
+  runs with the thread's `RunLine` (section 13).
 - Cards are `bg-card` with a `border` on the canvas; a clickable card is one
   stretched link (`absolute inset-0`), never a link around a button.
 
@@ -929,7 +930,9 @@ created package's link, a read skill's chip. A run started from the chat is a
 run), the run's state on a 16px badge at its corner; line 1 is the name, then the agent's
 integration logos, its space, its duration and the run page's link; line 2 the paced live log,
 then the outcome, or a failed run's own message, muted. The colour lives in the tile alone, and
-both lines keep their height whatever arrives. The model picker is `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
+both lines keep their height whatever arrives. A click on the card opens its run in the
+context panel (`ChatHost.openRun`), on its line of Runs; a launch that failed before any
+run existed is no button. The model picker is `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
 The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that
 canvas and floats beside the thread: its cards and its previewed file are `Card` /
@@ -952,7 +955,15 @@ a failure said by the small red cross named by its outcome and its muted message
 and the call's detail
 (`tool-call-detail`) opening inline under it, led by « Voir dans le fil ». Each turn's
 heading counts its calls with the group line's own words (`activityCounts`); a call opened
-from the Summary opens on its line of Tools, in view. A file opened from the Summary leads
+from the Summary opens on its line of Tools, in view. Runs draws each run with the card's
+`RunLine` (`modules/chat/conversation-runs-tab.tsx`): the agent's tile and state badge, name
+and number, integrations, its space when the list spans several, its duration, then its start
+and outcome. The line is a disclosure, one run open at a time (`selectedRunId` in the panel's
+reducer): open, it follows the run live over its own stream and shows, each only when it has
+something to say, « Voir dans le fil », « Ouvrir la page » and « Annuler » (40px on touch),
+its error, its result (the run page's `StructuredOutputBody`), its files (the Files tab's row,
+opening the file over Files), its journal (height capped, following its last line), then its
+model and cost. A file opened from the Summary leads
 back to it. Its width follows what it shows (a list, the Summary, a file), each remembered
 per browser.
 

@@ -10,7 +10,7 @@ import { RunDuration } from "./run-duration";
 
 /**
  * Which run this is, on two lines, wherever a run is listed: the runs table's
- * « Run » column and `RunRow` (dashboard, chat panel) draw this same block.
+ * « Run » column and the dashboard's `RunRow` draw this same block.
  *
  * With its `agent`: the agent's tile and name, then `#42 · <start> · <duration>`
  * under them. Without (inside one agent, whose name is already the page's):

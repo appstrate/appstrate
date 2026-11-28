@@ -126,6 +126,13 @@ export type OpenFile = (file: OpenFileTarget) => void;
 export type OpenFileTarget = { id: string; name: string; spaceId?: string } | { local: File };
 
 /**
+ * Shows a run a conversation launched in the host's context panel, open on its line, where its
+ * result, files and log follow it live. The thread's run card opens it on a click: the module owns
+ * no run detail of its own, as it owns no file viewer.
+ */
+export type OpenRun = (run: { id: string }) => void;
+
+/**
  * The host's authenticated image-preview hook: a stored file id → an object
  * URL for an `<img src>`, `undefined` while loading, `null` when there is none (callers fall
  * back to the file type's icon). A HOOK is injected — not a fetcher — so the shell keeps
@@ -166,6 +173,7 @@ export type ChatTranslate = (key: string, params?: Record<string, string | numbe
  */
 export interface ChatHost {
   openFile: OpenFile;
+  openRun: OpenRun;
   useFileImageSrc: UseFileImageSrc;
   t: ChatTranslate;
   can: ChatCan;

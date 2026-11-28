@@ -24,8 +24,8 @@ const { SpaceTilesOf } = await import("../../components/space-name.tsx");
 const { renderSpaces } = await import("./render-spaces.tsx");
 const { ConversationSpacesControl } = await import("./conversation-spaces.tsx");
 const { ChatSidebar } = await import("./chat-sidebar.tsx");
-const { ConversationFiles, ConversationRuns, ShownFile } =
-  await import("./conversation-sidebar.tsx");
+const { ConversationFiles, ShownFile } = await import("./conversation-sidebar.tsx");
+const { ConversationRuns } = await import("./conversation-runs-tab.tsx");
 const { useConversationTabs } = await import("./use-conversation-tabs.ts");
 const { useChatCan, useChatTransport } = await import("./use-chat-runtime.ts");
 const { usePermissions } = await import("../../hooks/use-permissions.ts");
@@ -37,6 +37,15 @@ await i18n.changeLanguage("fr");
 await i18n.loadNamespaces(["chat"]);
 
 const space = (id: string, permissions: string[]) => testSpace(id, permissions, id);
+
+/** The Runs list's props past its conversation: every line folded. */
+const RUNS_PROPS = {
+  openRunId: null,
+  missing: false,
+  onOpenChange: () => {},
+  onShowInThread: () => {},
+  onSelectFile: () => {},
+};
 
 /** `node` with the overview mode chosen and, when `spaces` is given, the space listing answered. */
 function renderOverview(
@@ -76,7 +85,7 @@ describe("the conversation panel", () => {
 
   it("polls the runs of every space: the SSE stream carries the working space only", () => {
     const { queryClient } = renderOverview(
-      <ConversationRuns conversationId="chs_1" active />,
+      <ConversationRuns conversationId="chs_1" active {...RUNS_PROPS} />,
       spaces,
     );
     const query = queryClient
@@ -118,7 +127,7 @@ describe("the conversation panel", () => {
       testSpace("spc_a", ["chat:read", permission]),
       testSpace("spc_b", ["chat:read"]),
     ];
-    const runList = <ConversationRuns conversationId="chs_1" active />;
+    const runList = <ConversationRuns conversationId="chs_1" active {...RUNS_PROPS} />;
     const fileList = <ConversationFiles conversationId="chs_1" active onSelect={() => {}} />;
     // The row is drawn either way; only its space's name depends on how many spaces admit the list.
     const cases: [React.ReactElement, string, string, unknown[], string][] = [
@@ -161,11 +170,11 @@ describe("the conversation panel", () => {
     expect(renderOverview(<Tabs />, chatOnly).html).toContain("<p>summary,runs,files,tools</p>");
   });
 
-  it("lists a run of a space without the Studio, unlinked: its page is a Studio screen", () => {
+  it("opens a run of a space without the Studio with no way to its page: a Studio screen", () => {
     const runs = [makeRun({ id: "run_a", spaceId: "spc_a", packageId: "@acme/reporter" })];
     const html = (studio: boolean) =>
       listed(
-        <ConversationRuns conversationId="chs_1" active />,
+        <ConversationRuns conversationId="chs_1" active {...RUNS_PROPS} openRunId="run_a" />,
         [testSpace("spc_a", ["chat:read", "runs:read"], "spc_a", { studio })],
         "/api/orgs/{orgId}/runs",
         runs,

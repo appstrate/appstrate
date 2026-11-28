@@ -19,10 +19,8 @@
 
 import * as React from "react";
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
-import { ArrowUpRightIcon, BracesIcon, PlayIcon } from "lucide-react";
+import { ArrowUpRightIcon } from "lucide-react";
 import { formatDuration } from "@appstrate/core/format";
-import { Button } from "@appstrate/ui/components/button";
-import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { useChatHost } from "./runtime-context.ts";
 import { ToolCallDetail } from "./tool-call-detail.tsx";
 import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
@@ -36,7 +34,6 @@ import {
   extractAgentLabel,
   extractRunFiles,
   extractRunId,
-  extractRunOutput,
   extractRunPackageId,
   extractRunStatus,
   isRunLaunchOp,
@@ -88,31 +85,6 @@ export type ToolCardProps = ToolCallMessagePartProps<Record<string, unknown>, un
 };
 
 /**
- * A finished run's detail: its structured output as labelled facts, the raw
- * input/output/metadata JSON one toggle away. The chat has no output schema to
- * hand (inline runs declare an open one), so the labels are the field keys.
- */
-function RunOutputDetails({
-  output,
-  raw,
-}: {
-  output: Record<string, unknown>;
-  raw: React.ReactNode;
-}) {
-  const { t } = useChatHost();
-  const [showJson, setShowJson] = React.useState(false);
-  return (
-    <div className="space-y-4">
-      {showJson ? raw : <StructuredOutput value={output} />}
-      <Button variant="outline" size="sm" onClick={() => setShowJson((v) => !v)}>
-        <BracesIcon />
-        {showJson ? t("run.output.showFields") : t("run.output.showJson")}
-      </Button>
-    </div>
-  );
-}
-
-/**
  * Render run-launch tool calls as in-chat run progress while launch/run state is
  * available.
  *
@@ -134,28 +106,10 @@ function RunLaunchCard({
   /** The card is the call's whole display, so the context panel reveals the call by it. */
   anchorsCall: boolean;
 }): React.ReactNode {
-  const { t } = useChatHost();
   const runId = extractRunId(props.result);
   const initialFiles = React.useMemo(() => extractRunFiles(props.result), [props.result]);
-  // Same reason as `ToolCallCard` — see the note there.
-  const unwrapped = React.useMemo(() => unwrapMcpResult(props.result), [props.result]);
-  const meta = definedEntries({
-    tool_call_id: props.toolCallId,
-    is_error: props.isError,
-    http_status: httpStatusOf(unwrapped),
-    duration_ms: readDurationMs(props.timing),
-  });
   const agentLabel = extractAgentLabel(props.args);
   const phase = deriveToolPhase(props);
-  const modalTitle = (
-    <span className="flex items-center gap-2">
-      <PlayIcon className="size-4 shrink-0" />
-      {agentLabel ?? "Run"}
-    </span>
-  );
-  const output = React.useMemo(() => extractRunOutput(props.result), [props.result]);
-  const rawDetails = <ToolCallDetail t={t} input={props.args} output={unwrapped} metadata={meta} />;
-  const details = output ? <RunOutputDetails output={output} raw={rawDetails} /> : rawDetails;
   // Run-page link needs package id. The result normally carries it; for agent
   // runs the label is also the package id (`@scope/name`), so it is a safe fallback.
   // Inline labels are manifest names, not package ids, so they wait for result/fetch.
@@ -173,9 +127,7 @@ function RunLaunchCard({
       spaceId={spaceId}
       initialFiles={initialFiles}
       phase={phase}
-      errorText={phase === "error" ? extractErrorMessage(unwrapped) : undefined}
-      modalTitle={modalTitle}
-      details={details}
+      errorText={phase === "error" ? extractErrorMessage(unwrapMcpResult(props.result)) : undefined}
     />
   );
 }

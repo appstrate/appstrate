@@ -28,7 +28,7 @@
 import { useEffect, useState } from "react";
 import { runProducedFilesPath } from "@appstrate/core/run-and-wait-client";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { useCanIn, useChatTransport } from "./runtime-context.ts";
+import { useChatTransport } from "./runtime-context.ts";
 import {
   requestInSpace,
   buildRunSseUrl,
@@ -120,6 +120,20 @@ interface RunLogStream {
 }
 
 /**
+ * What the reader may read of a run, judged where the run ran (the call's space, not the working
+ * one): `chat:read` implies neither the run reads nor the produced-file read.
+ */
+export interface RunReadAccess {
+  runs: boolean;
+  files: boolean;
+}
+
+/** {@link RunReadAccess} from the reader's grants in the run's space. */
+export function runReadAccess(has: (permission: string) => boolean): RunReadAccess {
+  return { runs: canReadRuns(has), files: has("files:read") };
+}
+
+/**
  * @param runId       the launched run id (`run_…`), or undefined to stay idle.
  * @param initialStatus status already known from the launch result (e.g.
  *                      `run_and_wait` returns a terminal run) — seeds the badge
@@ -128,19 +142,17 @@ interface RunLogStream {
  * @param spaceId      the space the run ran in (the space of the conversation's call
  *                      that launched it): its reads and its stream name that
  *                      space, whether or not it is the working one.
+ * @param access       what the reader may read there ({@link runReadAccess}).
  */
 export function useRunLogStream(
   runId: string | undefined,
-  initialStatus?: string,
-  initialPackageId?: string,
-  spaceId?: string,
+  initialStatus: string | undefined,
+  initialPackageId: string | undefined,
+  spaceId: string | undefined,
+  access: RunReadAccess,
 ): RunLogStream {
   const transport = useChatTransport();
-  // `chat:read` implies neither the run reads nor the file read below, and they are judged where
-  // the run ran: the call's space, not the working one.
-  const canIn = useCanIn();
-  const readsRuns = canReadRuns((permission) => canIn(spaceId, permission));
-  const readsFiles = canIn(spaceId, "files:read");
+  const { runs: readsRuns, files: readsFiles } = access;
   const [logs, setLogs] = useState<RunLogLine[]>([]);
   const [status, setStatus] = useState<RunStatus | undefined>(
     isTerminalStatus(initialStatus) ? initialStatus : undefined,

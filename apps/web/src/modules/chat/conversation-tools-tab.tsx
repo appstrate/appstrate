@@ -112,7 +112,7 @@ function ToolCallStep({
           onClick={onShowInThread}
         >
           <MessageSquareIcon />
-          {t("context.tools.showInThread")}
+          {t("context.showInThread")}
         </Button>
         {missing ? (
           <p className="text-muted-foreground text-xs">{t("context.tools.notInThread")}</p>

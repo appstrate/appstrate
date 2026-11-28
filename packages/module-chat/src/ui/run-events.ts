@@ -677,20 +677,6 @@ export function resolveAttachmentContent(
   return uploaded ? { kind: "file", ...uploaded } : { kind: "inert", uri };
 }
 
-/**
- * The run's structured output from a launch result, when it carries one:
- * `run_and_wait` answers `result.output` at the top level, a run resource read
- * through `invoke_operation` nests it under `body`. An empty object is no output.
- */
-export function extractRunOutput(result: unknown): Record<string, unknown> | undefined {
-  const unwrapped = asRecordOrNull(unwrapMcpResult(result));
-  if (!unwrapped) return undefined;
-  const output =
-    asRecordOrNull(asRecordOrNull(unwrapped.result)?.output) ??
-    asRecordOrNull(asRecordOrNull(asRecordOrNull(unwrapped.body)?.result)?.output);
-  return output && Object.keys(output).length > 0 ? output : undefined;
-}
-
 /** Run package id from a launch result (`body.packageId`, then top-level). */
 export function extractRunPackageId(result: unknown): string | undefined {
   const unwrapped = asRecordOrNull(unwrapMcpResult(result));

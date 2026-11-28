@@ -2,6 +2,7 @@
 
 import { linkedSpacePath } from "../../lib/across-spaces";
 import { describe, expect, it } from "bun:test";
+import type { ReactElement, ReactNode } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import { ChatConversationList, ChatTransportProvider } from "@appstrate/module-chat/ui";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
@@ -85,6 +86,7 @@ function renderConversationList(qc: QueryClient, can: (permission: string) => bo
 function hostWith(granted: string[]): ChatHost {
   return {
     openFile: () => {},
+    openRun: () => {},
     useFileImageSrc: () => "blob:thumbnail",
     t: (key) => key,
     can: (permission) => granted.includes(permission),
@@ -176,8 +178,6 @@ describe("chat surfaces held to the caller's grants", () => {
             initialPackageId="@acme/bot"
             spaceId="spc_b"
             phase="success"
-            modalTitle="run"
-            details={null}
           />
         </ChatHostProvider>,
       );
@@ -186,11 +186,14 @@ describe("chat surfaces held to the caller's grants", () => {
     expect(denied).toContain("run.noAccess");
     expect(denied).not.toContain("run.starting");
     expect(denied).not.toContain('title="run.openPage"');
+    // A run out of reach has nothing to show in the panel either.
+    expect(denied).not.toContain('aria-label="run.details"');
 
     const granted = card(["runs:read"]);
     expect(granted).toContain("run.starting");
     expect(granted).toContain('title="run.openPage"');
     expect(granted).toContain("?enterSpace=spc_b");
+    expect(granted).toContain('aria-label="run.details"');
   });
 });
 
@@ -225,8 +228,6 @@ describe("chat run card", () => {
           agentLabel="@acme/bot"
           initialPackageId={packageId}
           phase={phase}
-          modalTitle="run"
-          details={null}
         />
       </ChatHostProvider>,
       { queryClient: qc },
@@ -245,6 +246,52 @@ describe("chat run card", () => {
     const html = card("@inline/shadow");
     expect(html).toContain("bg-muted text-muted-foreground flex size-8");
     expect(html).not.toContain("run.integrations");
+  });
+
+  /** The first element under `node` whose props satisfy `match`. */
+  function findElement(
+    node: ReactNode,
+    match: (props: Record<string, unknown>) => boolean,
+  ): ReactElement<Record<string, unknown>> | undefined {
+    if (!node || typeof node !== "object") return undefined;
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const hit = findElement(child, match);
+        if (hit) return hit;
+      }
+      return undefined;
+    }
+    const el = node as ReactElement<Record<string, unknown>>;
+    if (match(el.props ?? {})) return el;
+    return findElement(el.props?.children as ReactNode, match);
+  }
+
+  it("opens its run in the host's panel on a click", () => {
+    const opened: { id: string }[] = [];
+    function Probe() {
+      const tree = ChatRunProgressCard({
+        runId: "run_1",
+        initialStatus: "success",
+        agentLabel: "@acme/bot",
+        initialPackageId: "@acme/bot",
+        phase: "success",
+      });
+      const button = findElement(tree, (props) => props["aria-label"] === "run.details");
+      (button!.props.onClick as () => void)();
+      return null;
+    }
+    render(
+      <ChatHostProvider value={{ ...hostWith(["runs:read"]), openRun: (run) => opened.push(run) }}>
+        <Probe />
+      </ChatHostProvider>,
+    );
+    expect(opened).toEqual([{ id: "run_1" }]);
+  });
+
+  it("is no button on a launch failure: no run to open, its message on the card", () => {
+    const failed = card("@acme/bot", "error");
+    expect(failed).not.toContain("<button");
+    expect(failed).toContain("run.launchFailed");
   });
 
   it("puts the state on the tile's corner: a spinner until it is known, an alert on a launch failure", () => {

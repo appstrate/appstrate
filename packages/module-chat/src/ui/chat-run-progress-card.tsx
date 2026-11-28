@@ -18,13 +18,15 @@
  * `run.running` once running; once terminal it settles on the final outcome (a failed
  * or timed-out run's own error message when it carries one). The live execution time and a
  * link to the run's page sit on the right. Clicking
- * the card opens the raw input/output detail modal (`details`).
+ * the card opens the run in the host's context panel (`openRun`), where its result, files and log
+ * follow it; the launch call's raw input and output stay in the panel's Tools tab.
  *
  * Before the tool returns a `run_…` id there is no SSE yet: the badge falls back to the tool-call phase.
  *
  * A launch failure (tool errored before a run id exists) renders INSIDE this
  * card — error glyph + `errorText` on line 2 — never as a swap to another
- * component, so the block's height stays constant for the call's whole life.
+ * component, so the block's height stays constant for the call's whole life. No run, nothing to
+ * open: the card is then no button.
  */
 
 import * as React from "react";
@@ -32,11 +34,10 @@ import { AlertTriangleIcon, ExternalLinkIcon, LockIcon } from "lucide-react";
 import { RunStatusIcon } from "@appstrate/ui/components/run-status";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { useLiveElapsedMs } from "@appstrate/ui/use-live-elapsed-ms";
-import { Modal } from "./modal.tsx";
-import { useRunLogStream } from "./use-run-log-stream.ts";
+import { runReadAccess, useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
-import { useChatHost, type ChatHost } from "./runtime-context.ts";
+import { useCanIn, useChatHost, type ChatHost } from "./runtime-context.ts";
 import { CallSpace } from "./call-space.tsx";
 import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import {
@@ -140,8 +141,6 @@ export function ChatRunProgressCard({
   initialFiles,
   phase,
   errorText,
-  modalTitle,
-  details,
 }: {
   /** The call the card stands for, when the context panel reveals it by this card. */
   toolCallId?: string | undefined;
@@ -165,10 +164,9 @@ export function ChatRunProgressCard({
   phase: ToolPhase;
   /** Launch-failure message shown on line 2 when the tool errored without a run id. */
   errorText?: string;
-  modalTitle: React.ReactNode;
-  details: React.ReactNode;
 }) {
-  const anchor = useRevealAnchor(toolCallId);
+  const anchor = useRevealAnchor(toolCallId, runId);
+  const canIn = useCanIn();
   const {
     logs,
     status,
@@ -181,7 +179,13 @@ export function ChatRunProgressCard({
     sweepDone,
     runDenied,
     error,
-  } = useRunLogStream(runId, initialStatus, initialPackageId, spaceId);
+  } = useRunLogStream(
+    runId,
+    initialStatus,
+    initialPackageId,
+    spaceId,
+    runReadAccess((permission) => canIn(spaceId, permission)),
+  );
 
   // Files: the persisted tool-result list (reload-safe), the frames that arrive
   // live over the log stream (`file.published` — chips appear the moment an
@@ -197,7 +201,6 @@ export function ChatRunProgressCard({
   );
   const effectiveStatus =
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
-  const [open, setOpen] = React.useState(false);
 
   // Live execution time — ticks while running, then settles on the
   // server-authoritative `runs.duration` (same value the run page shows).
@@ -213,7 +216,7 @@ export function ChatRunProgressCard({
   // every chunk, and the filter walked the whole log array each time.
   const visible = React.useMemo(() => visibleLogEntries(logs), [logs]);
   const current = useLogTicker(visible);
-  const { lang, openFile, t, linkInSpace } = useChatHost();
+  const { lang, openFile, openRun, t, linkInSpace } = useChatHost();
   // A card that mounted already complete belongs to history: never let N old
   // runs fight over the panel. A card mounted for a live call presents through
   // the exact same host opener as a direct file click.
@@ -273,15 +276,17 @@ export function ChatRunProgressCard({
       {...anchor}
       className={`bg-card text-card-foreground relative isolate my-2 w-full rounded-lg border ${REVEAL_RING_CLASS}`}
     >
-      {/* Full-card click target (opens the detail modal). Behind the content so
+      {/* Full-card click target (opens the run in the panel). Behind the content so
           the run-page link can re-enable pointer events for itself — avoids
-          nesting interactive elements. */}
-      <button
-        type="button"
-        aria-label={t("run.details")}
-        className="hover:bg-muted/50 absolute inset-0 z-0 rounded-lg"
-        onClick={() => setOpen(true)}
-      />
+          nesting interactive elements. A run out of reach has nothing to show there. */}
+      {runId && !runDenied ? (
+        <button
+          type="button"
+          aria-label={t("run.details")}
+          className="hover:bg-muted/50 absolute inset-0 z-0 rounded-lg"
+          onClick={() => openRun({ id: runId })}
+        />
+      ) : null}
       <RunLine
         className="pointer-events-none relative z-10 px-3 py-2"
         tile={<AgentTile agent={agent} label={label} />}
@@ -337,12 +342,6 @@ export function ChatRunProgressCard({
           <p className="text-muted-foreground px-3 pb-2 text-xs">{t("run.filesTruncated")}</p>
         ) : null}
       </div>
-
-      {open ? (
-        <Modal title={modalTitle} onClose={() => setOpen(false)}>
-          {details}
-        </Modal>
-      ) : null}
     </div>
   );
 }
