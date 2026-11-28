@@ -24,6 +24,7 @@ import { IntegrationOverviewSkeleton } from "./package-detail/integration-overvi
 import { ScheduleOverviewSkeleton } from "./schedule-overview-skeleton";
 import { RunOverviewSkeleton } from "./run-detail/run-snapshot-inspector";
 import { SkeletonBadge, SkeletonLine } from "./skeleton-line";
+import { MODEL_ROW_ACTIONS, MODEL_ROW_ITEM, MODEL_ROW_MENUS } from "./model-configs/row-layout";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
@@ -699,6 +700,54 @@ export function SettingsSkeleton({ rows = 3, className }: { rows?: number; class
 }
 
 /**
+ * Settings › Models and Preferences › Models: the default model's row (settings only), the
+ * group heading, then the configurations as collapsed rows in their own layout (`row-layout.ts`:
+ * logo, label over summary, then the state badge and the row's controls, under the text in a
+ * narrow row): the menu and the chevron in settings, « Utiliser ma clé » in preferences.
+ */
+export function ModelsPageSkeleton({ withDefault = true }: { withDefault?: boolean }) {
+  return (
+    <Waiting>
+      {withDefault ? (
+        <>
+          <SettingsSkeleton rows={1} className="mb-8" />
+          <div className="mb-4 flex h-6 items-center">
+            <Skeleton className="h-4 w-32" />
+          </div>
+        </>
+      ) : (
+        // Preferences' intro paragraph, above the rows.
+        <SkeletonLine className="mb-4 w-3/4 max-w-full text-sm leading-normal" />
+      )}
+      <div className="flex flex-col gap-2">
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i} className="@container/row rounded-md border">
+            <div className={cn("flex items-center gap-2.5 px-4 py-3", MODEL_ROW_ITEM)}>
+              <Skeleton className="size-8 shrink-0 rounded-sm" />
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <SkeletonLine className="w-40 max-w-full text-sm leading-snug" />
+                <SkeletonLine className="w-64 max-w-full text-sm leading-normal" />
+              </div>
+              <div className={cn("flex items-center gap-2", MODEL_ROW_ACTIONS)}>
+                <SkeletonBadge />
+                {withDefault ? (
+                  <div className={MODEL_ROW_MENUS}>
+                    <Skeleton className="size-7" />
+                    <Skeleton className="size-7" />
+                  </div>
+                ) : (
+                  <Skeleton className="h-8 w-32 rounded-md" />
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Waiting>
+  );
+}
+
+/**
  * A package's definition editor while its code loads: `PackageEditorFrame`'s padded column, its
  * section heading, then the section's rows.
  */
@@ -920,9 +969,10 @@ export function PanelTitleBlock() {
  * yet: `PanelLayout`'s rail and page as blocks. Content only — the dialog around
  * it is `OverlayFrame`'s and is already open, so the page replaces this inside
  * the same box instead of opening a second one. Reached only on a cold address,
- * since the shell preloads the overlays on intent.
+ * since the shell preloads the overlays on intent. `children` is the page's own skeleton when
+ * the address names it (a settings page), so its first paint already has the page's shape.
  */
-export function OverlayPanelSkeleton({ list }: { list?: boolean }) {
+export function OverlayPanelSkeleton({ list, children }: { list?: boolean; children?: ReactNode }) {
   return (
     <>
       <aside className="bg-sidebar border-sidebar-border flex w-56 shrink-0 flex-col gap-2 border-r p-3 max-md:hidden">
@@ -934,13 +984,14 @@ export function OverlayPanelSkeleton({ list }: { list?: boolean }) {
           page, whose title row is `mb-6 min-h-9`. */}
       <div className="min-w-0 flex-1 p-6 pt-[57px]">
         <PanelTitleBlock />
-        {list ? (
-          <Waiting>
-            <CollectionBlocks frameless columns />
-          </Waiting>
-        ) : (
-          <SettingsSkeleton />
-        )}
+        {children ??
+          (list ? (
+            <Waiting>
+              <CollectionBlocks frameless columns />
+            </Waiting>
+          ) : (
+            <SettingsSkeleton />
+          ))}
       </div>
     </>
   );

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The credential form's endpoint fields: API type and base URL where the provider lets the
- * operator describe its endpoint, then the key to type. What is asserted here is the arrangement
- * itself, and that the base URL is presented as pinned once a saved key carries it.
+ * A gateway configuration's endpoint fields: API type and base URL where the provider lets the
+ * operator describe its endpoint, nothing where it pins its own.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -37,7 +36,6 @@ const OPENAI_COMPATIBLE: ProviderRegistryEntry = {
   featured: false,
   live_model_search: false,
   models: [],
-  personal_allowed: false,
 };
 
 /** A provider that pins its own endpoint. */
@@ -47,7 +45,6 @@ const DIRECT_PROVIDER: ProviderRegistryEntry = {
   displayName: "OpenAI",
   defaultBaseUrl: "https://api.openai.com/v1",
   baseUrlOverridable: false,
-  personal_allowed: true,
 };
 
 function fields(overrides: Partial<Parameters<typeof EndpointFields>[0]> = {}): string {
@@ -58,22 +55,18 @@ function fields(overrides: Partial<Parameters<typeof EndpointFields>[0]> = {}): 
       provider={OPENAI_COMPATIBLE}
       onApiTypeChange={() => {}}
       baseUrlProps={fieldProps("baseUrlOverride")}
-      baseUrlLocked={false}
-      apiKeyProps={fieldProps("apiKey")}
       {...overrides}
     />,
   );
 }
 
 describe("EndpointFields", () => {
-  it("asks for the API type, the URL and a key, under the host's id prefix", () => {
+  it("asks for the API type and the URL, under the host's id prefix", () => {
     const html = fields();
     expect(html).toContain('id="pk-apiType"');
     expect(html).toContain('id="pk-baseUrl"');
-    expect(html).toContain('id="pk-apiKey"');
     expect(html).toContain(settingsFr["models.form.apiType"]);
     expect(html).toContain(settingsFr["models.form.baseUrlHint"]);
-    expect(html).toContain('placeholder="sk-..."');
   });
 
   it("suggests the URL shape the picked API type answers on", () => {
@@ -82,18 +75,8 @@ describe("EndpointFields", () => {
     expect(fields()).toContain(`placeholder="${OPENAI_COMPATIBLE.defaultBaseUrl}"`);
   });
 
-  it("pins the URL once the key carries it", () => {
-    const html = fields({ baseUrlLocked: true });
-    const at = html.indexOf('id="pk-baseUrl"');
-    expect(html.slice(html.lastIndexOf("<input", at), html.indexOf(">", at))).toContain("disabled");
-    expect(html).toContain(settingsFr["models.form.baseUrlPinnedHint"]);
-  });
-
-  it("asks only for the key where the provider pins its own endpoint", () => {
-    const html = fields({ provider: DIRECT_PROVIDER, providers: [] });
-    expect(html).not.toContain('id="pk-apiType"');
-    expect(html).not.toContain('id="pk-baseUrl"');
-    expect(html).toContain('id="pk-apiKey"');
+  it("asks nothing where the provider pins its own endpoint", () => {
+    expect(fields({ provider: DIRECT_PROVIDER, providers: [] })).toBe("");
   });
 
   it("renders nothing until a provider is picked", () => {
@@ -101,8 +84,6 @@ describe("EndpointFields", () => {
   });
 
   it("reports the errors its host resolved", () => {
-    const html = fields({ baseUrlError: "URL invalide", apiKeyError: "Clé requise" });
-    expect(html).toContain("URL invalide");
-    expect(html).toContain("Clé requise");
+    expect(fields({ baseUrlError: "URL invalide" })).toContain("URL invalide");
   });
 });

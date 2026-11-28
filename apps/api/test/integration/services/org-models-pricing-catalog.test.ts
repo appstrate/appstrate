@@ -11,6 +11,8 @@ import { listOrgModels, loadModel } from "../../../src/services/org-models.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
+// Imported for its module-level boot: `loadModel` reads the system model registry.
+import "../../helpers/app.ts";
 
 describe("loadModel — catalog fallback", () => {
   let ctx: TestContext;
@@ -32,8 +34,7 @@ describe("loadModel — catalog fallback", () => {
     // form — the catalog should kick in.
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "GPT-4o preset",
       modelId: "gpt-4o",
       enabled: true,
@@ -58,8 +59,7 @@ describe("loadModel — catalog fallback", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "GPT-4o with org discount",
       modelId: "gpt-4o",
       enabled: true,
@@ -82,8 +82,7 @@ describe("loadModel — catalog fallback", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "Custom fine-tune",
       modelId: "ft:gpt-4o:my-org:custom:xyz123",
       enabled: true,
@@ -107,8 +106,7 @@ describe("loadModel — catalog fallback", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "GPT-4o catalog",
       modelId: "gpt-4o",
       enabled: true,
@@ -133,8 +131,7 @@ describe("loadModel — catalog fallback", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: cred.id,
-        providerId: cred.providerId,
+        configId: cred.configId!,
         modelId,
       });
       return (await loadModel(ctx.orgId, model.id, null))!.piProvider;
@@ -160,8 +157,7 @@ describe("loadModel — catalog fallback", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: cred.id,
-        providerId: cred.providerId,
+        configId: cred.configId!,
         modelId,
         reasoning,
       });
@@ -177,7 +173,8 @@ describe("loadModel — catalog fallback", () => {
     // Anthropic disables thinking.
     expect((await offOf("openai-compatible", "my-model", true))?.off).toBe("unsent");
     expect((await offOf("anthropic-compatible", "my-model", true))?.off).toBe("disables");
-    expect(await offOf("openai-compatible", "my-model", false)).not.toHaveProperty("off");
+    // Another id: one configuration holds a model id once.
+    expect(await offOf("openai-compatible", "my-plain-model", false)).not.toHaveProperty("off");
     // A non-aliased model's Pi never sees the gateway's upstream host, so
     // OpenRouter's endpoint alone does not switch it to OpenRouter's dialect.
     const viaOpenRouter = await offOf("openai-compatible", "my-model", true, OPENROUTER_URL);

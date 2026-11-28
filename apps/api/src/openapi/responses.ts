@@ -312,7 +312,7 @@ export const responses = {
       "(`field: integrations.<id>`), and a `must_choose_connection` item lists " +
       "`candidate_connections` to pick from via `connection_overrides`. What does not block is " +
       "a `warnings[]` item of the success response (see LaunchWarnings). Or `model_credential_required` — " +
-      "the model is unbound and the caller has no usable personal credential for it.",
+      "no connection of the model's configuration serves it for the caller (the organization has none that serves it, and the caller has no usable personal one).",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
@@ -363,10 +363,10 @@ export const responses = {
       },
     },
   },
-  /** The 409 of `POST /api/models` — one row per binding (`PATCH` words the same rule inline). */
+  /** The 409 of `POST /api/models` — one row per `(config_id, modelId)` (`PATCH` words the same rule inline). */
   ModelAlreadyAdded: {
     description:
-      "`model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair, or, for a model each member serves with their own credential (`credentialId` null), for this `(providerId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding.",
+      "`model_already_added` — this model configuration already has a row for this `modelId`. One row per `(config_id, modelId)`: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds it. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one.",
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },

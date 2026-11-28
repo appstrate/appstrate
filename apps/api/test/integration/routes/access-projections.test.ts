@@ -21,6 +21,7 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedAgent,
+  seedModelConfigFor,
   seedOrgModel,
   seedPackageShare,
   seedSpace,
@@ -64,7 +65,7 @@ describe("GET /api/org-roles", () => {
 });
 
 describe("serves_model_ids", () => {
-  it("lists the unbound models a personal credential pays for, and nothing on an org one", async () => {
+  it("lists the models of its configuration a connection serves, org or personal", async () => {
     registerModelProvider({
       providerId: FIXED_ANTHROPIC,
       catalogProviderId: "anthropic",
@@ -77,35 +78,43 @@ describe("serves_model_ids", () => {
       featuredModels: [],
     });
     const member = await memberContext(owner, "member");
+    const configId = await seedModelConfigFor(owner.orgId, FIXED_ANTHROPIC);
     const personal = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: owner.orgId,
       userId: member.user.id,
       ownerUserId: member.user.id,
       label: "Ma clé",
       providerId: FIXED_ANTHROPIC,
+      configId,
       apiKey: "sk-ant-personal",
     });
     const orgKey = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: owner.orgId,
       userId: owner.user.id,
       ownerUserId: null,
       label: "Clé équipe",
       providerId: FIXED_ANTHROPIC,
+      configId,
       apiKey: "sk-ant-org",
     });
-    const unbound = await seedOrgModel({
+    const inCatalog = await seedOrgModel({
       orgId: owner.orgId,
-      providerId: FIXED_ANTHROPIC,
+      configId,
       modelId: "claude-sonnet-4-5",
-      credentialId: null,
     });
-    const otherService = await seedOrgModel({
+    const offCatalog = await seedOrgModel({
       orgId: owner.orgId,
-      providerId: "openai",
+      configId,
       modelId: "gpt-4o-mini",
-      credentialId: null,
     });
-    await seedOrgModel({ orgId: owner.orgId, modelId: "claude-sonnet-4-5", credentialId: orgKey });
+    // A model of another configuration is never one of its.
+    await seedOrgModel({
+      orgId: owner.orgId,
+      configId: await seedModelConfigFor(owner.orgId, "openai"),
+      modelId: "gpt-4o-mini",
+    });
 
     const res = await app.request("/api/model-provider-credentials", {
       headers: authHeaders(owner),
@@ -113,18 +122,16 @@ describe("serves_model_ids", () => {
     expect(res.status).toBe(200);
     const rows = (
       (await res.json()) as {
-        data: { id: string; serves_model_ids: string[]; referencing_model_count: number }[];
+        data: { id: string; config_id: string | null; serves_model_ids: string[] }[];
       }
     ).data;
-    expect(rows.find((row) => row.id === personal)?.referencing_model_count).toBe(0);
-    expect(rows.find((row) => row.id === orgKey)?.referencing_model_count).toBe(1);
-    const served = (id: string) => rows.find((row) => row.id === id)?.serves_model_ids;
+    const row = (id: string) => rows.find((r) => r.id === id);
     // The server's own rule decides, model by model.
-    expect(servesModel(FIXED_ANTHROPIC, unbound)).toBe(true);
-    expect(servesModel(FIXED_ANTHROPIC, otherService)).toBe(false);
-    expect(served(personal)).toEqual([unbound.id]);
-    // An organization key's models name it as their credential instead.
-    expect(served(orgKey)).toEqual([]);
+    expect(servesModel(FIXED_ANTHROPIC, FIXED_ANTHROPIC, inCatalog.modelId)).toBe(true);
+    expect(servesModel(FIXED_ANTHROPIC, FIXED_ANTHROPIC, offCatalog.modelId)).toBe(false);
+    expect(row(personal)?.config_id).toBe(configId);
+    expect(row(personal)?.serves_model_ids).toEqual([inCatalog.id]);
+    expect(row(orgKey)?.serves_model_ids).toEqual([inCatalog.id]);
   });
 });
 

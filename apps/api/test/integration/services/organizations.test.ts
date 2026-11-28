@@ -131,20 +131,15 @@ describe("organizations service", () => {
       expect(orgSettingsPatchSchema.safeParse({ future_key: 1 }).success).toBe(false);
     });
 
-    it("getOrgSettings parses the stored row through orgSettingsReadSchema — defaults applied, unknown keys kept", async () => {
+    it("getOrgSettings parses the stored row through orgSettingsReadSchema — stored values served, unknown keys kept", async () => {
       const org = await createOrganization("Parse Org", "parse-org", userId);
 
-      // An empty stored row reads the schema default: personal model
-      // credentials are allowed unless the organization turned them off.
-      await db.update(organizations).set({ orgSettings: {} }).where(eq(organizations.id, org.id));
-      expect((await getOrgSettings(org.id)).personal_model_credentials).toBe(true);
-
-      // A stored value is served as-is, not overridden by the default.
+      // A stored value is served as-is.
       await db
         .update(organizations)
-        .set({ orgSettings: { personal_model_credentials: false } })
+        .set({ orgSettings: { dashboard_sso_enabled: false } })
         .where(eq(organizations.id, org.id));
-      expect((await getOrgSettings(org.id)).personal_model_credentials).toBe(false);
+      expect((await getOrgSettings(org.id)).dashboard_sso_enabled).toBe(false);
 
       // A key no schema declares survives the read verbatim (`.loose()`).
       // The read is a parse with defaults, not a strip: an unknown key is
@@ -155,7 +150,6 @@ describe("organizations service", () => {
         .where(eq(organizations.id, org.id));
       expect(await getOrgSettings(org.id)).toEqual({
         api_version: CURRENT_API_VERSION,
-        personal_model_credentials: true,
         personal_space_role: { preset_role: "admin" },
         future_key: "kept",
       } as never);

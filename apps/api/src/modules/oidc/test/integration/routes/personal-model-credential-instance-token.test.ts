@@ -13,14 +13,19 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import * as jose from "jose";
 import { _resetCacheForTesting } from "@appstrate/env";
-import { orgModels } from "@appstrate/db/schema";
+import { orgModels, organizations } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   addOrgMember,
   createTestOrg,
   createTestUser,
 } from "../../../../../../test/helpers/auth.ts";
-import { seedOrgModelProviderKey, seedSpaceMember } from "../../../../../../test/helpers/seed.ts";
+import {
+  seedModelConfigFor,
+  seedOrgModelProviderKey,
+  seedSpaceMember,
+} from "../../../../../../test/helpers/seed.ts";
 import {
   createFakeOrchestrator,
   inlineAgentManifest,
@@ -110,22 +115,24 @@ describe("personal model credentials — instance token", () => {
     await addOrgMember(orgId, member.id, "member");
     await seedSpaceMember({ spaceId, userId: member.id, presetRole: "builder" });
 
-    // An org default served by nothing but each member's own credential.
+    // An org default served by nothing but each member's own connection (the organization
+    // connection was removed after the default was set: `setDefaultModel` refuses it up front).
     const [model] = await db
       .insert(orgModels)
       .values({
         orgId,
         label: "Shared GPT",
         modelId: "gpt-5.5",
-        providerId: "openai",
-        credentialId: null,
+        configId: await seedModelConfigFor(orgId, "openai"),
         aliased: false,
         source: "custom",
         createdBy: owner.id,
       })
       .returning({ id: orgModels.id });
-    const { setDefaultModel } = await import("../../../../../services/org-models.ts");
-    await setDefaultModel(orgId, model!.id);
+    await db
+      .update(organizations)
+      .set({ defaultModelId: model!.id })
+      .where(eq(organizations.id, orgId));
     personalKeyId = (
       await seedOrgModelProviderKey({
         orgId,

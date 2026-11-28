@@ -16,7 +16,14 @@ export function testHost(overrides: Partial<ChatHost> = {}): ChatHost {
     canIn: () => true,
     actingSpaceIds: [],
     attachTarget: { unavailable: "loading" },
-    personalModelCredentials: true,
+    modelConfigs: [
+      {
+        id: "cfg_test",
+        label: "Anthropic",
+        personal_connections_allowed: true,
+        org_connection: "active",
+      },
+    ],
     modelCredentials: [],
     formatBytes: String,
     lang: "en",

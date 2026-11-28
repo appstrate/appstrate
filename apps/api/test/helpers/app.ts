@@ -64,6 +64,7 @@ import { createProxiesRouter } from "../../src/routes/proxies.ts";
 import { createModelsRouter } from "../../src/routes/models.ts";
 import { createModelProvidersOAuthRouter } from "../../src/routes/model-providers-oauth.ts";
 import { createModelProviderCredentialsRouter } from "../../src/routes/model-provider-credentials.ts";
+import { createModelConfigsRouter } from "../../src/routes/model-configs.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createSpacesRouter } from "../../src/routes/spaces.ts";
 import { createRolesRouter } from "../../src/routes/roles.ts";
@@ -313,6 +314,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/api-keys", createApiKeysRouter());
   app.route("/api/proxies", createProxiesRouter());
   app.route("/api/models", createModelsRouter());
+  app.route("/api/model-configs", createModelConfigsRouter());
   app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
   app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
   app.route("/api/spaces", createSpacesRouter());

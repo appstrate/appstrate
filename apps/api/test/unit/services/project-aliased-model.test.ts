@@ -17,7 +17,6 @@ import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 const base: OrgModelInfo = {
   id: "appstrate-medium",
   label: "Appstrate Medium",
-  binding: "managed",
   apiShape: "openai-completions",
   providerId: "openai-compatible",
   provider_name: "OpenAI-compatible (custom)",
@@ -52,7 +51,7 @@ const base: OrgModelInfo = {
   aliased: false,
   iconUrl: null,
   source: "built-in",
-  credentialId: "deepseek-prod",
+  config_id: "00000000-0000-4000-8000-000000000001",
   billed_to: "org",
   created_by: null,
   createdAt: "2026-01-10T08:00:00Z",
@@ -124,7 +123,7 @@ describe("projectAliasedModel", () => {
     expect(out.provider_name).toBeNull();
     expect(out.base_url).toBeNull();
     expect(out.modelId).toBeNull();
-    expect(out.credentialId).toBeNull();
+    expect(out.config_id).toBeNull();
     expect(out.input).toBeNull();
     expect(out.contextWindow).toBeNull();
     expect(out.maxTokens).toBeNull();

@@ -849,7 +849,7 @@ describe("Spaces API", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: credential.id,
+        configId: credential.configId!,
         modelId: "gpt-5.6-luna",
       });
 
@@ -926,7 +926,7 @@ describe("Spaces API", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: credential.id,
+        configId: credential.configId!,
         modelId: "gpt-5.6-luna",
       });
 
@@ -952,7 +952,7 @@ describe("Spaces API", () => {
       // an unknown model admits no level at all.
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: credential.id,
+        configId: credential.configId!,
         modelId: TEST_OAUTH_MODEL_ID,
       });
 

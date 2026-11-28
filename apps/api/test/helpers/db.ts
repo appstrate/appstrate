@@ -103,6 +103,7 @@ const CORE_TABLES = [
   "package_schedules",
   "org_models",
   "model_provider_credentials",
+  "model_configs",
   "org_proxies",
   "org_invitations",
   // Space membership: rows first, then the custom bundles they may reference

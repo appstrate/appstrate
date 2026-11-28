@@ -52,4 +52,20 @@ describe("TestResultSpan", () => {
     expect(html).toContain("Échec : Authentication failed");
     expect(html).toContain("text-destructive");
   });
+
+  it("wraps on a line of its own instead of truncating beside buttons", () => {
+    const result = { ok: false, latency: 3, message: "Authentication failed", status: 401 };
+    expect(line(result)).toContain("truncate");
+    const wrapped = render(
+      <TestResultSpan
+        result={result}
+        successKey="credentials.testSuccess"
+        failedKey="credentials.testFailed"
+        wrap
+      />,
+    );
+    expect(wrapped).not.toContain("truncate");
+    expect(wrapped).toContain("break-words");
+    expect(wrapped).toContain("Échec : Authentication failed");
+  });
 });

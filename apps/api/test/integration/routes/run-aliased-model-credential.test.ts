@@ -18,7 +18,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { modelProviderCredentials, runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
+import { configIdOf, seedOrgModelProviderKey } from "../../helpers/seed.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import {
@@ -55,6 +59,7 @@ describe("run launch — model_credential_id on an aliased model", () => {
   /** Make an org-default model on a real api_key credential. Returns its id. */
   async function seedDefaultModel(aliased: boolean): Promise<string> {
     const credentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -67,7 +72,7 @@ describe("run launch — model_credential_id on an aliased model", () => {
       aliased ? "Appstrate Medium" : "Plain GPT",
       "gpt-5.5",
       ctx.user.id,
-      { credentialId },
+      await configIdOf(credentialId),
       { aliased },
     );
     await setDefaultModel(ctx.orgId, modelDbId);
@@ -97,5 +102,50 @@ describe("run launch — model_credential_id on an aliased model", () => {
   it("still serves the credential id for a plain, non-aliased model (control)", async () => {
     const credentialId = await seedDefaultModel(false);
     expect((await launchAndRead()).modelCredentialId).toBe(credentialId);
+  });
+
+  it("serves an aliased model with the organization connection, never the payer's personal one", async () => {
+    await seedDefaultModel(true);
+    await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      ownerUserId: ctx.user.id,
+      label: "Own key",
+      providerId: "openai",
+      apiKey: "sk-personal-owner",
+    });
+    const res = await app.request("/api/runs/inline", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ manifest: inlineAgentManifest(), prompt: "do the thing" }),
+    });
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db.select().from(runs).where(eq(runs.id, id));
+    // The id itself is masked on an aliased run; the payer and source say the
+    // organization paid.
+    expect(row!.modelCredentialId).toBeNull();
+    expect(row!.modelSource).toBe("org");
+    expect(row!.payerUserId).toBeNull();
+  });
+
+  it("does not serve an aliased model through a personal connection alone", async () => {
+    const credentialId = await seedDefaultModel(true);
+    await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      ownerUserId: ctx.user.id,
+      label: "Own key",
+      providerId: "openai",
+      apiKey: "sk-personal-owner",
+    });
+    await db.delete(modelProviderCredentials).where(eq(modelProviderCredentials.id, credentialId));
+    const res = await app.request("/api/runs/inline", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ manifest: inlineAgentManifest(), prompt: "do the thing" }),
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("model_credential_required");
   });
 });

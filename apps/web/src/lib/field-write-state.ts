@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/** The `SaveFeedback` state of a setting's write. */
+export type WriteState = { pending: boolean; success: boolean; error: boolean };
+/** A setting no write is touching. */
+export const IDLE_WRITE: WriteState = { pending: false, success: false, error: false };
+
 /**
  * The `SaveFeedback` of one setting when a mutation writes several: only a write
  * whose body carried one of the setting's `keys` is that setting's, so saving a
@@ -14,7 +19,7 @@ export function fieldWriteState(
     variables?: { body?: object };
   },
   keys: string | readonly string[],
-): { pending: boolean; success: boolean; error: boolean } {
+): WriteState {
   const body = mutation.variables?.body;
   const mine = !!body && (typeof keys === "string" ? [keys] : keys).some((key) => key in body);
   return {

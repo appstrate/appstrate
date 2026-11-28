@@ -94,7 +94,7 @@ function hostWith(granted: string[]): ChatHost {
     canIn: (_spaceId, permission) => granted.includes(permission),
     actingSpaceIds: ["spc_a"],
     attachTarget: { unavailable: "loading" },
-    personalModelCredentials: true,
+    modelConfigs: [],
     modelCredentials: [],
     formatBytes: String,
     lang: "en",

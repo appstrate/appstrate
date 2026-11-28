@@ -4,60 +4,26 @@
  * What "ask this endpoint what it serves" puts on the wire.
  *
  * The route takes exactly one of two forms and answers 400 to both at once or
- * neither, so which one is emitted is the whole contract — and it is decided by
- * two facts the form holds: whether a saved credential is selected, and whether
- * the provider lets the operator move the base URL.
+ * neither: a saved organization key, or a key typed for this one request
+ * against the configuration's endpoint.
  */
 
 import { describe, it, expect } from "bun:test";
 import { buildDiscoverBody, parsesAsUrl } from "../model-discovery.ts";
 
-const OPENAI_COMPATIBLE = {
-  providerId: "openai-compatible",
-  baseUrlOverridable: true,
-};
-const ANTHROPIC = { providerId: "anthropic", baseUrlOverridable: false };
-
-describe("buildDiscoverBody — a saved credential", () => {
-  it("names the credential and nothing else: it already carries key and endpoint", () => {
-    expect(
-      buildDiscoverBody({
-        credentialId: "cred_1",
-        provider: OPENAI_COMPATIBLE,
-        inlineApiKey: "sk-typed",
-        baseUrl: "http://localhost:11434/v1",
-      }),
-    ).toEqual({ credentialId: "cred_1" });
+describe("buildDiscoverBody — a saved key", () => {
+  it("names the key and nothing else: it already carries key and endpoint", () => {
+    expect(buildDiscoverBody("openai-compatible", { credentialId: "cred_1" })).toEqual({
+      credentialId: "cred_1",
+    });
   });
 });
 
 describe("buildDiscoverBody — a key typed inline", () => {
-  it("describes the endpoint the key opens, trimmed", () => {
+  it("asks the configuration's endpoint with the key, trimmed", () => {
     expect(
-      buildDiscoverBody({
-        credentialId: null,
-        provider: OPENAI_COMPATIBLE,
-        inlineApiKey: "  sk-test  ",
-        baseUrl: "  http://localhost:11434/v1  ",
-      }),
-    ).toEqual({
-      providerId: "openai-compatible",
-      api_key: "sk-test",
-      base_url_override: "http://localhost:11434/v1",
-    });
-  });
-
-  it("omits the base URL for a provider that pins its own endpoint", () => {
-    // The route accepts `base_url_override` only where `baseUrlOverridable` is
-    // true; the form still holds the pinned default in the field.
-    expect(
-      buildDiscoverBody({
-        credentialId: null,
-        provider: ANTHROPIC,
-        inlineApiKey: "sk-ant-test",
-        baseUrl: "https://api.anthropic.com",
-      }),
-    ).toEqual({ providerId: "anthropic", api_key: "sk-ant-test" });
+      buildDiscoverBody("openai-compatible", { inlineApiKey: "  sk-test  ", configId: "cfg_1" }),
+    ).toEqual({ providerId: "openai-compatible", api_key: "sk-test", config_id: "cfg_1" });
   });
 });
 

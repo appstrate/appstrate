@@ -1,210 +1,256 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Preferences › My providers: the caller's own keys and subscriptions, in the table of the
- * organization's providers narrowed to them, with the kind of each. The Models column says what each lets them use.
+ * Preferences › Models: the organization's configurations that let members connect their own key
+ * or subscription, one row each. A row says who serves the caller's calls to its models (their
+ * own connection, the organization's, or nobody yet), offers « Utiliser ma clé », and holds the
+ * menu of the caller's own connection. A configuration that refuses personal connections is
+ * listed only where the caller still holds a connection: read-only, with its deletion.
  */
 
-import { Alert } from "@appstrate/ui/components/alert";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
-import { useQueryClient } from "@tanstack/react-query";
-import { AlertDescription } from "@appstrate/ui/components/alert";
-import { Plus } from "lucide-react";
-import { ConfirmModal } from "../../components/confirm-modal";
-import { useUrlModalTarget } from "../../hooks/use-url-modal";
-import { CredentialFormModal } from "../../components/credential-form-modal";
-import { ProvidersTable } from "../../components/providers-table";
-import type { MenuAction } from "../../lib/menu-action";
-import { SettingsPageActions } from "../../components/settings/settings-page-actions";
+import { KeyRound, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import {
-  deduplicateLabel,
-  useCreateModelProviderCredential,
-  useDeleteModelProviderCredential,
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemTitle,
+} from "@appstrate/ui/components/item";
+import { DeleteKeyConfirm } from "../../components/delete-key-confirm";
+import {
+  CredentialFormModal,
+  type ConnectionFormTarget,
+} from "../../components/credential-form-modal";
+import { InlineEditableLabel } from "../../components/inline-editable-label";
+import { ModelsPageSkeleton } from "../../components/loading-skeletons";
+import { ConnectMenu } from "../../components/model-configs/connect-menu";
+import { ConfigLogo, ConfigStateBadge } from "../../components/model-configs/model-config-row";
+import {
+  MODEL_ROW_ACTIONS,
+  MODEL_ROW_ITEM,
+  MODEL_ROW_MENUS,
+} from "../../components/model-configs/row-layout";
+import { EmptyState, ErrorState } from "../../components/page-states";
+import { TableRowActions } from "../../components/table-row-actions";
+import { useModelConfigs } from "../../hooks/use-model-configs";
+import {
   useModelProviderCredentials,
   useProvidersRegistry,
   useUpdateModelProviderCredential,
   type ModelProviderCredentialInfo,
+  type ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials";
-import { useModels } from "../../hooks/use-models";
-import { useOrgSettings } from "../../hooks/use-org-settings";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
-  credentialUpdateBody,
-  ownPersonalCredentials,
-  personalApiKeyBody,
-} from "../../lib/personal-model-credentials";
-import { invalidatePaths } from "../../lib/query-keys";
-import { errorMessage } from "../../lib/mutation-error";
-import { providerRows } from "../../lib/model-providers";
+  connectChoices,
+  connectionLabelBody,
+  personalServing,
+  preferencesConfigs,
+  type ConnectChoice,
+  type ModelConfigInfo,
+} from "../../lib/model-configs";
+import { ownPersonalCredentials } from "../../lib/personal-model-credentials";
 import { authStore } from "../../stores/auth-store";
-import { EmptyStateAction } from "../../components/page-states";
-
-/** The key form shows a refusal under its fields. */
-const FORM_META = { errorHandledByCaller: true } as const;
 
 export function PreferencesModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const userId = useStore(authStore, (s) => s.user?.id);
-  const queryClient = useQueryClient();
-
   const canConnect = can("model-provider-credentials:connect");
-  const { data: orgSettings } = useOrgSettings();
-  // Until the settings load the flag is unknown: adding stays off, and nothing is withdrawn
-  // from the credentials already held (deleting is never gated by the policy).
-  const personalModelCredentialsDisabled = orgSettings?.personal_model_credentials === false;
-  const personalModelCredentialsAllowed = orgSettings?.personal_model_credentials === true;
-  const canAdd = canConnect && personalModelCredentialsAllowed;
-  const credentialsQuery = useModelProviderCredentials();
-  const modelsQuery = useModels();
-  const { data: registry } = useProvidersRegistry();
-  const createCredential = useCreateModelProviderCredential(FORM_META);
-  // The form shows its refusal inline; a rename goes through the cache's toast.
-  const updateCredential = useUpdateModelProviderCredential();
-  const editKeyCredential = useUpdateModelProviderCredential(FORM_META);
-  const deleteCredential = useDeleteModelProviderCredential();
 
-  const [creating, setCreating] = useState(false);
-  const credentials = ownPersonalCredentials(credentialsQuery.data ?? [], userId);
-  const editParam = useUrlModalTarget("editCredential", credentialsQuery.data && credentials);
-  const editCredential = editParam.target ?? null;
-  const formOpen = (creating && canAdd) || editCredential !== null;
+  const configsQuery = useModelConfigs();
+  const credentialsQuery = useModelProviderCredentials();
+  const registryQuery = useProvidersRegistry();
+  const registry = registryQuery.data;
+  const updateCredential = useUpdateModelProviderCredential();
+
+  const [connecting, setConnecting] = useState<ConnectionFormTarget | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
 
-  const rows = providerRows(modelsQuery.data ?? [], credentials, registry ?? [], userId).filter(
-    (row) => row.credential !== null,
-  );
-
-  // A credential's add, rename, delete or pairing changes which models the caller can use.
-  const refreshModels = () => {
-    void invalidatePaths(queryClient, ["/api/models"]);
-  };
-
-  const closeForm = () => {
-    createCredential.reset();
-    editKeyCredential.reset();
-    (editCredential ? editParam.close : () => setCreating(false))();
-    refreshModels();
-  };
-
-  const openCreate = () => setCreating(true);
-
-  const openEdit = (credential: ModelProviderCredentialInfo) => editParam.open(credential.id);
-
-  // A refusal is toasted by the mutation cache; the rejection keeps the typed label.
-  const renameCredential = async (credential: ModelProviderCredentialInfo, label: string) => {
-    await updateCredential.mutateAsync({
-      params: { path: { id: credential.id } },
-      body: { label },
-    });
-  };
-
-  const submitForm = (data: { label: string; providerId: string; apiKey?: string }) => {
-    if (editCredential) {
-      // The provider is pinned at create time: only the label and the key change.
-      editKeyCredential.mutate(
-        {
-          params: { path: { id: editCredential.id } },
-          body: credentialUpdateBody(editCredential, data),
-        },
-        { onSuccess: closeForm },
-      );
-      return;
-    }
-    createCredential.mutate(
-      {
-        body: personalApiKeyBody({
-          providerId: data.providerId,
-          label: deduplicateLabel(data.label, credentials),
-          apiKey: data.apiKey ?? "",
-        }),
-      },
-      { onSuccess: closeForm },
-    );
-  };
-
-  const addCredential: MenuAction = {
-    id: "create-credential",
-    icon: Plus,
-    label: t("credentials.addPersonal"),
-    onSelect: openCreate,
-    hidden: !canAdd,
-  };
+  const own = ownPersonalCredentials(credentialsQuery.data ?? [], userId);
+  const configs = configsQuery.data && preferencesConfigs(configsQuery.data, own);
+  const error = configsQuery.error ?? credentialsQuery.error ?? registryQuery.error;
+  // A row drawn before the caller's connections and the registry would offer « Utiliser ma clé »
+  // to someone who already has one.
+  const loading = !configs || credentialsQuery.isLoading || registryQuery.isLoading;
 
   return (
     <>
-      {personalModelCredentialsDisabled && (
-        <Alert variant="warning" className="mb-4">
-          <AlertDescription>{t("modelCredentials.policyDisabled")}</AlertDescription>
-        </Alert>
+      {/* The skeleton carries the intro line itself: the page and its fallback stay one shape. */}
+      {(!loading || error) && (
+        <p className="text-muted-foreground mb-4 text-sm">{t("modelConfigs.preferences.intro")}</p>
       )}
 
-      <SettingsPageActions actions={[addCredential]} />
+      {error ? (
+        <ErrorState error={error} />
+      ) : !configs || loading ? (
+        <ModelsPageSkeleton withDefault={false} />
+      ) : configs.length === 0 ? (
+        <EmptyState icon={KeyRound} message={t("modelConfigs.preferences.empty")} />
+      ) : (
+        <div className="flex flex-col gap-2">
+          {configs.map((config) => (
+            <PersonalConfigRow
+              key={config.id}
+              config={config}
+              provider={registry?.find((p) => p.providerId === config.provider_id)}
+              own={own}
+              choices={connectChoices(
+                config,
+                registry ?? [],
+                { org: false, personal: canConnect },
+                own,
+              )}
+              onConnect={(choice) =>
+                setConnecting({
+                  kind: "create",
+                  config,
+                  provider: choice.provider,
+                  ownerType: "user",
+                })
+              }
+              onRename={async (credential, label) => {
+                // A refusal is toasted by the mutation cache; the rejection keeps the label typed.
+                await updateCredential.mutateAsync({
+                  params: { path: { id: credential.id } },
+                  body: connectionLabelBody(label),
+                });
+              }}
+              onReplace={(credential) => setConnecting({ kind: "edit", credential })}
+              onDelete={setConfirmDelete}
+            />
+          ))}
+        </div>
+      )}
 
-      <p className="text-muted-foreground mb-4 text-sm">{t("modelCredentials.description")}</p>
-
-      <ProvidersTable
-        tableId="own-model-keys"
-        label={t("preferences.tabModels")}
-        rows={rows}
-        showType
-        isLoading={credentialsQuery.isLoading || modelsQuery.isLoading}
-        error={credentialsQuery.error ?? modelsQuery.error}
-        // The add deed is in the Actions menu, which is closed: the empty list repeats it.
-        empty={{
-          message: t("modelCredentials.empty"),
-          hint: t("modelCredentials.emptyHint"),
-          action: <EmptyStateAction action={addCredential} />,
-        }}
-        canWriteModels={false}
-        onRename={renameCredential}
-        onChangeKey={openEdit}
-        onReconnect={openEdit}
-        onDelete={setConfirmDelete}
-      />
-
-      {formOpen && (
+      {connecting && (
         <CredentialFormModal
-          key={editCredential?.id ?? "__create__"}
-          onClose={closeForm}
-          credential={editCredential}
-          isPending={createCredential.isPending || editKeyCredential.isPending}
-          error={
-            createCredential.error || editKeyCredential.error
-              ? errorMessage(createCredential.error ?? editKeyCredential.error)
-              : null
-          }
-          onSubmit={submitForm}
-          personal
+          key={connecting.kind === "edit" ? connecting.credential.id : connecting.config.id}
+          target={connecting}
+          onClose={() => setConnecting(null)}
         />
       )}
 
-      <ConfirmModal
-        open={!!confirmDelete}
-        onClose={() => setConfirmDelete(null)}
-        title={t("credentials.deleteTitle")}
-        confirmLabel={t("btn.delete", { ns: "common" })}
-        description={
-          confirmDelete ? t("modelCredentials.deleteConfirm", { label: confirmDelete.label }) : ""
-        }
-        isPending={deleteCredential.isPending}
-        onConfirm={() => {
-          if (!confirmDelete) return;
-          deleteCredential.mutate(
-            { params: { path: { id: confirmDelete.id } } },
-            {
-              onSuccess: () => {
-                setConfirmDelete(null);
-                refreshModels();
-              },
-            },
-          );
-        }}
-      >
-        <p className="text-muted-foreground text-sm">{t("modelCredentials.deleteImpact")}</p>
-      </ConfirmModal>
+      {confirmDelete && (
+        <DeleteKeyConfirm credential={confirmDelete} onClose={() => setConfirmDelete(null)} />
+      )}
     </>
+  );
+}
+
+function PersonalConfigRow({
+  config,
+  provider,
+  own,
+  choices,
+  onConnect,
+  onRename,
+  onReplace,
+  onDelete,
+}: {
+  config: ModelConfigInfo;
+  provider: ProviderRegistryEntry | undefined;
+  own: readonly ModelProviderCredentialInfo[];
+  choices: readonly ConnectChoice[];
+  onConnect: (choice: ConnectChoice) => void;
+  onRename: (credential: ModelProviderCredentialInfo, label: string) => Promise<void>;
+  onReplace: (credential: ModelProviderCredentialInfo) => void;
+  onDelete: (credential: ModelProviderCredentialInfo) => void;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  const [renaming, setRenaming] = useState(false);
+  const serving = personalServing(config, own);
+  const mine = serving.by === "mine" ? serving.connection : null;
+  const allowed = new Set(mine?.allowed_actions ?? []);
+  const subscription = mine?.authMode === "oauth2";
+  // The organization switched personal connections off after the caller connected: it serves
+  // nothing now, and only its deletion is left.
+  const refused = !config.personal_connections_allowed;
+
+  const description = refused
+    ? t("modelConfigs.preferences.personalDisabled")
+    : serving.by === "mine"
+      ? t("modelConfigs.preferences.servedByMine", {
+          account: serving.connection.oauth_email ?? serving.connection.label,
+        })
+      : serving.by === "org"
+        ? t("modelConfigs.preferences.servedByOrg")
+        : t("modelConfigs.preferences.servedByNone");
+
+  return (
+    // The container the row's layout answers to: its own width, not the screen's.
+    <div className="@container/row" data-row>
+      <Item variant="outline" size="sm" className={MODEL_ROW_ITEM}>
+        <ConfigLogo provider={provider} />
+        <ItemContent className="min-w-0">
+          <ItemTitle className="max-w-full min-w-0">
+            <span className="truncate" title={config.label}>
+              {config.label}
+            </span>
+          </ItemTitle>
+          <ItemDescription>
+            {mine && renaming && !refused ? (
+              <InlineEditableLabel
+                value={mine.label}
+                editable={allowed.has("edit")}
+                editing={renaming}
+                onEditingChange={setRenaming}
+                onSave={(label) => onRename(mine, label)}
+              />
+            ) : (
+              description
+            )}
+          </ItemDescription>
+        </ItemContent>
+        <ItemActions className={MODEL_ROW_ACTIONS}>
+          {!refused && <ConfigStateBadge state={serving.state} />}
+          {!mine && (
+            <ConnectMenu
+              choices={choices}
+              label={t("modelConfigs.preferences.useMine")}
+              onPick={onConnect}
+            />
+          )}
+          {mine && (
+            <div className={MODEL_ROW_MENUS}>
+              <TableRowActions
+                menuLabel={t("modelConfigs.connections.menu", { label: mine.label })}
+                renaming={renaming}
+                actions={[
+                  {
+                    id: "rename",
+                    icon: Pencil,
+                    label: t("btn.rename", { ns: "common" }),
+                    onSelect: () => setRenaming(true),
+                    hidden: refused || !allowed.has("edit"),
+                  },
+                  {
+                    id: "replace",
+                    icon: subscription ? RefreshCw : KeyRound,
+                    label: subscription
+                      ? t("modelConfigs.connect.reconnect")
+                      : t("credentials.edit"),
+                    onSelect: () => onReplace(mine),
+                    hidden:
+                      refused || (subscription ? !allowed.has("reconnect") : !allowed.has("edit")),
+                  },
+                  {
+                    id: "delete",
+                    icon: Trash2,
+                    label: t("btn.delete", { ns: "common" }),
+                    onSelect: () => onDelete(mine),
+                    destructive: true,
+                    hidden: !allowed.has("delete"),
+                  },
+                ]}
+              />
+            </div>
+          )}
+        </ItemActions>
+      </Item>
+    </div>
   );
 }

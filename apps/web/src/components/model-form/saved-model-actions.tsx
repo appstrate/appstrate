@@ -8,8 +8,9 @@ import { useTestModel, type OrgModelInfo } from "../../hooks/use-models";
 import { ModelTestResult } from "./model-test-result";
 
 /**
- * A saved model's own deeds, at the start of its form's footer: delete it, test it. A model left
- * to each member has no key of the organization's to test (`model_credential_required`).
+ * A saved model's own deeds, at the start of its form's footer: delete it, test it. A model no
+ * connection serves for the caller (`billed_to: null`) has nothing to test, nor has a managed
+ * alias (its backing is hidden).
  */
 export function SavedModelActions({
   model,
@@ -21,7 +22,7 @@ export function SavedModelActions({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const { testingIds, testResults, handleTest } = useConnectionTest(useTestModel());
-  const testable = model.credentialId !== null;
+  const testable = model.billed_to !== null && !model.aliased;
   const testing = testingIds.has(model.id);
   const result = testResults[model.id];
 

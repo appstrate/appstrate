@@ -368,8 +368,6 @@ export async function updateOrgSettings(
   // The transaction has committed, so the row is durable by the time the pin
   // entry is dropped — the next cached read cannot re-cache the pre-update value.
   orgApiVersionCache.invalidate(orgId);
-  // Resolved models carry the payer's personal credentials only while the policy allows them.
-  if (updates.personal_model_credentials !== undefined) clearResolvedModelCache();
 
   return toOrgSettings(row);
 }

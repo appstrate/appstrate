@@ -10,7 +10,7 @@ import {
   useModelProviderCredentials,
   useProvidersRegistry,
 } from "../hooks/use-model-provider-credentials";
-import { useOrgSettings } from "../hooks/use-org-settings";
+import { useModelConfigs } from "../hooks/use-model-configs";
 import { usePermissions } from "../hooks/use-permissions";
 import type { OrgModelInfo } from "../hooks/use-models";
 import { pickerCredentials } from "../lib/model-picker";
@@ -47,24 +47,16 @@ export function ModelSelect({
   const userId = useStore(authStore, (s) => s.user?.id);
   const { data: credentials } = useModelProviderCredentials();
   const { data: registry } = useProvidersRegistry();
-  const { data: orgSettings } = useOrgSettings();
+  const { data: configs } = useModelConfigs();
   const groups = useMemo(
     () =>
       groupModelsForPicker(models, {
-        credentials: pickerCredentials(credentials ?? [], registry ?? [], userId),
-        personalAllowed: orgSettings?.personal_model_credentials,
+        credentials: pickerCredentials(credentials ?? [], userId),
+        configs,
         canConnect: can("model-provider-credentials:connect"),
         scheduled,
       }),
-    [
-      models,
-      credentials,
-      registry,
-      userId,
-      orgSettings?.personal_model_credentials,
-      can,
-      scheduled,
-    ],
+    [models, credentials, userId, configs, can, scheduled],
   );
   return (
     <ModelPicker

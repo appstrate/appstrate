@@ -12,7 +12,11 @@ import {
 } from "@appstrate/db/schema";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedOrgModelProviderOAuth, seedPublishedVersion } from "../../helpers/seed.ts";
+import {
+  seedModelConfigFor,
+  seedOrgModelProviderOAuth,
+  seedPublishedVersion,
+} from "../../helpers/seed.ts";
 import {
   GMAIL_PACKAGE_ID,
   seedPinnedClient,
@@ -364,12 +368,14 @@ describe("credential refresh sweep — model provider credentials", () => {
 
   it("skips an API-key credential", async () => {
     await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
       label: "api key",
       providerId: "test-apikey",
       apiKey: "sk-test",
+      configId: await seedModelConfigFor(ctx.orgId, "test-apikey"),
     });
     await db
       .update(modelProviderCredentials)

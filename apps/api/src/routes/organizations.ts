@@ -796,7 +796,6 @@ router.patch("/:orgId/settings", requirePermission("org", "settings"), async (c)
       apiVersion: data.api_version,
       dashboardSsoEnabled: data.dashboard_sso_enabled,
       restrictPackageCopy: data.restrict_package_copy,
-      personalModelCredentials: data.personal_model_credentials,
       personalSpaceRole: data.personal_space_role && auditSpaceRole(data.personal_space_role),
     },
     orgIdOverride: orgId,

@@ -171,6 +171,25 @@ export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
       "`admin` is ignored and their members get `admin` in their personal space.",
     removeWhen: "the release after the one that ships `0060`: delete this entry and its test case.",
   },
+  {
+    script: "scripts/migration/0062-model-configs.ts",
+    after: "0119",
+    // EXACTLY what `0062` fills: a connection or an organization model with no configuration.
+    pending: (database) =>
+      count(
+        database,
+        sql`SELECT ((SELECT count(*) FROM model_provider_credentials WHERE config_id IS NULL)
+          + (SELECT count(*) FROM org_models WHERE config_id IS NULL))::int AS pending`,
+      ),
+    consequence:
+      "Model configurations not filled: connections or organization models have no `config_id` " +
+      "(migration 0119 applied, `0062` not). Every model is served through its configuration's " +
+      "connections, so such a model resolves to no connection and such a connection serves nothing.",
+    removeWhen:
+      "the release after the one that ships `0062`: delete this entry, its test case and the README note, " +
+      "and add the drizzle migration that makes both `config_id` columns NOT NULL and drops " +
+      "`model_provider_credentials.base_url_override`, `org_models.provider_id` and `org_models.credential_id`.",
+  },
 ];
 
 function commandFor(script: string, embeddedDataDir: string | null): string {

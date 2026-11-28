@@ -25,13 +25,13 @@ const SETTINGS_PATH = "/org-settings/models";
 test.describe("OAuth Model Providers — UI smoke", () => {
   test("models settings page renders for an authenticated admin", async ({ authedPage: page }) => {
     await page.goto(SETTINGS_PATH);
-    // Both tabs are shown to an admin — their presence proves the page
+    // The default model's row and the configurations' heading prove the page
     // mounted and the guard let us through. The labels come from i18n
-    // (`providers.tabOrg` / `providers.tabPersonal`), rendered as French in
-    // the default locale.
-    await expect(page.getByRole("tab", { name: "Clés org", exact: true })).toBeVisible({
+    // (`modelConfigs.default.label` / `modelConfigs.title`), rendered as French
+    // in the default locale.
+    await expect(page.getByText("Modèle par défaut", { exact: true })).toBeVisible({
       timeout: 10_000,
     });
-    await expect(page.getByRole("tab", { name: "Clés perso", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Configurations", exact: true })).toBeVisible();
   });
 });

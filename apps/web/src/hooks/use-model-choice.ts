@@ -5,7 +5,7 @@ import { useOpenRouterSearch } from "../components/model-form/use-open-router-se
 import { useModelDiscovery } from "../components/model-form/use-model-discovery";
 import type { ProviderRegistryEntry } from "./use-model-provider-credentials";
 import type { OrgModelInfo } from "./use-models";
-import { buildDiscoverBody } from "@/lib/model-discovery";
+import { buildDiscoverBody, type DiscoverWith } from "@/lib/model-discovery";
 import { planModelChoice } from "@/lib/model-choice";
 import {
   catalogRows,
@@ -17,28 +17,20 @@ import {
   type ModelPickRow,
 } from "@/lib/model-source";
 
-/** What a listing that needs a key asks with: a saved key, or the one being typed. */
-export type DiscoverWith =
-  { credentialId: string } | { inlineApiKey: string; baseUrl: string } | null;
-
 interface ModelChoiceOptions {
   provider: ProviderRegistryEntry;
-  /** The models this provider already makes available. */
+  /** The models this configuration already makes available. */
   existing: readonly OrgModelInfo[];
-  discoverWith: DiscoverWith;
-  /** « Add a provider »: everything the listing offers starts ticked. */
-  tickAll: boolean;
-  /** The organization already has a default, so a new provider does not star one. */
-  hasDefault: boolean;
+  /** `null` while there is nothing to ask with yet (no key typed). */
+  discoverWith: DiscoverWith | null;
+  /**
+   * A new configuration: a catalog's recommended models start ticked, a detection's every model;
+   * a search ticks nothing (it lists hundreds).
+   */
+  tickNew: boolean;
 }
 
-export function useModelChoice({
-  provider,
-  existing,
-  discoverWith,
-  tickAll,
-  hasDefault,
-}: ModelChoiceOptions) {
+export function useModelChoice({ provider, existing, discoverWith, tickNew }: ModelChoiceOptions) {
   const source = modelSource(provider);
   const search = useOpenRouterSearch(source === "search");
   const {
@@ -81,30 +73,19 @@ export function useModelChoice({
     // Ticked is access: a row switched off is listed, unticked.
     for (const m of existing)
       if (m.modelId !== null && m.enabled) map.set(m.modelId, existingRow(m));
-    // A search lists hundreds: the operator picks, nothing is ticked for them.
-    if (tickAll && source !== "search") for (const row of listed) map.set(row.id, row);
+    if (tickNew && source !== "search") {
+      for (const row of listed) if (source === "discover" || row.featured) map.set(row.id, row);
+    }
     return map;
-  }, [existing, tickAll, source, listed]);
+  }, [existing, tickNew, source, listed]);
   const picked = touched ?? initial;
 
-  const [starred, setStarred] = useState<string | null | undefined>(undefined);
-  const currentDefault = existing.find((m) => m.is_default)?.modelId ?? null;
-  // A new provider in an organization with no default offers its first recommended model.
-  const suggested =
-    tickAll && !hasDefault
-      ? (listed.find((r) => r.featured && picked.has(r.id))?.id ??
-        listed.find((r) => picked.has(r.id))?.id ??
-        null)
-      : null;
-  const star = starred === undefined ? (currentDefault ?? suggested) : starred;
+  const plan = planModelChoice({ picked, existing });
+  const canSave = plan.add.length + plan.grant.length + plan.withdraw.length > 0;
 
-  const plan = planModelChoice({ picked, existing, starred: star });
-  const canSave =
-    plan.add.length + plan.grant.length + plan.withdraw.length > 0 || plan.defaultModelId !== null;
-
-  // The server refuses to switch off the default model: its box stays ticked until another model
-  // is starred.
-  const lockedId = currentDefault !== null && star === currentDefault ? currentDefault : null;
+  // The server refuses to switch off the default model: its box stays ticked (the default is
+  // changed at the top of the page).
+  const lockedId = existing.find((m) => m.is_default)?.modelId ?? null;
 
   const change = (changed: ModelPickRow[], checked: boolean) => {
     const next = new Map(picked);
@@ -124,14 +105,7 @@ export function useModelChoice({
 
   const detect = () => {
     if (!discoverWith) return;
-    discover(
-      buildDiscoverBody({
-        credentialId: "credentialId" in discoverWith ? discoverWith.credentialId : null,
-        provider,
-        inlineApiKey: "inlineApiKey" in discoverWith ? discoverWith.inlineApiKey : "",
-        baseUrl: "baseUrl" in discoverWith ? discoverWith.baseUrl : "",
-      }),
-    );
+    discover(buildDiscoverBody(provider.providerId, discoverWith));
   };
 
   return {
@@ -140,8 +114,6 @@ export function useModelChoice({
     search,
     picked,
     change,
-    star,
-    setStar: setStarred,
     plan,
     canSave,
     lockedId,

@@ -14,9 +14,11 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
+  configIdOf,
   seedAgent,
   seedApiKey,
   seedEndUser,
+  seedModelConfigFor,
   seedOrgModelProviderOAuth,
   seedPackageShare,
   seedRun,
@@ -247,6 +249,7 @@ describe("Runs API", () => {
       // min length (only the create-route Zod schema does), so this models a
       // stub/misconfigured key reaching resolution.
       const credentialId = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         ownerUserId: null,
@@ -254,9 +257,13 @@ describe("Runs API", () => {
         providerId: "openai",
         apiKey: "",
       });
-      const modelDbId = await createOrgModel(ctx.orgId, "Blank GPT", "gpt-5.5", ctx.user.id, {
-        credentialId,
-      });
+      const modelDbId = await createOrgModel(
+        ctx.orgId,
+        "Blank GPT",
+        "gpt-5.5",
+        ctx.user.id,
+        await configIdOf(credentialId),
+      );
       // First org model auto-defaults, but pin it explicitly so the test is
       // robust to that behavior changing.
       await setDefaultModel(ctx.orgId, modelDbId);
@@ -319,8 +326,9 @@ describe("Runs API", () => {
       );
     }
 
-    async function seedOrgModel(label: string): Promise<string> {
+    async function seedOrgModel(label: string, modelId = "gpt-5.5"): Promise<string> {
       const credentialId = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         ownerUserId: null,
@@ -328,7 +336,7 @@ describe("Runs API", () => {
         providerId: "openai",
         apiKey: "sk-test-not-a-real-key",
       });
-      return createOrgModel(ctx.orgId, label, "gpt-5.5", ctx.user.id, { credentialId });
+      return createOrgModel(ctx.orgId, label, modelId, ctx.user.id, await configIdOf(credentialId));
     }
 
     it("echoes the org default's model_label and model_source 'org'", async () => {
@@ -399,7 +407,7 @@ describe("Runs API", () => {
       await seedRunnableAgent();
       const defaultId = await seedOrgModel("Echo Default GPT");
       await setDefaultModel(ctx.orgId, defaultId);
-      const pinnedId = await seedOrgModel("Echo Pinned GPT");
+      const pinnedId = await seedOrgModel("Echo Pinned GPT", "gpt-5.1");
 
       const res = await app.request("/api/agents/@runorg/echo-agent/run?version=draft", {
         method: "POST",
@@ -420,8 +428,9 @@ describe("Runs API", () => {
 
     it("leaves an OAuth subscription run's inference with its sidecar", async () => {
       await seedRunnableAgent();
-      // The subscription is the launching member's own credential; the model is unbound,
-      // so the run's payer serves it with that subscription.
+      // The launching member's own subscription ranks before the organization's,
+      // so the run's payer serves the model with it.
+      await seedOrgModelProviderOAuth({ orgId: ctx.orgId, createdBy: ctx.user.id });
       const credential = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
         ownerUserId: ctx.user.id,
@@ -432,7 +441,7 @@ describe("Runs API", () => {
         "Echo Subscription",
         TEST_OAUTH_MODEL_ID,
         ctx.user.id,
-        { credentialId: null, providerId: TEST_OAUTH_PROVIDER_ID },
+        await seedModelConfigFor(ctx.orgId, TEST_OAUTH_PROVIDER_ID),
       );
       await setDefaultModel(ctx.orgId, modelDbId);
 

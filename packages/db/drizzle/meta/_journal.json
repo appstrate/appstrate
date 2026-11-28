@@ -834,6 +834,13 @@
       "when": 1795800609530,
       "tag": "0118_credential_death_cause_preset_role_and_call_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1795858430197,
+      "tag": "0119_model_configs",
+      "breakpoints": true
     }
   ]
 }

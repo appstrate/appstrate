@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * How the credential form reaches its provider: API type and base URL where
- * `baseUrlOverridable`, then the key to type.
+ * A gateway configuration's endpoint: its API type and its base URL. A provider that pins its own
+ * endpoint (`baseUrlOverridable: false`) asks nothing.
  */
 
 import { useTranslation } from "react-i18next";
@@ -20,11 +20,7 @@ export function EndpointFields({
   onApiTypeChange,
   providerLocked,
   baseUrlProps,
-  baseUrlLocked,
   baseUrlError,
-  apiKeyProps,
-  apiKeyError,
-  apiKeyHint,
 }: {
   /** Namespaces the field ids so two forms can render this on one page. */
   idPrefix: string;
@@ -36,71 +32,45 @@ export function EndpointFields({
   onApiTypeChange: (entry: ProviderRegistryEntry) => void;
   providerLocked?: boolean;
   baseUrlProps: UseFormRegisterReturn;
-  baseUrlLocked: boolean;
   baseUrlError?: string;
-  apiKeyProps: UseFormRegisterReturn;
-  apiKeyError?: string;
-  apiKeyHint?: string;
 }) {
   const { t } = useTranslation(["settings", "common"]);
 
-  if (!provider) return null;
+  if (!provider?.baseUrlOverridable) return null;
 
   return (
     <>
-      {provider.baseUrlOverridable && (
-        <>
-          <FormItem id={`${idPrefix}-apiType`} label={t("models.form.apiType")}>
-            <OptionSelect
-              value={provider.providerId}
-              onValueChange={(id) => {
-                const entry = providers.find((p) => p.providerId === id);
-                if (entry) onApiTypeChange(entry);
-              }}
-              disabled={providerLocked}
-              placeholder={t("models.form.providerPlaceholder")}
-              options={providers.map((p) => {
-                const Icon = getProviderIcon(p);
-                return {
-                  value: p.providerId,
-                  label: (
-                    <span className="flex items-center gap-2">
-                      {Icon && <Icon className="size-4" />}
-                      {p.displayName}
-                    </span>
-                  ),
-                };
-              })}
-            />
-          </FormItem>
-
-          <FormItem
-            id={`${idPrefix}-baseUrl`}
-            label={t("models.form.baseUrl")}
-            hint={baseUrlLocked ? t("models.form.baseUrlPinnedHint") : t("models.form.baseUrlHint")}
-            error={baseUrlError}
-          >
-            <Input
-              type="url"
-              {...baseUrlProps}
-              disabled={baseUrlLocked}
-              placeholder={provider.defaultBaseUrl}
-            />
-          </FormItem>
-        </>
-      )}
+      <FormItem id={`${idPrefix}-apiType`} label={t("models.form.apiType")}>
+        <OptionSelect
+          value={provider.providerId}
+          onValueChange={(id) => {
+            const entry = providers.find((p) => p.providerId === id);
+            if (entry) onApiTypeChange(entry);
+          }}
+          disabled={providerLocked}
+          placeholder={t("models.form.providerPlaceholder")}
+          options={providers.map((p) => {
+            const Icon = getProviderIcon(p);
+            return {
+              value: p.providerId,
+              label: (
+                <span className="flex items-center gap-2">
+                  {Icon && <Icon className="size-4" />}
+                  {p.displayName}
+                </span>
+              ),
+            };
+          })}
+        />
+      </FormItem>
 
       <FormItem
-        id={`${idPrefix}-apiKey`}
-        label={t("credentials.form.apiKey")}
-        hint={apiKeyHint}
-        error={apiKeyError}
+        id={`${idPrefix}-baseUrl`}
+        label={t("models.form.baseUrl")}
+        hint={t("models.form.baseUrlHint")}
+        error={baseUrlError}
       >
-        <Input
-          type="password"
-          {...apiKeyProps}
-          placeholder={t("credentials.form.apiKeyPlaceholder")}
-        />
+        <Input type="url" {...baseUrlProps} placeholder={provider.defaultBaseUrl} />
       </FormItem>
     </>
   );

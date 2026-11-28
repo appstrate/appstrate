@@ -10,7 +10,7 @@ export const modelProvidersOAuthPaths = {
       "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "Mint a one-shot pairing token for the connect helper",
-      description: `Creates a single-use pairing token surfaced in the dashboard as a \`npx ${CONNECT_HELPER_PACKAGE} <token>\` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to \`/api/model-providers-oauth/pair/redeem\` using this token as Bearer credentials. Two body shapes. A new connection sends \`owner_type\`, as on \`POST /api/model-provider-credentials\`: \`org\` (default) pairs an organization credential, which an organization model may be bound to and which then serves every caller; \`user\` pairs the caller's personal credential, serving only their own calls. A reconnect sends \`credentialId\` and no \`owner_type\` (the credential names its own owner, and the two together are a \`400\`): it updates that exact credential in place, and is accepted exactly when the credential lists the \`reconnect\` action for the caller. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. **Permission:** a new connection needs \`model-provider-credentials:write\` for \`owner_type: org\`, \`model-provider-credentials:connect\` for \`owner_type: user\` (\`403\` otherwise, and \`403 personal_model_credentials_disabled\` for \`user\` while the organization has \`personal_model_credentials\` off). A reconnect the caller may not make answers \`404\`, except the caller's own personal credential while the organization has \`personal_model_credentials\` off, which answers \`403 personal_model_credentials_disabled\`. Org-scoped: only \`X-Org-Id\` is required (no \`X-Space-Id\` — the resulting credential lives in \`model_provider_credentials\`, which has no space affinity).`,
+      description: `Creates a single-use pairing token surfaced in the dashboard as a \`npx ${CONNECT_HELPER_PACKAGE} <token>\` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to \`/api/model-providers-oauth/pair/redeem\` using this token as Bearer credentials. Two body shapes. A new connection sends \`owner_type\`, as on \`POST /api/model-provider-credentials\`: \`org\` (default) pairs an organization credential, which serves every caller of its configuration's models; \`user\` pairs the caller's personal credential, serving only their own calls. A reconnect sends \`credentialId\` and no \`owner_type\` (the credential names its own owner, and the two together are a \`400\`): it updates that exact credential in place, and is accepted exactly when the credential lists the \`reconnect\` action for the caller. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. **Permission:** a new connection needs \`model-provider-credentials:write\` for \`owner_type: org\`, \`model-provider-credentials:connect\` for \`owner_type: user\` (\`403\` otherwise, and \`403 personal_connections_disabled\` for \`user\` while its model configuration does not allow personal connections). A reconnect the caller may not make answers \`404\`, except the caller's own personal credential while its model configuration does not allow personal connections, which answers \`403 personal_connections_disabled\`. Org-scoped: only \`X-Org-Id\` is required (no \`X-Space-Id\` — the resulting credential lives in \`model_provider_credentials\`, which has no space affinity).`,
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -38,6 +38,12 @@ export const modelProvidersOAuthPaths = {
                   default: "org",
                   description:
                     "New connection: `org` (default) pairs an organization credential; `user` pairs a personal credential owned by the caller. Never sent with `credentialId`: a reconnect takes its owner from the credential.",
+                },
+                config_id: {
+                  type: "string",
+                  format: "uuid",
+                  description:
+                    "New connection: the model configuration it joins, kept on the pairing and used at redeem. Absent: the provider's family configuration, created at redeem when missing, and only for a minter who holds `models:write` (`409 model_config_required` at mint and at redeem otherwise). Never sent with `credentialId`: a reconnect keeps its configuration.",
                 },
               },
               additionalProperties: false,
@@ -79,7 +85,7 @@ export const modelProvidersOAuthPaths = {
         },
         "400": {
           description:
-            "Validation error (`validation_failed`, the offending fields in `errors[]`): an unknown or unregistered `providerId`, an unknown field, or `owner_type` sent with `credentialId` (reported on `owner_type`). `personal_credential_custom_endpoint` — `owner_type: user` on a provider whose endpoint is the organization's to choose.",
+            "Validation error (`validation_failed`, the offending fields in `errors[]`): an unknown or unregistered `providerId`, an unknown field, or `owner_type` / `config_id` sent with `credentialId` (reported on that field). `connection_provider_mismatch` — the provider does not fit `config_id`'s configuration.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -89,7 +95,7 @@ export const modelProvidersOAuthPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:
-            "Forbidden — a new connection whose caller lacks `model-provider-credentials:write` (`owner_type: org`) or `model-provider-credentials:connect` (`owner_type: user`); or `personal_model_credentials_disabled` — a personal connection, or a reconnect of the caller's own personal credential, while the organization has personal model credentials off.",
+            "Forbidden — a new connection whose caller lacks `model-provider-credentials:write` (`owner_type: org`) or `model-provider-credentials:connect` (`owner_type: user`); or `personal_connections_disabled` — a personal connection, or a reconnect of the caller's own personal credential, to a configuration that does not allow personal connections.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -97,6 +103,15 @@ export const modelProvidersOAuthPaths = {
           },
         },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`model_config_required` (on `config_id`) — no `config_id` was given, the organization has no configuration for the provider's family, and the caller does not hold `models:write`, the only grant that creates one. Ask a member who manages models to create the configuration, or pass its `config_id`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -188,7 +203,7 @@ export const modelProvidersOAuthPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Redeem a pairing token: post the OAuth credential bundle back to the platform",
       description:
-        "Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider / owner and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, owner or credential. The request carries no principal, so the member who minted the pairing is judged again on what the organization grants them at this moment, by the rules of the mint: a new connection needs `model-provider-credentials:write` (organization) or `model-provider-credentials:connect` (personal) and answers `403` without it, or once the member left; a reconnect needs the credential to still list `reconnect` for them and answers `404` otherwise. A personal credential answers `403 personal_model_credentials_disabled` when the organization turned `personal_model_credentials` off after the mint. The token is single-use and consumed before anything is judged, the request body included: a refused redeem spends it (a retry answers `410`) and is recorded on the pairing, which `GET /pairing/{id}` then reads as `failed`; a new pairing must be minted. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.",
+        "Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider / owner and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, owner or credential. The request carries no principal, so the member who minted the pairing is judged again on what the organization grants them at this moment, by the rules of the mint: a new connection needs `model-provider-credentials:write` (organization) or `model-provider-credentials:connect` (personal) and answers `403` without it, or once the member left; a reconnect needs the credential to still list `reconnect` for them and answers `404` otherwise. A personal credential answers `403 personal_connections_disabled` when its model configuration stopped allowing personal connections after the mint. The token is single-use and consumed before anything is judged, the request body included: a refused redeem spends it (a retry answers `410`) and is recorded on the pairing, which `GET /pairing/{id}` then reads as `failed`; a new pairing must be minted. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.",
       requestBody: {
         required: true,
         content: {
@@ -260,6 +275,15 @@ export const modelProvidersOAuthPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`model_config_required` (on `config_id`) — the pairing names no configuration, the organization has none for the provider's family, and the member who minted it no longer holds `models:write`, the only grant that creates one.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "410": {
           description: "Gone — pairing token expired or already consumed.",
           content: {

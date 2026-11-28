@@ -32,7 +32,6 @@ describe("model_provider_credentials table schema", () => {
         label: "OpenAI prod",
         providerId: "openai",
         credentialsEncrypted: "v1:k1:dummy-opaque-blob",
-        baseUrlOverride: null,
         createdBy: ctx.user.id,
       })
       .returning();
@@ -44,13 +43,12 @@ describe("model_provider_credentials table schema", () => {
       .where(eq(modelProviderCredentials.id, inserted!.id));
     expect(row!.providerId).toBe("openai");
     expect(row!.label).toBe("OpenAI prod");
-    expect(row!.baseUrlOverride).toBeNull();
     expect(row!.credentialsEncrypted).toBe("v1:k1:dummy-opaque-blob");
     expect(row!.createdBy).toBe(ctx.user.id);
     expect(row!.createdAt).toBeInstanceOf(Date);
   });
 
-  it("round-trips an oauth row with no baseUrlOverride", async () => {
+  it("round-trips an oauth row", async () => {
     const ctx = await createTestContext({ orgSlug: "mpc-oauth" });
     const [inserted] = await db
       .insert(modelProviderCredentials)
@@ -68,28 +66,6 @@ describe("model_provider_credentials table schema", () => {
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, inserted!.id));
     expect(row!.providerId).toBe("test-oauth");
-    expect(row!.baseUrlOverride).toBeNull();
-  });
-
-  it("accepts a baseUrlOverride for openai-compatible custom endpoints", async () => {
-    const ctx = await createTestContext({ orgSlug: "mpc-custom" });
-    const [inserted] = await db
-      .insert(modelProviderCredentials)
-      .values({
-        orgId: ctx.orgId,
-        label: "Local Ollama",
-        providerId: "openai-compatible",
-        credentialsEncrypted: "v1:k1:opaque",
-        baseUrlOverride: "http://host.docker.internal:11434",
-        createdBy: ctx.user.id,
-      })
-      .returning();
-
-    const [row] = await db
-      .select()
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, inserted!.id));
-    expect(row!.baseUrlOverride).toBe("http://host.docker.internal:11434");
   });
 
   it("cascades on org delete — credentials don't outlive their org", async () => {

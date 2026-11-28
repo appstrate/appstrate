@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQueryClient, type MutationMeta, type QueryClient } from "@tanstack/react-query";
-import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { $api, type components, type paths } from "../api/client";
-import { ApiError } from "../api/errors";
-import { invalidatePaths } from "../lib/query-keys";
+import { invalidatePaths, MODEL_CACHE_PATHS } from "../lib/query-keys";
 import { useInvalidatePaths } from "./use-invalidate-paths";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
@@ -28,7 +26,6 @@ export type ProviderRegistryEntry = RawProviderRegistryEntry &
       | "featured"
       | "live_model_search"
       | "models"
-      | "personal_allowed"
     >
   >;
 
@@ -69,9 +66,9 @@ export function useProvidersRegistry() {
   );
 }
 
-/** `meta`: the model form and the key form report a refusal themselves. */
+/** `meta`: the key form reports a refusal itself. */
 export function useCreateModelProviderCredential(meta?: MutationMeta) {
-  const invalidate = useInvalidatePaths("/api/model-provider-credentials");
+  const invalidate = useInvalidatePaths(...MODEL_CACHE_PATHS);
   return $api.useMutation("post", "/api/model-provider-credentials", {
     meta,
     onSuccess: invalidate,
@@ -82,29 +79,23 @@ export function useCreateModelProviderCredential(meta?: MutationMeta) {
 // be mutated — delete and re-create to switch providers.
 /** `meta`: the key form shows its refusal inline; a rename reports through the cache. */
 export function useUpdateModelProviderCredential(meta?: MutationMeta) {
-  const invalidate = useInvalidatePaths("/api/model-provider-credentials");
+  const invalidate = useInvalidatePaths(...MODEL_CACHE_PATHS);
   return $api.useMutation("patch", "/api/model-provider-credentials/{id}", {
     meta,
     onSuccess: invalidate,
   });
 }
 
-/** `meta`: deleting an organization key with its models reports its own failures. */
-export function useDeleteModelProviderCredential(meta?: MutationMeta) {
-  const qc = useQueryClient();
-  const invalidate = () => invalidatePaths(qc, ["/api/model-provider-credentials"]);
+export function useDeleteModelProviderCredential() {
+  const invalidate = useInvalidatePaths(...MODEL_CACHE_PATHS);
   return $api.useMutation("delete", "/api/model-provider-credentials/{id}", {
-    meta,
     onSuccess: invalidate,
-    onError: (error) => {
-      if (error instanceof ApiError && error.code === "credential_in_use") return invalidate();
-    },
   });
 }
 
-/** Re-read the credentials and the models they serve: a test may rotate or flag a subscription, a pairing adds one, a personal-key switch changes which serve a call. */
+/** Re-read the connections, the configurations and the models they serve: a test may rotate or flag a subscription, a pairing adds one. */
 export async function invalidateCredentialsAndModels(qc: QueryClient): Promise<void> {
-  await invalidatePaths(qc, ["/api/model-provider-credentials", "/api/models"]);
+  await invalidatePaths(qc, [...MODEL_CACHE_PATHS]);
 }
 
 export function useTestModelProviderCredential() {
@@ -125,13 +116,6 @@ export function useDiscoverModels() {
   return $api.useMutation("post", "/api/model-provider-credentials/discover", {
     meta: { errorHandledByCaller: true },
   });
-}
-
-export function deduplicateLabel(label: string, existingKeys: { label: string }[]): string {
-  return dedupeLabel(
-    label,
-    existingKeys.map((k) => k.label),
-  );
 }
 
 export function useTestModelProviderCredentialInline() {

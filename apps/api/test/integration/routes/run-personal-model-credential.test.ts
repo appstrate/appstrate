@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Whose credential a run spends (#1875).
+ * Whose connection a run spends (#1875, #2451).
  *
- * The payer is the run's user when the run was not triggered by an API key:
- * their personal credential serves an UNBOUND org model of the same provider
- * family. A model bound to an organization credential is served by it whoever
- * launches, and a built-in model by the platform key. An API-key run has no
- * payer and never spends a personal credential. A model with no usable
- * credential for its payer is refused at kickoff (`model_credential_required`).
+ * The payer is the run's user when the run was not triggered by an API key.
+ * A model belongs to a configuration, and the configuration's connections serve
+ * it: the payer's personal ones first (when the configuration allows them), then
+ * the organization's. A built-in model is served by the platform key. An API-key
+ * run has no payer and spends only organization connections. A model with no
+ * usable connection for its payer is refused at kickoff
+ * (`model_credential_required`).
  *
  * The sidecar OAuth door serves an organization credential to every run pinned
  * to it, and a personal one only to runs its owner pays: the same pin that gates
@@ -31,6 +32,7 @@ import {
   seedAgent,
   seedApiKey,
   seedEndUser,
+  seedModelConfigFor,
   seedOrgModelProviderKey,
   seedOrgModelProviderOAuth,
   seedRun,
@@ -43,7 +45,7 @@ import {
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { createOrgModel, loadModel, setDefaultModel } from "../../../src/services/org-models.ts";
-import { updateOrgSettings } from "../../../src/services/organizations.ts";
+import { updateModelConfig } from "../../../src/services/model-configs.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { clearResolvedModelCache } from "../../../src/services/resolved-model-cache.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
@@ -55,12 +57,21 @@ import { TEST_OAUTH_MODEL_ID } from "../../helpers/test-oauth-provider.ts";
 
 const app = getTestApp();
 
-const postInline = (headers: Record<string, string>) =>
+const postInline = (headers: Record<string, string>, modelId?: string) =>
   app.request("/api/runs/inline", {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ manifest: inlineAgentManifest(), prompt: "do the thing" }),
+    body: JSON.stringify({
+      manifest: inlineAgentManifest(),
+      prompt: "do the thing",
+      ...(modelId ? { modelId } : {}),
+    }),
   });
+
+/** Switch personal connections off on a configuration. */
+async function disablePersonal(orgId: string, configId: string): Promise<void> {
+  await updateModelConfig(orgId, configId, { personalConnectionsAllowed: false });
+}
 
 describe("run payer — personal model credentials", () => {
   let ctx: TestContext;
@@ -80,46 +91,33 @@ describe("run payer — personal model credentials", () => {
 
   afterEach(waitForRunPipelineSettled);
 
-  /** Org API-key credential bound to an org-default `gpt-5.5`. Returns the credential id. */
-  async function seedBoundDefault(): Promise<string> {
+  /** The openai configuration every model of this suite belongs to. */
+  const openaiConfig = () => seedModelConfigFor(ctx.orgId, "openai");
+
+  /** An org-default `gpt-5.5` served by an organization key. Returns the connection id. */
+  async function seedOrgDefault(): Promise<string> {
+    const configId = await openaiConfig();
     const credentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
       label: "Org key",
       providerId: "openai",
       apiKey: "sk-org-test-key",
+      configId,
     });
-    const modelDbId = await createOrgModel(ctx.orgId, "Team GPT", "gpt-5.5", ctx.user.id, {
-      credentialId,
-    });
+    const modelDbId = await createOrgModel(ctx.orgId, "Team GPT", "gpt-5.5", ctx.user.id, configId);
     await setDefaultModel(ctx.orgId, modelDbId);
     return credentialId;
   }
 
-  /** Org-default `gpt-5.5` with no credential: each payer must bring their own. */
-  async function seedUnboundDefault(): Promise<void> {
-    const [row] = await db
-      .insert(orgModels)
-      .values({
-        orgId: ctx.orgId,
-        label: "Shared GPT",
-        modelId: "gpt-5.5",
-        providerId: "openai",
-        credentialId: null,
-        aliased: false,
-        source: "custom",
-        createdBy: ctx.user.id,
-      })
-      .returning({ id: orgModels.id });
-    await setDefaultModel(ctx.orgId, row!.id);
+  /** A `gpt-5.5` model with no organization connection: each payer brings their own. */
+  async function seedPersonalOnlyModel(): Promise<string> {
+    return createOrgModel(ctx.orgId, "Shared GPT", "gpt-5.5", ctx.user.id, await openaiConfig());
   }
 
-  /**
-   * A personal openai API-key credential held by `ownerId`. Seeded directly: the
-   * harness makes every provider `baseUrlOverridable`, which the service refuses
-   * for a personal credential (`personal_credential_custom_endpoint`).
-   */
+  /** A personal openai API-key connection held by `ownerId`. */
   async function seedPersonalKey(ownerId: string, label: string): Promise<string> {
     const row = await seedOrgModelProviderKey({
       orgId: ctx.orgId,
@@ -149,18 +147,30 @@ describe("run payer — personal model credentials", () => {
   }
 
   /** Launch an inline run and read its row: the payer and source are stored, not on the wire. */
-  async function launchedRun(launchHeaders: Record<string, string>) {
-    const res = await postInline(launchHeaders);
+  async function launchedRun(launchHeaders: Record<string, string>, modelId?: string) {
+    const res = await postInline(launchHeaders, modelId);
     expect(res.status).toBe(201);
     const { id } = (await res.json()) as { id: string };
     const [row] = await db.select().from(runs).where(eq(runs.id, id));
     return row!;
   }
 
-  it("a member's manual run on a bound org model spends the org credential, even with a personal key", async () => {
-    const orgCredentialId = await seedBoundDefault();
+  it("a member's manual run spends their personal key before the organization's", async () => {
+    await seedOrgDefault();
+    const member = await memberContext(ctx, "member", "builder");
+    const personalId = await seedPersonalKey(member.user.id, "member-key");
+
+    const run = await launchedRun(authHeaders(member));
+    expect(run.modelCredentialId).toBe(personalId);
+    expect(run.modelSource).toBe("user");
+    expect(run.payerUserId).toBe(member.user.id);
+  });
+
+  it("spends the organization key once the configuration disallows personal connections", async () => {
+    const orgCredentialId = await seedOrgDefault();
     const member = await memberContext(ctx, "member", "builder");
     await seedPersonalKey(member.user.id, "member-key");
+    await disablePersonal(ctx.orgId, await openaiConfig());
 
     const run = await launchedRun(authHeaders(member));
     expect(run.modelCredentialId).toBe(orgCredentialId);
@@ -169,13 +179,13 @@ describe("run payer — personal model credentials", () => {
   });
 
   it("the org owner without a personal key still runs on the org credential", async () => {
-    const orgCredentialId = await seedBoundDefault();
+    const orgCredentialId = await seedOrgDefault();
 
     expect(await launchedCredentialId(authHeaders(ctx))).toBe(orgCredentialId);
   });
 
   it("an API-key run spends the org credential, never a personal one", async () => {
-    const orgCredentialId = await seedBoundDefault();
+    const orgCredentialId = await seedOrgDefault();
     const member = await memberContext(ctx, "member", "builder");
     await seedPersonalKey(member.user.id, "member-key");
     const key = await seedApiKey({
@@ -190,31 +200,31 @@ describe("run payer — personal model credentials", () => {
     ).toBe(orgCredentialId);
   });
 
-  it("refuses a run on an unbound model when the payer has no personal key", async () => {
-    await seedUnboundDefault();
+  it("refuses a run on a model without org connection when the payer has no personal key", async () => {
+    const modelDbId = await seedPersonalOnlyModel();
     const member = await memberContext(ctx, "member", "builder");
 
-    const res = await postInline(authHeaders(member));
+    const res = await postInline(authHeaders(member), modelDbId);
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe("model_credential_required");
   });
 
-  it("serves an unbound model through the payer's personal key", async () => {
-    await seedUnboundDefault();
+  it("serves a model without org connection through the payer's personal key", async () => {
+    const modelDbId = await seedPersonalOnlyModel();
     const member = await memberContext(ctx, "member", "builder");
     const personalId = await seedPersonalKey(member.user.id, "member-key");
 
-    const run = await launchedRun(authHeaders(member));
+    const run = await launchedRun(authHeaders(member), modelDbId);
     expect(run.modelCredentialId).toBe(personalId);
     expect(run.modelSource).toBe("user");
     expect(run.payerUserId).toBe(member.user.id);
   });
 
   it("keeps the payer of a run whose personal credential is deleted afterwards", async () => {
-    await seedUnboundDefault();
+    const modelDbId = await seedPersonalOnlyModel();
     const member = await memberContext(ctx, "member", "builder");
     const personalId = await seedPersonalKey(member.user.id, "member-key");
-    const launched = await launchedRun(authHeaders(member));
+    const launched = await launchedRun(authHeaders(member), modelDbId);
     expect(launched.modelCredentialId).toBe(personalId);
 
     const deleted = await app.request(`/api/model-provider-credentials/${personalId}`, {
@@ -326,7 +336,7 @@ describe("run payer — personal model credentials", () => {
       expect((await read(unattended)).status).toBe(200);
       expect((await read(await tokenOf(member.user.id))).status).toBe(200);
 
-      await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+      await disablePersonal(ctx.orgId, oauth.configId!);
       expect((await read(unattended)).status).toBe(200);
     } finally {
       await db.update(runs).set({ status: "success" }).where(eq(runs.modelCredentialId, oauth.id));
@@ -345,14 +355,19 @@ describe("run payer — personal model credentials", () => {
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
     const oauth = await seedOrgModelProviderOAuth({ orgId: ctx.orgId, createdBy: ctx.user.id });
+    // The key's creator holds a personal subscription that would rank first for them:
+    // a call no member pays never spends it.
+    await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      ownerUserId: ctx.user.id,
+    });
     const modelDbId = await createOrgModel(
       ctx.orgId,
       "Team plan",
       TEST_OAUTH_MODEL_ID,
       ctx.user.id,
-      {
-        credentialId: oauth.id,
-      },
+      oauth.configId!,
     );
     await setDefaultModel(ctx.orgId, modelDbId);
     const key = await seedApiKey({
@@ -422,7 +437,7 @@ describe("run payer — personal model credentials", () => {
 
     try {
       expect((await read()).status).toBe(200);
-      await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+      await disablePersonal(ctx.orgId, oauth.configId!);
       expect((await read()).status).toBe(403);
     } finally {
       await db.update(runs).set({ status: "success" }).where(eq(runs.modelCredentialId, oauth.id));
@@ -431,37 +446,53 @@ describe("run payer — personal model credentials", () => {
 
   // ── the other doors ───────────────────────────────────────
 
-  it("lists an unbound model as billed to the caller's own key and to nobody for an API key, a bound one to the org", async () => {
-    const orgCredentialId = await seedBoundDefault();
-    await seedUnboundDefault();
+  it("lists billed_to per caller: the member's own key first, the organization for others, nobody without a connection", async () => {
+    await seedOrgDefault();
+    const [withOrg] = await db
+      .select({ id: orgModels.id })
+      .from(orgModels)
+      .where(eq(orgModels.orgId, ctx.orgId));
+    const withOrgId = withOrg!.id;
+    // A second configuration with no organization connection.
+    const anthropicConfig = await seedModelConfigFor(ctx.orgId, "anthropic");
+    const personalOnlyId = await createOrgModel(
+      ctx.orgId,
+      "Claude",
+      "claude-sonnet-4-5",
+      ctx.user.id,
+      anthropicConfig,
+    );
     const member = await memberContext(ctx, "member", "builder");
     await seedPersonalKey(member.user.id, "member-key");
+    await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      createdBy: member.user.id,
+      ownerUserId: member.user.id,
+      label: "member-claude",
+      providerId: "anthropic",
+      apiKey: "sk-ant-personal",
+      configId: anthropicConfig,
+    });
     const key = await seedApiKey({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       createdBy: member.user.id,
       scopes: ["models:read"],
     });
-    const rows = await db
-      .select({ id: orgModels.id, credentialId: orgModels.credentialId })
-      .from(orgModels)
-      .where(eq(orgModels.orgId, ctx.orgId));
-    const boundId = rows.find((r) => r.credentialId === orgCredentialId)!.id;
-    const unboundId = rows.find((r) => r.credentialId === null)!.id;
 
     const billedTo = async (headers: Record<string, string>) => {
       const res = await app.request("/api/models", { headers });
       expect(res.status).toBe(200);
       const { data } = (await res.json()) as { data: { id: string; billed_to: string | null }[] };
       const of = (id: string) => data.find((m) => m.id === id)?.billed_to;
-      return { bound: of(boundId), unbound: of(unboundId) };
+      return { withOrg: of(withOrgId), personalOnly: of(personalOnlyId) };
     };
 
-    expect(await billedTo(authHeaders(member))).toEqual({ bound: "org", unbound: "user" });
-    expect(await billedTo(authHeaders(ctx))).toEqual({ bound: "org", unbound: null });
+    expect(await billedTo(authHeaders(member))).toEqual({ withOrg: "user", personalOnly: "user" });
+    expect(await billedTo(authHeaders(ctx))).toEqual({ withOrg: "org", personalOnly: null });
     expect(await billedTo({ Authorization: `Bearer ${key.rawKey}` })).toEqual({
-      bound: "org",
-      unbound: null,
+      withOrg: "org",
+      personalOnly: null,
     });
   });
 
@@ -526,22 +557,15 @@ describe("run admission — the credential a run spends is the one admitted", ()
     });
   }
 
-  /** An unbound org model: the member's personal key of the same family serves it (source "org"). */
-  async function seedUnboundModel(): Promise<string> {
-    const [row] = await db
-      .insert(orgModels)
-      .values({
-        orgId: ctx.orgId,
-        label: "Shared GPT",
-        modelId: "gpt-5.5",
-        providerId: "openai",
-        credentialId: null,
-        aliased: false,
-        source: "custom",
-        createdBy: ctx.user.id,
-      })
-      .returning({ id: orgModels.id });
-    return row!.id;
+  /** A model with no organization connection: the member's personal key serves it. */
+  async function seedPersonalOnlyModel(): Promise<string> {
+    return createOrgModel(
+      ctx.orgId,
+      "Shared GPT",
+      "gpt-5.5",
+      ctx.user.id,
+      await seedModelConfigFor(ctx.orgId, "openai"),
+    );
   }
 
   const stampedCredentials = () =>
@@ -590,15 +614,15 @@ describe("run admission — the credential a run spends is the one admitted", ()
   });
 
   it("spends the credential resolved once and admitted, even when the gate changes what a second resolution would pick", async () => {
-    // The unbound org model is served by the member's personal key.
-    const orgModelId = await seedUnboundModel();
+    // The model is served by the member's personal key.
+    const orgModelId = await seedPersonalOnlyModel();
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances(
       [
         gateModule(async () => {
-          // Personal credentials are switched off org-wide while the gate runs. A
-          // second resolution after this point would find no credential to spend.
-          await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+          // Personal connections are switched off on the configuration while the
+          // gate runs. A second resolution after this point would find nothing.
+          await disablePersonal(ctx.orgId, await seedModelConfigFor(ctx.orgId, "openai"));
         }, calls),
       ],
       fakeInitCtx(),
@@ -617,8 +641,8 @@ describe("run admission — the credential a run spends is the one admitted", ()
     expect(resolvedAfterGate?.credentialSource).toBeNull();
   });
 
-  it("admits the unbound-model run on the member's personal key when the gate removes nothing (control)", async () => {
-    const orgModelId = await seedUnboundModel();
+  it("admits the run on the member's personal key when the gate removes nothing (control)", async () => {
+    const orgModelId = await seedPersonalOnlyModel();
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances([gateModule(async () => {}, calls)], fakeInitCtx());
 
@@ -630,18 +654,26 @@ describe("run admission — the credential a run spends is the one admitted", ()
     expect(await stampedCredentials()).toEqual([{ modelCredentialId: personalId }]);
   });
 
-  it("admits a bound model on the org credential and a built-in one on the platform key, though the member holds a personal key", async () => {
+  it("admits a model of a personal-off configuration on the org credential and a built-in one on the platform key, though the member holds a personal key", async () => {
+    const configId = await seedModelConfigFor(ctx.orgId, "openai");
     const orgCredentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
       label: "Org key",
       providerId: "openai",
       apiKey: "sk-org-admission",
+      configId,
     });
-    const boundModelId = await createOrgModel(ctx.orgId, "Team GPT", "gpt-5.5", ctx.user.id, {
-      credentialId: orgCredentialId,
-    });
+    await disablePersonal(ctx.orgId, configId);
+    const boundModelId = await createOrgModel(
+      ctx.orgId,
+      "Team GPT",
+      "gpt-5.5",
+      ctx.user.id,
+      configId,
+    );
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances([gateModule(async () => {}, calls)], fakeInitCtx());
 

@@ -2,15 +2,14 @@
 
 /**
  * `listOrgModels` used to DROP any model whose OAuth credential was flagged
- * `needsReconnection` — while `org_models.credential_id` (ON DELETE RESTRICT)
- * made that credential undeletable. The model was invisible in the UI, so it
- * could not be detached, so the credential could not be deleted: a deadlock
- * observed in production.
+ * `needsReconnection`: the model was invisible in the UI, so it could not be
+ * acted on (a deadlock observed in production, when a model still pinned its
+ * credential).
  *
  * The row is now listed with `needs_reconnection: true` instead. These tests
  * pin both halves of that contract:
- *   - the read path SHOWS the dead model (regression), while a missing
- *     credential row / unregistered provider is still dropped (nothing to
+ *   - the read path SHOWS the dead model (regression), while a model whose
+ *     configuration's provider is unregistered is still dropped (nothing to
  *     render), and
  *   - the write + runtime paths stay FAIL-CLOSED — it cannot become the org
  *     default, and `loadModel` still resolves it to null.
@@ -18,7 +17,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { modelProviderCredentials } from "@appstrate/db/schema";
+import { modelProviderCredentials, organizations } from "@appstrate/db/schema";
 import {
   assertExplicitModelExists,
   listOrgModels,
@@ -40,6 +39,7 @@ import {
   seedOrgModelProviderKey,
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
+import { TEST_OAUTH_MODEL_ID } from "../../helpers/test-oauth-provider.ts";
 
 describe("org-models — dead OAuth credential is listed, not hidden", () => {
   let ctx: TestContext;
@@ -58,10 +58,11 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "Subscription model",
-      modelId: "gpt-5-codex",
+      // An id test-oauth serves: a connection that does not serve the model is
+      // no candidate, dead or alive.
+      modelId: TEST_OAUTH_MODEL_ID,
       enabled: true,
     });
     return { cred, model };
@@ -79,8 +80,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "GPT-4o",
       modelId: "gpt-4o",
       enabled: true,
@@ -97,10 +97,9 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     expect(listed!.needs_reconnection).toBe(true);
     // Display fields still resolve (from the registry metadata) so the row can
     // actually be rendered and acted on.
-    expect(listed!.providerId).toBe("test-oauth");
-    expect(listed!.apiShape).toBe("openai-responses");
-    expect(listed!.base_url).toBe("https://example.test/v1");
-    expect(listed!.credentialId).toBe(model.credentialId);
+    // The configuration names the provider: test-oauth is filed under openai.
+    expect(listed!.providerId).toBe("openai");
+    expect(listed!.config_id).toBe(model.configId);
   });
 
   it("flags a model on a healthy OAuth credential as false", async () => {
@@ -109,8 +108,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed).toBeDefined();
     expect(listed!.needs_reconnection).toBe(false);
-    expect(listed!.providerId).toBe("test-oauth");
-    expect(listed!.base_url).toBe("https://example.test/v1");
+    expect(listed!.providerId).toBe("openai");
   });
 
   it("flags a model on an api-key credential as false, with the decrypt path untouched", async () => {
@@ -124,7 +122,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     expect(listed!.providerId).toBe("openai");
     expect(listed!.apiShape).toBe("openai-responses");
     expect(listed!.base_url).toBe("https://api.openai.com/v1");
-    expect(listed!.credentialId).toBe(cred.id);
+    expect(listed!.config_id).toBe(cred.configId);
 
     const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved).not.toBeNull();
@@ -164,11 +162,10 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
   });
 
   it("still drops a model whose credential has an unregistered providerId", async () => {
-    // The credential ROW cannot be deleted while the model references it
-    // (ON DELETE RESTRICT) — the reachable way to lose the provider is a
-    // `providerId` with no registry entry (module removed from MODULES).
-    // Without one there is no apiShape/baseUrl to render, so the row stays
-    // dropped; recovering it is out of scope here.
+    // The reachable way to lose the provider is a `providerId` with no
+    // registry entry (module removed from MODULES). Without one there is no
+    // apiShape/baseUrl to render, so the row stays dropped; recovering it is
+    // out of scope here.
     const { model } = await seedApiKeyModel("@gone/provider");
 
     const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
@@ -199,7 +196,12 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
 
   it("refuses to resolve an org default bound to an unregistered provider", async () => {
     const { model } = await seedApiKeyModel("google-ai");
-    await setDefaultModel(ctx.orgId, model.id);
+    // Set while the module still registered the provider: the setter itself now
+    // refuses a model nothing serves, so the pointer is written as it was left.
+    await db
+      .update(organizations)
+      .set({ defaultModelId: model.id })
+      .where(eq(organizations.id, ctx.orgId));
 
     // The org default must not cascade on to the system default.
     const err = await resolveModel(ctx.orgId, "@acme/agent", null, null).catch((e: unknown) => e);
@@ -265,8 +267,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     const { cred } = await seedOAuthModel(true);
     const disabled = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "Disabled on a dead credential",
       // A second binding of the same (credential, model) is refused since
       // `uq_org_models_unaliased_binding`; the disabled row is its own model.
@@ -293,7 +294,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
   });
 });
 
-describe("org-models — a member's own credential never serves a bound model", () => {
+describe("org-models — a dead organization connection and a member's own key", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -301,10 +302,10 @@ describe("org-models — a member's own credential never serves a bound model", 
     ctx = await createTestContext({ orgSlug: "deadorgcred" });
   });
 
-  it("flags a model whose organization credential is dead to everyone, own key or not", async () => {
+  it("serves the member who holds a key of her own, and flags the model to everyone else", async () => {
     const alice = await memberContext(ctx, "member");
     const bob = await memberContext(ctx, "member");
-    // The organization's key is listed but its blob no longer decrypts: a dead binding.
+    // The organization's key is listed but its blob no longer decrypts.
     const orgKey = await seedOrgModelProviderKey({
       orgId: ctx.orgId,
       label: "Org OpenAI",
@@ -315,13 +316,12 @@ describe("org-models — a member's own credential never serves a bound model", 
     await corruptCredentialBlob(orgKey.id);
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: orgKey.id,
-      providerId: "openai",
+      configId: orgKey.configId!,
       label: "GPT",
       modelId: "gpt-5.5",
       enabled: true,
     });
-    // Alice holds her own key of the same family.
+    // Alice holds her own key in the same configuration, ranked before the organization's.
     await seedOrgModelProviderKey({
       orgId: ctx.orgId,
       createdBy: alice.user.id,
@@ -329,14 +329,21 @@ describe("org-models — a member's own credential never serves a bound model", 
       label: "Alice OpenAI",
       providerId: "openai",
       apiKey: "sk-alice",
+      configId: orgKey.configId!,
     });
     clearResolvedModelCache();
 
-    // The organization pays for a bound model: Alice's own key does not stand in for it.
-    for (const payer of [alice.user.id, bob.user.id]) {
-      const listed = (await listOrgModels(ctx.orgId, payer)).find((m) => m.id === model.id);
-      expect(listed).toMatchObject({ needs_reconnection: true, billed_to: "org" });
+    const listedFor = async (payer: string | null) =>
+      (await listOrgModels(ctx.orgId, payer)).find((m) => m.id === model.id);
+    expect(await listedFor(alice.user.id)).toMatchObject({
+      needs_reconnection: false,
+      billed_to: "user",
+    });
+    for (const payer of [bob.user.id, null]) {
+      expect((await listedFor(payer))!.needs_reconnection).toBe(true);
     }
+    // The organization connection is dead: the model cannot be the default.
+    expect(await modelNeedsReconnection(ctx.orgId, model.id)).toBe(true);
     const refused = await assertExplicitModelExists(ctx.orgId, model.id).catch(
       (err: unknown) => err,
     );

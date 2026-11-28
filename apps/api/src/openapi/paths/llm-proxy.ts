@@ -130,8 +130,9 @@ const baseResponses = {
     description:
       "`org_deleting` — the organization's deletion is reserved, so no new " +
       "metered usage is admitted. `model_credential_required` — the preset is an " +
-      "unbound model and the caller has no usable personal credential for it (a " +
-      "run: the credential it launched with is gone). RFC 9457 problem+json.",
+      "model no connection of its configuration serves for the caller (the organization has " +
+      "none that serves it and the caller has no usable personal one; a run: the connection it " +
+      "launched with is gone). RFC 9457 problem+json.",
     headers: PROXY_STATUS_HEADER,
     content: problemContent,
   },
@@ -154,7 +155,7 @@ const baseResponses = {
   },
   "503": {
     description:
-      "`encryption_key_unavailable` — the model's stored credential is encrypted under a key " +
+      "`encryption_key_unavailable` — the model's connection is encrypted under a key " +
       "id missing from the platform's keyring. Operator configuration; nothing is sent " +
       "upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`).",
     headers: PROXY_STATUS_HEADER,

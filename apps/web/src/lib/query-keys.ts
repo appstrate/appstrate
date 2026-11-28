@@ -33,6 +33,16 @@ export type GetPath = {
   [P in keyof paths]: paths[P] extends { get: object } ? P : never;
 }[keyof paths];
 
+/**
+ * What a write to a model, a configuration or a connection changes: the models, the
+ * configurations (their state, counts and models) and the connections. Every such write rereads all three.
+ */
+export const MODEL_CACHE_PATHS = [
+  "/api/models",
+  "/api/model-configs",
+  "/api/model-provider-credentials",
+] as const satisfies readonly GetPath[];
+
 /** Invalidates typed-client queries by spec path (the prefix of every `[method, path, init]` key); `refetchType` `"none"` only marks stale, `"all"` also refetches inactive entries. */
 export function invalidatePaths(
   qc: QueryClient,

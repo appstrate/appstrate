@@ -6,36 +6,34 @@ import {
   useDeleteModelProviderCredential,
   type ModelProviderCredentialInfo,
 } from "../hooks/use-model-provider-credentials";
-import { keyDeletionPrompt } from "../lib/key-deletion";
 
-/** « Supprimer » on a key of Settings › Models: an organization key goes only once no model uses it. */
+/**
+ * « Supprimer » on a connection of a model configuration. A refusal (the organization's last
+ * connection of the default model's configuration, `model_org_connection_required`) closes the
+ * dialog and is toasted.
+ */
 export function DeleteKeyConfirm({
   credential,
-  referenceCountVerified,
   onClose,
 }: {
   credential: ModelProviderCredentialInfo;
-  referenceCountVerified: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation("settings");
-  const deleteCredential = useDeleteModelProviderCredential({ errorHandledByCaller: true });
-  const { description, blocked } = keyDeletionPrompt(
-    credential,
-    t,
-    deleteCredential.error,
-    referenceCountVerified,
-  );
+  const deleteCredential = useDeleteModelProviderCredential();
 
   return (
     <ConfirmModal
       open
-      keepOpenOnRefusal
       onClose={onClose}
       title={t("credentials.deleteTitle")}
       confirmLabel={t("credentials.delete")}
-      description={description}
-      confirmDisabled={blocked}
+      description={t(
+        credential.owner_type === "user"
+          ? "credentials.deleteMemberConfirm"
+          : "credentials.deleteConfirm",
+        { label: credential.label },
+      )}
       isPending={deleteCredential.isPending}
       onConfirm={() =>
         deleteCredential.mutate({ params: { path: { id: credential.id } } }, { onSuccess: onClose })

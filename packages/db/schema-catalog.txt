@@ -227,7 +227,17 @@ column llm_usage.request_id text
 column llm_usage.run_id text
 column llm_usage.source llm_usage_source not null
 column llm_usage.user_id text
+column model_configs.base_url text
+column model_configs.created_at timestamp with time zone not null default now()
+column model_configs.created_by text
+column model_configs.id uuid not null default gen_random_uuid()
+column model_configs.label text not null
+column model_configs.org_id uuid not null
+column model_configs.personal_connections_allowed boolean not null default true
+column model_configs.provider_id text not null
+column model_configs.updated_at timestamp with time zone not null default now()
 column model_provider_credentials.base_url_override text
+column model_provider_credentials.config_id uuid
 column model_provider_credentials.created_at timestamp with time zone not null default now()
 column model_provider_credentials.created_by text
 column model_provider_credentials.credentials_encrypted text not null
@@ -243,6 +253,7 @@ column model_provider_credentials.provider_id text not null
 column model_provider_credentials.refresh_checked_at timestamp with time zone
 column model_provider_credentials.refresh_failure_count integer not null default 0
 column model_provider_credentials.updated_at timestamp with time zone not null default now()
+column model_provider_pairings.config_id uuid
 column model_provider_pairings.consumed_at timestamp with time zone
 column model_provider_pairings.created_at timestamp with time zone not null default now()
 column model_provider_pairings.credential_id uuid
@@ -404,6 +415,7 @@ column org_members.org_id uuid not null
 column org_members.role org_role not null
 column org_members.user_id text not null
 column org_models.aliased boolean not null default false
+column org_models.config_id uuid
 column org_models.context_window integer
 column org_models.cost jsonb
 column org_models.created_at timestamp with time zone not null default now()
@@ -416,7 +428,7 @@ column org_models.label text not null
 column org_models.max_tokens integer
 column org_models.model_id text not null
 column org_models.org_id uuid not null
-column org_models.provider_id text not null
+column org_models.provider_id text
 column org_models.reasoning boolean
 column org_models.source text not null default 'custom'::text
 column org_models.updated_at timestamp with time zone not null default now()
@@ -832,12 +844,17 @@ constraint llm_usage llm_usage_proxy_has_request_id CHECK (((source <> 'proxy'::
 constraint llm_usage llm_usage_run_id_org_id_fk FOREIGN KEY (run_id, org_id) REFERENCES runs(id, org_id) ON DELETE SET NULL (run_id)
 constraint llm_usage llm_usage_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL
 constraint llm_usage llm_usage_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE SET NULL
+constraint model_configs model_configs_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint model_configs model_configs_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint model_configs model_configs_pkey PRIMARY KEY (id)
+constraint model_provider_credentials model_provider_credentials_config_id_org_id_fk FOREIGN KEY (config_id, org_id) REFERENCES model_configs(id, org_id) ON DELETE CASCADE
 constraint model_provider_credentials model_provider_credentials_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint model_provider_credentials model_provider_credentials_needs_reconnection_cause_valid CHECK (((needs_reconnection_cause IS NULL) OR (needs_reconnection_cause = ANY (ARRAY['refresh_token_revoked'::text, 'refresh_token_missing'::text, 'refresh_failures_exhausted'::text, 'unrefreshable'::text, 'credentials_undecryptable'::text]))))
 constraint model_provider_credentials model_provider_credentials_needs_reconnection_record CHECK ((needs_reconnection OR ((needs_reconnection_cause IS NULL) AND (needs_reconnection_at IS NULL))))
 constraint model_provider_credentials model_provider_credentials_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint model_provider_credentials model_provider_credentials_owner_user_id_user_id_fk FOREIGN KEY (owner_user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint model_provider_credentials model_provider_credentials_pkey PRIMARY KEY (id)
+constraint model_provider_pairings model_provider_pairings_config_id_org_id_fk FOREIGN KEY (config_id, org_id) REFERENCES model_configs(id, org_id) ON DELETE CASCADE
 constraint model_provider_pairings model_provider_pairings_credential_id_fk FOREIGN KEY (credential_id) REFERENCES model_provider_credentials(id) ON DELETE SET NULL
 constraint model_provider_pairings model_provider_pairings_failed_consumed CHECK (((failed_at IS NULL) OR (consumed_at IS NOT NULL)))
 constraint model_provider_pairings model_provider_pairings_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
@@ -896,9 +913,8 @@ constraint org_invitations org_invitations_token_unique UNIQUE (token)
 constraint org_members org_members_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_members org_members_org_id_user_id_pk PRIMARY KEY (org_id, user_id)
 constraint org_members org_members_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
-constraint org_models org_models_alias_bound CHECK (((NOT aliased) OR (credential_id IS NOT NULL)))
+constraint org_models org_models_config_id_org_id_fk FOREIGN KEY (config_id, org_id) REFERENCES model_configs(id, org_id) ON DELETE CASCADE
 constraint org_models org_models_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
-constraint org_models org_models_credential_provider_fk FOREIGN KEY (credential_id, provider_id) REFERENCES model_provider_credentials(id, provider_id) ON DELETE RESTRICT
 constraint org_models org_models_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_models org_models_pkey PRIMARY KEY (id)
 constraint org_models org_models_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
@@ -1095,10 +1111,14 @@ index CREATE INDEX idx_llm_usage_chat_session_id ON public.llm_usage USING btree
 index CREATE INDEX idx_llm_usage_org_created ON public.llm_usage USING btree (org_id, created_at)
 index CREATE INDEX idx_llm_usage_run_id ON public.llm_usage USING btree (run_id)
 index CREATE INDEX idx_llm_usage_user_id ON public.llm_usage USING btree (user_id)
+index CREATE INDEX idx_model_configs_created_by ON public.model_configs USING btree (created_by)
+index CREATE INDEX idx_model_configs_org_id ON public.model_configs USING btree (org_id)
+index CREATE INDEX idx_model_provider_credentials_config_id ON public.model_provider_credentials USING btree (config_id)
 index CREATE INDEX idx_model_provider_credentials_created_by ON public.model_provider_credentials USING btree (created_by)
 index CREATE INDEX idx_model_provider_credentials_expires_at_oauth ON public.model_provider_credentials USING btree (expires_at) WHERE (expires_at IS NOT NULL)
 index CREATE INDEX idx_model_provider_credentials_org_provider ON public.model_provider_credentials USING btree (org_id, provider_id)
 index CREATE INDEX idx_model_provider_credentials_owner ON public.model_provider_credentials USING btree (owner_user_id)
+index CREATE INDEX idx_model_provider_pairings_config_id ON public.model_provider_pairings USING btree (config_id)
 index CREATE INDEX idx_model_provider_pairings_org_id ON public.model_provider_pairings USING btree (org_id)
 index CREATE INDEX idx_notifications_recipient ON public.notifications USING btree (org_id, recipient_type, recipient_id, space_id)
 index CREATE INDEX idx_notifications_run ON public.notifications USING btree (run_id)
@@ -1128,6 +1148,7 @@ index CREATE INDEX idx_org_invitations_email ON public.org_invitations USING btr
 index CREATE INDEX idx_org_invitations_invited_by ON public.org_invitations USING btree (invited_by)
 index CREATE INDEX idx_org_invitations_org_id ON public.org_invitations USING btree (org_id)
 index CREATE INDEX idx_org_members_user_id ON public.org_members USING btree (user_id)
+index CREATE INDEX idx_org_models_config_id ON public.org_models USING btree (config_id)
 index CREATE INDEX idx_org_models_created_by ON public.org_models USING btree (created_by)
 index CREATE INDEX idx_org_models_org_id ON public.org_models USING btree (org_id)
 index CREATE INDEX idx_org_package_offers_offered_by ON public.org_package_offers USING btree (offered_by)
@@ -1226,6 +1247,7 @@ index CREATE UNIQUE INDEX integration_org_defaults_pkey ON public.integration_or
 index CREATE UNIQUE INDEX integration_pins_pkey ON public.integration_pins USING btree (id)
 index CREATE UNIQUE INDEX jwks_pkey ON public.jwks USING btree (id)
 index CREATE UNIQUE INDEX llm_usage_pkey ON public.llm_usage USING btree (id)
+index CREATE UNIQUE INDEX model_configs_pkey ON public.model_configs USING btree (id)
 index CREATE UNIQUE INDEX model_provider_credentials_pkey ON public.model_provider_credentials USING btree (id)
 index CREATE UNIQUE INDEX model_provider_pairings_pkey ON public.model_provider_pairings USING btree (id)
 index CREATE UNIQUE INDEX model_provider_pairings_token_hash_unique ON public.model_provider_pairings USING btree (token_hash)
@@ -1283,12 +1305,13 @@ index CREATE UNIQUE INDEX uq_files_run_output_dedup ON public.files USING btree 
 index CREATE UNIQUE INDEX uq_integration_conn_id_org_id ON public.integration_connections USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_llm_usage_proxy_request_id ON public.llm_usage USING btree (request_id) WHERE ((source = 'proxy'::llm_usage_source) AND (request_id IS NOT NULL))
 index CREATE UNIQUE INDEX uq_llm_usage_runner_run_id ON public.llm_usage USING btree (run_id) WHERE ((source = 'runner'::llm_usage_source) AND (run_id IS NOT NULL))
-index CREATE UNIQUE INDEX uq_model_provider_credentials_id_provider_id ON public.model_provider_credentials USING btree (id, provider_id)
+index CREATE UNIQUE INDEX uq_model_configs_endpoint ON public.model_configs USING btree (org_id, provider_id, base_url) WHERE (base_url IS NOT NULL)
+index CREATE UNIQUE INDEX uq_model_configs_family ON public.model_configs USING btree (org_id, provider_id) WHERE (base_url IS NULL)
+index CREATE UNIQUE INDEX uq_model_configs_id_org_id ON public.model_configs USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_notifications_run_recipient_type ON public.notifications USING btree (run_id, recipient_type, recipient_id, type) WHERE (run_id IS NOT NULL)
 index CREATE UNIQUE INDEX uq_oauth_client_resources_pair ON public.oauth_client_resources USING btree (client_id, resource_id)
 index CREATE UNIQUE INDEX uq_org_invitations_pending ON public.org_invitations USING btree (org_id, email) WHERE (status = 'pending'::invitation_status)
-index CREATE UNIQUE INDEX uq_org_models_unaliased_binding ON public.org_models USING btree (org_id, credential_id, model_id) WHERE (aliased = false)
-index CREATE UNIQUE INDEX uq_org_models_unbound ON public.org_models USING btree (org_id, provider_id, model_id) WHERE (credential_id IS NULL)
+index CREATE UNIQUE INDEX uq_org_models_config_model ON public.org_models USING btree (config_id, model_id) WHERE (aliased = false)
 index CREATE UNIQUE INDEX uq_runs_id_org_id ON public.runs USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_space_roles_id_org_id ON public.space_roles USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_spaces_id_org_id ON public.spaces USING btree (id, org_id)

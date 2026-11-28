@@ -13,20 +13,22 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
-import { listOrgModels, loadModel, updateOrgModel } from "../../../src/services/org-models.ts";
-import { ApiError } from "../../../src/lib/errors.ts";
-import { orgModels } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { listOrgModels, loadModel } from "../../../src/services/org-models.ts";
 import { getTestApp } from "../../helpers/app.ts";
-import { db, truncateAll } from "../../helpers/db.ts";
+import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
+import {
+  seedModelConfigFor,
+  seedOrgModel,
+  seedOrgModelProviderKey,
+  seedOrgModelProviderOAuth,
+} from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 
 getTestApp(); // boots the model registry
 
-// The unbind and alias races below need openai and anthropic at their production endpoint.
-beforeAll(() => seedTestModelProviders({ fixedEndpoint: ["openai", "anthropic"] }));
+// Back to the baseline registry: the alias serving checks need openai and anthropic fixed.
+beforeAll(() => seedTestModelProviders());
 afterAll(() => seedTestModelProviders());
 
 describe("org-models — aliased flag (DB path)", () => {
@@ -51,8 +53,7 @@ describe("org-models — aliased flag (DB path)", () => {
     const cred = await seedCred();
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "Plain GPT-4o",
       modelId: "gpt-4o",
       enabled: true,
@@ -74,8 +75,7 @@ describe("org-models — aliased flag (DB path)", () => {
     const cred = await seedCred();
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "Appstrate Medium",
       modelId: "gpt-4o", // the hidden backing
       enabled: true,
@@ -104,8 +104,7 @@ describe("org-models — aliased flag (DB path)", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       modelId: "deepseek-flash", // takes off/low/high/max
       aliased: true,
     });
@@ -124,68 +123,75 @@ describe("org-models — aliased flag (DB path)", () => {
   });
 });
 
-describe("org-models — the alias invariant on the locked row", () => {
+describe("org-models — an alias is served by organization connections only", () => {
   let ctx: TestContext;
-  let modelId: string;
 
   beforeEach(async () => {
     await truncateAll();
-    ctx = await createTestContext({ orgSlug: "aliaslockorg" });
-    const key = await seedOrgModelProviderKey({
-      orgId: ctx.orgId,
-      label: "OpenAI",
-      apiShape: "openai-completions",
-      baseUrl: "https://api.openai.com/v1",
-      apiKey: "sk-test",
-    });
+    ctx = await createTestContext({ orgSlug: "aliasorgonly" });
+  });
+
+  async function seedAlias(): Promise<{ id: string; configId: string }> {
+    const configId = await seedModelConfigFor(ctx.orgId, "openai");
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: key.id,
-      providerId: key.providerId,
-      label: "Plain",
-      modelId: "gpt-4o",
+      configId,
+      label: "Appstrate Medium",
+      modelId: "gpt-5.5",
       enabled: true,
+      aliased: true,
     });
-    modelId = model.id;
-  });
-
-  async function storedBinding() {
-    const [row] = await db
-      .select({ aliased: orgModels.aliased, credentialId: orgModels.credentialId })
-      .from(orgModels)
-      .where(eq(orgModels.id, modelId));
-    return row!;
+    return { id: model.id, configId };
   }
 
-  it("never leaves an alias unbound when an unbind and an alias race on the same row", async () => {
-    const providerId = "openai";
-    const results = await Promise.allSettled([
-      updateOrgModel(ctx.orgId, modelId, { credentialId: null, providerId }),
-      updateOrgModel(ctx.orgId, modelId, { aliased: true, label: "Masked" }),
-    ]);
+  const personalKey = (configId: string) =>
+    seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      providerId: "openai",
+      createdBy: ctx.user.id,
+      ownerUserId: ctx.user.id,
+      label: "Own key",
+      apiKey: "sk-personal",
+      configId,
+    });
 
-    // Whichever commits first, the other one sees its effect on the locked row and is refused.
-    const rejected = results.filter((r) => r.status === "rejected");
-    expect(rejected).toHaveLength(1);
-    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(ApiError);
-    expect(((rejected[0] as PromiseRejectedResult).reason as ApiError).status).toBe(400);
+  it("resolves nothing for a payer whose only connection is personal", async () => {
+    const alias = await seedAlias();
+    await personalKey(alias.configId);
 
-    const row = await storedBinding();
-    expect(row.aliased === true && row.credentialId === null).toBe(false);
+    const resolved = await loadModel(ctx.orgId, alias.id, ctx.user.id);
+    expect(resolved?.credentialSource ?? null).toBeNull();
   });
 
-  it("refuses an alias once the model is unbound, and admits it while still bound", async () => {
-    // Control: the alias is legal while the row keeps its organization credential.
-    await updateOrgModel(ctx.orgId, modelId, { aliased: true, label: "Masked" });
-    expect(await storedBinding()).toMatchObject({ aliased: true });
-    await updateOrgModel(ctx.orgId, modelId, { aliased: false });
+  it("resolves nothing when the only connection is a subscription, organization's or the payer's", async () => {
+    const alias = await seedAlias();
+    for (const ownerUserId of [null, ctx.user.id]) {
+      await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: "test-oauth",
+        configId: alias.configId,
+        ownerUserId,
+        expiresAt: Date.now() + 3_600_000,
+      });
+    }
 
-    await updateOrgModel(ctx.orgId, modelId, { credentialId: null, providerId: "openai" });
-    const error = await updateOrgModel(ctx.orgId, modelId, { aliased: true }).catch(
-      (err: unknown) => err,
-    );
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).status).toBe(400);
-    expect(await storedBinding()).toMatchObject({ aliased: false, credentialId: null });
+    const resolved = await loadModel(ctx.orgId, alias.id, ctx.user.id);
+    expect(resolved?.credentialSource ?? null).toBeNull();
+  });
+
+  it("resolves the organization connection, though the payer holds a personal one", async () => {
+    const alias = await seedAlias();
+    await personalKey(alias.configId);
+    const org = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      providerId: "openai",
+      label: "Org key",
+      apiKey: "sk-org",
+      configId: alias.configId,
+    });
+
+    const resolved = await loadModel(ctx.orgId, alias.id, ctx.user.id);
+    expect(resolved).toMatchObject({ credentialSource: "org", credentialId: org.id });
+    expect(resolved!.apiKey).toBe("sk-org");
   });
 });

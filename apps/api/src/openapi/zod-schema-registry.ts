@@ -34,6 +34,7 @@ import {
   setDefaultSchema as modelsSetDefaultSchema,
   testInlineSchema as modelsTestInlineSchema,
 } from "../routes/models.ts";
+import { createModelConfigSchema, updateModelConfigSchema } from "../routes/model-configs.ts";
 
 // --- API Key schemas (routes/api-keys.ts) ---
 import { createApiKeySchema } from "../routes/api-keys.ts";
@@ -180,6 +181,18 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   // ─── Models ─────────────────────────────────────────────────────────────
   {
     method: "POST",
+    path: "/api/model-configs",
+    jsonSchema: toJsonSchema(createModelConfigSchema),
+    description: "Create model configuration",
+  },
+  {
+    method: "PATCH",
+    path: "/api/model-configs/{id}",
+    jsonSchema: toJsonSchema(updateModelConfigSchema),
+    description: "Update model configuration",
+  },
+  {
+    method: "POST",
     path: "/api/models",
     jsonSchema: toJsonSchema(createModelSchema),
     description: "Create model",
@@ -194,7 +207,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     method: "POST",
     path: "/api/models/apply",
     jsonSchema: toJsonSchema(applyModelChoiceSchema),
-    description: "Apply a model-provider choice",
+    description: "Apply a configuration's model choice",
   },
   {
     method: "PUT",

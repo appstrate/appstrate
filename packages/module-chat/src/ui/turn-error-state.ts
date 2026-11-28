@@ -29,6 +29,7 @@ import {
   refusalCode,
   type ClientTurnError,
 } from "../turn-error.ts";
+import type { PickerConfig } from "@appstrate/ui/components/model-picker-groups";
 import type { ChatCan, ChatTranslate } from "./runtime-context.ts";
 
 /**
@@ -136,16 +137,16 @@ function withFix(
   { text, memberText, policyDisabledText, fix, otherwise }: Fixable,
   t: ChatTranslate,
   can: ChatCan,
-  personalModelCredentials: boolean | undefined,
+  personalConnections: boolean | undefined,
 ): Pick<TurnErrorState, "text" | "action"> {
   const { permissions, label, href } = FIX[fix];
   const permitted = permissions.every((permission) => can(permission));
-  if (!permitted && otherwise) return withFix(otherwise, t, can, personalModelCredentials);
+  if (!permitted && otherwise) return withFix(otherwise, t, can, personalConnections);
   // Until the policy is known, neither the link nor the refusal is claimed.
-  if (fix === "personalModels" && personalModelCredentials === undefined) return { text: t(text) };
+  if (fix === "personalModels" && personalConnections === undefined) return { text: t(text) };
   // A personal credential cannot be added while the organization refuses them:
   // the link would lead to a form answering 403, so only the sentence is shown.
-  if (fix === "personalModels" && !personalModelCredentials)
+  if (fix === "personalModels" && !personalConnections)
     return {
       text: policyDisabledText
         ? t(policyDisabledText)
@@ -172,14 +173,28 @@ function classifiedState(
   reason: string | undefined,
   t: ChatTranslate,
   can: ChatCan,
-  personalModelCredentials: boolean | undefined,
+  personalConnections: boolean | undefined,
 ): Pick<TurnErrorState, "text" | "action"> {
   if (reason && Object.prototype.hasOwnProperty.call(TURN_ERROR_REASON_KEY, reason)) {
     return { text: t(TURN_ERROR_REASON_KEY[reason]!) };
   }
   return category === "credential_unavailable"
-    ? withFix(DEAD_CREDENTIAL, t, can, personalModelCredentials)
+    ? withFix(DEAD_CREDENTIAL, t, can, personalConnections)
     : { text: t(TURN_ERROR_KEY[category]) };
+}
+
+/**
+ * Whether the configuration of the model that failed lets members bring their own connection:
+ * the link to add one leads somewhere only then. `undefined` while the configurations or the
+ * model are not known; `false` for a model outside every configuration (a built-in, an alias).
+ */
+export function personalConnectionsAllowed(
+  configs: readonly Pick<PickerConfig, "id" | "personal_connections_allowed">[] | undefined,
+  model: { config_id?: string | null } | undefined,
+): boolean | undefined {
+  if (!configs || !model) return undefined;
+  const config = configs.find((candidate) => candidate.id === model.config_id);
+  return config?.personal_connections_allowed ?? false;
 }
 
 /** Errored outright, or cut by the deadline while failing (see `turnErrorState`). */
@@ -203,9 +218,9 @@ export function turnErrorState(
   message: AssistantState["message"],
   t: ChatTranslate,
   can: ChatCan,
-  // Whether the organization lets members bring personal model credentials
-  // (`personal_model_credentials`).
-  personalModelCredentials: boolean | undefined,
+  // Whether the failed model's configuration lets members bring their own connection
+  // (`personalConnectionsAllowed`), `undefined` until it is known.
+  personalConnections: boolean | undefined,
 ): TurnErrorState | null {
   const turn = turnMetadataFromMessage(sourceMessage(message));
   // A turn cut by the wall-clock ceiling can ALSO have been failing upstream
@@ -231,7 +246,7 @@ export function turnErrorState(
         turn.errorReason,
         t,
         can,
-        personalModelCredentials,
+        personalConnections,
       ),
       // Retry is a property of the CAUSE, not of the ceiling: a deadline turn
       // whose cause was rate limiting is retryable, one whose credential is
@@ -251,13 +266,7 @@ export function turnErrorState(
     const requestId = classified?.requestId ?? problemRequestId(err);
     if (classified) {
       return {
-        ...classifiedState(
-          classified.category,
-          classified.reason,
-          t,
-          can,
-          personalModelCredentials,
-        ),
+        ...classifiedState(classified.category, classified.reason, t, can, personalConnections),
         retryable: classified.retryable,
         requestId,
       };
@@ -269,9 +278,7 @@ export function turnErrorState(
       return { text: t("turn.error.unknown"), retryable: true, requestId };
     }
     return {
-      ...(refusal.fix
-        ? withFix(refusal, t, can, personalModelCredentials)
-        : { text: t(refusal.text) }),
+      ...(refusal.fix ? withFix(refusal, t, can, personalConnections) : { text: t(refusal.text) }),
       retryable: false,
       requestId,
     };

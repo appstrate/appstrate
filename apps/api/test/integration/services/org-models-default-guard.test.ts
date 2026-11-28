@@ -37,7 +37,7 @@ describe("org-models — the default model is never disabled", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
+      configId: cred.configId!,
       label: "GPT-4o",
       modelId: "gpt-4o",
       enabled: true,

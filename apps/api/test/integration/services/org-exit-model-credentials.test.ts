@@ -12,7 +12,7 @@ import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, modelProviderPairings } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
-import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
+import { seedModelConfigFor, seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
 import {
@@ -68,10 +68,12 @@ describe("leaving an organization — model provider credentials and pairings", 
     ctx = await createTestContext();
     leaver = await addMember(ctx);
     stayer = await addMember(ctx);
+    await seedModelConfigFor(ctx.orgId, OAUTH_PROVIDER);
   });
 
   it("deletes the leaver's personal credentials and pairings, keeps org credentials, the subscription they connected included", async () => {
     const orgCredentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -80,6 +82,7 @@ describe("leaving an organization — model provider credentials and pairings", 
       apiKey: "sk-org",
     });
     await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: leaver,
       label: "Leaver key",
@@ -120,6 +123,7 @@ describe("leaving an organization — model provider credentials and pairings", 
       ttlSeconds: 300,
     });
     const stayerKeyId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: stayer,
       label: "Stayer key",

@@ -126,6 +126,32 @@ const testApiKeyProvider: ModelProviderDefinition = {
   featuredModels: [],
 };
 
+/**
+ * A subscription wrapper whose catalog family is no registered provider (the shape of `codex`,
+ * family `openai-codex`): its configuration is stored under its own id. Not registered by default.
+ */
+export const TEST_FAMILYLESS_PROVIDER: ModelProviderDefinition = {
+  providerId: "test-familyless-oauth",
+  displayName: "Test Familyless OAuth",
+  iconUrl: "openai",
+  description: "Synthetic subscription provider whose family is not a registered provider.",
+  apiShape: "openai-responses",
+  defaultBaseUrl: "https://familyless.example.test/v1",
+  baseUrlOverridable: false,
+  authMode: "oauth2",
+  oauth: {
+    clientId: "test-familyless-client-id",
+    authorizationUrl: "https://auth.familyless.example.test/authorize",
+    tokenUrl: "https://auth.familyless.example.test/token",
+    refreshUrl: "https://auth.familyless.example.test/token",
+    scopes: ["openid"],
+    pkce: "S256",
+  },
+  catalogProviderId: "test-unregistered-family",
+  featuredModels: [],
+  modelDiscovery: { mode: "static" },
+};
+
 let registered = false;
 let hooksRegistered = false;
 let apiKeyRegistered = false;

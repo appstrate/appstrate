@@ -64,7 +64,7 @@ describe("chat proxy-routed path — session attribution via the loopback bearer
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: providerKey.id,
+      configId: providerKey.configId!,
       modelId: "gpt-4o-2024-08-06",
       enabled: true,
       cost: { input: 5, output: 15, cacheRead: 0, cacheWrite: 0 },

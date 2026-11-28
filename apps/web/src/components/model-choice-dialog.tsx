@@ -1,91 +1,72 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The dialog around « Choose the models »: an organization key's, the personal keys' per
- * service, and the second step of « Ajouter une clé org ». The list is `ModelChoiceList`; this owns
- * the footer, the write (`useApplyModelChoice`) and the refusals it can name.
+ * « Choisir les modèles » of a configuration. The list is `ModelChoiceList`; this owns the footer,
+ * the write (`useApplyModelChoice`) and the refusals it can name. A listing that asks the endpoint
+ * (`discover`) goes through the configuration's organization key, or, with none, a key typed here
+ * for the one request.
  *
- * The dialog opens once: each entry point renders one `Modal` whose body alone changes (waiting,
- * then the list; another service, another list). Swapping the `Modal` itself would replay its
- * backdrop and zoom.
+ * The dialog opens once: its body alone changes (waiting, then the list). Swapping the `Modal`
+ * itself would replay its backdrop and zoom.
  */
 
 import { PendingButton } from "@/components/app-ui/pending-button";
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { DialogFooter } from "@appstrate/ui/components/dialog";
 import { FieldError } from "@appstrate/ui/components/field";
+import { Input } from "@appstrate/ui/components/input";
 import { FormItem } from "@/components/app-ui/form-item";
-import { OptionSelect } from "@/components/app-ui/option-select";
 import { Modal } from "./modal";
 import { ErrorState } from "./page-states";
 import { TextSkeleton } from "./loading-skeletons";
 import { ModelChoiceList } from "./model-choice";
-import { useModelChoice, type DiscoverWith } from "../hooks/use-model-choice";
+import { useModelChoice } from "../hooks/use-model-choice";
+import { choiceRefusal, useApplyModelChoice } from "../hooks/use-apply-model-choice";
 import {
-  choiceRefusal,
-  useApplyModelChoice,
-  type NewProviderCredential,
-} from "../hooks/use-apply-model-choice";
-import {
+  useModelProviderCredentials,
   useProvidersRegistry,
-  type ModelProviderCredentialInfo,
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import { useModels, type OrgModelInfo } from "../hooks/use-models";
+import { connectionsOfConfig, modelsOfConfig, type ModelConfigInfo } from "../lib/model-configs";
+import type { DiscoverWith } from "../lib/model-discovery";
+import { modelSource } from "../lib/model-source";
 import { errorMessage } from "../lib/mutation-error";
-import { isSystemModel, memberModels } from "@/lib/model-providers";
-import { resolveProviderEntry } from "@/lib/provider-registry-helpers";
 
 interface ChoiceBodyProps {
-  /** A sentence under the title, before the list. */
-  intro?: ReactNode;
+  config: ModelConfigInfo;
   provider: ProviderRegistryEntry;
   existing: OrgModelInfo[];
-  /** Where the models live: an organization key, or none (each person's own). */
-  credentialId: string | null;
-  /** The organization key needs reconnecting: none of its models can become the default. */
-  credentialUnavailable?: boolean;
-  /** « Ajouter une clé org »: the key to mint with the models, and the way back to its form. */
-  newCredential?: NewProviderCredential;
-  onBack?: () => void;
-  discoverWith: DiscoverWith;
-  tickAll: boolean;
-  hasDefault: boolean;
-  submitLabel: string;
+  /** The configuration's usable organization API key, which a detection asks with. */
+  orgKeyId: string | null;
+  tickNew: boolean;
   onClose: () => void;
-  /** Where a saved model's finer settings open (the model form), by the model's id. */
+  /** After a save; without it a save closes the dialog. */
+  onSaved?: () => void;
   onAdvanced?: (modelId: string) => void;
-  /** Above the list: the service picker of the personal keys. */
-  header?: ReactNode;
 }
 
-/** The list and its footer, inside the entry point's `Modal`. */
 function ChoiceBody({
-  intro,
+  config,
   provider,
   existing,
-  credentialId,
-  credentialUnavailable,
-  newCredential,
-  onBack,
-  discoverWith,
-  tickAll,
-  hasDefault,
-  submitLabel,
+  orgKeyId,
+  tickNew,
   onClose,
+  onSaved,
   onAdvanced,
-  header,
 }: ChoiceBodyProps) {
   const { t } = useTranslation(["settings", "common"]);
-  const choice = useModelChoice({
-    provider,
-    existing,
-    discoverWith,
-    tickAll,
-    hasDefault,
-  });
+  const [inlineKey, setInlineKey] = useState("");
+  const asksKey = modelSource(provider) === "discover" && orgKeyId === null;
+  const discoverWith: DiscoverWith | null = orgKeyId
+    ? { credentialId: orgKeyId }
+    : inlineKey.trim()
+      ? { inlineApiKey: inlineKey, configId: config.id }
+      : null;
+  const choice = useModelChoice({ provider, existing, discoverWith, tickNew });
   const { apply, isPending } = useApplyModelChoice();
   const [failed, setFailed] = useState<{ ids: string[]; refusal: string | null } | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -94,12 +75,8 @@ function ChoiceBody({
     setFailed(null);
     setRefusal(null);
     try {
-      await apply({
-        plan: choice.plan,
-        target: { credentialId, providerId: provider.providerId },
-        ...(newCredential ? { newCredential } : {}),
-      });
-      onClose();
+      await apply({ plan: choice.plan, configId: config.id });
+      (onSaved ?? onClose)();
     } catch (err) {
       // Refused as a whole or entry by entry: either way nothing was written.
       const refused = choiceRefusal(err, choice.plan);
@@ -113,11 +90,24 @@ function ChoiceBody({
   return (
     <>
       <fieldset disabled={isPending} className="flex min-w-0 flex-col gap-3">
-        {intro && <p className="text-muted-foreground text-sm">{intro}</p>}
-        {header}
+        <p className="text-muted-foreground text-sm">{t("modelConfigs.choice.intro")}</p>
+        {asksKey && (
+          <FormItem
+            id="model-choice-key"
+            label={t("credentials.form.apiKey")}
+            hint={t("modelConfigs.choice.keyHint")}
+          >
+            <Input
+              type="password"
+              autoComplete="off"
+              value={inlineKey}
+              onChange={(e) => setInlineKey(e.target.value)}
+              placeholder={t("credentials.form.apiKeyPlaceholder")}
+            />
+          </FormItem>
+        )}
         <ModelChoiceList
           choice={choice}
-          defaultUnavailable={credentialUnavailable}
           advanced={
             onAdvanced
               ? {
@@ -141,12 +131,10 @@ function ChoiceBody({
         )}
       </fieldset>
       <ChoiceFooter
-        onBack={onBack}
         onClose={onClose}
-        submitLabel={submitLabel}
         onSubmit={() => void save()}
         pending={isPending}
-        submitDisabled={!tickAll && !choice.canSave}
+        submitDisabled={!choice.canSave}
       />
     </>
   );
@@ -154,16 +142,12 @@ function ChoiceBody({
 
 /** The footer, the same while the list waits (its submit off) and once it is there. */
 function ChoiceFooter({
-  onBack,
   onClose,
-  submitLabel,
   onSubmit,
   pending = false,
   submitDisabled,
 }: {
-  onBack?: () => void;
   onClose: () => void;
-  submitLabel: string;
   onSubmit?: () => void;
   pending?: boolean;
   submitDisabled: boolean;
@@ -171,197 +155,73 @@ function ChoiceFooter({
   const { t } = useTranslation(["settings", "common"]);
   return (
     <DialogFooter>
-      {onBack && (
-        <Button
-          type="button"
-          variant="outline"
-          className="mr-auto"
-          onClick={onBack}
-          disabled={pending}
-        >
-          {t("btn.back", { ns: "common" })}
-        </Button>
-      )}
       <Button type="button" variant="outline" onClick={onClose}>
         {t("btn.cancel")}
       </Button>
       <PendingButton type="button" onClick={onSubmit} pending={pending} disabled={submitDisabled}>
-        {submitLabel}
+        {t("btn.save")}
       </PendingButton>
     </DialogFooter>
   );
 }
 
-/** The body's stand-in while what it lists is loading, failed to load, or names no provider. */
-function ChoiceGate({
-  error,
-  unavailable = false,
-  onBack,
+/**
+ * The models of a configuration. Mounted only while open. `tickNew`: the configuration was just
+ * made, its recommended models start ticked.
+ */
+export function ModelChoiceDialog({
+  config,
+  tickNew = false,
   onClose,
-  submitLabel,
-}: {
-  error: unknown;
-  unavailable?: boolean;
-  onBack?: () => void;
-  onClose: () => void;
-  submitLabel: string;
-}) {
-  const { t } = useTranslation("settings");
-  return (
-    <>
-      {error ? (
-        <ErrorState error={error} compact />
-      ) : unavailable ? (
-        <ErrorState message={t("models.form.providerUnavailable")} compact />
-      ) : (
-        <TextSkeleton lines={4} className="py-2" />
-      )}
-      <ChoiceFooter onBack={onBack} onClose={onClose} submitLabel={submitLabel} submitDisabled />
-    </>
-  );
-}
-
-/** The models an organization key serves. Mounted only while open. */
-export function ProviderModelsModal({
-  credential,
-  onClose,
+  onSaved,
   onAdvanced,
 }: {
-  credential: ModelProviderCredentialInfo;
+  config: ModelConfigInfo;
+  tickNew?: boolean;
+  /** Cancel, Escape, the close button: nothing was saved. */
   onClose: () => void;
-  onAdvanced: (modelId: string) => void;
+  /** A save went through; absent, `onClose` runs. */
+  onSaved?: () => void;
+  /** Where a saved model's finer settings open (the model form), by the model's id. */
+  onAdvanced?: (modelId: string) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
   const modelsQuery = useModels();
+  const credentialsQuery = useModelProviderCredentials();
   const registry = registryQuery.data;
-  const provider = registry ? resolveProviderEntry(credential, registry) : undefined;
   const models = modelsQuery.data;
-
-  return (
-    // The key's label is known before the lists: the title does not change when they arrive.
-    <Modal onClose={onClose} title={t("models.choice.titleOf", { name: credential.label })}>
-      {!registry || !models || !provider ? (
-        <ChoiceGate
-          error={registryQuery.error ?? modelsQuery.error}
-          unavailable={!!registry && !!models}
-          onClose={onClose}
-          submitLabel={t("btn.save")}
-        />
-      ) : (
-        <ChoiceBody
-          intro={t("models.choice.orgIntro", { service: provider.displayName })}
-          provider={provider}
-          existing={models.filter((m) => m.credentialId === credential.id && !isSystemModel(m))}
-          credentialId={credential.id}
-          credentialUnavailable={credential.needs_reconnection === true}
-          discoverWith={{ credentialId: credential.id }}
-          tickAll={false}
-          hasDefault={models.some((m) => m.is_default)}
-          submitLabel={t("btn.save")}
-          onClose={onClose}
-          onAdvanced={onAdvanced}
-        />
-      )}
-    </Modal>
+  const provider = registry?.find((p) => p.providerId === config.provider_id);
+  // The organization's key decides whether the key field shows: the body waits for the connections.
+  const error = registryQuery.error ?? modelsQuery.error ?? credentialsQuery.error;
+  const orgKey = connectionsOfConfig(credentialsQuery.data ?? [], config.id).org.find(
+    (c) => c.authMode === "api_key" && !c.needs_reconnection,
   );
-}
-
-/** The models usable with a personal key, per service. Mounted only while open. */
-export function PersonalModelsModal({
-  services,
-  providerId,
-  onChangeService,
-  onClose,
-  onAdvanced,
-}: {
-  /** The services whose models may be left to each person's own key (`personalModelServices`). */
-  services: ProviderRegistryEntry[];
-  providerId: string;
-  onChangeService: (providerId: string) => void;
-  onClose: () => void;
-  onAdvanced: (modelId: string) => void;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  const modelsQuery = useModels();
-  const provider = services.find((s) => s.providerId === providerId) ?? services[0];
-  const models = modelsQuery.data;
 
   return (
-    <Modal onClose={onClose} title={t("models.choice.personalTitle")}>
-      {!models || !provider ? (
-        <ChoiceGate error={modelsQuery.error} onClose={onClose} submitLabel={t("btn.save")} />
+    // The configuration's label is known before the lists: the title does not change when they arrive.
+    <Modal onClose={onClose} title={t("modelConfigs.choice.title", { label: config.label })}>
+      {error || !registry || !models || !provider || credentialsQuery.isLoading ? (
+        <>
+          {error ? (
+            <ErrorState error={error} compact />
+          ) : registry && models && !credentialsQuery.isLoading ? (
+            <ErrorState message={t("models.form.providerUnavailable")} compact />
+          ) : (
+            <TextSkeleton lines={4} className="py-2" />
+          )}
+          <ChoiceFooter onClose={onClose} submitDisabled />
+        </>
       ) : (
         <ChoiceBody
-          // A service has its own list, ticks and detection: another service starts the body
-          // over, inside the same dialog.
-          key={provider.providerId}
-          intro={t("models.choice.personalIntro")}
+          config={config}
           provider={provider}
-          existing={memberModels(models).filter((m) => m.providerId === provider.providerId)}
-          credentialId={null}
-          discoverWith={null}
-          tickAll={false}
-          hasDefault={models.some((m) => m.is_default)}
-          submitLabel={t("btn.save")}
+          existing={modelsOfConfig(models, config.id)}
+          orgKeyId={orgKey?.id ?? null}
+          tickNew={tickNew}
           onClose={onClose}
+          onSaved={onSaved}
           onAdvanced={onAdvanced}
-          header={
-            <FormItem id="personal-models-service" label={t("providers.col.provider")}>
-              <OptionSelect
-                value={provider.providerId}
-                onValueChange={onChangeService}
-                options={services.map((service) => ({
-                  value: service.providerId,
-                  label: service.displayName,
-                }))}
-              />
-            </FormItem>
-          }
-        />
-      )}
-    </Modal>
-  );
-}
-
-/** Step 2 of « Ajouter une clé org »: the models the new key makes available, all ticked. */
-export function NewProviderModelsModal({
-  draft,
-  onBack,
-  onClose,
-}: {
-  draft: NewProviderCredential;
-  onBack: () => void;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  const registryQuery = useProvidersRegistry();
-  const modelsQuery = useModels();
-  const provider = registryQuery.data?.find((p) => p.providerId === draft.providerId);
-
-  return (
-    <Modal onClose={onClose} title={t("credentials.form.title")}>
-      {!registryQuery.data || !modelsQuery.data || !provider ? (
-        <ChoiceGate
-          error={registryQuery.error ?? modelsQuery.error}
-          unavailable={!!registryQuery.data && !!modelsQuery.data}
-          onBack={onBack}
-          onClose={onClose}
-          submitLabel={t("credentials.add")}
-        />
-      ) : (
-        <ChoiceBody
-          intro={t("models.choice.newIntro", { service: provider.displayName })}
-          provider={provider}
-          existing={[]}
-          credentialId={null}
-          newCredential={draft}
-          onBack={onBack}
-          discoverWith={{ inlineApiKey: draft.apiKey, baseUrl: draft.baseUrlOverride ?? "" }}
-          tickAll
-          hasDefault={modelsQuery.data.some((m) => m.is_default)}
-          submitLabel={t("credentials.add")}
-          onClose={onClose}
         />
       )}
     </Modal>

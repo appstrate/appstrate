@@ -271,14 +271,63 @@ export const orgProxies = pgTable(
 );
 
 /**
+ * A model configuration: what the organization offers of one catalog family
+ * (`familyOf`, `catalogProviderId ?? providerId`), or of one endpoint of a gateway
+ * provider (`baseUrlOverridable`). Its connections (`model_provider_credentials.config_id`)
+ * hold the secrets, its models (`org_models.config_id`) the ids it offers.
+ *
+ * `provider_id` is the family's representative registry key (`configProviderOf`):
+ * `anthropic` takes an Anthropic API key and a Claude Code subscription alike.
+ * `base_url` is set for a gateway only: the endpoint is the configuration's, so a
+ * member's own connection to it sends traffic where the organization chose.
+ * `personal_connections_allowed` lets members bring their own connection; turning
+ * it off keeps their connections but they stop serving.
+ *
+ * Which provider fits which configuration lives in the registry (code), so the
+ * service guards it at creation and pairing; SQL cannot.
+ */
+export const modelConfigs = pgTable(
+  "model_configs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    providerId: text("provider_id").notNull(),
+    label: text("label").notNull(),
+    baseUrl: text("base_url"),
+    personalConnectionsAllowed: boolean("personal_connections_allowed").notNull().default(true),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_model_configs_org_id").on(t.orgId),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    index("idx_model_configs_created_by").on(t.createdBy),
+    // One configuration per catalog family, and one per endpoint of a gateway.
+    uniqueIndex("uq_model_configs_family")
+      .on(t.orgId, t.providerId)
+      .where(sql`${t.baseUrl} IS NULL`),
+    uniqueIndex("uq_model_configs_endpoint")
+      .on(t.orgId, t.providerId, t.baseUrl)
+      .where(sql`${t.baseUrl} IS NOT NULL`),
+    // Target of the composite `(config_id, org_id)` FKs below: a connection, a model or a
+    // pairing can only point at a configuration of its own organization.
+    uniqueIndex("uq_model_configs_id_org_id").on(t.id, t.orgId),
+  ],
+);
+
+/**
  * Unified credentials table for LLM model providers (API-key + OAuth alike).
  *
  * The sole credential store. `provider_id` is a free-text registry key (e.g. "openai",
  * "anthropic") — NOT a FK to `packages.id`. Inference wire format and default
  * base URL are read from the platform registry
  * (`apps/api/src/services/model-providers/registry.ts`) keyed by
- * `provider_id`. `base_url_override` is honored only for providers whose
- * registry entry has `baseUrlOverridable: true` (e.g. "openai-compatible").
+ * `provider_id`, which is the connection's TYPE (an Anthropic API key and a Claude Code
+ * subscription both serve the `anthropic` configuration). The endpoint is the
+ * configuration's (`model_configs.base_url`).
  *
  * The encrypted blob's plaintext is a tagged union:
  *   { kind: "api_key", apiKey: string }
@@ -298,7 +347,17 @@ export const modelProviderCredentials = pgTable(
     label: text("label").notNull(),
     providerId: text("provider_id").notNull(),
     credentialsEncrypted: text("credentials_encrypted").notNull(),
+    /**
+     * RETIRED — the endpoint is the configuration's (`model_configs.base_url`). Only
+     * `scripts/migration/0062-model-configs.ts` reads it; the follow-up release drops it.
+     */
     baseUrlOverride: text("base_url_override"),
+    /**
+     * The configuration this connection serves. Nullable only until script 0062 has
+     * filled every row (the boot guard refuses to start before); the follow-up release
+     * sets NOT NULL.
+     */
+    configId: uuid("config_id"),
     /**
      * Denormalized OAuth token expiry — duplicates `blob.expiresAt` from the
      * encrypted blob to enable an efficient SQL filter in the background
@@ -350,9 +409,10 @@ export const modelProviderCredentials = pgTable(
     // did refresh last fail" is ever needed, build the reader first — a column
     // with no reader is not telemetry, it is write amplification.
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
-    // NULL = organization credential: bindable to a model, serves every caller. Set = personal
-    // credential of that user: usable only by them, on their own runs, and deleted with their
-    // account. The rule is the same for an API key and for a subscription (OAuth).
+    // NULL = organization connection: serves every model of its configuration, for every caller.
+    // Set = personal connection of that user: usable only by them, on their own calls, while its
+    // configuration allows personal connections, and deleted with their account. The rule is the
+    // same for an API key and for a subscription (OAuth).
     ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -369,8 +429,14 @@ export const modelProviderCredentials = pgTable(
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_model_provider_credentials_created_by").on(t.createdBy),
-    // Target of `org_models_credential_provider_fk`: a model's provider is its credential's.
-    uniqueIndex("uq_model_provider_credentials_id_provider_id").on(t.id, t.providerId),
+    index("idx_model_provider_credentials_config_id").on(t.configId),
+    // Tenant integrity: the configuration belongs to the row's organization. NULL `config_id`
+    // passes (MATCH SIMPLE) while the column is nullable.
+    foreignKey({
+      name: "model_provider_credentials_config_id_org_id_fk",
+      columns: [t.configId, t.orgId],
+      foreignColumns: [modelConfigs.id, modelConfigs.orgId],
+    }).onDelete("cascade"),
     check(
       "model_provider_credentials_needs_reconnection_cause_valid",
       sql`needs_reconnection_cause IS NULL OR needs_reconnection_cause IN (${sql.raw(CREDENTIAL_DEATH_CAUSES.map((v) => `'${v}'`).join(", "))})`,
@@ -448,6 +514,11 @@ export const modelProviderPairings = pgTable(
      * target id and fail instead of silently falling back to create mode.
      */
     reconnectCredentialId: uuid("reconnect_credential_id"),
+    /**
+     * The configuration a new connection joins, when the mint named one. NULL: the
+     * redeem finds or creates the provider's configuration (`ensureModelConfig`).
+     */
+    configId: uuid("config_id"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /** When the token was redeemed, whether or not the redeem produced a credential. NULL = never redeemed. */
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
@@ -478,6 +549,14 @@ export const modelProviderPairings = pgTable(
   },
   (table) => [
     index("idx_model_provider_pairings_org_id").on(table.orgId),
+    index("idx_model_provider_pairings_config_id").on(table.configId),
+    // Tenant integrity: the configuration belongs to the row's organization. NULL `config_id`
+    // passes (MATCH SIMPLE) while the column is nullable.
+    foreignKey({
+      name: "model_provider_pairings_config_id_org_id_fk",
+      columns: [table.configId, table.orgId],
+      foreignColumns: [modelConfigs.id, modelConfigs.orgId],
+    }).onDelete("cascade"),
     // NOTE — there is deliberately no `expires_at` index.
     //
     // There was one, partial on `consumed_at IS NULL`, justified as "only
@@ -534,20 +613,19 @@ export const orgModels = pgTable(
     label: text("label").notNull(),
     modelId: text("model_id").notNull(),
     /**
-     * The provider serving this model, written from the bound credential and
-     * kept when the binding is removed. `apiShape` and the default `baseUrl`
-     * are resolved from the runtime registry (`getModelProvider`) at read
-     * time; `baseUrlOverride` (on the credential row) is honored when
-     * `baseUrlOverridable: true`.
+     * The configuration offering this model; its connections serve it. Nullable only
+     * until script 0062 has filled every row (the boot guard refuses to start before);
+     * the follow-up release sets NOT NULL.
      */
-    providerId: text("provider_id").notNull(),
+    configId: uuid("config_id"),
     /**
-     * The bound credential, an organization one (`owner_user_id IS NULL`), API
-     * key or subscription, whose provider is `providerId`
-     * (`org_models_credential_provider_fk`). ON DELETE RESTRICT: deleting a
-     * credential a model still references is rejected so the API can surface a
-     * clear error. NULL: each member brings their own personal credential for
-     * `providerId`.
+     * RETIRED — the provider is the configuration's. Only
+     * `scripts/migration/0062-model-configs.ts` reads it; the follow-up release drops it.
+     */
+    providerId: text("provider_id"),
+    /**
+     * RETIRED — a model is served by its configuration's connections, not bound to one.
+     * Only `scripts/migration/0062-model-configs.ts` reads it; the follow-up release drops it.
      */
     credentialId: uuid("credential_id"),
     input: jsonb("input").$type<ModelInputModality[]>(),
@@ -557,7 +635,7 @@ export const orgModels = pgTable(
     cost: jsonb("cost").$type<ModelCost>(), // $/M tokens
     enabled: boolean("enabled").notNull().default(true),
     // Model-alias flag (LLM-gateway alias pattern). When true, this row's `id`
-    // is a public alias and its real binding (`modelId` + the credential's
+    // is a public alias and its real binding (`modelId` + the configuration's
     // provider/baseUrl) is stripped from user-facing surfaces; the sidecar
     // rewrites the `model` field in both directions. The real id stays
     // server-side (resolution + private `llm_usage` ledger).
@@ -576,24 +654,19 @@ export const orgModels = pgTable(
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_org_models_created_by").on(table.createdBy),
-    // One direct row per (org, credential, model), so usage cannot split across
-    // duplicate bindings. Deliberate aliases keep their own reporting identity.
-    // Migration 0062 documents the concurrency invariant and existing-row repair.
-    uniqueIndex("uq_org_models_unaliased_binding")
-      .on(table.orgId, table.credentialId, table.modelId)
-      .where(sql`${table.aliased} = false`),
-    // The same for a model each member serves with their own credential (no
-    // binding): one row per (org, provider, model). An alias always has a binding
-    // (`org_models_alias_bound`).
-    uniqueIndex("uq_org_models_unbound")
-      .on(table.orgId, table.providerId, table.modelId)
-      .where(sql`${table.credentialId} IS NULL`),
-    check("org_models_source_valid", sql`source IN ('built-in', 'custom')`),
-    check("org_models_alias_bound", sql`NOT aliased OR credential_id IS NOT NULL`),
+    index("idx_org_models_config_id").on(table.configId),
+    // Tenant integrity: the configuration belongs to the row's organization. NULL `config_id`
+    // passes (MATCH SIMPLE) while the column is nullable.
     foreignKey({
-      columns: [table.credentialId, table.providerId],
-      foreignColumns: [modelProviderCredentials.id, modelProviderCredentials.providerId],
-      name: "org_models_credential_provider_fk",
-    }).onDelete("restrict"),
+      name: "org_models_config_id_org_id_fk",
+      columns: [table.configId, table.orgId],
+      foreignColumns: [modelConfigs.id, modelConfigs.orgId],
+    }).onDelete("cascade"),
+    // One direct row per (configuration, model), so usage cannot split across
+    // duplicates. Deliberate aliases keep their own reporting identity.
+    uniqueIndex("uq_org_models_config_model")
+      .on(table.configId, table.modelId)
+      .where(sql`${table.aliased} = false`),
+    check("org_models_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );

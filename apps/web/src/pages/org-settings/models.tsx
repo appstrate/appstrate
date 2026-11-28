@@ -1,301 +1,310 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Settings › Models: the organization's providers, in two tabs. A connected provider makes its
- * models available (`lib/model-providers.ts`).
+ * Settings › Models: the organization's default model, then its model configurations, then the
+ * instance's own models.
  *
- * - **Clés org**: the organization's keys, and the instance's own models. An organization key
- *   serves the models bound to it, the instance serves the ones it ships.
- * - **Clés perso**: the setting that lets people use a key or a subscription of their own, one
- *   row per service open to them (its models, and who plugged a key in), then the personal keys
- *   themselves, each with what the server lets the caller do with it (`allowed_actions`).
+ * A **configuration** is a service the organization set up (its label, a gateway's endpoint, its
+ * models, whether members may connect their own); its **connections** (the organization's, the
+ * members') serve its models (`lib/model-configs.ts`). One row per configuration, collapsed to
+ * its state and the repair it needs, open on its connections and models.
  *
- * A model's own deeds (test, delete, its finer settings) are in its form, opened from « Choose the
- * models »; the instance's models are tested from its row, and the aliases the organization added
- * to it deleted there.
- *
- * The tab lives in the URL (`?tab=personal`), like the roles page's.
+ * A model's own deeds (test, delete, its finer settings) are in its form, opened from its chip or
+ * from « Choisir les modèles ».
  */
 
-import { useMemo, useState } from "react";
-import { useQueryTab } from "../../hooks/use-query-tab";
-import { useTranslation } from "react-i18next";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
-import { Plus } from "lucide-react";
-import { cn } from "@appstrate/ui/cn";
-import { usePermissions } from "../../hooks/use-permissions";
+import { useTranslation } from "react-i18next";
+import { Boxes, Plus, Sparkles } from "lucide-react";
 import {
-  useDeleteModel,
-  useModels,
-  useSetDefaultModel,
-  type OrgModelInfo,
-} from "../../hooks/use-models";
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@appstrate/ui/components/item";
+import { usePermissions } from "../../hooks/use-permissions";
+import { useDeleteModel, useModels, type OrgModelInfo } from "../../hooks/use-models";
+import {
+  useDeleteModelConfig,
+  useModelConfigs,
+  useUpdateModelConfig,
+} from "../../hooks/use-model-configs";
 import {
   useModelProviderCredentials,
   useProvidersRegistry,
   useUpdateModelProviderCredential,
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
-import { useOrgSettings } from "../../hooks/use-org-settings";
-import { useUrlModal, useUrlModalTarget } from "../../hooks/use-url-modal";
-import { ModelFormModal } from "../../components/model-form-modal";
-import { CredentialFormModal } from "../../components/credential-form-modal";
-import { DeleteKeyConfirm } from "../../components/delete-key-confirm";
-import { ConfirmModal } from "../../components/confirm-modal";
-import { CollectionTabs } from "../../components/detail-tabs";
-import { PreferencesModelsLink } from "../../components/preferences-models-link";
-import { EmptyStateAction } from "../../components/page-states";
-import { ProvidersTable } from "../../components/providers-table";
-import { PersonalServicesTable } from "../../components/personal-services-table";
-import { ProviderAddFlow } from "../../components/provider-add-flow";
-import { PersonalModelsModal, ProviderModelsModal } from "../../components/model-choice-dialog";
-import { SettingsPageActions } from "../../components/settings/settings-page-actions";
-import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
-import { SettingsGroup } from "../../components/settings/setting-row";
-import type { MenuAction } from "../../lib/menu-action";
-import { errorMessage } from "../../lib/mutation-error";
-import { credentialUpdateBody } from "../../lib/personal-model-credentials";
 import {
-  isSystemModel,
-  personalModelServices,
-  personalServiceRows,
-  providerRows,
-  type ProviderRow,
-} from "../../lib/model-providers";
+  CredentialFormModal,
+  type ConnectionFormTarget,
+} from "../../components/credential-form-modal";
+import { ConfirmModal } from "../../components/confirm-modal";
+import { DeleteKeyConfirm } from "../../components/delete-key-confirm";
+import { ModelChoiceDialog } from "../../components/model-choice-dialog";
+import { ModelFormModal } from "../../components/model-form-modal";
+import { EmptyState, EmptyStateAction, ErrorState } from "../../components/page-states";
+import { ModelsPageSkeleton } from "../../components/loading-skeletons";
+import { ConfigStateBadge, ModelConfigRow } from "../../components/model-configs/model-config-row";
+import { DefaultModelSetting } from "../../components/model-configs/default-model-setting";
+import { ModelConfigEndpointDialog } from "../../components/model-configs/model-config-dialogs";
+import { AddConfigFlow } from "../../components/model-configs/add-config-flow";
+import { ModelChips } from "../../components/model-configs/model-chips";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
+import { SettingsGroup } from "../../components/settings/setting-row";
+import { SettingsHeading } from "../../components/settings/settings-heading";
+import { IDLE_WRITE, fieldWriteState } from "../../lib/field-write-state";
+import type { MenuAction } from "../../lib/menu-action";
+import { ownPersonalCredentials } from "../../lib/personal-model-credentials";
 import { authStore } from "../../stores/auth-store";
-
-const MODELS_TABS = ["org", "personal"] as const;
+import {
+  configUpdateBody,
+  connectChoices,
+  connectionLabelBody,
+  connectionsOfConfig,
+  isSystemModel,
+  modelsOfConfig,
+  systemModels,
+} from "../../lib/model-configs";
 
 export function OrgSettingsModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
-  const userId = useStore(authStore, (s) => s.user?.id);
-
   const canWriteModels = can("models:write");
   const canDeleteModels = can("models:delete");
-  const canReadCredentials = can("model-provider-credentials:read");
   const canWriteCredentials = can("model-provider-credentials:write");
   const canConnect = can("model-provider-credentials:connect");
+  // `connect` alone lists only the caller's own: the organization's are counted under `read`.
+  const canReadCredentials = can("model-provider-credentials:read");
 
-  const { data: models, isLoading: modelsLoading, error: modelsError } = useModels();
-  const [deleteKeyId, setDeleteKeyId] = useState<string | null>(null);
-  const {
-    data: credentials,
-    isLoading: pkLoading,
-    error: pkError,
-    isPaused: pkPaused,
-  } = useModelProviderCredentials(deleteKeyId ? "always" : false);
-  // A row is a key and its models: either read failing leaves the table wrong, so both surface.
-  const tableError = modelsError ?? pkError;
-  const { data: registry } = useProvidersRegistry();
-  const { data: orgSettings, isLoading: settingsLoading } = useOrgSettings();
+  const userId = useStore(authStore, (s) => s.user?.id);
 
-  const [addingProvider, setAddingProvider] = useState(false);
-  const editKey = useUrlModalTarget("editCredential", credentials);
-  const chooseModels = useUrlModalTarget("models", credentials);
-  const personalModels = useUrlModal("personalModels");
-  // The form edits what a list offers: never a model the instance ships.
+  const modelsQuery = useModels();
+  const configsQuery = useModelConfigs();
+  const credentialsQuery = useModelProviderCredentials();
+  const registryQuery = useProvidersRegistry();
+  const registry = registryQuery.data;
+  const models = modelsQuery.data;
+  const configs = configsQuery.data;
+  const credentials = credentialsQuery.data ?? [];
+  const own = ownPersonalCredentials(credentials, userId);
+  const countsOrgConnections = canReadCredentials && credentialsQuery.data !== undefined;
+
+  const updateConfig = useUpdateModelConfig();
+  const deleteConfig = useDeleteModelConfig();
+  const updateCredential = useUpdateModelProviderCredential();
+  const deleteModel = useDeleteModel();
+
+  const [adding, setAdding] = useState(false);
+  /** The rows the person opened, and the configuration just made or asked for (opened, shown). */
+  const [openIds, setOpenIds] = useState<ReadonlySet<string>>(new Set());
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [choosingId, setChoosingId] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState<ConnectionFormTarget | null>(null);
+  const [endpointId, setEndpointId] = useState<string | null>(null);
+  const [deletingConfigId, setDeletingConfigId] = useState<string | null>(null);
+  const [deletingConnection, setDeletingConnection] = useState<ModelProviderCredentialInfo | null>(
+    null,
+  );
+  // The form edits what a configuration offers: never a model the instance ships.
   const [editModelId, setEditModelId] = useState<string | null>(null);
+  const [deletingModel, setDeletingModel] = useState<OrgModelInfo | null>(null);
+
+  const configOf = (id: string | null) => configs?.find((c) => c.id === id);
+  const choosingConfig = configOf(choosingId);
+  const endpointConfig = configOf(endpointId);
+  const deletingConfig = configOf(deletingConfigId);
   const editTarget = useMemo(
     () => models?.find((m) => m.id === editModelId && !isSystemModel(m)),
     [models, editModelId],
   );
 
-  const [tab, setTab] = useQueryTab("tab", MODELS_TABS);
-
-  const confirmDelete = credentials?.find((key) => key.id === deleteKeyId);
-  const [deletingModel, setDeletingModel] = useState<OrgModelInfo | null>(null);
-  const updateCredential = useUpdateModelProviderCredential();
-  // The key form shows its refusal inline; a rename goes through the cache's toast.
-  const editKeyCredential = useUpdateModelProviderCredential({ errorHandledByCaller: true });
-  const setDefault = useSetDefaultModel();
-  const deleteModel = useDeleteModel();
-
-  const { orgRows, personalRows } = useMemo(() => {
-    const rows = providerRows(models ?? [], credentials ?? [], registry ?? [], userId);
-    const isOrg = (row: ProviderRow) => row.kind === "org-key" || row.kind === "system";
-    return { orgRows: rows.filter(isOrg), personalRows: rows.filter((row) => !isOrg(row)) };
-  }, [models, credentials, registry, userId]);
-  const serviceRows = useMemo(
-    () => personalServiceRows(models ?? [], credentials ?? [], registry ?? [], userId),
-    [models, credentials, registry, userId],
-  );
-  const personalServices = personalModelServices(registry ?? []);
-  // « Open a service » starts on one that is not open yet.
-  const nextService = (
-    personalServices.find((s) => !serviceRows.some((r) => r.id === s.providerId)) ??
-    personalServices[0]
-  )?.providerId;
-
-  const personalAllowed = orgSettings?.personal_model_credentials === true;
-  // Known off: the table stays, greyed. Unknown (the setting did not load) is not off.
-  const personalOff = orgSettings?.personal_model_credentials === false;
-
-  /** A key's menu, the organization's or a person's: the row offers what the server allows. */
-  const keyDeeds = {
-    onRename: async (pk: ModelProviderCredentialInfo, label: string) => {
-      // A refusal is toasted by the mutation cache; the rejection keeps the label being typed.
-      await updateCredential.mutateAsync({ params: { path: { id: pk.id } }, body: { label } });
-    },
-    onChangeKey: (pk: ModelProviderCredentialInfo) => editKey.open(pk.id),
-    onReconnect: (pk: ModelProviderCredentialInfo) => editKey.open(pk.id),
-    onDelete: (key: ModelProviderCredentialInfo) => setDeleteKeyId(key.id),
-  };
-
-  const addCredential: MenuAction = {
-    id: "create-credential",
+  const addConfig: MenuAction = {
+    id: "add-model-config",
     icon: Plus,
-    label: t("credentials.add"),
-    onSelect: () => setAddingProvider(true),
-    hidden: !canWriteCredentials,
-  };
-  // The deed of the tab in view; a member who may write nothing has no menu.
-  const allowPersonalModels: MenuAction = {
-    id: "open-personal-service",
-    icon: Plus,
-    label: t("providers.allowPersonalModels"),
-    onSelect: () => nextService && personalModels.open(nextService),
-    hidden: !canWriteModels || !nextService,
+    label: t("modelConfigs.add.action"),
+    onSelect: () => setAdding(true),
+    hidden: !canWriteModels,
   };
 
-  const emptyOrg = {
-    message: t("providers.empty"),
-    hint: canWriteCredentials ? undefined : t("providers.emptyAskAdmin"),
-    action: <EmptyStateAction action={addCredential} />,
+  const error =
+    modelsQuery.error ?? configsQuery.error ?? credentialsQuery.error ?? registryQuery.error;
+  // A row drawn before its connections and its registry entry would show them empty.
+  const loading = !models || !configs || credentialsQuery.isLoading || registryQuery.isLoading;
+  const system = systemModels(models ?? []);
+
+  const setOpen = (id: string, open: boolean) =>
+    setOpenIds((ids) => {
+      const next = new Set(ids);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  const focus = (id: string) => {
+    setOpen(id, true);
+    setFocusedId(id);
   };
+  // A configuration just made or asked for comes into view once its row exists.
+  const focusedRendered = !loading && configs.some((c) => c.id === focusedId);
+  useEffect(() => {
+    if (!focusedId || !focusedRendered) return;
+    document
+      .querySelector(`[data-config-id="${CSS.escape(focusedId)}"]`)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [focusedId, focusedRendered]);
 
   return (
     <>
-      <SettingsPageActions actions={[tab === "org" ? addCredential : allowPersonalModels]} />
+      <SettingsPageActions actions={[addConfig]} />
 
-      <div className="mb-6">
-        <CollectionTabs
-          value={tab}
-          label={t("providers.tabTitle")}
-          onChange={setTab}
-          options={[
-            { value: "org", label: t("providers.tabOrg") },
-            { value: "personal", label: t("providers.tabPersonal") },
-          ]}
-        />
-      </div>
-
-      {tab === "org" && (
-        <div className="mb-8">
-          <ProvidersTable
-            tableId="org-model-keys"
-            label={t("providers.tabOrg")}
-            rows={orgRows}
-            isLoading={modelsLoading || (canReadCredentials && pkLoading)}
-            error={tableError}
-            empty={emptyOrg}
-            canWriteModels={canWriteModels}
-            {...keyDeeds}
-            onChooseModels={(pk) => chooseModels.open(pk.id)}
-            onSetDefault={(m: OrgModelInfo) => setDefault.mutate({ body: { modelId: m.id } })}
-            onDeleteModel={canDeleteModels ? setDeletingModel : undefined}
-          />
-        </div>
-      )}
-
-      {tab === "personal" && (
+      {error ? (
+        <ErrorState error={error} />
+      ) : loading ? (
+        <ModelsPageSkeleton />
+      ) : (
         <>
-          {(can("org:settings") || canWriteModels) && (
-            <SettingsGroup className="mb-6">
-              <PersonalCredentialsSetting />
-            </SettingsGroup>
-          )}
-          {/* Until the setting is read, the table waits in its own rows, where it will stand. */}
-          <>
-            {personalOff && (
-              <p className="text-muted-foreground mb-3 text-sm">{t("providers.personalOff")}</p>
+          <SettingsGroup>
+            <DefaultModelSetting
+              models={models}
+              configs={configs}
+              credentials={canReadCredentials ? credentialsQuery.data : undefined}
+              registry={registry ?? []}
+              canWrite={canWriteModels}
+            />
+          </SettingsGroup>
+
+          <SettingsHeading level="group" title={t("modelConfigs.title")} />
+          <div className="flex flex-col gap-2">
+            {configs.length === 0 && (
+              <EmptyState
+                icon={Boxes}
+                message={t("modelConfigs.empty")}
+                hint={canWriteModels ? undefined : t("modelConfigs.emptyAskAdmin")}
+              >
+                <EmptyStateAction action={addConfig} />
+              </EmptyState>
             )}
-            <div inert={personalOff} className={cn("mb-6", personalOff && "opacity-50")}>
-              <PersonalServicesTable
-                rows={serviceRows}
-                isLoading={settingsLoading || modelsLoading || (canReadCredentials && pkLoading)}
-                error={tableError}
-                canWriteModels={canWriteModels}
-                onChooseModels={(row) => personalModels.open(row.id)}
-              />
-            </div>
-            {/* Outside the greyed table: a key already held is deleted whatever the setting says. */}
-            {canReadCredentials && personalRows.length > 0 && (
-              <section className="mb-6">
-                <h3 className="mb-3 text-sm font-semibold">{t("providers.memberKeys")}</h3>
-                <ProvidersTable
-                  tableId="member-model-keys"
-                  label={t("providers.memberKeys")}
-                  rows={personalRows}
-                  showType
-                  isLoading={false}
-                  error={null}
-                  empty={{ message: t("modelCredentials.empty") }}
-                  canWriteModels={false}
-                  {...keyDeeds}
+            {configs.map((config) => {
+              const connections = connectionsOfConfig(credentials, config.id);
+              return (
+                <ModelConfigRow
+                  key={config.id}
+                  config={config}
+                  provider={registry?.find((p) => p.providerId === config.provider_id)}
+                  models={modelsOfConfig(models, config.id)}
+                  connections={connections}
+                  orgConnectionCount={countsOrgConnections ? connections.org.length : null}
+                  can={{ writeModels: canWriteModels, deleteModels: canDeleteModels }}
+                  choices={connectChoices(
+                    config,
+                    registry ?? [],
+                    { org: canWriteCredentials, personal: canConnect },
+                    own,
+                  )}
+                  open={openIds.has(config.id)}
+                  onOpenChange={(open) => setOpen(config.id, open)}
+                  personalWrite={
+                    updateConfig.variables?.params.path.id === config.id
+                      ? fieldWriteState(updateConfig, "personal_connections_allowed")
+                      : IDLE_WRITE
+                  }
+                  onConnect={(choice) =>
+                    setConnecting({
+                      kind: "create",
+                      config,
+                      provider: choice.provider,
+                      ownerType: choice.owner,
+                    })
+                  }
+                  onChooseModels={() => setChoosingId(config.id)}
+                  onOpenModel={(model) => setEditModelId(model.id)}
+                  onRename={async (label) => {
+                    await updateConfig.mutateAsync({
+                      params: { path: { id: config.id } },
+                      body: configUpdateBody({ label }),
+                    });
+                  }}
+                  onEditEndpoint={() => setEndpointId(config.id)}
+                  onDelete={() => setDeletingConfigId(config.id)}
+                  onTogglePersonal={(allowed) =>
+                    updateConfig.mutate({
+                      params: { path: { id: config.id } },
+                      body: configUpdateBody({ personalConnectionsAllowed: allowed }),
+                    })
+                  }
+                  connectionDeeds={{
+                    onRename: async (credential, label) => {
+                      // A refusal is toasted by the mutation cache; the rejection keeps the label typed.
+                      await updateCredential.mutateAsync({
+                        params: { path: { id: credential.id } },
+                        body: connectionLabelBody(label),
+                      });
+                    },
+                    onReplace: (credential) => setConnecting({ kind: "edit", credential }),
+                    onDelete: setDeletingConnection,
+                  }}
                 />
-              </section>
-            )}
-            {canConnect && personalAllowed && (
-              <p className="text-muted-foreground text-sm">
-                {t("providers.personalFooter")}{" "}
-                <PreferencesModelsLink>{t("providers.personalFooterLink")}</PreferencesModelsLink>
-              </p>
-            )}
-          </>
+              );
+            })}
+            {system.length > 0 && <SystemModelsRow models={system} />}
+          </div>
         </>
       )}
 
-      {canWriteCredentials && addingProvider && (
-        <ProviderAddFlow credentials={credentials ?? []} onClose={() => setAddingProvider(false)} />
-      )}
+      {adding && <AddConfigFlow onClose={() => setAdding(false)} onFocus={focus} />}
 
-      {editKey.target && (
-        <CredentialFormModal
-          key={editKey.target.id}
-          onClose={() => {
-            editKeyCredential.reset();
-            editKey.close();
-          }}
-          credential={editKey.target}
-          isPending={editKeyCredential.isPending}
-          error={editKeyCredential.error ? errorMessage(editKeyCredential.error) : null}
-          onSubmit={(data) => {
-            // The PATCH body only accepts mutable fields: the protocol and endpoint are pinned
-            // by `providerId` at create time.
-            editKeyCredential.mutate(
-              {
-                params: { path: { id: editKey.target!.id } },
-                body: credentialUpdateBody(editKey.target!, data),
-              },
-              { onSuccess: editKey.close },
-            );
-          }}
-        />
-      )}
-
-      {chooseModels.target && (
-        <ProviderModelsModal
-          credential={chooseModels.target}
-          onClose={chooseModels.close}
+      {choosingConfig && (
+        <ModelChoiceDialog
+          config={choosingConfig}
+          onClose={() => setChoosingId(null)}
           // The model form replaces the list: two never stack.
           onAdvanced={(id) => {
-            chooseModels.close();
+            setChoosingId(null);
             setEditModelId(id);
           }}
         />
       )}
 
-      {personalModels.value !== null && (
-        <PersonalModelsModal
-          services={personalServices}
-          providerId={personalModels.value}
-          onChangeService={(id) => personalModels.open(id)}
-          onClose={personalModels.close}
-          onAdvanced={(id) => {
-            personalModels.close();
-            setEditModelId(id);
-          }}
+      {connecting && (
+        <CredentialFormModal
+          key={connecting.kind === "edit" ? connecting.credential.id : connecting.config.id}
+          target={connecting}
+          onClose={() => setConnecting(null)}
+        />
+      )}
+
+      {endpointConfig && registry && (
+        <ModelConfigEndpointDialog
+          config={endpointConfig}
+          registry={registry}
+          onClose={() => setEndpointId(null)}
+        />
+      )}
+
+      <ConfirmModal
+        open={!!deletingConfig}
+        onClose={() => setDeletingConfigId(null)}
+        title={t("modelConfigs.delete.title")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
+        description={
+          deletingConfig ? t("modelConfigs.delete.confirm", { label: deletingConfig.label }) : ""
+        }
+        isPending={deleteConfig.isPending}
+        onConfirm={() => {
+          if (!deletingConfig) return;
+          deleteConfig.mutate(
+            { params: { path: { id: deletingConfig.id } } },
+            { onSuccess: () => setDeletingConfigId(null) },
+          );
+        }}
+      />
+
+      {deletingConnection && (
+        <DeleteKeyConfirm
+          credential={deletingConnection}
+          onClose={() => setDeletingConnection(null)}
         />
       )}
 
@@ -307,7 +316,7 @@ export function OrgSettingsModelsPage() {
         />
       )}
 
-      {/* Over the model form (or the instance's row), which closes with it once the model is gone. */}
+      {/* Over the model form, which closes with it once the model is gone. */}
       <ConfirmModal
         open={deletingModel !== null}
         onClose={() => setDeletingModel(null)}
@@ -328,14 +337,24 @@ export function OrgSettingsModelsPage() {
           );
         }}
       />
-
-      {confirmDelete && (
-        <DeleteKeyConfirm
-          credential={confirmDelete}
-          referenceCountVerified={!pkError && !pkPaused}
-          onClose={() => setDeleteKeyId(null)}
-        />
-      )}
     </>
+  );
+}
+
+/** The instance's own models: the last row, nothing to connect nor to configure. */
+function SystemModelsRow({ models }: { models: readonly OrgModelInfo[] }) {
+  const { t } = useTranslation("settings");
+  return (
+    <Item variant="outline" size="sm" className="flex-nowrap items-start">
+      <ItemMedia>
+        <Sparkles />
+      </ItemMedia>
+      <ItemContent className="min-w-0 gap-2">
+        <ItemTitle>{t("modelConfigs.system.label")}</ItemTitle>
+        <ItemDescription>{t("modelConfigs.system.description")}</ItemDescription>
+        <ModelChips models={models.filter((m) => m.enabled || m.is_default)} />
+      </ItemContent>
+      <ConfigStateBadge state="system" />
+    </Item>
   );
 }

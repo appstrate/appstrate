@@ -160,9 +160,7 @@ group whose sampled rows are corrupted. A rollback to the env from before step 2
 once rows exist under the new kid, by design. A key that is truly lost cannot be restored: the rows under its kid are unreadable for
 good. Delete them (the connection, OAuth client, model credential, proxy or SMTP/social config is
 then reconnected or re-entered; a run's sink secret stops counting once the sink is closed or
-expired) until the dry run of step 4 shows no `UNKNOWN` line. A model credential is referenced by
-`org_models.credential_id` with `ON DELETE RESTRICT`: delete or repoint those `org_models` rows
-first, in the same SQL session.
+expired) until the dry run of step 4 shows no `UNKNOWN` line.
 
 The credential-proxy cookie jars in Redis are not rewritten: they expire with their session, and one
 still under a dropped kid reads as an empty jar.

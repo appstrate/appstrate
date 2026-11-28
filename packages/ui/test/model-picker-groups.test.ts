@@ -3,6 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   groupModelsForPicker,
+  type PickerConfig,
   type PickerCredential,
   type PickerModel,
 } from "../src/components/model-picker-groups.ts";
@@ -10,7 +11,6 @@ import {
 const model = (over: Partial<PickerModel> & { id: string }): PickerModel => ({
   label: over.id,
   modelId: over.id,
-  binding: "org",
   billed_to: "org",
   enabled: true,
   needs_reconnection: false,
@@ -18,95 +18,113 @@ const model = (over: Partial<PickerModel> & { id: string }): PickerModel => ({
   ...over,
 });
 
-const orgKey: PickerCredential = {
-  id: "cred_org",
-  label: "Mistral (Alice)",
-  owner: "org",
-  subscription: false,
-  modelIds: [],
+const mistralConfig: PickerConfig = {
+  id: "cfg_mistral",
+  label: "Mistral",
+  personal_connections_allowed: false,
+  org_connection: "active",
+};
+const anthropicConfig: PickerConfig = {
+  id: "cfg_anthropic",
+  label: "Anthropic",
+  personal_connections_allowed: true,
+  org_connection: "none",
 };
 const myKey: PickerCredential = {
   id: "cred_me",
   label: "Ma clé perso",
-  owner: "me",
+  configId: "cfg_anthropic",
   subscription: false,
+  needsReconnection: false,
   modelIds: ["claude-sonnet"],
 };
 const mySubscription: PickerCredential = {
   id: "cred_sub",
   label: "Mon Claude",
-  owner: "me",
+  configId: "cfg_anthropic",
   subscription: true,
+  needsReconnection: false,
   modelIds: ["claude-sonnet"],
 };
 
 const mistral = model({
   id: "mistral-medium",
-  credentialId: "cred_org",
+  config_id: "cfg_mistral",
   provider_name: "Mistral",
   is_default: true,
 });
 const claude = model({
   id: "claude-sonnet",
-  binding: "user",
-  credentialId: null,
+  config_id: "cfg_anthropic",
   billed_to: "user",
   provider_name: "Anthropic",
   providerId: "anthropic",
 });
 const claudeUnserved = { ...claude, billed_to: null as null };
-const builtIn = model({
-  id: "sys-1",
-  binding: "system",
-  billed_to: "system",
-  provider_name: "OpenAI",
-});
+const builtIn = model({ id: "sys-1", billed_to: "system", provider_name: "OpenAI" });
+const configs = [mistralConfig, anthropicConfig];
 
 describe("groupModelsForPicker", () => {
   it("groups by who pays, org first, then the person's own, then the system", () => {
     const groups = groupModelsForPicker([builtIn, claude, mistral], {
-      credentials: [orgKey, myKey],
+      credentials: [myKey],
+      configs,
     });
     expect(groups.map((g) => [g.kind, g.name])).toEqual([
-      ["org", "Mistral (Alice)"],
+      ["org", "Mistral"],
       ["personal", "Ma clé perso"],
       ["system", null],
     ]);
   });
 
-  it("names an org group after the provider when the person cannot read the credential", () => {
+  it("names an org group after the provider until the configurations are known", () => {
     const [group] = groupModelsForPicker([mistral], { credentials: [] });
     expect(group).toMatchObject({ kind: "org", name: "Mistral" });
   });
 
+  it("blocks no unserved model while the configurations load: no reason is definitive yet", () => {
+    const [group] = groupModelsForPicker([claudeUnserved], { canConnect: true });
+    expect(group).toMatchObject({ kind: "org", name: "Anthropic", needs: null });
+    expect(group!.entries[0]!.blocked).toBeNull();
+  });
+
   it("marks the default and leaves a usable model unblocked", () => {
-    const [group] = groupModelsForPicker([mistral], { credentials: [orgKey] });
+    const [group] = groupModelsForPicker([mistral], { configs });
     expect(group!.entries).toEqual([{ model: mistral, isDefault: true, blocked: null }]);
   });
 
   it("prefers a subscription over a key for the same model, as the server does", () => {
-    const [group] = groupModelsForPicker([claude], { credentials: [myKey, mySubscription] });
+    const [group] = groupModelsForPicker([claude], {
+      credentials: [myKey, mySubscription],
+      configs,
+    });
     expect(group).toMatchObject({ name: "Mon Claude", subscription: true });
   });
 
   it("keeps a switched-off model, blocked as disabled", () => {
-    const [group] = groupModelsForPicker([{ ...mistral, enabled: false }], {
-      credentials: [orgKey],
-    });
+    const [group] = groupModelsForPicker([{ ...mistral, enabled: false }], { configs });
     expect(group!.entries[0]!.blocked).toBe("disabled");
   });
 
-  it("keeps a model whose org credential is unavailable, blocked", () => {
-    const [group] = groupModelsForPicker([{ ...mistral, needs_reconnection: true }], {
-      credentials: [orgKey],
+  it("blocks a model whose organization connection must be reconnected", () => {
+    const [group] = groupModelsForPicker([{ ...mistral, billed_to: null }], {
+      configs: [{ ...mistralConfig, org_connection: "needs_reconnection" }],
     });
     expect(group!.entries[0]!.blocked).toBe("orgUnavailable");
   });
 
-  describe("a personal model with no credential of the person's", () => {
-    const context = { credentials: [], personalAllowed: true, canConnect: true };
+  it("blocks a model whose configuration has no organization connection nor personal ones", () => {
+    const [group] = groupModelsForPicker([{ ...mistral, billed_to: null }], {
+      configs: [{ ...mistralConfig, org_connection: "none" }],
+    });
+    expect(group).toMatchObject({ kind: "org", name: "Mistral", needs: null });
+    expect(group!.entries[0]!.blocked).toBe("orgConnectionMissing");
+  });
 
-    it("sits last, under its service, asking for a key with a link", () => {
+  describe("a model of a configuration open to personal connections, none of the person's", () => {
+    const context = { credentials: [], configs, canConnect: true };
+
+    it("sits last, under its configuration, asking for a key with a link", () => {
       const groups = groupModelsForPicker([claudeUnserved, builtIn, mistral], context);
       const last = groups.at(-1)!;
       expect(last).toMatchObject({
@@ -117,22 +135,30 @@ describe("groupModelsForPicker", () => {
       expect(last.entries[0]!.blocked).toBe("personalRequired");
     });
 
-    it("asks to reconnect when one of the person's keys is dead", () => {
-      const [group] = groupModelsForPicker(
-        [{ ...claudeUnserved, needs_reconnection: true }],
-        context,
-      );
+    it("asks to reconnect when one of the person's keys of the configuration is dead", () => {
+      const [group] = groupModelsForPicker([{ ...claudeUnserved, needs_reconnection: true }], {
+        ...context,
+        credentials: [{ ...myKey, needsReconnection: true }],
+      });
       expect(group!.needs).toEqual({ service: "Anthropic", fix: "reconnect" });
       expect(group!.entries[0]!.blocked).toBe("personalReconnect");
     });
 
-    it("offers no link when the organization turned personal keys off", () => {
+    it("asks to add a key when only the organization's connection is dead", () => {
+      const [group] = groupModelsForPicker([{ ...claudeUnserved, needs_reconnection: true }], {
+        ...context,
+        configs: [{ ...anthropicConfig, org_connection: "needs_reconnection" }],
+      });
+      expect(group!.needs).toEqual({ service: "Anthropic", fix: "add" });
+      expect(group!.entries[0]!.blocked).toBe("personalRequired");
+    });
+
+    it("ignores a dead key of another configuration", () => {
       const [group] = groupModelsForPicker([claudeUnserved], {
         ...context,
-        personalAllowed: false,
+        credentials: [{ ...myKey, configId: "cfg_other", needsReconnection: true }],
       });
-      expect(group!.needs).toEqual({ service: "Anthropic", fix: null });
-      expect(group!.entries[0]!.blocked).toBe("personalOff");
+      expect(group!.needs?.fix).toBe("add");
     });
 
     it("offers no link to someone who may not add a key", () => {
@@ -140,7 +166,7 @@ describe("groupModelsForPicker", () => {
       expect(group!.needs?.fix).toBeNull();
     });
 
-    it("keeps one group per service", () => {
+    it("keeps one group per configuration", () => {
       const groups = groupModelsForPicker(
         [claudeUnserved, { ...claudeUnserved, id: "claude-opus" }],
         context,
@@ -151,43 +177,43 @@ describe("groupModelsForPicker", () => {
   });
 
   describe("in a schedule", () => {
-    it("blocks every model a personal credential serves, whoever pays", () => {
-      const groups = groupModelsForPicker([claude, claudeUnserved, mistral, builtIn], {
-        credentials: [orgKey, myKey],
-        personalAllowed: true,
+    it("blocks a model only a personal connection serves, as without an organization connection", () => {
+      const groups = groupModelsForPicker([claude, mistral, builtIn], {
+        credentials: [myKey],
+        configs,
         canConnect: true,
         scheduled: true,
       });
       const blocked = groups.flatMap((g) => g.entries).filter((e) => e.blocked);
-      expect(blocked.map((e) => e.blocked)).toEqual(["notSchedulable", "notSchedulable"]);
+      expect(blocked.map((e) => [e.model.id, e.blocked])).toEqual([
+        ["claude-sonnet", "orgConnectionMissing"],
+      ]);
+    });
+
+    it("serves through the organization connection a model the person pays for in person", () => {
+      const [group] = groupModelsForPicker([claude], {
+        credentials: [myKey],
+        configs: [{ ...anthropicConfig, org_connection: "active" }],
+        scheduled: true,
+      });
+      expect(group).toMatchObject({ kind: "org", name: "Anthropic" });
+      expect(group!.entries[0]!.blocked).toBeNull();
     });
 
     it("offers no key to add: a key would not make the model schedulable", () => {
       const [group] = groupModelsForPicker([claudeUnserved], {
         credentials: [],
-        personalAllowed: true,
+        configs,
         canConnect: true,
         scheduled: true,
       });
-      expect(group!.needs?.fix).toBeNull();
-    });
-
-    it("leaves org and system models usable", () => {
-      const groups = groupModelsForPicker([mistral, builtIn], {
-        credentials: [orgKey],
-        scheduled: true,
-      });
-      expect(groups.flatMap((g) => g.entries).every((e) => e.blocked === null)).toBe(true);
+      expect(group!.needs).toBeNull();
+      expect(group!.entries[0]!.blocked).toBe("orgConnectionMissing");
     });
   });
 
   it("groups a managed alias with no name", () => {
-    const alias = model({
-      id: "alias",
-      binding: "managed",
-      credentialId: null,
-      provider_name: null,
-    });
+    const alias = model({ id: "alias", config_id: null, provider_name: null });
     const [group] = groupModelsForPicker([alias]);
     expect(group).toMatchObject({ kind: "org", name: null });
   });

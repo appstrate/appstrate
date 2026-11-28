@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 
-import { turnErrorState } from "../src/ui/turn-error-state.ts";
+import { personalConnectionsAllowed, turnErrorState } from "../src/ui/turn-error-state.ts";
 import {
   classifyClientTurnError,
   clientTurnErrorForCategory,
@@ -413,5 +413,27 @@ describe("turnErrorState", () => {
       retryable: true,
       requestId: undefined,
     });
+  });
+});
+
+describe("personalConnectionsAllowed", () => {
+  const configs = [
+    { id: "cfg_open", personal_connections_allowed: true },
+    { id: "cfg_closed", personal_connections_allowed: false },
+  ];
+
+  it("reads the policy of the failed model's own configuration, not of any configuration", () => {
+    expect(personalConnectionsAllowed(configs, { config_id: "cfg_open" })).toBe(true);
+    expect(personalConnectionsAllowed(configs, { config_id: "cfg_closed" })).toBe(false);
+  });
+
+  it("refuses a model outside every configuration (a built-in, an alias)", () => {
+    expect(personalConnectionsAllowed(configs, { config_id: null })).toBe(false);
+    expect(personalConnectionsAllowed(configs, {})).toBe(false);
+  });
+
+  it("claims nothing until the configurations and the model are known", () => {
+    expect(personalConnectionsAllowed(undefined, { config_id: "cfg_open" })).toBeUndefined();
+    expect(personalConnectionsAllowed(configs, undefined)).toBeUndefined();
   });
 });

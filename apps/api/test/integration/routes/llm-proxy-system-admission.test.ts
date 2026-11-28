@@ -121,7 +121,7 @@ async function seedByokPreset(ctx: TestContext): Promise<string> {
   });
   const model = await seedOrgModel({
     orgId: ctx.orgId,
-    credentialId: providerKey.id,
+    configId: providerKey.configId!,
     label: "BYOK Preset",
     modelId: "gpt-4o-2024-08-06",
     enabled: true,

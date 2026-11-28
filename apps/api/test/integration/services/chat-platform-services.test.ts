@@ -25,7 +25,12 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
+import {
+  corruptCredentialBlob,
+  seedModelConfigFor,
+  seedOrgModelProviderKey,
+  seedOrgModelProviderOAuth,
+} from "../../helpers/seed.ts";
 import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
@@ -64,12 +69,15 @@ describe("resolveChatModel", () => {
     return row.id;
   }
 
-  /** An unbound subscription model: each member's own subscription serves it. */
-  function createSubscriptionModel(label: string): Promise<string> {
-    return createOrgModel(ctx.orgId, label, TEST_OAUTH_MODEL_ID, ctx.user.id, {
-      credentialId: null,
-      providerId: TEST_OAUTH_PROVIDER_ID,
-    });
+  /** A subscription model with no organization connection: each member's own serves it. */
+  async function createSubscriptionModel(label: string): Promise<string> {
+    return createOrgModel(
+      ctx.orgId,
+      label,
+      TEST_OAUTH_MODEL_ID,
+      ctx.user.id,
+      await seedModelConfigFor(ctx.orgId, TEST_OAUTH_PROVIDER_ID),
+    );
   }
 
   /** Whether the credential's row is flagged as needing a reconnect. */
@@ -95,13 +103,12 @@ describe("resolveChatModel", () => {
       expiresAt: Date.now() + 3_600_000,
       createdBy: ctx.user.id,
     });
-    // The row is written directly, as a write path without the alias rule could leave it.
+    // An alias of a subscription configuration, written directly.
     const [row] = await db
       .insert(orgModels)
       .values({
         orgId: ctx.orgId,
-        providerId: TEST_OAUTH_PROVIDER_ID,
-        credentialId: orgSubscription.id,
+        configId: orgSubscription.configId!,
         label: "Masked Subscription",
         modelId: TEST_OAUTH_MODEL_ID,
         aliased: true,
@@ -187,10 +194,46 @@ describe("resolveChatModel", () => {
     });
   });
 
+  it("asks to reconnect when the payer's only subscription is dead", async () => {
+    await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      ownerUserId: ctx.user.id,
+      createdBy: ctx.user.id,
+      needsReconnection: true,
+    });
+    const presetId = await createSubscriptionModel("Dead subscription");
+
+    expect(await resolveChatModel(ctx.orgId, presetId, ctx.user.id)).toEqual({
+      subscription: true,
+      needsReconnection: true,
+    });
+  });
+
+  it("never answers a subscription reconnect for a dead personal API key", async () => {
+    const configId = await seedModelConfigFor(ctx.orgId, "openai");
+    const key = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      providerId: "openai",
+      configId,
+      ownerUserId: ctx.user.id,
+      createdBy: ctx.user.id,
+    });
+    await corruptCredentialBlob(key.id);
+    const presetId = await createOrgModel(ctx.orgId, "Keyed", "gpt-5.5", ctx.user.id, configId);
+
+    // The turn goes to the gateway, which names the dead key: a reconnect would not serve it.
+    expect(await resolveChatModel(ctx.orgId, presetId, ctx.user.id)).toEqual({
+      subscription: false,
+    });
+  });
+
   it("serves a member-held model from that member's own subscription, never another's", async () => {
     const other = await createTestUser({ email: `member-${crypto.randomUUID()}@example.test` });
+    const configId = await seedModelConfigFor(ctx.orgId, TEST_OAUTH_PROVIDER_ID);
     await db.insert(modelProviderCredentials).values({
       orgId: ctx.orgId,
+      configId,
       ownerUserId: other.id,
       label: "Other's subscription",
       providerId: TEST_OAUTH_PROVIDER_ID,
@@ -202,13 +245,12 @@ describe("resolveChatModel", () => {
       }),
       createdBy: other.id,
     });
-    // Unbound: no org credential, each member brings their own subscription.
+    // No organization connection: each member brings their own subscription.
     const [model] = await db
       .insert(orgModels)
       .values({
         orgId: ctx.orgId,
-        providerId: TEST_OAUTH_PROVIDER_ID,
-        credentialId: null,
+        configId,
         label: "Member subscription",
         // A model the subscription's catalog serves: a personal credential only
         // serves a model of its own provider family.
@@ -217,9 +259,10 @@ describe("resolveChatModel", () => {
       })
       .returning();
 
-    await expect(resolveChatModel(ctx.orgId, model!.id, ctx.user.id)).rejects.toMatchObject({
-      status: 409,
-      code: "model_credential_required",
+    // Nothing serves the caller: the turn falls to the API-key branch, which
+    // refuses it; the other member's token is never handed out.
+    expect(await resolveChatModel(ctx.orgId, model!.id, ctx.user.id)).toEqual({
+      subscription: false,
     });
     expect(await resolveChatModel(ctx.orgId, model!.id, other.id)).toMatchObject({
       subscription: true,
@@ -235,10 +278,13 @@ describe("resolveChatModel", () => {
       accessToken: "org-token",
       expiresAt: Date.now() + 3_600_000,
     });
-    const presetId = await createOrgModel(ctx.orgId, "Shared", TEST_OAUTH_MODEL_ID, ctx.user.id, {
-      credentialId: orgSubscription.id,
-      providerId: TEST_OAUTH_PROVIDER_ID,
-    });
+    const presetId = await createOrgModel(
+      ctx.orgId,
+      "Shared",
+      TEST_OAUTH_MODEL_ID,
+      ctx.user.id,
+      orgSubscription.configId!,
+    );
     const member = await memberContext(ctx, "member");
 
     expect(await resolveChatModel(ctx.orgId, presetId, member.user.id)).toMatchObject({

@@ -3,25 +3,25 @@
 /**
  * Regression guard for the no-forging contract (issue: remove all OAuth
  * fingerprint forging). The generic llm-proxy gateway must REFUSE any
- * OAuth-subscription provider rather than forward a bare bearer upstream —
- * subscription providers are served only by their own SDK gateway. A silent
- * fall-through here would re-open the forging path.
+ * OAuth-subscription connection rather than forward a bare bearer upstream —
+ * subscription providers are served only by their own SDK gateway. Since
+ * #2451 the proxy's serving order leaves subscriptions out, so a model only a
+ * subscription serves is refused as unserved. A silent fall-through here would
+ * re-open the forging path.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import {
-  proxyLlmCall,
-  LlmProxyUnsupportedSubscriptionError,
-} from "../../../src/services/llm-proxy/core.ts";
+import { proxyLlmCall } from "../../../src/services/llm-proxy/core.ts";
 import type { LlmProxyAdapter } from "../../../src/services/llm-proxy/types.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { seedOrgModelProviderOAuth, seedOrgModel } from "../../helpers/seed.ts";
+import { TEST_OAUTH_MODEL_ID } from "../../helpers/test-oauth-provider.ts";
 
 // Minimal adapter for the `test-oauth` provider's apiShape. None of its
-// methods should run — the subscription guard throws before forwarding.
+// methods should run — the call is refused before forwarding.
 const adapter: LlmProxyAdapter = {
   apiShape: "openai-responses",
   buildUpstreamHeaders: () => {
@@ -38,7 +38,7 @@ beforeEach(async () => {
 });
 
 describe("proxyLlmCall — OAuth-subscription rejection", () => {
-  it("throws LlmProxyUnsupportedSubscriptionError and never forwards upstream", async () => {
+  it("serves no subscription: a model only a subscription serves is refused before any forward", async () => {
     const ctx = await createTestContext({ orgSlug: "subrej" });
     const cred = await seedOrgModelProviderOAuth({
       orgId: ctx.orgId,
@@ -47,8 +47,8 @@ describe("proxyLlmCall — OAuth-subscription rejection", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      modelId: "test-model",
+      configId: cred.configId!,
+      modelId: TEST_OAUTH_MODEL_ID,
       enabled: true,
     });
 
@@ -58,6 +58,8 @@ describe("proxyLlmCall — OAuth-subscription rejection", () => {
       return new Response("{}", { status: 200 });
     }) as unknown as typeof fetch;
 
+    // The proxy's serving order leaves subscriptions out, so the configuration's
+    // only connection never reaches the adapter.
     await expect(
       proxyLlmCall({
         adapter,
@@ -76,7 +78,7 @@ describe("proxyLlmCall — OAuth-subscription rejection", () => {
         rawBody: new TextEncoder().encode(JSON.stringify({ model: model.id })),
         fetchImpl,
       }),
-    ).rejects.toBeInstanceOf(LlmProxyUnsupportedSubscriptionError);
+    ).rejects.toMatchObject({ status: 409, code: "model_credential_required" });
 
     expect(fetchCalled).toBe(false);
   });

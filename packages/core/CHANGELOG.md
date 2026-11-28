@@ -59,6 +59,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`MODEL_BINDINGS`, `ModelBinding`** — BREAKING (`@appstrate/core/model-payer`). A listed model
+  is no longer bound to one credential (`system` | `org` | `user` | `managed`): its model
+  configuration's connections serve it, so the vocabulary has no reader. `MODEL_PAYERS` and
+  `MODEL_CREDENTIAL_OWNERS` stay.
+- **`personal_model_credentials` in `orgSettingsSchema` and `orgSettingsReadSchema`** — BREAKING.
+  Whether members may bring their own model connection is now a setting of each model
+  configuration (`personal_connections_allowed`), not of the organization; the key is part of
+  neither schema, and script 0062 removes the stored key after carrying it onto the
+  configurations it creates.
 - **`personal_space_role` in `orgSettingsSchema` and `orgSettingsReadSchema`** — BREAKING. The
   personal-space default role is no longer stored in the settings document but in two columns of
   the organization; the key is part of neither schema, and a stored `personal_space_role` key is

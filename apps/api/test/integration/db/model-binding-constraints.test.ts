@@ -2,9 +2,12 @@
 
 /**
  * Invariants the model writers hold, stated by the database:
- *   - `org_models`: an alias is bound to a credential (`org_models_alias_bound`),
- *     and a bound model's provider is its credential's
- *     (`org_models_credential_provider_fk`, which keeps ON DELETE RESTRICT);
+ *   - `model_configs`: one configuration per (org, provider) without an endpoint
+ *     (`uq_model_configs_family`), one per (org, provider, endpoint) for a gateway
+ *     (`uq_model_configs_endpoint`);
+ *   - `org_models`: one non-aliased model per (configuration, model id)
+ *     (`uq_org_models_config_model`), deleted with its configuration, never with
+ *     a connection;
  *   - `model_provider_pairings`: the owner is the organization or the minter
  *     (`model_provider_pairings_owner_is_minter`), a redeem ends with a
  *     credential or a failure, never both (`model_provider_pairings_outcome_single`),
@@ -14,7 +17,12 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, modelProviderPairings, orgModels } from "@appstrate/db/schema";
+import {
+  modelConfigs,
+  modelProviderCredentials,
+  modelProviderPairings,
+  orgModels,
+} from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 
@@ -47,71 +55,82 @@ beforeEach(async () => {
   credentialId = credential!.id;
 });
 
-describe("org_models — binding", () => {
-  const model = (fields: { providerId: string; credentialId: string | null; aliased?: boolean }) =>
+describe("model_configs — one per family, one per gateway endpoint", () => {
+  const config = (providerId: string, baseUrl: string | null = null) =>
     db
-      .insert(orgModels)
-      .values({ orgId: ctx.orgId, label: "GPT", modelId: "gpt-5", ...fields })
-      .returning({ id: orgModels.id });
+      .insert(modelConfigs)
+      .values({ orgId: ctx.orgId, providerId, label: providerId, baseUrl })
+      .returning({ id: modelConfigs.id });
 
-  it("accepts a model bound to a credential of its provider, an alias among them", async () => {
-    await model({ providerId: "openai", credentialId });
-    await model({ providerId: "openai", credentialId, aliased: true });
+  it("accepts one family configuration per provider, and gateways on distinct endpoints", async () => {
+    await config("anthropic");
+    await config("openai-compatible", "https://a.example.test/v1");
+    await config("openai-compatible", "https://b.example.test/v1");
   });
 
-  it("accepts an unbound model of any provider", async () => {
-    await model({ providerId: "anthropic", credentialId: null });
+  it("refuses a second family configuration of a provider", async () => {
+    await config("anthropic");
+    expect(await refusal(config("anthropic"))).toContain("uq_model_configs_family");
   });
 
-  it("refuses an unbound alias", async () => {
-    expect(
-      await refusal(model({ providerId: "openai", credentialId: null, aliased: true })),
-    ).toContain("org_models_alias_bound");
-  });
-
-  it("refuses unbinding an alias", async () => {
-    const [row] = await model({ providerId: "openai", credentialId, aliased: true });
-    expect(
-      await refusal(
-        db.update(orgModels).set({ credentialId: null }).where(eq(orgModels.id, row!.id)),
-      ),
-    ).toContain("org_models_alias_bound");
-  });
-
-  it("refuses a bound model whose provider is not its credential's", async () => {
-    expect(await refusal(model({ providerId: "anthropic", credentialId }))).toContain(
-      "org_models_credential_provider_fk",
+  it("refuses a second gateway configuration on the same endpoint", async () => {
+    await config("openai-compatible", "https://a.example.test/v1");
+    expect(await refusal(config("openai-compatible", "https://a.example.test/v1"))).toContain(
+      "uq_model_configs_endpoint",
     );
   });
+});
 
-  it("refuses moving a bound model to another provider", async () => {
-    const [row] = await model({ providerId: "openai", credentialId });
-    expect(
-      await refusal(
-        db.update(orgModels).set({ providerId: "anthropic" }).where(eq(orgModels.id, row!.id)),
-      ),
-    ).toContain("org_models_credential_provider_fk");
+describe("org_models — one model id per configuration", () => {
+  let configId: string;
+
+  beforeEach(async () => {
+    const [row] = await db
+      .insert(modelConfigs)
+      .values({ orgId: ctx.orgId, providerId: "openai", label: "OpenAI" })
+      .returning({ id: modelConfigs.id });
+    configId = row!.id;
   });
 
-  it("refuses rewriting the provider of a credential a model is bound to", async () => {
-    await model({ providerId: "openai", credentialId });
-    expect(
-      await refusal(
-        db
-          .update(modelProviderCredentials)
-          .set({ providerId: "anthropic" })
-          .where(eq(modelProviderCredentials.id, credentialId)),
-      ),
-    ).toContain("org_models_credential_provider_fk");
+  const model = (fields: { aliased?: boolean; configId?: string } = {}) =>
+    db
+      .insert(orgModels)
+      .values({ orgId: ctx.orgId, label: "GPT", modelId: "gpt-5", configId, ...fields })
+      .returning({ id: orgModels.id });
+
+  it("accepts a model without a credential, and aliases of a model id it already holds", async () => {
+    await model();
+    await model({ aliased: true });
+    await model({ aliased: true });
   });
 
-  it("still refuses deleting a credential a model references", async () => {
-    await model({ providerId: "openai", credentialId });
-    expect(
-      await refusal(
-        db.delete(modelProviderCredentials).where(eq(modelProviderCredentials.id, credentialId)),
-      ),
-    ).toContain("org_models_credential_provider_fk");
+  it("refuses the same model id twice in a configuration", async () => {
+    await model();
+    expect(await refusal(model())).toContain("uq_org_models_config_model");
+  });
+
+  it("accepts the same model id in another configuration", async () => {
+    await model();
+    const [other] = await db
+      .insert(modelConfigs)
+      .values({ orgId: ctx.orgId, providerId: "anthropic", label: "Anthropic" })
+      .returning({ id: modelConfigs.id });
+    await model({ configId: other!.id });
+  });
+
+  it("deletes a configuration's models and connections with it, and lets a connection go alone", async () => {
+    const [row] = await model();
+    await db
+      .update(modelProviderCredentials)
+      .set({ configId })
+      .where(eq(modelProviderCredentials.id, credentialId));
+
+    // A connection is deleted without its models.
+    await db.delete(modelProviderCredentials).where(eq(modelProviderCredentials.id, credentialId));
+    expect(await db.select().from(orgModels).where(eq(orgModels.id, row!.id))).toHaveLength(1);
+
+    await db.delete(modelConfigs).where(eq(modelConfigs.id, configId));
+    expect(await db.select().from(orgModels).where(eq(orgModels.id, row!.id))).toHaveLength(0);
   });
 });
 

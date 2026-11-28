@@ -232,19 +232,35 @@ async function discover(ctx: TestContext, body: unknown): Promise<Response> {
   });
 }
 
-async function createCustomCredential(ctx: TestContext, baseUrl: string): Promise<string> {
+/** A gateway configuration on `baseUrl`; returns its id. */
+async function createCustomConfig(ctx: TestContext, baseUrl: string): Promise<string> {
+  const res = await app.request("/api/model-configs", {
+    method: "POST",
+    headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+    body: JSON.stringify({ provider_id: "openai-compatible", base_url: baseUrl }),
+  });
+  expect(res.status).toBe(201);
+  return ((await res.json()) as { id: string }).id;
+}
+
+/** An organization connection of a gateway configuration on `baseUrl`. */
+async function createCustomCredential(
+  ctx: TestContext,
+  baseUrl: string,
+): Promise<{ id: string; configId: string }> {
+  const configId = await createCustomConfig(ctx, baseUrl);
   const res = await app.request("/api/model-provider-credentials", {
     method: "POST",
     headers: authHeaders(ctx, { "Content-Type": "application/json" }),
     body: JSON.stringify({
       label: "Custom endpoint",
       providerId: "openai-compatible",
-      base_url_override: baseUrl,
+      config_id: configId,
       api_key: "good-key",
     }),
   });
   expect(res.status).toBe(201);
-  return ((await res.json()) as { id: string }).id;
+  return { id: ((await res.json()) as { id: string }).id, configId };
 }
 
 describe("POST /api/model-provider-credentials/discover", () => {
@@ -269,7 +285,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     const res = await discover(ctx, {
       providerId: "openai-compatible",
       api_key: "good-key",
-      base_url_override: GOOD_BASE_URL,
+      base_url: GOOD_BASE_URL,
     });
 
     expect(res.status).toBe(200);
@@ -313,7 +329,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     const res = await discover(ctx, {
       providerId: "openai-compatible",
       api_key: "hints-key",
-      base_url_override: GOOD_BASE_URL,
+      base_url: GOOD_BASE_URL,
     });
 
     expect(res.status).toBe(200);
@@ -340,7 +356,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     const res = await discover(ctx, {
       providerId: "openai-compatible",
       api_key: "mixed-hints-key",
-      base_url_override: GOOD_BASE_URL,
+      base_url: GOOD_BASE_URL,
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as DiscoverBody;
@@ -351,12 +367,12 @@ describe("POST /api/model-provider-credentials/discover", () => {
     });
     expect(body.models[0]!.max_tokens).toBeGreaterThan(8192);
     expect(body.models[0]!.endpoint_capabilities).toEqual({ context_window: 8192 });
-    const credentialId = await createCustomCredential(ctx, GOOD_BASE_URL);
+    const { configId } = await createCustomCredential(ctx, GOOD_BASE_URL);
 
     const added = await app.request("/api/models", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ modelId: "gpt-4o", contextWindow: 8192, credentialId }),
+      body: JSON.stringify({ modelId: "gpt-4o", contextWindow: 8192, config_id: configId }),
     });
     expect(added.status).toBe(201);
     expect(await added.json()).toMatchObject({
@@ -371,7 +387,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     const res = await discover(ctx, {
       providerId: "anthropic-compatible",
       api_key: "good-key",
-      base_url_override: ANTHROPIC_BASE_URL,
+      base_url: ANTHROPIC_BASE_URL,
     });
 
     expect(res.status).toBe(200);
@@ -384,7 +400,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     const res = await discover(ctx, {
       providerId: "openai-compatible",
       api_key: "wrong-key",
-      base_url_override: GOOD_BASE_URL,
+      base_url: GOOD_BASE_URL,
     });
 
     expect(res.status).toBe(200);
@@ -398,7 +414,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     const res = await discover(ctx, {
       providerId: "openai-compatible",
       api_key: "good-key",
-      base_url_override: BAD_BASE_URL,
+      base_url: BAD_BASE_URL,
     });
 
     expect(res.status).toBe(200);
@@ -408,7 +424,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
   });
 
   it("enumerates an existing credential", async () => {
-    const id = await createCustomCredential(ctx, GOOD_BASE_URL);
+    const { id } = await createCustomCredential(ctx, GOOD_BASE_URL);
 
     const res = await discover(ctx, { credentialId: id });
     expect(res.status).toBe(200);
@@ -447,7 +463,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
   });
 
   it("refuses the snake_case credential_id — the id keeps its camelCase name", async () => {
-    const id = await createCustomCredential(ctx, GOOD_BASE_URL);
+    const { id } = await createCustomCredential(ctx, GOOD_BASE_URL);
     await expectRejectedField(await discover(ctx, { credential_id: id }), "credential_id");
   });
 
@@ -456,11 +472,43 @@ describe("POST /api/model-provider-credentials/discover", () => {
     expect(res.status).toBe(400);
   });
 
-  it("refuses a base_url_override on a provider that pins its base URL", async () => {
+  it("enumerates a draft key against a stored configuration's endpoint", async () => {
+    const configId = await createCustomConfig(ctx, GOOD_BASE_URL);
+    const res = await discover(ctx, {
+      providerId: "openai-compatible",
+      api_key: "good-key",
+      config_id: configId,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiscoverBody;
+    expect(body.models.map((m) => m.id)).toEqual(["gpt-4o", "qwen3:8b"]);
+  });
+
+  it("refuses a draft whose provider does not fit the named configuration, and config_id with base_url", async () => {
+    const configId = await createCustomConfig(ctx, GOOD_BASE_URL);
+    const mismatch = await discover(ctx, {
+      providerId: "anthropic-compatible",
+      api_key: "good-key",
+      config_id: configId,
+    });
+    expect(mismatch.status).toBe(400);
+    expect(((await mismatch.json()) as { param?: string }).param).toBe("config_id");
+
+    const both = await discover(ctx, {
+      providerId: "openai-compatible",
+      api_key: "good-key",
+      config_id: configId,
+      base_url: GOOD_BASE_URL,
+    });
+    expect(both.status).toBe(400);
+    expect(listingRequests.size).toBe(0);
+  });
+
+  it("refuses a base_url on a provider that pins its base URL", async () => {
     const res = await discover(ctx, {
       providerId: PINNED_URL_PROVIDER,
       api_key: "good-key",
-      base_url_override: GOOD_BASE_URL,
+      base_url: GOOD_BASE_URL,
     });
     expect(res.status).toBe(400);
   });
@@ -469,7 +517,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     const res = await discover(ctx, {
       providerId: "anthropic-compatible",
       api_key: "paged-key",
-      base_url_override: ANTHROPIC_BASE_URL,
+      base_url: ANTHROPIC_BASE_URL,
     });
 
     expect(res.status).toBe(200);
@@ -488,7 +536,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     const res = await discover(ctx, {
       providerId: "openai-compatible",
       api_key: "endless-key",
-      base_url_override: GOOD_BASE_URL,
+      base_url: GOOD_BASE_URL,
     });
 
     expect(res.status).toBe(200);
@@ -505,7 +553,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     const res = await discover(ctx, {
       providerId: "openai-compatible",
       api_key: "flood-key",
-      base_url_override: GOOD_BASE_URL,
+      base_url: GOOD_BASE_URL,
     });
 
     // The endpoint never stops sending; the read stops it. Without a byte
@@ -521,7 +569,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     const res = await discover(ctx, {
       providerId: STATIC_LIST_PROVIDER,
       api_key: "good-key",
-      base_url_override: GOOD_BASE_URL,
+      base_url: GOOD_BASE_URL,
     });
 
     // The declaration is what gates enumeration, not the auth mode: this
@@ -534,7 +582,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     const res = await discover(ctx, {
       providerId: "openai-compatible",
       api_key: "good-key",
-      base_url_override: GOOD_BASE_URL,
+      base_url: GOOD_BASE_URL,
     });
     expect(res.status).toBe(200);
 

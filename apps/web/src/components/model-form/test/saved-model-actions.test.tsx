@@ -17,8 +17,8 @@ import type { OrgModelInfo } from "../../../hooks/use-models.ts";
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-const BOUND = { id: "mdl_1", credentialId: "cred_org", binding: "org" } as OrgModelInfo;
-const LEFT_TO_MEMBERS = { id: "mdl_m", credentialId: null, binding: "user" } as OrgModelInfo;
+const BOUND = { id: "mdl_1", billed_to: "org", aliased: false } as OrgModelInfo;
+const LEFT_TO_MEMBERS = { id: "mdl_m", billed_to: null, aliased: false } as OrgModelInfo;
 
 describe("SavedModelActions", () => {
   it("tests the model, and deletes it when the caller may", () => {
@@ -33,7 +33,7 @@ describe("SavedModelActions", () => {
     expect(html).not.toContain(`>${commonFr["btn.delete"]}<`);
   });
 
-  it("offers no test of a model left to each member, which no organization key serves", () => {
+  it("offers no test of a model no connection serves", () => {
     const html = render(<SavedModelActions model={LEFT_TO_MEMBERS} onDelete={() => {}} />);
     expect(html).not.toContain(`>${settingsFr["models.test"]}<`);
     expect(html).toContain(`>${commonFr["btn.delete"]}<`);

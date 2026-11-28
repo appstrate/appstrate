@@ -13,7 +13,7 @@ import { usePermissions } from "./use-permissions";
 import { packageSightPermissions } from "@appstrate/core/permissions";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import { invalidateCredentialsAndModels } from "./use-model-provider-credentials";
-import { invalidatePaths, packageKeys } from "../lib/query-keys";
+import { invalidatePaths, MODEL_CACHE_PATHS, packageKeys } from "../lib/query-keys";
 import { useInvalidatePaths } from "./use-invalidate-paths";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -31,7 +31,7 @@ export function useModels(enabled = true) {
 }
 
 export function useUpdateModel() {
-  const invalidate = useInvalidatePaths("/api/models", "/api/model-provider-credentials");
+  const invalidate = useInvalidatePaths(...MODEL_CACHE_PATHS);
   return $api.useMutation("patch", "/api/models/{id}", {
     meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
@@ -39,7 +39,7 @@ export function useUpdateModel() {
 }
 
 export function useDeleteModel() {
-  const invalidate = useInvalidatePaths("/api/models", "/api/model-provider-credentials");
+  const invalidate = useInvalidatePaths(...MODEL_CACHE_PATHS);
   return $api.useMutation("delete", "/api/models/{id}", { onSuccess: invalidate });
 }
 

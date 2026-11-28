@@ -9,6 +9,7 @@ import {
   DashboardSkeleton,
   DetailPageSkeleton,
   ListPageSkeleton,
+  ModelsPageSkeleton,
   OverlayPanelSkeleton,
   ScheduleDetailSkeleton,
   SettingsSkeleton,
@@ -162,5 +163,23 @@ describe("detail page skeleton", () => {
     expect(at("#runs")).toContain("sm:max-w-[280px]");
     expect(at("")).not.toContain(rail);
     expect(at("")).not.toContain("sm:max-w-[280px]");
+  });
+});
+
+describe("models page skeleton", () => {
+  it("draws the collapsed rows in their layout, with the controls each page ends a row with", () => {
+    const settings = render(<ModelsPageSkeleton />);
+    const preferences = render(<ModelsPageSkeleton withDefault={false} />);
+    for (const html of [settings, preferences]) {
+      expect(count(html, "@container/row")).toBe(3);
+      expect(html).toContain("@xl/row:flex-nowrap");
+    }
+    // Settings: the menu and the chevron; preferences: « Utiliser ma clé ».
+    expect(count(settings, "size-7")).toBe(6);
+    expect(preferences).not.toContain("size-7");
+    // The ConnectMenu is a `sm` button (h-8); preferences also leads with its intro line.
+    expect(count(preferences, "h-8 w-32")).toBe(3);
+    expect(preferences).toContain("mb-4 w-3/4");
+    expect(settings).not.toContain("mb-4 w-3/4");
   });
 });

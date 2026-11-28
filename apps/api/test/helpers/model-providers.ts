@@ -39,32 +39,26 @@ import {
 } from "./test-oauth-provider.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
 
-export interface SeedTestModelProvidersOptions {
-  /**
-   * Module provider ids that keep their production `baseUrlOverridable`
-   * value instead of the harness default. Tests that exercise the unbound
-   * refusal on a fixed-endpoint provider (`openai`, `anthropic`) list them
-   * here so the refusal path is reachable.
-   */
-  readonly fixedEndpoint?: readonly string[];
-}
+/** The gateway providers production ships (`core-providers`): the only module ones with a chosen endpoint. */
+const GATEWAY_PROVIDER_IDS: ReadonlySet<string> = new Set([
+  "openai-compatible",
+  "anthropic-compatible",
+]);
 
-export function seedTestModelProviders(options: SeedTestModelProvidersOptions = {}): void {
+export function seedTestModelProviders(): void {
   resetModelProviders();
   _resetTestOAuthProviderRegistration();
   registerTestOAuthProvider();
   registerTestOAuthHooksProvider();
   registerTestApiKeyProvider();
-  // Module-contributed providers are registered with `baseUrlOverridable: true`
-  // so the integration harness can point any provider at a mock endpoint
-  // (`api.openai.test`, `api.anthropic.test`, …) without each test having to
-  // monkey-patch the registry. Providers listed in `fixedEndpoint` keep the
-  // production value (`core-providers` ships them `baseUrlOverridable: false`,
-  // only `openai-compatible` and `anthropic-compatible` are overridable).
-  const fixedEndpoint = new Set(options.fixedEndpoint ?? []);
-  const moduleContributions = getDiscoveredModules()
-    .map((m) => m.modelProviders?.() ?? [])
-    .flat()
-    .map((p) => (fixedEndpoint.has(p.providerId) ? p : { ...p, baseUrlOverridable: true }));
-  registerModelProviders(moduleContributions);
+  // Module providers keep their production `baseUrlOverridable`: only the two
+  // gateway providers take an endpoint per configuration, every other one
+  // (openai, anthropic, mistral, codex, …) is a fixed endpoint. A test that
+  // needs to reach a mock endpoint creates a gateway configuration on it.
+  registerModelProviders(
+    getDiscoveredModules()
+      .map((m) => m.modelProviders?.() ?? [])
+      .flat()
+      .map((p) => ({ ...p, baseUrlOverridable: GATEWAY_PROVIDER_IDS.has(p.providerId) })),
+  );
 }

@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * « Choose the models » of a provider: the checklist of the models its service offers, the
- * ones the organization has access to ticked, a star on its default.
+ * « Choose the models » of a configuration: the checklist of the models its service offers, the
+ * ones the organization has access to ticked.
  *
- * `useModelChoice` holds the state (what is ticked, starred, searched, detected) and hands back the
- * plan it amounts to; `ModelChoiceList` draws it. The three dialogs that choose models (an
- * organization key's, the personal keys' per service, and the second step of « Ajouter une clé
- * org ») own their footer and apply the plan, so the same list serves all three.
+ * `useModelChoice` holds the state (what is ticked, searched, detected) and hands back the plan it
+ * amounts to; `ModelChoiceList` draws it; `ModelChoiceDialog` owns the footer and applies the plan.
  */
 
 import { PendingButton } from "@/components/app-ui/pending-button";
@@ -20,11 +18,8 @@ import type { ModelChoice } from "../hooks/use-model-choice";
 export function ModelChoiceList({
   choice,
   advanced,
-  defaultUnavailable,
 }: {
   choice: ModelChoice;
-  /** The key needs reconnecting: none of its models can become the default. */
-  defaultUnavailable?: boolean;
   /** The models already saved, with where their finer settings open. */
   advanced?: { ids: ReadonlySet<string>; onOpen: (modelId: string) => void };
 }) {
@@ -56,9 +51,6 @@ export function ModelChoiceList({
         isLoading={source === "search" && choice.search.isLoading}
         emptyText={t("models.form.modelSearchEmpty")}
         grouped={source === "catalog"}
-        defaultId={choice.star}
-        onDefaultChange={choice.setStar}
-        defaultUnavailable={defaultUnavailable}
         lockedId={choice.lockedId}
         advancedIds={advanced?.ids}
         onAdvanced={advanced?.onOpen}

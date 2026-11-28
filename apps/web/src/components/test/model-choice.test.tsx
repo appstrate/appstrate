@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * « Choose the models » as the personal keys' list of a service draws it: the models left to each
- * member are starred like any other, so one of them can be the organization's default, and a
- * saved one opens its finer settings. The dialog around it is a portal: the list is
- * rendered with the state hook it reads.
+ * « Choose the models » of a configuration: a saved model opens its finer settings, and the
+ * default model keeps its access (its box cannot be unticked). The dialog around it is a portal:
+ * the list is rendered with the state hook it reads.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -29,7 +28,6 @@ const CODEX = {
   authMode: "oauth2",
   featured: false,
   live_model_search: false,
-  personal_allowed: true,
   models: [
     {
       id: "gpt-5-codex",
@@ -47,22 +45,21 @@ const LEFT_TO_MEMBERS = {
   label: "GPT-5 Codex",
   providerId: "codex",
   modelId: "gpt-5-codex",
-  credentialId: null,
-  binding: "user",
+  config_id: "cfg_codex",
+  billed_to: "user",
   source: "custom",
   enabled: true,
-  is_default: false,
+  is_default: true,
   needs_reconnection: false,
   aliased: false,
 } as OrgModelInfo;
 
-function PersonalList({ onAdvanced }: { onAdvanced?: (id: string) => void }) {
+function ConfigList({ onAdvanced }: { onAdvanced?: (id: string) => void }) {
   const choice = useModelChoice({
     provider: CODEX,
     existing: [LEFT_TO_MEMBERS],
     discoverWith: null,
-    tickAll: false,
-    hasDefault: true,
+    tickNew: false,
   });
   return (
     <ModelChoiceList
@@ -74,13 +71,15 @@ function PersonalList({ onAdvanced }: { onAdvanced?: (id: string) => void }) {
   );
 }
 
-describe("the personal keys' list of a subscription service", () => {
-  const html = render(<PersonalList onAdvanced={() => {}} />);
+describe("the models of a configuration", () => {
+  const html = render(<ConfigList onAdvanced={() => {}} />);
 
-  it("offers to make a model left to each member the default", () => {
-    expect(html).toContain(
-      `aria-label="${settingsFr["models.choice.setDefault"].replace("{{name}}", "GPT-5 Codex")}"`,
-    );
+  it("keeps the default model's box ticked, and says why", () => {
+    expect(html).toContain(`title="${settingsFr["models.choice.defaultLocked"]}"`);
+  });
+
+  it("offers no star: the default is chosen at the top of the page", () => {
+    expect(html).not.toContain("aria-pressed");
   });
 
   it("opens a saved model's finer settings", () => {

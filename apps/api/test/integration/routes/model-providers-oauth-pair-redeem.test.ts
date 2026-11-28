@@ -32,7 +32,8 @@ import {
 } from "../../../src/services/model-providers/credentials.ts";
 import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
 import { listCatalogModels } from "../../../src/services/model-catalog.ts";
-import { updateOrgSettings } from "../../../src/services/organizations.ts";
+import { updateModelConfig } from "../../../src/services/model-configs.ts";
+import { seedModelConfigFor } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -161,7 +162,9 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
 
   it("refuses a personal redeem with 403 when the org turned personal credentials off after the mint", async () => {
     const pairing = await mintPairing(ctx, "test-oauth", { ownerType: "user" });
-    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+    await updateModelConfig(ctx.orgId, await seedModelConfigFor(ctx.orgId, "test-oauth"), {
+      personalConnectionsAllowed: false,
+    });
 
     const res = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
@@ -169,9 +172,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
       body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(res.status).toBe(403);
-    expect(((await res.json()) as { code: string }).code).toBe(
-      "personal_model_credentials_disabled",
-    );
+    expect(((await res.json()) as { code: string }).code).toBe("personal_connections_disabled");
     const rows = await db
       .select({ id: modelProviderCredentials.id })
       .from(modelProviderCredentials)
@@ -181,6 +182,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
 
   it("a reconnect pairing never updates a credential its minter may not reconnect", async () => {
     const holder = await memberContext(ctx, "member");
+    await seedModelConfigFor(ctx.orgId, "test-oauth");
     const subscription = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: holder.user.id,
@@ -227,6 +229,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
 
   it("refuses to mint a reconnect pairing on another member's personal subscription", async () => {
     const holder = await memberContext(ctx, "member");
+    await seedModelConfigFor(ctx.orgId, "test-oauth");
     const subscription = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: holder.user.id,
@@ -255,7 +258,9 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
       refreshToken: "old-refresh",
     });
     const pairing = await mintPairing(ctx, "test-oauth", { credentialId: subscription });
-    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+    await updateModelConfig(ctx.orgId, await seedModelConfigFor(ctx.orgId, "test-oauth"), {
+      personalConnectionsAllowed: false,
+    });
 
     const res = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
@@ -264,9 +269,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
     });
 
     expect(res.status).toBe(403);
-    expect(((await res.json()) as { code: string }).code).toBe(
-      "personal_model_credentials_disabled",
-    );
+    expect(((await res.json()) as { code: string }).code).toBe("personal_connections_disabled");
   });
 
   it("does NOT emit Deprecation / Link successor-version response headers", async () => {

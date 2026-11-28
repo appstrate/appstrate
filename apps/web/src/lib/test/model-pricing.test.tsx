@@ -3,16 +3,16 @@
 /**
  * The "No pricing" badge exists so a self-hoster learns a model is unpriced
  * BEFORE spending on it. This exercises the pure rule the badge renders
- * (`model-pricing.ts`) — each exclusion on its own, because an exclusion
+ * (`lib/model-pricing.ts`) — each exclusion on its own, because an exclusion
  * silently dropped is a false positive on every alias or every built-in row —
- * then the model cell that draws it, row by row.
+ * then the model chips that draw it, chip by chip.
  */
 
 import { describe, it, expect } from "bun:test";
-import { ModelsCell } from "../../../components/provider-models-cell.tsx";
-import i18n, { i18nReady } from "../../../i18n.ts";
-import { orgModelFixture as orgModel } from "../../../test/org-model-fixture.ts";
-import { render } from "../../../test/render.tsx";
+import { ModelChips } from "../../components/model-configs/model-chips.tsx";
+import i18n, { i18nReady } from "../../i18n.ts";
+import { orgModelFixture as orgModel } from "../../test/org-model-fixture.ts";
+import { render } from "../../test/render.tsx";
 import { isModelUnpriced, type ModelPricingFields } from "../model-pricing.ts";
 
 await i18nReady;
@@ -70,7 +70,7 @@ describe("isModelUnpriced", () => {
 describe("the unpriced badge", () => {
   const cell = () =>
     render(
-      <ModelsCell
+      <ModelChips
         models={[
           orgModel({ id: "mdl_priced", label: "Priced" }),
           orgModel({ id: "mdl_local", label: "Local", cost: null }),
@@ -87,10 +87,11 @@ describe("the unpriced badge", () => {
       await i18n.changeLanguage(language);
       const label = i18n.t("models.unpriced", { ns: "settings" });
       const html = cell();
-      expect(nameOf(html, "Local", "Alias")).toContain(`aria-label="${label}"`);
-      expect(nameOf(html, "Priced", "Local")).not.toContain(`aria-label="${label}"`);
-      expect(nameOf(html, "Alias")).not.toContain(`aria-label="${label}"`);
-      expect(html.split(`aria-label="${label}"`)).toHaveLength(2);
+      // Visible text, not an icon alone: readable where a title never shows (touch).
+      expect(nameOf(html, "Local", "Alias")).toContain(`>${label}<`);
+      expect(nameOf(html, "Priced", "Local")).not.toContain(`>${label}<`);
+      expect(nameOf(html, "Alias")).not.toContain(`>${label}<`);
+      expect(html.split(`>${label}<`)).toHaveLength(2);
       expect(html).toContain(`title="${i18n.t("models.unpricedHint", { ns: "settings" })}"`);
     }
     await i18n.changeLanguage("fr");

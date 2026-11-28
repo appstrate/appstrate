@@ -46,8 +46,9 @@ function isPairingTarget(t: unknown): t is PairingTarget {
   if (!t || typeof t !== "object") return false;
   const c = t as Record<string, unknown>;
   return c.credentialId === undefined
-    ? c.ownerType === "org" || c.ownerType === "user"
-    : typeof c.credentialId === "string" && c.ownerType === undefined;
+    ? (c.ownerType === "org" || c.ownerType === "user") &&
+        (c.configId === undefined || typeof c.configId === "string")
+    : typeof c.credentialId === "string" && c.ownerType === undefined && c.configId === undefined;
 }
 
 function isPendingPairing(p: unknown): p is PendingPairing {
@@ -164,6 +165,7 @@ export function resumablePairing(
       p.providerId === match.providerId &&
       p.target.ownerType === match.target.ownerType &&
       p.target.credentialId === match.target.credentialId &&
+      p.target.configId === match.target.configId &&
       new Date(p.expiresAt).getTime() > now
     ) {
       resumable = { id: p.id, command };

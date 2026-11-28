@@ -91,7 +91,6 @@ describe("resolveProviderEntry", () => {
     apiShape,
     defaultBaseUrl,
     baseUrlOverridable: providerId.endsWith("-compatible"),
-    personal_allowed: !providerId.endsWith("-compatible"),
     authMode: "api_key",
     featured: false,
     live_model_search: false,

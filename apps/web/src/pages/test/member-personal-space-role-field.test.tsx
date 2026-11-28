@@ -47,7 +47,7 @@ function renderField(m: OrgMember, permissions: string[]): string {
   seedOrgAndRoles(queryClient, permissions);
   queryClient.setQueryData(
     ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
-    { personal_model_credentials: true, personal_space_role: { preset_role: "operator" } },
+    { personal_space_role: { preset_role: "operator" } },
   );
   const snapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
     ...orgStore.getInitialState(),

@@ -240,7 +240,7 @@ describe("POST /internal/llm-proxy — a run's own inference", () => {
     });
     const orgModel = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: providerKey.id,
+      configId: providerKey.configId!,
       modelId: "org-upstream-model",
       enabled: true,
     });
@@ -337,7 +337,7 @@ describe("POST /internal/llm-proxy — a run's own inference", () => {
     });
     const orgModel = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: providerKey.id,
+      configId: providerKey.configId!,
       enabled: true,
     });
     const runs = [

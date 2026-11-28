@@ -33,13 +33,13 @@
 import { describe, it, expect, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { organizations, orgModels } from "@appstrate/db/schema";
+import { organizations } from "@appstrate/db/schema";
 import { checkUsageAllowed } from "../../../src/services/chat-platform-services.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
-import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
+import { seedModelConfigFor, seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import type {
@@ -54,15 +54,14 @@ const SYSTEM_PRESET = "sys-chat-model";
 /** The test organization and its session user, created fresh for each test. */
 let ORG_ID = "";
 let USER_ID = "";
-/** An org-owned model bound to the org's own API key (not a system preset). */
+/** An org-owned model whose configuration holds the org's own API key (not a system preset). */
 let orgPresetId = "";
 
-/** An unbound openai org model: each member's own key of the family serves it. */
+/** An openai org model whose configuration holds no organization key: each member's own key serves it. */
 async function seedUnboundOpenAiPreset(): Promise<string> {
   const model = await seedOrgModel({
     orgId: ORG_ID,
-    providerId: "openai",
-    credentialId: null,
+    configId: await seedModelConfigFor(ORG_ID, "openai"),
     label: "Shared GPT",
     modelId: "gpt-5.5",
     enabled: true,
@@ -114,7 +113,7 @@ describe("checkUsageAllowed", () => {
         models: [{ id: SYSTEM_PRESET, modelId: "gpt-4o-2024-08-06" }],
       },
     ]);
-    // An org-owned preset: a real org credential, bound through `org_models`.
+    // An org-owned preset: a model of a configuration holding a real org connection.
     const orgKey = await seedOrgModelProviderKey({
       orgId: ORG_ID,
       label: "Org key",
@@ -124,8 +123,7 @@ describe("checkUsageAllowed", () => {
     });
     const model = await seedOrgModel({
       orgId: ORG_ID,
-      providerId: "test-apikey",
-      credentialId: orgKey.id,
+      configId: orgKey.configId!,
       label: "Org preset",
       modelId: "gpt-4o-2024-08-06",
       enabled: true,
@@ -140,18 +138,15 @@ describe("checkUsageAllowed", () => {
   });
 
   async function seedUnboundModel(): Promise<string> {
-    const [unbound] = await db
-      .insert(orgModels)
-      .values({
-        orgId: ORG_ID,
-        providerId: "test-apikey",
-        credentialId: null,
-        label: "Unbound",
-        modelId: "gpt-4o-2024-08-06",
-        enabled: true,
-      })
-      .returning();
-    return unbound!.id;
+    // A model whose configuration (another endpoint of the gateway) holds no connection.
+    const unbound = await seedOrgModel({
+      orgId: ORG_ID,
+      configId: await seedModelConfigFor(ORG_ID, "test-apikey", "https://unserved.example.test/v1"),
+      label: "Unbound",
+      modelId: "gpt-4o-2024-08-06",
+      enabled: true,
+    });
+    return unbound.id;
   }
 
   it("refuses a turn on a model no credential of the session user serves, with or without a hook", async () => {

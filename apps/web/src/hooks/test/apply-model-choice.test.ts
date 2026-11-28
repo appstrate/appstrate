@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A model choice is one write (`POST /api/models/apply`): its body names the key, the models
- * added, those switched on and off, and the default; a refusal comes back entry by entry and
+ * A model choice is one write (`POST /api/models/apply`): its body names the configuration, the
+ * models added and those switched on and off; a refusal comes back entry by entry and
  * writes nothing, so the dialog only has to say which entries the server refused.
  */
 
@@ -39,40 +39,22 @@ const plan = {
   add: [row("opus")],
   grant: [switchedOff],
   withdraw: [current],
-  defaultModelId: "opus",
 };
 
 describe("modelChoiceBody", () => {
-  it("mints the key in the same write, with every switch and the default", () => {
-    expect(
-      modelChoiceBody({
-        plan,
-        target: { credentialId: null, providerId: "anthropic" },
-        newCredential: { label: "Anthropic", providerId: "anthropic", apiKey: "sk-test" },
-      }),
-    ).toEqual({
-      credential: { label: "Anthropic", providerId: "anthropic", api_key: "sk-test" },
+  it("names the configuration, with every switch", () => {
+    expect(modelChoiceBody({ plan, configId: "cfg_anthropic" })).toEqual({
+      config_id: "cfg_anthropic",
       add: [{ modelId: "opus" }],
       enable: ["mdl_off"],
       disable: ["mdl_cur"],
-      default_model_id: "opus",
     });
   });
 
-  it("binds to an existing key by id", () => {
-    const body = modelChoiceBody({
-      plan: { ...plan, defaultModelId: null },
-      target: { credentialId: "cred_org", providerId: "anthropic" },
-    });
-    expect(body.credential).toEqual({ id: "cred_org" });
-    expect(body).not.toHaveProperty("providerId");
-    expect(body).not.toHaveProperty("default_model_id");
-  });
-
-  it("names the service of models left to each person's own key", () => {
-    const body = modelChoiceBody({ plan, target: { credentialId: null, providerId: "anthropic" } });
-    expect(body.credential).toBeNull();
-    expect(body.providerId).toBe("anthropic");
+  it("never sets the default: it is chosen at the top of the page", () => {
+    expect(modelChoiceBody({ plan, configId: "cfg_anthropic" })).not.toHaveProperty(
+      "default_model_id",
+    );
   });
 });
 
@@ -98,10 +80,10 @@ describe("choiceRefusal", () => {
     expect(choiceRefusal(err, plan)?.failedModelIds).toEqual(["opus"]);
   });
 
-  it("is not an entry refusal when the key or the permission is refused", () => {
+  it("is not an entry refusal when the configuration or the permission is refused", () => {
     expect(choiceRefusal(new ApiError("forbidden", "no", 403), plan)).toBeNull();
     expect(
-      choiceRefusal(refused([{ field: "credential.providerId", code: "invalid_request" }]), plan),
+      choiceRefusal(refused([{ field: "config_id", code: "invalid_request" }]), plan),
     ).toBeNull();
   });
 });

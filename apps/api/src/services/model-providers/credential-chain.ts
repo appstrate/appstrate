@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context } from "hono";
-import { and, eq } from "drizzle-orm";
-import type { ModelProviderDefinition } from "@appstrate/core/module";
-import { db } from "@appstrate/db/client";
-import { modelProviderCredentials } from "@appstrate/db/schema";
 import type { AppEnv } from "../../types/index.ts";
 import { isUserPrincipal } from "../../lib/principal.ts";
-import { lookupCatalogModel } from "../model-catalog.ts";
-import { personalModelCredentialsAllowed } from "./credentials.ts";
+import { lookupCatalogModel, piProviderOf, restrictsToOffer } from "../model-catalog.ts";
 import { getModelProvider } from "./registry.ts";
 
 /** The catalog family a provider's models belong to (a wrapper serves its catalog provider's ids). */
@@ -17,81 +12,99 @@ function familyOf(providerId: string): string {
 }
 
 /**
- * A subscription (oauth2) credential: never served by the LLM proxy, and first in
- * a member's personal chain.
+ * The provider a configuration of `providerId`'s family is stored under: the family's own
+ * registered provider when there is one (`claude-code` → `anthropic`), else `providerId`
+ * itself (`codex`, whose family `openai-codex` is no registered provider).
  */
+export function configProviderOf(providerId: string): string {
+  const family = familyOf(providerId);
+  return getModelProvider(family) ? family : providerId;
+}
+
+/** A provider whose endpoint is chosen per configuration (`baseUrlOverridable`). */
+export function isGatewayProvider(providerId: string): boolean {
+  return getModelProvider(providerId)?.baseUrlOverridable === true;
+}
+
+/**
+ * Whether a connection of `connectionProviderId` may join a configuration of
+ * `configProviderId`: the same catalog family, and for a gateway the same provider.
+ */
+export function connectionFitsConfig(
+  connectionProviderId: string,
+  configProviderId: string,
+): boolean {
+  if (!getModelProvider(connectionProviderId)) return false;
+  if (familyOf(connectionProviderId) !== familyOf(configProviderId)) return false;
+  return !isGatewayProvider(configProviderId) || connectionProviderId === configProviderId;
+}
+
+/**
+ * Whether a connection of `connectionProviderId` serves `modelId` of a configuration of
+ * `configProviderId`: it fits, and the model is in its offer (a gateway, or a provider not
+ * restricted to its offer, serves any id). A subscription serves only its catalog's ids.
+ */
+export function servesModel(
+  connectionProviderId: string,
+  configProviderId: string,
+  modelId: string,
+): boolean {
+  if (!connectionFitsConfig(connectionProviderId, configProviderId)) return false;
+  const def = getModelProvider(connectionProviderId)!;
+  if (piProviderOf(def) === null) return true;
+  return lookupCatalogModel(def, modelId) !== null || !restrictsToOffer(def);
+}
+
+/** A subscription (oauth2) connection: never served by the LLM proxy, first in its rank. */
 function isSubscription(providerId: string): boolean {
   return getModelProvider(providerId)?.authMode === "oauth2";
 }
 
-/** Whether a personal credential of `credentialProviderId` may serve the model `target`. */
-export function servesModel(
-  credentialProviderId: string,
-  target: { providerId: string; modelId: string },
-): boolean {
-  const def = getModelProvider(credentialProviderId);
-  // No endpoint check: a personal credential never carries one (refused at creation).
-  if (!def) return false;
-  if (familyOf(credentialProviderId) !== familyOf(target.providerId)) return false;
-  return lookupCatalogModel(def, target.modelId) !== null;
-}
-
-/** A member's personal credential, as applicability and ranking read it. */
-interface PersonalCredential {
+/** A connection of a configuration, as the serving order reads it. */
+export interface ConnectionCandidate {
   id: string;
   providerId: string;
+  ownerUserId: string | null;
   createdAt: Date;
 }
 
-/**
- * The personal credentials `payerUserId` owns in `orgId` (none for `null`), read once per call.
- * The owner query runs first (indexed, and almost always empty); the org policy
- * is read only when there is a credential to switch off.
- */
-export async function listPersonalCredentials(
-  orgId: string,
-  payerUserId: string | null,
-): Promise<PersonalCredential[]> {
-  if (!payerUserId) return [];
-  const rows = await db
-    .select({
-      id: modelProviderCredentials.id,
-      providerId: modelProviderCredentials.providerId,
-      createdAt: modelProviderCredentials.createdAt,
-    })
-    .from(modelProviderCredentials)
-    .where(
-      and(
-        eq(modelProviderCredentials.orgId, orgId),
-        eq(modelProviderCredentials.ownerUserId, payerUserId),
-      ),
-    );
-  if (rows.length === 0) return [];
-  return (await personalModelCredentialsAllowed(orgId)) ? rows : [];
+/** Who asks for a model of a configuration, and how. */
+export interface CandidateQuery {
+  /** The configuration's provider. */
+  configProviderId: string;
+  personalConnectionsAllowed: boolean;
+  modelId: string;
+  /** An alias is served by the organization only, never by a subscription. */
+  aliased: boolean;
+  /** The member whose personal connections may serve (`null`: none). */
+  payerUserId: string | null;
+  /** The LLM proxy never serves a subscription. */
+  viaProxy?: boolean;
 }
 
 /**
- * The ids of the `credentials` that may serve `target`, best first (subscriptions
- * before API keys, then oldest). Pure: no read, no policy. `excludeSubscriptions`
- * drops the subscriptions (the LLM proxy never serves one).
+ * The connections that may serve the model, best first: personal subscription, personal
+ * API key, organization subscription, organization API key, then oldest. Pure: no read.
+ * `connections` are the configuration's; a member's personal ones count for that member
+ * only, while the configuration allows them and the model is no alias.
  */
-export function applicableCredentialIds(
-  credentials: readonly PersonalCredential[],
-  target: { providerId: string; modelId: string },
-  options: { excludeSubscriptions?: boolean } = {},
-): string[] {
-  const rank = (providerId: string): number => (isSubscription(providerId) ? 0 : 1);
-  return credentials
+export function rankCandidates<T extends ConnectionCandidate>(
+  connections: readonly T[],
+  query: CandidateQuery,
+): T[] {
+  const personalOk =
+    query.payerUserId !== null && query.personalConnectionsAllowed && !query.aliased;
+  const rank = (c: T): number =>
+    (c.ownerUserId === null ? 2 : 0) + (isSubscription(c.providerId) ? 0 : 1);
+  return connections
     .filter(
-      (credential) =>
-        !(options.excludeSubscriptions && isSubscription(credential.providerId)) &&
-        servesModel(credential.providerId, target),
+      (c) =>
+        (c.ownerUserId === null || (personalOk && c.ownerUserId === query.payerUserId)) &&
+        // A subscription is a bearer swap: neither the proxy nor an alias's body rewrite runs on one.
+        !((query.viaProxy || query.aliased) && isSubscription(c.providerId)) &&
+        servesModel(c.providerId, query.configProviderId, query.modelId),
     )
-    .sort(
-      (a, b) =>
-        rank(a.providerId) - rank(b.providerId) || a.createdAt.getTime() - b.createdAt.getTime(),
-    )
-    .map((credential) => credential.id);
+    .sort((a, b) => rank(a) - rank(b) || a.createdAt.getTime() - b.createdAt.getTime());
 }
 
 /**
@@ -101,22 +114,4 @@ export function applicableCredentialIds(
  */
 export function requestPayerUserId(c: Context<AppEnv>): string | null {
   return isUserPrincipal(c) ? c.get("user").id : null;
-}
-
-/**
- * A member may own a credential of this provider, and a model on it may be left to
- * each member: its endpoint is fixed.
- */
-export function providerAllowsPersonalCredentials(
-  def: Pick<ModelProviderDefinition, "baseUrlOverridable">,
-): boolean {
-  return !def.baseUrlOverridable;
-}
-
-/**
- * An organization model may be bound to this credential: an organization one
- * (API key or subscription), never a member's own.
- */
-export function isBindableCredential(c: { ownerUserId: string | null }): boolean {
-  return c.ownerUserId === null;
 }

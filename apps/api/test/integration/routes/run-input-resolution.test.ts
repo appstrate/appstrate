@@ -17,7 +17,7 @@ import { runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedSchedule } from "../../helpers/seed.ts";
+import { configIdOf, seedAgent, seedSchedule } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
@@ -81,6 +81,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT_ID);
 
     const credentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -88,9 +89,13 @@ describe("run input resolution — author / editor / schedule / caller layers", 
       providerId: "openai",
       apiKey: "sk-test-not-a-real-key",
     });
-    const modelDbId = await createOrgModel(ctx.orgId, "Layered GPT", "gpt-5.5", ctx.user.id, {
-      credentialId,
-    });
+    const modelDbId = await createOrgModel(
+      ctx.orgId,
+      "Layered GPT",
+      "gpt-5.5",
+      ctx.user.id,
+      await configIdOf(credentialId),
+    );
     await setDefaultModel(ctx.orgId, modelDbId);
   }
 

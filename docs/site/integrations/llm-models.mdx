@@ -28,7 +28,7 @@ The providers available on your instance depend on the `MODULES` setting (see [E
 | OpenAI-compatible (custom endpoint)                                                             | `openai-completions`    |
 | Anthropic-compatible (custom endpoint)                                                          | `anthropic-messages`    |
 
-The two **custom endpoint** providers are the escape hatch: give them a `base_url_override` to reach a self-hosted or third-party server (Ollama, vLLM, LiteLLM and similar). The API-key providers all use one of the four wire formats the platform's LLM proxy serves, so inference reaches the vendor through the same sidecar path whichever one you pick.
+The two **custom endpoint** providers are the escape hatch: point a model configuration at a self-hosted or third-party server (Ollama, vLLM, LiteLLM and similar) with its `base_url`. The API-key providers all use one of the four wire formats the platform's LLM proxy serves, so inference reaches the vendor through the same sidecar path whichever one you pick.
 
 Google, Vertex, Azure OpenAI and AWS Bedrock are not native providers. To use a model served by one of them, put a gateway that exposes an OpenAI or Anthropic compatible API in front of it and connect that gateway through a custom endpoint provider.
 
@@ -38,32 +38,41 @@ Two opt-in modules, `@appstrate/module-claude-code` and `@appstrate/module-codex
 
 ## Adding a provider and a model
 
-Create the credential first, then the model that points at it.
+A model belongs to a **configuration**: one provider family of the organization (`anthropic`, `openai`, …), or one endpoint of a custom endpoint provider. Its **connections** (an API key or a subscription, the organization's or a member's own) pay for the calls; a model is served by the connections of its configuration, never bound to one key. The configuration also decides whether members may add a connection of their own (`personal_connections_allowed`, default `true`).
 
 ```bash
-# 1. Store the API key (encrypted at rest)
-appstrate api POST /api/model-provider-credentials -d '{
-  "providerId": "openai",
-  "api_key": "sk-..."
+# 1. A custom endpoint provider takes its endpoint from a configuration (the other providers
+#    get their family's configuration implicitly, created when missing)
+appstrate api POST /api/model-configs -d '{
+  "provider_id": "openai-compatible",
+  "base_url": "https://llm.internal.example.com/v1"
 }'
-# -> { "id": "<credentialId>", ... }
+# -> { "id": "<configId>", ... }
 
-# 2. Create a model bound to it
+# 2. Store the API key (encrypted at rest) as a connection of that configuration
+appstrate api POST /api/model-provider-credentials -d '{
+  "providerId": "openai-compatible",
+  "api_key": "sk-...",
+  "config_id": "<configId>"
+}'
+
+# 3. Create a model in the configuration
 appstrate api POST /api/models -d '{
   "modelId": "<id from the provider offer>",
-  "credentialId": "<credentialId>"
+  "config_id": "<configId>"
 }'
 ```
 
-- `label` is optional on both calls. The platform derives one and avoids duplicates.
-- For a custom endpoint provider, add `"base_url_override": "https://llm.internal.example.com/v1"` to the credential.
+- `label` is optional on every call. The platform derives one and avoids duplicates.
+- `base_url_override` is gone: sending it is a `400`. A configuration's endpoint changes with `PATCH /api/model-configs/{id}`, while it has no connection (`model_config_has_connections` otherwise). A connection omitting `config_id` joins its provider's family configuration, a gateway needs one named.
 - A named provider only accepts model ids from its own offer (`model_not_offered` otherwise). The offer is the provider's records in the model registry bundled with your platform version, plus the newer ones the instance has read from the [live model catalog](#where-the-offer-comes-from). Gateways (OpenAI-compatible, Anthropic-compatible) and OpenRouter accept any id.
 - `POST /api/model-provider-credentials/test` and `POST /api/model-provider-credentials/{id}/test` check a key before or after saving. `POST /api/models/{id}/test` checks one model.
-- `POST /api/model-provider-credentials/discover` lists the models an endpoint serves.
-- `POST /api/models/seed` creates several models from the provider's offer for one credential in a single call.
+- `POST /api/model-provider-credentials/discover` lists the models an endpoint serves (`config_id` or `base_url` in the body).
+- `POST /api/models/seed` creates several models from the provider's offer for one configuration in a single call; `POST /api/models/apply` applies a configuration's whole choice (models to add, enable, disable and the default) at once.
 - For OpenRouter, `GET /api/models/openrouter?q=claude` searches its catalogue. The registry marks such a provider with `live_model_search: true`: its models are searched live, and any model id is accepted.
 - Each model returned by `GET /api/models` carries `pi_provider`, the key of the Pi registry provider it is served through (for example `moonshotai` for `moonshot`). It is `null` for a gateway and for an aliased system model.
 - Per-model overrides (`contextWindow`, `maxTokens`, `reasoning`, `input`, `cost`) are optional. Left out, they come from the model catalogue and follow catalogue updates.
+- The default model must be served by an organization connection (`model_org_connection_required` otherwise), since schedules, API keys and end users cannot use a member's own.
 
 The dashboard also seeds a provider's featured models the first time you connect it.
 
@@ -74,19 +83,20 @@ A provider's offer comes from the model registry that ships with your platform v
 - **A platform upgrade can change the offer.** A model the registry no longer records can no longer be added. A model you already added on it stays in your list with the values stored, but it loses the catalog defaults (label, limits, capabilities, price) and runs unpriced unless you set a `cost` on it. If the operator listed such a model in `SYSTEM_PROVIDER_KEYS`, the platform refuses to boot until it is removed, and `bun run verify:system-models` run before the deploy catches it. The release notes of each version say which providers lost models.
 - **A live catalog adds new models between releases.** Each API process reads a signed file from `get.appstrate.dev` when it starts and every hour, and holds it in memory. It lists models a newer registry records and your build can already serve, so a new vendor model becomes selectable without a platform release. It only adds: it never changes a model of the bundled registry, a system model or a featured model. The read sends nothing about your instance. Until a process has read the file (just after a restart, or while the channel is unreachable), a model added from it runs without its catalog defaults. An operator turns the read off with `MODEL_CATALOG_URL=off`, which leaves the bundled registry alone (see [Environment Variables](/self-hosting/environment-variables)). The design is in [`MODEL_CATALOG.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/MODEL_CATALOG.md).
 
-## Organization keys and personal keys
+## Organization connections and personal connections
 
-A credential belongs to the organization (the default) or to one member. A personal credential is created with `"owner_type": "user"` on `POST /api/model-provider-credentials`, which takes the `model-provider-credentials:connect` permission. It serves only its owner's own calls, cannot be bound to a model, and is refused on a custom endpoint provider. Members manage theirs under **Preferences**, **My model keys**. An organization turns personal credentials off with **Members can use their personal key or personal subscription** in its settings, and they then serve nothing.
+A connection belongs to the organization (the default) or to one member. A personal connection is created with `"owner_type": "user"` on `POST /api/model-provider-credentials`, which takes the `model-provider-credentials:connect` permission, and joins a configuration like any other (`config_id`). It serves only its owner's own calls. Members manage theirs under **Preferences**.
 
-Who pays follows from the model, reported as `billed_to` on `GET /api/models`:
+Each configuration decides whether members may bring their own: `personal_connections_allowed` on `POST` and `PATCH /api/model-configs`, default `true`. When it is `false`, adding or reconnecting a personal connection is refused (`403 personal_connections_disabled`) and the existing ones serve nothing.
 
-| Model                                                                                            | Paid by                                                                                                             |
-| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| A built-in model (`system`)                                                                      | The platform                                                                                                        |
-| Bound to an organization credential (`org`)                                                      | That credential, whoever calls                                                                                      |
-| Created with `"credentialId": null` and a `providerId`, so each member brings their own (`user`) | The caller's own credential for that provider. Without one the call is refused with `409 model_credential_required` |
+A call is served by one connection of the model's configuration that can serve the model, in this order, then the oldest:
 
-Only a signed-in user pays from a personal credential. API keys, end-users and schedules never do, so a model left to each member cannot be used by a schedule.
+1. the caller's personal subscription
+2. the caller's personal API key
+3. an organization subscription
+4. an organization API key
+
+Only a signed-in user pays from a personal connection. API keys, end-users and schedules never do, so they need an organization connection on the configuration, and so does the default model (`model_org_connection_required`). A model whose configuration holds no connection that can serve the caller is refused. The public LLM proxy never uses a subscription.
 
 ## System models and organization models
 

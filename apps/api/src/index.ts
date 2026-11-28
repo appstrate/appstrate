@@ -27,6 +27,7 @@ import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createApiKeysRouter } from "./routes/api-keys.ts";
 import { createProxiesRouter } from "./routes/proxies.ts";
 import { createModelsRouter } from "./routes/models.ts";
+import { createModelConfigsRouter } from "./routes/model-configs.ts";
 import { createModelProviderCredentialsRouter } from "./routes/model-provider-credentials.ts";
 import { createModelProvidersOAuthRouter } from "./routes/model-providers-oauth.ts";
 import { createInternalRouter } from "./routes/internal.ts";
@@ -388,6 +389,7 @@ app.route("/api/admin/storage-deletion-jobs", createAdminStorageDeletionRouter()
 app.route("/api/api-keys", createApiKeysRouter());
 app.route("/api/proxies", createProxiesRouter());
 app.route("/api/models", createModelsRouter());
+app.route("/api/model-configs", createModelConfigsRouter());
 app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
 app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
 app.route("/api/spaces", createSpacesRouter());
