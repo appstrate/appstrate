@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Driving the Radix primitives the SPA builds its forms from.
+ * Driving the `Select` the SPA builds its forms from.
  *
- * A Radix `Select` is a listbox, not a `<select>`, and its popper is taller
- * than the viewport without scrolling with the page — so an option far down it
- * is simply unclickable. Its typeahead is the way in: type enough of the label
- * to bring the option under the cursor, then commit it with Enter.
+ * It is a listbox, not a `<select>`, and its popup is held to the viewport and
+ * scrolls on its own — so an option far down it is out of reach of a click.
+ * Its typeahead is the way in: type enough of the label to highlight the
+ * option, then commit it with Enter.
  */
 
 import { expect, type Page } from "@playwright/test";

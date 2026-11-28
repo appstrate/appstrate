@@ -4,7 +4,7 @@
  * The signup policy of an OAuth client: what the operator may answer, and when.
  * The policy is what a signup WOULD receive, so an org-level client edits it
  * whether or not signups are currently allowed. `SignupPolicyFields` is rendered
- * rather than the modal, whose Radix chrome needs a DOM.
+ * rather than the modal, whose dialog chrome needs a DOM.
  */
 
 import { describe, it, expect } from "bun:test";

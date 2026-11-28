@@ -141,13 +141,11 @@ export function ReasoningStep({
   return (
     <Collapsible open={readerOpen ?? streaming} onOpenChange={setReaderOpen}>
       <ActivityLine lead={<BrainIcon aria-hidden />}>
-        <CollapsibleTrigger asChild>
-          <ActivityTrigger>
-            <ActivityLabel active={streaming}>
-              {title || t(streaming ? "reasoning.running" : "reasoning.done")}
-            </ActivityLabel>
-            <ActivityChevron />
-          </ActivityTrigger>
+        <CollapsibleTrigger render={<ActivityTrigger />}>
+          <ActivityLabel active={streaming}>
+            {title || t(streaming ? "reasoning.running" : "reasoning.done")}
+          </ActivityLabel>
+          <ActivityChevron />
         </CollapsibleTrigger>
       </ActivityLine>
       <CollapsibleContent className={ACTIVITY_CONTENT_CLASS}>

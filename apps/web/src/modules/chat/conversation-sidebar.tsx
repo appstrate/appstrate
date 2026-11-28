@@ -68,18 +68,20 @@ export function ConversationContextToggle({
   const Icon = expanded ? PanelRightCloseIcon : PanelRightIcon;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label={label}
-          aria-expanded={expanded}
-          aria-controls={CONVERSATION_CONTEXT_PANEL_ID}
-          onClick={() => dispatch({ type: "toggle" })}
-        >
-          <Icon />
-        </Button>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={label}
+            aria-expanded={expanded}
+            aria-controls={CONVERSATION_CONTEXT_PANEL_ID}
+            onClick={() => dispatch({ type: "toggle" })}
+          />
+        }
+      >
+        <Icon />
       </TooltipTrigger>
       <TooltipContent side="bottom">{label}</TooltipContent>
     </Tooltip>
@@ -416,7 +418,7 @@ export function ConversationSidebar({
       return;
     }
     // The phone's sheet covers the thread: it closes first, and the card is revealed once it has,
-    // in place of the focus the sheet would give back to its trigger (`onCloseAutoFocus`).
+    // in place of the focus the sheet would give back to its trigger (`finalFocus`).
     pendingReveal.current = call;
     dispatch({ type: "toggle" });
   };
@@ -490,17 +492,16 @@ export function ConversationSidebar({
           <SheetContent
             id={CONVERSATION_CONTEXT_PANEL_ID}
             side="right"
-            aria-describedby={undefined}
             // The panel's header carries the one close control.
             showCloseButton={false}
             className="bg-canvas flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
-            onCloseAutoFocus={(event) => {
+            finalFocus={() => {
               const call = pendingReveal.current;
-              if (!call) return;
+              if (!call) return true;
               pendingReveal.current = null;
               // The revealed card takes the focus, not the toggle that opened the sheet.
-              event.preventDefault();
               reveal(call);
+              return false;
             }}
           >
             <SheetTitle className="sr-only">{t("context.label")}</SheetTitle>

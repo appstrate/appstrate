@@ -50,7 +50,7 @@ interface ModelFormBodyProps {
 }
 
 /**
- * The form without the dialog chrome (a Radix dialog renders nothing without a DOM). The registry
+ * The form without the dialog chrome (a dialog renders nothing without a DOM). The registry
  * is awaited, not defaulted: the capabilities toggle opens on a comparison against the row's
  * catalog entry.
  */

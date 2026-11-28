@@ -286,7 +286,7 @@ describe("the space default's connections", () => {
 
   it("list a stored member no longer shared unticked, and never tickable again", () => {
     const html = section([SHARED, GONE]);
-    expect(html).toMatch(new RegExp(`aria-checked="false"[^>]*disabled=""[^>]*${box(GONE)}`));
+    expect(html).toMatch(new RegExp(`disabled=""[^>]*aria-checked="false"[^>]*${box(GONE)}`));
     expect(html).toContain(settingsFr["integration.admin.unavailableConnection"]);
   });
 });

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A saved model's own deeds, at the start of its form's footer. The form's dialog is a Radix
+ * A saved model's own deeds, at the start of its form's footer. The form's dialog is a
  * portal, so the footer's part is rendered on its own: a test for a model bound to a key of the
  * organization's, a delete only for a caller the page hands it to (`models:delete`).
  */

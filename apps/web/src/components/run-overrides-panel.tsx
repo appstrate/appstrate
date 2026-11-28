@@ -6,7 +6,6 @@ import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { isQueryInFlight } from "../lib/query-state";
-import { SelectItem } from "@appstrate/ui/components/select";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { useModels } from "../hooks/use-models";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
@@ -274,21 +273,23 @@ export function RunOverridesPanel({
             <OptionSelect
               value={proxySelectValue}
               onValueChange={setProxy}
-              leading={
-                <SelectItem value={INHERIT}>
-                  {persistedProxyId === NONE
-                    ? t("run.overrides.proxyInheritWithDefault", {
-                        ns: "agents",
-                        name: t("run.overrides.proxyNone", { ns: "agents" }),
-                      })
-                    : inheritedProxy
+              leading={[
+                {
+                  value: INHERIT,
+                  label:
+                    persistedProxyId === NONE
                       ? t("run.overrides.proxyInheritWithDefault", {
                           ns: "agents",
-                          name: inheritedProxy.label,
+                          name: t("run.overrides.proxyNone", { ns: "agents" }),
                         })
-                      : t("run.overrides.proxyInherit", { ns: "agents" })}
-                </SelectItem>
-              }
+                      : inheritedProxy
+                        ? t("run.overrides.proxyInheritWithDefault", {
+                            ns: "agents",
+                            name: inheritedProxy.label,
+                          })
+                        : t("run.overrides.proxyInherit", { ns: "agents" }),
+                },
+              ]}
               options={[
                 { value: NONE, label: t("run.overrides.proxyNone", { ns: "agents" }) },
                 ...(goneProxyOverride

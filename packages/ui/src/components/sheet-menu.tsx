@@ -68,7 +68,7 @@ export function MenuHeading({ back, children }: { back?: MenuBack; children: Rea
 export const MENU_TITLE_CLASS = "truncate text-base font-semibold desktop-pointer:text-sm";
 
 interface SheetMenuContentProps extends Omit<
-  React.ComponentPropsWithoutRef<typeof SheetContent>,
+  React.ComponentProps<typeof SheetContent>,
   "side" | "showCloseButton" | "title"
 > {
   /** The panel's name: its accessible name, drawn as its heading with `showTitle`. */
@@ -80,14 +80,17 @@ interface SheetMenuContentProps extends Omit<
  * A sheet menu's panel, inside a `Sheet` root: from the bottom, at most 85 % of the screen, its
  * rows scrolling. A width or a height the call site set for a popover yields to the screen's.
  */
-export const SheetMenuContent = React.forwardRef<HTMLDivElement, SheetMenuContentProps>(
-  ({ title, showTitle = false, className, children, ...props }, ref) => (
+export function SheetMenuContent({
+  title,
+  showTitle = false,
+  className,
+  children,
+  ...props
+}: SheetMenuContentProps) {
+  return (
     <SheetContent
-      ref={ref}
       side="bottom"
       showCloseButton={false}
-      // The title names the panel; there is no description to read after it.
-      aria-describedby={undefined}
       data-testid="sheet-menu"
       {...props}
       // No drag to dismiss, so no grabber; the bottom inset is the home indicator's, or a margin.
@@ -106,9 +109,8 @@ export const SheetMenuContent = React.forwardRef<HTMLDivElement, SheetMenuConten
       )}
       {children}
     </SheetContent>
-  ),
-);
-SheetMenuContent.displayName = "SheetMenuContent";
+  );
+}
 
 export const SheetMenuRow = React.forwardRef<HTMLButtonElement, React.ComponentProps<"button">>(
   ({ className, type = "button", ...props }, ref) => (

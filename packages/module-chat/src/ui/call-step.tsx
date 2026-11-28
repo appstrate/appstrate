@@ -30,10 +30,8 @@ import {
   FailedGlyph,
 } from "./activity-line.tsx";
 
-export type CallStepProps = Omit<
-  React.ComponentProps<typeof Collapsible>,
-  "open" | "onOpenChange" | "children"
-> & {
+export type CallStepProps = Omit<React.HTMLAttributes<HTMLDivElement>, "children"> & {
+  ref?: React.Ref<HTMLDivElement>;
   lead: React.ReactNode;
   label: React.ReactNode;
   idText?: string | undefined;
@@ -90,12 +88,10 @@ export function CallStep({
       {/* What lands with the result (duration, cross) follows the trigger on a line of fixed
           height: its arrival moves nothing. */}
       <ActivityLine lead={lead}>
-        <CollapsibleTrigger asChild>
-          <ActivityTrigger>
-            <ActivityLabel active={running}>{label}</ActivityLabel>
-            {idText ? <ActivityId>{idText}</ActivityId> : null}
-            <ActivityChevron />
-          </ActivityTrigger>
+        <CollapsibleTrigger render={<ActivityTrigger />}>
+          <ActivityLabel active={running}>{label}</ActivityLabel>
+          {idText ? <ActivityId>{idText}</ActivityId> : null}
+          <ActivityChevron />
         </CollapsibleTrigger>
         {trailing}
         {cross}

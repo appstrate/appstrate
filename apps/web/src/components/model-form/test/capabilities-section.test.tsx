@@ -103,7 +103,7 @@ describe("CapabilitiesSection — on", () => {
   });
 });
 
-/** A Radix checkbox is a `button`, so its state reads off `aria-checked`. */
+/** A checkbox is a `button`, so its state reads off `aria-checked`. */
 function checkedState(html: string, id: string): string | undefined {
   const tag = html.slice(html.lastIndexOf("<button", html.indexOf(`id="${id}"`)));
   return /aria-checked="(\w+)"/.exec(tag.slice(0, tag.indexOf(">")))?.[1];

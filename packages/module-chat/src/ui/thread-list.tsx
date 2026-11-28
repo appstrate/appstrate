@@ -389,12 +389,8 @@ function ConversationRow({
   // Closing a dialog opened from a row hands the focus back to what opened it.
   const dialogTrigger = useRef<HTMLButtonElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
-  const restoreDialogFocus = (event: Event) => {
-    if (dialogTrigger.current?.isConnected) {
-      event.preventDefault();
-      dialogTrigger.current.focus();
-    }
-  };
+  const restoreDialogFocus = () =>
+    dialogTrigger.current?.isConnected ? dialogTrigger.current : true;
   const [deleting, setDeleting] = useState(false);
   const [deleteFailed, setDeleteFailed] = useState(false);
   // The « … »'s two items; selecting one closes the menu.
@@ -463,7 +459,7 @@ function ConversationRow({
               className={cn(
                 "flex shrink-0 items-center justify-end gap-2",
                 canWrite &&
-                  "desktop-pointer:min-w-6 desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0 desktop-pointer:group-has-[[data-state=open]]/menu-item:opacity-0 transition-opacity",
+                  "desktop-pointer:min-w-6 desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0 desktop-pointer:group-has-[[data-popup-open]]/menu-item:opacity-0 transition-opacity",
               )}
             >
               {session.space_ids.length > 0 && (
@@ -496,17 +492,19 @@ function ConversationRow({
           titled by the conversation. */}
       {canWrite && (
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={t("threads.actions.openFor", {
-                title: session.title ?? t("threads.new"),
-              })}
-              ref={menuTrigger}
-              className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-2 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
-            >
-              <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
-            </button>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                aria-label={t("threads.actions.openFor", {
+                  title: session.title ?? t("threads.new"),
+                })}
+                ref={menuTrigger}
+                className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-2 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-popup-open:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
+              />
+            }
+          >
+            <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
@@ -526,11 +524,11 @@ function ConversationRow({
                 ? renderSpaces(session.space_ids)
                 : t("common:overview.title")}
             </DropdownMenuLabel>
-            <DropdownMenuItem onSelect={openRename}>
+            <DropdownMenuItem onClick={openRename}>
               <PencilIcon />
               {t("threads.rename")}
             </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onSelect={openDelete}>
+            <DropdownMenuItem variant="destructive" onClick={openDelete}>
               <Trash2Icon />
               {t("common:btn.delete")}
             </DropdownMenuItem>
@@ -541,7 +539,7 @@ function ConversationRow({
         open={confirmingDelete}
         onOpenChange={(open) => !deleting && setConfirmingDelete(open)}
       >
-        <AlertDialogContent data-testid="chat-delete-confirm" onCloseAutoFocus={restoreDialogFocus}>
+        <AlertDialogContent data-testid="chat-delete-confirm" finalFocus={restoreDialogFocus}>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("threads.delete.title")}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -571,7 +569,7 @@ function ConversationRow({
         <ConversationRenameDialog
           session={session}
           t={t}
-          onCloseAutoFocus={restoreDialogFocus}
+          finalFocus={restoreDialogFocus}
           onClose={() => setRenaming(false)}
         />
       )}
@@ -630,12 +628,12 @@ function ConversationRenameDialog({
   session,
   t,
   onClose,
-  onCloseAutoFocus,
+  finalFocus,
 }: {
   session: SessionSummary;
   t: ChatTranslate;
   onClose: () => void;
-  onCloseAutoFocus?: (event: Event) => void;
+  finalFocus?: () => HTMLElement | boolean;
 }) {
   const transport = useChatTransport();
   const queryClient = useQueryClient();
@@ -665,7 +663,7 @@ function ConversationRenameDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && !saving && onClose()}>
-      <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
+      <DialogContent finalFocus={finalFocus}>
         <DialogHeader>
           <DialogTitle>{t("threads.renameDialog.title")}</DialogTitle>
           <DialogDescription>{t("threads.renameDialog.description")}</DialogDescription>

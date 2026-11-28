@@ -53,7 +53,7 @@ export function PageActionsMenu({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <DropdownMenuTrigger render={trigger} />
       <DropdownMenuContent align="end" className={contentClassName}>
         {offered.map((action) => (
           <MenuActionItem key={action.id} action={action} pageAction />

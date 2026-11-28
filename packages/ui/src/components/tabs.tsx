@@ -4,12 +4,11 @@ import * as React from "react";
 import { Tabs as TabsPrimitive } from "@base-ui/react/tabs";
 
 import { cn } from "../cn.ts";
+import type { WithClassName } from "./primitive-props.ts";
 
 type TabsListVariant = "default" | "line";
 
 /** Base UI also takes a `(state) => string` class; these wrappers merge theirs, so a string only. */
-type WithClassName<P> = Omit<P, "className"> & { className?: string };
-
 function Tabs(props: React.ComponentProps<typeof TabsPrimitive.Root>) {
   return <TabsPrimitive.Root data-slot="tabs" {...props} />;
 }

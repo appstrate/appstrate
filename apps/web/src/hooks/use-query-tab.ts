@@ -27,8 +27,8 @@ export function useQueryTab<T extends string>(
   name: string,
   options: readonly [T, ...T[]],
 ): [T, (tab: T) => void] {
-  // Radix reports one click twice (pointer-down, then focus) before React re-renders: the guard
-  // reads the live URL, or the second identical push would leave Back on the same tab.
+  // A tab press activates twice (on focus during pointer-down, then on click) before React
+  // re-renders: the guard reads the live URL, or the second identical push would leave Back on the same tab.
   return queryTab(useListParams([]), name, options, () =>
     new URLSearchParams(window.location.search).get(name),
   );

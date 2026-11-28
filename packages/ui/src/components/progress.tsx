@@ -1,27 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import * as React from "react";
-import * as ProgressPrimitive from "@radix-ui/react-progress";
+import { Progress as ProgressPrimitive } from "@base-ui/react/progress";
 
 import { cn } from "../cn.ts";
+import type { WithClassName } from "./primitive-props.ts";
 
-const Progress = React.forwardRef<
-  React.ElementRef<typeof ProgressPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof ProgressPrimitive.Root> & { indicatorClassName?: string }
->(({ className, indicatorClassName, value, max = 100, ...props }, ref) => (
-  <ProgressPrimitive.Root
-    ref={ref}
-    value={value}
-    max={max}
-    className={cn("bg-muted relative h-2 w-full overflow-hidden rounded-full", className)}
-    {...props}
-  >
-    <ProgressPrimitive.Indicator
-      className={cn("bg-primary h-full w-full flex-1 transition-all", indicatorClassName)}
-      style={{ transform: `translateX(-${100 - ((value || 0) / max) * 100}%)` }}
-    />
-  </ProgressPrimitive.Root>
-));
-Progress.displayName = ProgressPrimitive.Root.displayName;
+/** The indicator's width is the primitive's own (`value` over `max`). */
+function Progress({
+  className,
+  indicatorClassName,
+  ...props
+}: WithClassName<ProgressPrimitive.Root.Props> & { indicatorClassName?: string }) {
+  return (
+    <ProgressPrimitive.Root
+      className={cn("bg-muted relative h-2 w-full overflow-hidden rounded-full", className)}
+      {...props}
+    >
+      <ProgressPrimitive.Track className="block h-full w-full">
+        <ProgressPrimitive.Indicator
+          className={cn("bg-primary block h-full transition-all", indicatorClassName)}
+        />
+      </ProgressPrimitive.Track>
+    </ProgressPrimitive.Root>
+  );
+}
 
 export { Progress };

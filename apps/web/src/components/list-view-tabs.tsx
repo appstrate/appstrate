@@ -14,27 +14,22 @@ export function ListViewTabs({
 }) {
   const { t } = useTranslation("common");
   return (
-    <ToggleGroup
-      type="single"
+    <ToggleGroup<ListView>
       aria-label={t("toolbar.viewMode")}
       className="bg-muted h-8 shrink-0 gap-0 rounded-md p-0.5"
-      value={view}
-      onValueChange={(next) => {
-        if (next === "cards" || next === "table") onChange(next);
-      }}
+      value={[view]}
+      onValueChange={([next]) => next && onChange(next)}
     >
       <ToggleGroupItem
-        className="data-[state=on]:bg-background h-7 min-w-7 px-1.5"
+        className="data-pressed:bg-background h-7 min-w-7 px-1.5"
         value="table"
-        onFocus={() => onChange("table")}
         aria-label={t("toolbar.viewTable")}
       >
         <Rows3 className="size-4" />
       </ToggleGroupItem>
       <ToggleGroupItem
-        className="data-[state=on]:bg-background h-7 min-w-7 px-1.5"
+        className="data-pressed:bg-background h-7 min-w-7 px-1.5"
         value="cards"
-        onFocus={() => onChange("cards")}
         aria-label={t("toolbar.viewCards")}
       >
         <LayoutGrid className="size-4" />

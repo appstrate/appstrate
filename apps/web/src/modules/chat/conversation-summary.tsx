@@ -269,28 +269,26 @@ function SummaryDisclosure({
   children: ReactNode;
 }) {
   return (
-    <Collapsible open={open} onOpenChange={onOpenChange} asChild>
-      <section>
-        <h3>
-          <CollapsibleTrigger
-            className={cn(
-              DISCLOSURE_LINE_CLASS,
-              "group hover:bg-muted/50 focus-visible:ring-ring text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset",
-            )}
-          >
-            <span className="text-muted-foreground">
-              <ActivityChevron />
+    <Collapsible open={open} onOpenChange={onOpenChange} render={<section />}>
+      <h3>
+        <CollapsibleTrigger
+          className={cn(
+            DISCLOSURE_LINE_CLASS,
+            "group hover:bg-muted/50 focus-visible:ring-ring text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset",
+          )}
+        >
+          <span className="text-muted-foreground">
+            <ActivityChevron />
+          </span>
+          <span className="shrink-0 text-sm font-medium">{title}</span>
+          {preview ? (
+            <span className="text-muted-foreground ml-auto min-w-0 truncate pl-2 text-xs font-normal">
+              {preview}
             </span>
-            <span className="shrink-0 text-sm font-medium">{title}</span>
-            {preview ? (
-              <span className="text-muted-foreground ml-auto min-w-0 truncate pl-2 text-xs font-normal">
-                {preview}
-              </span>
-            ) : null}
-          </CollapsibleTrigger>
-        </h3>
-        <CollapsibleContent className="px-4 pt-1 pb-3">{children}</CollapsibleContent>
-      </section>
+          ) : null}
+        </CollapsibleTrigger>
+      </h3>
+      <CollapsibleContent className="px-4 pt-1 pb-3">{children}</CollapsibleContent>
     </Collapsible>
   );
 }
