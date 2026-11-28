@@ -222,7 +222,16 @@ export const chatComponentSchemas = {
           "The agents the caller can launch, as launch prompts. Empty when the caller cannot run agents.",
         items: {
           type: "object",
-          required: ["name", "title", "description", "packageId", "icon", "color", "integrations"],
+          required: [
+            "name",
+            "title",
+            "description",
+            "packageId",
+            "spaceId",
+            "icon",
+            "color",
+            "integrations",
+          ],
           properties: {
             name: {
               type: "string",
@@ -234,6 +243,11 @@ export const chatComponentSchemas = {
             packageId: {
               type: "string",
               description: "`@scope/name`: the seed of the agent's derived colour.",
+            },
+            spaceId: {
+              type: "string",
+              description:
+                "The space the agent is installed in, where its prompt launches it. An agent installed in several spaces is listed once per space.",
             },
             icon: {
               type: ["string", "null"],
@@ -247,7 +261,7 @@ export const chatComponentSchemas = {
             integrations: {
               type: "array",
               description:
-                "The integrations a launch of the agent uses, as the agents index (`GET /api/agents`) lists them in the space of its prompt; `[]` when none.",
+                "The integrations a launch of the agent uses, as the agents index (`GET /api/agents`) lists them in `spaceId`; `[]` when none.",
               items: {
                 type: "object",
                 required: ["id", "name", "icon"],

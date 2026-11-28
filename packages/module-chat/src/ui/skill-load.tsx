@@ -2,8 +2,8 @@
 
 /**
  * A skill the assistant read (its `SKILL.md`), drawn with the chip a user message draws for a
- * cited skill, in view under its activity group's line. The read serves the turn that made it and pins nothing; an « Épingler » action
- * pins the skill to the conversation. A failed read is a muted chip whose error is written for
+ * cited skill, in view under its activity group's line. The read serves the turn that made it and
+ * pins nothing; an « Épingler » action pins the skill to the conversation. A failed read is a muted chip whose error is written for
  * the model, never shown.
  */
 
@@ -22,7 +22,7 @@ import {
 } from "./chat-skills.ts";
 import { DirectiveChip } from "./directive-chip.tsx";
 import { useChatHost } from "./runtime-context.ts";
-import type { ToolCardProps } from "./tool-uis.tsx";
+import type { ToolPartProps } from "./tool-uis.tsx";
 import { deriveToolPhase } from "./tool-result.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
 import { useConversationSkillsContext } from "./use-conversation-skills.ts";
@@ -33,7 +33,7 @@ const CHIP_CLASS: Record<SkillLoadState, string | undefined> = {
   error: "text-muted-foreground border-dashed bg-transparent",
 };
 
-type ResourceReadProps = ToolCardProps;
+type ResourceReadProps = ToolPartProps;
 
 /**
  * Pins the skill read to the conversation: offered once the server holds the conversation and

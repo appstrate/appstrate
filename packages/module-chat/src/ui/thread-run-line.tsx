@@ -8,8 +8,8 @@
  * is even known, on a line of fixed height: nothing that arrives later moves the block.
  *
  * The lead is the agent's 16px identity tile (`AgentTile`; a neutral bot tile for an inline run or
- * an agent the `/chat/commands` data does not hold). The control is the agent's name (its title in
- * that data, else the launch's label), shimmering while the run is in flight: a button opening the
+ * an agent the `/chat/commands` data does not hold in the run's space). The control is the agent's
+ * name (its title in that data, else the launch's label), shimmering while the run is in flight: a button opening the
  * run in the host's context panel (`openThreadItem`), where its result, files and log follow it;
  * plain text when there is no run to open (a launch that failed, a run the reader cannot read).
  * After it, muted: the run's state, a status icon and its text, which is the run's own log-tool
@@ -18,24 +18,28 @@
  * run's SSE channel (`useRunLogStream`) and paced one at a time (`useLogTicker`, ≥500ms each) with
  * a fade/slide animation, truncated in the room left; `run.starting` before the first log, then
  * `run.running`, and the outcome's short label once terminal. Then the duration, the agent's
- * integration logos, the run's space and the run page's link.
+ * integrations (`IntegrationLogoStack`, the stack the panel's Runs tab and the agent cards draw, as
+ * the `/chat/commands` data holds them for the run's space; none when the line does not know that
+ * space, another space's install would answer), the run's space and the run page's link.
  *
  * What a short state cannot say goes under the line, in full and muted, aligned on the name, as a
- * failed call's message does: a failed or timed-out run's own error, a launch failure's message
- * (the tool errored before a run id existed), the notice that the reader's role cannot read the
- * run. The run's file chips and the notice of a truncated file list follow it, on the same indent.
- * The launch call's raw input and output stay in the panel's Tools tab.
+ * failed call's message does: a failed or timed-out run's own error, else the launch call's error
+ * message when the call errored, the notice that the reader's role cannot read the run. The run's
+ * file chips and the notice of a truncated file list follow it, on the same indent. A visually
+ * hidden status region announces the settled outcome, never the streaming log. The launch call's
+ * raw input and output stay in the panel's Tools tab.
  */
 
 import * as React from "react";
 import { AlertTriangleIcon, ExternalLinkIcon, LockIcon } from "lucide-react";
 import { RunStatusIcon } from "@appstrate/ui/components/run-status";
 import { Spinner } from "@appstrate/ui/components/spinner";
+import { IntegrationLogoStack } from "@appstrate/ui/components/integration-logo-stack";
 import { useLiveElapsedMs } from "@appstrate/ui/use-live-elapsed-ms";
 import { runReadAccess, useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
-import { useCanIn, useChatHost, type ChatHost } from "./runtime-context.ts";
+import { useCanIn, useChatHost } from "./runtime-context.ts";
 import { CallSpace } from "./call-space.tsx";
 import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import {
@@ -58,12 +62,7 @@ import type { ToolPhase } from "./tool-result.ts";
 import { AgentTile } from "./agent-glyph.tsx";
 import { useKnownAgent } from "./use-chat-commands.ts";
 import { ActivityTrigger } from "./activity-line.tsx";
-import { CallLine, CallName } from "./call-step.tsx";
-import { SubjectStack } from "./subject-glyph.tsx";
-import type { ChatAgentCommand } from "../commands.ts";
-
-/** What sits under the line, aligned on the name (the indent of `CallLine`'s `errorText`). */
-const UNDER_LINE_CLASS = "pb-1.5 pl-6";
+import { CallLine, CallName, UNDER_LINE_CLASS } from "./call-step.tsx";
 
 /**
  * Row of file attachments surfaced under a run's line — the same unified renderer the thread uses
@@ -81,38 +80,6 @@ function FileChips({ files, spaceId }: { files: ChatRunFile[]; spaceId?: string 
         />
       ))}
     </div>
-  );
-}
-
-/**
- * The agent's integrations as stacked logos (each its manifest `icon`, drawn by the
- * `IntegrationIcon` the panel's Runs tab draws too), named for assistive technology.
- */
-function IntegrationLogos({
-  integrations,
-  label,
-}: {
-  integrations: ChatAgentCommand["integrations"];
-  label: (names: string) => string;
-}) {
-  const subjects = React.useMemo(
-    () =>
-      integrations.map((integration) => ({
-        kind: "integration" as const,
-        id: integration.id,
-        ...(integration.icon && { icons: [{ src: integration.icon }] }),
-      })),
-    [integrations],
-  );
-  if (subjects.length === 0) return null;
-  return (
-    <span
-      className="flex shrink-0"
-      role="img"
-      aria-label={label(integrations.map((i) => i.name).join(", "))}
-    >
-      <SubjectStack subjects={subjects} />
-    </span>
   );
 }
 
@@ -172,7 +139,7 @@ export function ThreadRunLine({
    */
   initialFiles?: ChatRunFile[];
   phase: ToolPhase;
-  /** Launch-failure message shown under the line when the tool errored without a run id. */
+  /** The launch call's error message, shown under the line whenever the call errored. */
   errorText?: string;
 }) {
   const anchor = useRevealAnchor(toolCallId, runId);
@@ -209,6 +176,8 @@ export function ThreadRunLine({
       mergeRunFiles(mergeRunFiles(initialFiles ?? [], publishedFilesFromLogs(logs)), producedFiles),
     [initialFiles, logs, producedFiles],
   );
+  // `useRunLogStream` seeds `status` from `initialStatus` at mount only: a launch result that turns
+  // terminal later, on the same run id, reaches the line through the prop.
   const effectiveStatus =
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
 
@@ -268,15 +237,24 @@ export function ThreadRunLine({
         : current
           ? { id: current.id, text: current.text, log: true }
           : { id: -1, text: runOutcomeText(effectiveStatus, error, t), log: false };
-  // What the short state cannot say, under the line, in full.
-  const underText = launchFailed
-    ? errorText
-    : denied
-      ? t("run.noAccess")
-      : runFailureMessage(effectiveStatus, error);
-  const effectiveRunHref =
-    runId && !runDenied ? runPageHref(linkInSpace, packageId, runId, spaceId) : undefined;
-  const agent = useKnownAgent(packageId ? { packageId } : undefined);
+  // What the short state cannot say, under the line, in full: the run's own failure before the
+  // call's error.
+  const underText = denied
+    ? t("run.noAccess")
+    : (runFailureMessage(effectiveStatus, error) ?? (phase === "error" ? errorText : undefined));
+  // The settled outcome, announced once: never the streaming log.
+  const outcome = terminal
+    ? t(runStatusLineKey(effectiveStatus))
+    : launchFailed
+      ? t("run.launchFailed")
+      : denied
+        ? t("run.noAccess")
+        : "";
+  // The run's page in the space its call named (`linkInSpace` names it only when it is not the
+  // working one).
+  const runPath = runId && !runDenied ? buildRunPageHref(packageId, runId) : undefined;
+  const effectiveRunHref = runPath ? linkInSpace(runPath, spaceId) : undefined;
+  const agent = useKnownAgent(packageId ? { packageId, spaceId } : undefined);
   const label = agent?.title ?? agentLabel ?? t("run.fallbackLabel");
   const name = <CallName label={label} running={inFlight} />;
 
@@ -314,10 +292,7 @@ export function ThreadRunLine({
                 {formatDuration(elapsedMs, lang)}
               </span>
             ) : null}
-            <IntegrationLogos
-              integrations={agent?.integrations ?? []}
-              label={(names) => t("run.integrations", { names })}
-            />
+            <IntegrationLogoStack integrations={(spaceId && agent?.integrations) || []} />
             <CallSpace spaceId={spaceId} />
             {effectiveRunHref ? (
               <a
@@ -333,6 +308,9 @@ export function ThreadRunLine({
         }
         errorText={underText}
       />
+      <span role="status" className="sr-only">
+        {outcome}
+      </span>
       {/* The authoritative read is one page of at most 100 rows and this line does not page; a
           run that produced more says so rather than showing a silently short list. */}
       <FileChips files={files} spaceId={spaceId} />
@@ -343,18 +321,4 @@ export function ThreadRunLine({
       ) : null}
     </div>
   );
-}
-
-/**
- * The run's page in the space its call named, through the host's `linkInSpace` (which names the
- * space only when it is not the working one); the server-side reconcile names it itself.
- */
-function runPageHref(
-  linkInSpace: ChatHost["linkInSpace"],
-  packageId: string | undefined,
-  runId: string,
-  spaceId: string | undefined,
-): string | undefined {
-  const path = buildRunPageHref(packageId, runId);
-  return path && linkInSpace(path, spaceId);
 }

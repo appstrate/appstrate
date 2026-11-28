@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What the thread's cards read off a call's stored part, where the context panel reads it:
+ * What the thread's lines read off a call's stored part, where the context panel reads it:
  * assistant-ui's `tool-call` part drops `resultProviderMetadata` (`@assistant-ui/ai-sdk`), so it
  * is read off the AI SDK message behind it (`getExternalStoreMessages`).
  */
@@ -21,11 +21,11 @@ export type StoredResult = AppstrateToolPartMetadata;
 export type StoredResults = ReadonlyMap<string, StoredResult>;
 
 /** The resolved space rides on the stored part's outcome stamp, success or failure. */
-export function cardSpaceOf(card: {
+export function callPartSpaceOf(part: {
   providerMetadata?: unknown;
   stored?: StoredResult | undefined;
 }): string | undefined {
-  return outcomeSpaceOf(card.stored, card.providerMetadata);
+  return outcomeSpaceOf(part.stored, part.providerMetadata);
 }
 
 /** The stored parts' `resultProviderMetadata` of the tool calls behind `message`, by call id. */

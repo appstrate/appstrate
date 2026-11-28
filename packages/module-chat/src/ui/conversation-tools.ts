@@ -4,7 +4,7 @@
  * A conversation's tool calls, for the context panel, in order: pure, like `conversationStats`. It
  * reads the messages the open chat holds (`live-conversation.ts`), the turn in flight included.
  * Two notions of lookup live here, on purpose: the thread folds the calls the engine stamped before
- * they ran ({@link activityGroupOf}), so its cards never move when a result arrives; the panel's
+ * they ran ({@link activityGroupOf}), so its lines never move when a result arrives; the panel's
  * count ({@link isPanelLookup}) also takes the reads presented once their result landed.
  */
 
@@ -68,8 +68,8 @@ export interface GroupablePart {
 }
 
 /**
- * Tools whose call is a card of its own in the thread, never a step of an activity group: the
- * card is the call's whole display (a run's progress).
+ * Tools whose call is a line of its own in the thread, never a step of an activity group: the
+ * line is the call's whole display (a run's progress).
  */
 const STANDALONE_TOOLS: ReadonlySet<string> = new Set(["run_and_wait"]);
 

@@ -5,7 +5,8 @@
  * acted on, its name, its target, then its duration and, when it failed, a small red cross. The
  * thread names, the context panel details: clicking the line opens the call there, its input and
  * output with it. The line is a step under its group's rail (`ToolStep`), or the group's own line
- * when the call is its one step.
+ * when the call is its one step. Its label shimmers while the call is in progress
+ * (`isCallInProgress`), as the group's header does.
  *
  * A failure is softened, never hidden: its message stays under the line, muted, and the cross
  * ends the line, named with the HTTP status. Tone is driven by the actual result
@@ -53,7 +54,8 @@ import {
   type CreatedPackage,
 } from "./package-created.ts";
 import { showCall } from "./tool-presentation.ts";
-import { cardSpaceOf, type StoredResult } from "./use-call-presentation.ts";
+import { isCallInProgress } from "./turn-status.ts";
+import { callPartSpaceOf, type StoredResult } from "./use-call-presentation.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
 import {
   deriveToolPhase,
@@ -70,8 +72,8 @@ import {
  */
 const INITIATE_CONNECT_OP = "initiateIntegrationConnect";
 
-/** A card's props: its part, and what its stored part says (`useStoredResults`). */
-export type ToolCardProps = ToolCallMessagePartProps<Record<string, unknown>, unknown> & {
+/** A tool part's props: the part, and what its stored part says (`useStoredResults`). */
+export type ToolPartProps = ToolCallMessagePartProps<Record<string, unknown>, unknown> & {
   stored?: StoredResult | undefined;
 };
 
@@ -79,21 +81,13 @@ export type ToolCardProps = ToolCallMessagePartProps<Record<string, unknown>, un
  * Render run-launch tool calls as the run's line in the thread, from the launch to its terminal
  * status.
  *
- * A real component, not a `build…()` helper called inline: `ThreadRunLine`
- * memoizes its file set on the `initialFiles` prop, and this is where that array
- * is derived. Computed inline it was a fresh array every time THIS component
- * rendered — which assistant-ui does once per stream chunk while the tool part
- * is live — so the memo missed on each of those, the auto-present candidate was
- * a new object, and the effect that opens it re-ran (only a ref kept the result
- * correct). Note the line's own 500 ms log ticker is NOT the trigger: it is
- * state inside the child, and a child's re-render never re-invokes this
- * extraction. Hooks need a component, and `InvokeOperationTool` reaches this
- * branch conditionally, so the `useMemo` cannot live in its body.
+ * A component because it holds a hook: `InvokeOperationTool` reaches this branch conditionally.
+ * The memo keeps `initialFiles` referentially stable per result, which `ThreadRunLine` memoizes on.
  */
 function RunLaunchLine({
   anchorsCall,
   ...props
-}: ToolCardProps & {
+}: ToolPartProps & {
   /** The line is the call's whole display, so the context panel reveals the call by it. */
   anchorsCall: boolean;
 }): React.ReactNode {
@@ -107,7 +101,7 @@ function RunLaunchLine({
   const packageId =
     extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
   // The call names the space the run ran in: the line reads and links there.
-  const spaceId = cardSpaceOf(props);
+  const spaceId = callPartSpaceOf(props);
   return (
     <ThreadRunLine
       toolCallId={anchorsCall ? props.toolCallId : undefined}
@@ -125,7 +119,7 @@ function RunLaunchLine({
   );
 }
 
-/** `invoke_operation`'s arguments, as its cards read them. */
+/** `invoke_operation`'s arguments, as its lines read them. */
 type InvokeOperationArgs = { operation_id?: string; path_params?: { packageId?: string } };
 
 /** A call as its thread line reads it: the assistant-ui part, and what its stored part says. */
@@ -146,12 +140,15 @@ export function ThreadCallLine({
   label,
   idText,
   running,
+  trailing,
 }: {
   call: LineCall;
   lead: React.ReactNode;
   label: string;
   idText?: string | undefined;
   running: boolean;
+  /** What ends the line's trailing content (the running turn's clock, for a group's lone call). */
+  trailing?: React.ReactNode;
 }) {
   const { t, lang, openThreadItem } = useChatHost();
   const anchor = useRevealAnchor(call.toolCallId);
@@ -162,7 +159,7 @@ export function ThreadCallLine({
   const failed = deriveToolPhase(call) === "error";
   const status = httpStatusOf(unwrapped);
   const durationMs = call.stored?.durationMs;
-  const spaceId = cardSpaceOf(call);
+  const spaceId = callPartSpaceOf(call);
 
   return (
     <div {...anchor} className={`rounded-sm ${REVEAL_RING_CLASS}`}>
@@ -187,6 +184,7 @@ export function ThreadCallLine({
                 {formatDuration(durationMs, lang)}
               </span>
             ) : null}
+            {trailing}
           </>
         }
         failure={
@@ -201,7 +199,7 @@ export function ThreadCallLine({
 }
 
 /** A tool call as a step under its activity group's rail, named as the context panel names it. */
-export function ToolStep(props: ToolCardProps) {
+export function ToolStep(props: ToolPartProps) {
   const { t } = useChatHost();
   const { Icon, subject, label, idText } = showCall(
     { ...props, presentation: props.stored?.presentation },
@@ -213,37 +211,37 @@ export function ToolStep(props: ToolCardProps) {
       lead={subject ? <SubjectGlyph subject={subject} /> : <Icon aria-hidden />}
       label={label}
       idText={idText}
-      running={deriveToolPhase(props) === "running"}
+      running={isCallInProgress(props)}
     />
   );
 }
 
 /**
  * What an `invoke_operation` keeps in view under its group's line, whatever the fold: the connect
- * card of a connect kickoff, a launched run's progress, the link to a package it created. Nothing
+ * card of a connect kickoff, a launched run's line, the link to a package it created. Nothing
  * for any other operation: its step says it all.
  */
-export function InvokeOperationBreakout(props: ToolCardProps) {
+export function InvokeOperationBreakout(props: ToolPartProps) {
   const { result } = props;
   const args = props.args as InvokeOperationArgs | undefined;
   const opId = args?.operation_id ?? "";
   const phase = deriveToolPhase(props);
 
   // Mounted from the kickoff's first frame (before the result carries the connect url), so the
-  // card does not appear mid-stream; a failure shows in place. A success without an offer draws
+  // connect card does not appear mid-stream; a failure shows in place. A success without an offer draws
   // none.
   if (opId === INITIATE_CONNECT_OP) {
-    // One card: the route behind this operation mints a single `connect_url`.
+    // One connect card: the route behind this operation mints a single `connect_url`.
     const offer = extractAuthOffers(result)[0];
     if (!offer && phase === "success") return null;
     return (
       <OAuthConnectCard
         // It reads the integration where the call acted.
-        spaceId={cardSpaceOf(props)}
+        spaceId={callPartSpaceOf(props)}
         authUrl={offer?.authUrl}
         state={offer?.state}
         // The session route returns no `packageId`; the call's own path
-        // param is the integration this card connects.
+        // param is the integration this connect card connects.
         packageId={args?.path_params?.packageId}
         toolCallId={props.toolCallId}
         errorText={
@@ -266,7 +264,7 @@ export function InvokeOperationBreakout(props: ToolCardProps) {
     <CreatedPackageLink
       created={created}
       toolCallId={props.toolCallId}
-      spaceId={cardSpaceOf(props)}
+      spaceId={callPartSpaceOf(props)}
     />
   ) : null;
 }
@@ -309,7 +307,7 @@ function CreatedPackageLink({
 }
 
 /** The link to the package an import created, in view under its group's line. */
-export function ImportPackageBreakout(props: ToolCardProps) {
+export function ImportPackageBreakout(props: ToolPartProps) {
   const created =
     deriveToolPhase(props) === "success"
       ? packageCreatedByImport(unwrapToolResult(props.result))
@@ -318,7 +316,7 @@ export function ImportPackageBreakout(props: ToolCardProps) {
     <CreatedPackageLink
       created={created}
       toolCallId={props.toolCallId}
-      spaceId={cardSpaceOf(props)}
+      spaceId={callPartSpaceOf(props)}
     />
   ) : null;
 }
@@ -326,18 +324,17 @@ export function ImportPackageBreakout(props: ToolCardProps) {
 // `run_and_wait` is its own MCP tool (not invoke_operation), outside any activity group, so it
 // draws its own block — the run's line the invoke-operation run-launch branch renders, in the room
 // a group takes (`ACTIVITY_BLOCK_CLASS`). Chat emits the run id as a preliminary result; the line is
-// mounted for the call's whole life (a launch failure's message goes under it) — no generic-card
-// fallback swap.
+// mounted for the call's whole life (a launch failure's message goes under it).
 //
 // A launch refused for a missing connection (409) carries a ready-to-open
 // `connect_url` per actionable integration, so the connect cards render
 // UNDER the run's line and the user clicks straight through — the model is never
 // asked to kick a connect flow off, and never sees the link. A run that started
 // without an optional integration carries the same link on its warning, shown
-// once the call settles — by then it may have lapsed, so the card gets its expiry.
+// once the call settles — by then it may have lapsed, so the connect card gets its expiry.
 // Zero offers adds nothing: unlike the invoke_operation connect branch there is
-// no placeholder card here, because the run's line already holds its geometry.
-export function RunAndWaitTool(props: ToolCardProps) {
+// no placeholder here, because the run's line already holds its geometry.
+export function RunAndWaitTool(props: ToolPartProps) {
   return (
     <>
       <div className={ACTIVITY_BLOCK_CLASS}>
@@ -346,7 +343,7 @@ export function RunAndWaitTool(props: ToolCardProps) {
       {extractRunAndWaitAuthOffers(props).map((offer) => (
         <OAuthConnectCard
           key={offer.authUrl}
-          spaceId={cardSpaceOf(props)}
+          spaceId={callPartSpaceOf(props)}
           authUrl={offer.authUrl}
           state={offer.state}
           packageId={offer.packageId}

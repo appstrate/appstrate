@@ -49,7 +49,7 @@ import {
   InvokeOperationBreakout,
   RunAndWaitTool,
   ToolStep,
-  type ToolCardProps,
+  type ToolPartProps,
 } from "./tool-uis.tsx";
 import { SkillReadBreakout } from "./skill-load.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
@@ -965,7 +965,7 @@ const Step = React.memo(ToolStep);
 const RunAndWaitLine = React.memo(RunAndWaitTool);
 const SkillBreakout = React.memo(SkillReadBreakout);
 /** What a call keeps in view under its group's line, by tool name; most calls keep nothing. */
-const BREAKOUTS: Partial<Record<string, React.ComponentType<ToolCardProps>>> = {
+const BREAKOUTS: Partial<Record<string, React.ComponentType<ToolPartProps>>> = {
   invoke_operation: React.memo(InvokeOperationBreakout),
   import_package_file: React.memo(ImportPackageBreakout),
   read_resource: SkillBreakout,
@@ -973,7 +973,7 @@ const BREAKOUTS: Partial<Record<string, React.ComponentType<ToolCardProps>>> = {
 };
 
 /** A tool call: a step of its activity group and what it keeps in view, or a block of its own. */
-function ToolPart(props: ToolCardProps) {
+function ToolPart(props: ToolPartProps) {
   const activity = useActivityMode();
   if (activity?.mode === "breakout") {
     const Breakout = BREAKOUTS[props.toolName];
@@ -992,11 +992,7 @@ function ReasoningPart({
   children: React.ReactNode;
 }) {
   if (useActivityMode()?.mode === "breakout") return null;
-  return (
-    <ReasoningStep startIndex={indices[0] ?? 0} endIndex={indices[indices.length - 1] ?? 0}>
-      {children}
-    </ReasoningStep>
-  );
+  return <ReasoningStep indices={indices}>{children}</ReasoningStep>;
 }
 
 function AssistantParts() {

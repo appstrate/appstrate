@@ -27,7 +27,8 @@ interface FakeAgent {
   description?: string;
   icon?: string;
   color?: string;
-  integrations?: { id: string; name: string; icon: string | null; required: boolean }[];
+  /** The index rows' entries, malformed ones included. */
+  integrations?: unknown[];
   input?: Record<string, unknown>;
 }
 
@@ -134,6 +135,7 @@ describe("agent prompts — prompts/list", () => {
         _meta: {
           [AGENT_PROMPT_META_KEY]: {
             packageId: "@acme/writer",
+            spaceId: "spc_a",
             icon: null,
             color: null,
             integrations: [],
@@ -153,7 +155,12 @@ describe("agent prompts — prompts/list", () => {
           version: "1.0.0",
           icon: "lucide:bot",
           color: "teal",
-          integrations: [{ id: "@acme/gmail", name: "Gmail", icon: "logos:gmail", required: true }],
+          integrations: [
+            { id: "@acme/gmail", name: "Gmail", icon: "logos:gmail", required: true },
+            // Malformed entries, an empty id included, are dropped alone.
+            { id: "", name: "Ghost", icon: null, required: false },
+            { id: "@acme/broken", icon: null },
+          ],
         },
       ],
     });
@@ -162,11 +169,34 @@ describe("agent prompts — prompts/list", () => {
     expect(listed!._meta).toEqual({
       [AGENT_PROMPT_META_KEY]: {
         packageId: "@acme/writer",
+        spaceId: "spc_a",
         icon: "lucide:bot",
         color: "teal",
         integrations: [{ id: "@acme/gmail", name: "Gmail", icon: "logos:gmail" }],
       },
     });
+  });
+
+  it("names in each prompt's _meta the space whose install it describes", async () => {
+    const gmail = { id: "@acme/gmail", name: "Gmail", icon: null, required: true };
+    const slack = { id: "@acme/slack", name: "Slack", icon: null, required: true };
+    const { prompts } = provider([space("spc_a", "Alpha"), space("spc_b", "Beta")], {
+      spc_a: [{ id: "@acme/writer", version: "1.0.0", integrations: [gmail] }],
+      spc_b: [{ id: "@acme/writer", version: "1.0.0", integrations: [slack] }],
+    });
+    const listed = await prompts.list(noExtra);
+    expect(
+      listed.map((prompt) => {
+        const meta = prompt._meta?.[AGENT_PROMPT_META_KEY] as {
+          spaceId: string;
+          integrations: { id: string }[];
+        };
+        return [prompt.name, meta.spaceId, meta.integrations.map((i) => i.id)];
+      }),
+    ).toEqual([
+      ["run-writer", "spc_a", ["@acme/gmail"]],
+      ["run-beta-writer", "spc_b", ["@acme/slack"]],
+    ]);
   });
 
   it("lists nothing when the caller can run in no space", async () => {

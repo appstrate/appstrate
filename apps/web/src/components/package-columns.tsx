@@ -23,7 +23,7 @@ import { usePackageSpaceColumn } from "./space-column";
 import { CellEmpty, CellPlaceholder, CellText } from "./table-cells";
 import { useOrg } from "../hooks/use-org";
 import type { CardItem } from "../lib/package-card-item";
-import { IntegrationLogoStack } from "./integration-logo-stack";
+import { IntegrationLogoStack } from "@appstrate/ui/components/integration-logo-stack";
 
 /** The package identity shared by the index, usage and catalogue tables. */
 export function usePackageNameColumn(holds?: PackageType): DataColumn<CardItem> {

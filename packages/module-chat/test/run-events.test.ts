@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
 import { runProducedFilesPath } from "@appstrate/core/run-and-wait-client";
 import { fileURLToPath } from "node:url";
 import {
@@ -46,7 +45,7 @@ describe("shouldOpenLiveTail", () => {
     expect(shouldOpenLiveTail({ initialStatus: undefined, hasSseContext: true })).toBe(true);
   });
 
-  it("does not open the tail for a card mounted on a terminal status (negative control)", () => {
+  it("does not open the tail for a line mounted on a terminal status (negative control)", () => {
     // A `run_and_wait` result / reopened conversation: nothing more will be
     // emitted, the one-shot `/api/runs/:id` read owns `sweepDone`.
     expect(shouldOpenLiveTail({ initialStatus: "success", hasSseContext: true })).toBe(false);
@@ -178,7 +177,7 @@ describe("run-events helpers", () => {
       completedAt: "2026-06-30T00:00:42Z",
       duration: 42_000,
     });
-    // A failed run's own message is kept: the card settles on it.
+    // A failed run's own message is kept: the line settles on it.
     expect(parseRunResource({ id: "run_2", status: "failed", error: "boom" })?.error).toBe("boom");
     // Malformed body (no status) → undefined, so the seed is skipped.
     expect(parseRunResource({ id: "run_1" })).toBeUndefined();
@@ -375,8 +374,7 @@ describe("run-events helpers", () => {
 });
 
 /**
- * The derived presentation rule that replaced the agent-declared
- * `presentation: "primary"` (issue #1177). The count of files the run PRODUCED
+ * The derived presentation rule (issue #1177). The count of files the run PRODUCED
  * is the whole rule — nothing the model says takes part in it.
  */
 describe("autoPresentFile", () => {
@@ -409,9 +407,8 @@ describe("autoPresentFile", () => {
     expect(autoPresentFile({ files: one, status: "running", sweepDone: false })).toBeUndefined();
     expect(autoPresentFile({ files: one, status: undefined, sweepDone: false })).toBeUndefined();
     // Terminal, but the sweep that would reveal files 2 and 3 has not landed.
-    // This is the exact window the old `!live` gate mistook for "settled": the
-    // one-shot `GET /runs/:id` answers `success` while the SSE is still
-    // handshaking, so `live` was still its initial `false`.
+    // This is the window in which the one-shot `GET /runs/:id` answers
+    // `success` while the SSE is still handshaking: terminal alone is not "settled".
     expect(autoPresentFile({ files: one, status: "success", sweepDone: false })).toBeUndefined();
     expect(autoPresentFile({ files: one, status: "success", sweepDone: true })).toEqual(
       file("file_1"),
@@ -466,33 +463,6 @@ describe("autoPresentFile", () => {
       autoPresentFile({ files: publishedFilesFromLogs(logs.slice(0, 2)), ...settled }),
     ).toBeUndefined();
   });
-
-  it("leaves the run line no reader of the retired agent-declared selection", () => {
-    // A source-text grep, and deliberately only the NEGATIVE half of one — the
-    // same rule the `useRunLogStream source guards` block below states, for the
-    // same reason. There is no DOM harness in this repo, so the card cannot be
-    // rendered; "this string is absent" is the one claim a grep answers
-    // honestly, because it fails on the thing coming back and cannot pass by
-    // luck of formatting.
-    //
-    // The positive assertions this case used to carry are gone — both species
-    // the doctrine below names, and both were demonstrated on this card:
-    //  - `toContain("autoPresentFile({ files, status: effectiveStatus, sweepDone })")`
-    //    pinned one unwrapped call expression. Letting prettier rewrap it —
-    //    zero behaviour change — failed it, while `const _x = autoPresentFile({…})`,
-    //    a call whose result is discarded, would have passed. What it reached
-    //    for is the rule itself, which the cases above test directly.
-    //  - `toContain("producedFiles")` was already satisfied by the unrelated
-    //    `producedFilesTruncated` further down the same file, so dropping the
-    //    authoritative `/api/files` read out of the counted set — the real
-    //    defect it was there to catch — left the whole suite green.
-    const card = readFileSync(
-      fileURLToPath(new URL("../src/ui/thread-run-line.tsx", import.meta.url)),
-      "utf8",
-    );
-    expect(card).not.toContain("primary");
-    expect(card).not.toContain("presentation:");
-  });
 });
 
 /**
@@ -524,7 +494,7 @@ describe("producedFilesFromFileList", () => {
 
   it("reports a truncated page instead of hiding it", () => {
     // The route clamps `limit` to 100 and answers `hasMore` with no cursor
-    // field. Discarding it truncated a >100-file run's chips row silently.
+    // field. Discarding it would truncate a >100-file run's chips row silently.
     // It never endangers the auto-present rule — a truncated page holds at
     // least 100 rows, never exactly 1 — so surfacing it is the whole fix.
     const payload = { object: "list", data: [row({ id: "file_a" })], hasMore: true };
@@ -550,7 +520,7 @@ describe("producedFilesFromFileList", () => {
   });
 
   it("answers `undefined` on a malformed or errored payload — no evidence at all", () => {
-    // Union-never-subtract: nothing is added to the card, which stays on its
+    // Union-never-subtract: nothing is added to the line, which stays on its
     // log-derived chips. And `undefined` is NOT an empty page: the completion
     // signal turns on telling "the run produced nothing" apart from "the read
     // did not answer" (see `shouldRaiseSweepDone`).
@@ -600,11 +570,8 @@ describe("nameless publication frames", () => {
  * The decision itself — "given how the authoritative read and the log sweep
  * turned out, and the run status, may the flag be raised?" — is
  * `shouldRaiseSweepDone`, and it is tested here against real inputs, failures
- * included. It used to be an inlined `finally` in `use-run-log-stream.ts` that
- * could only be pinned by grepping that file's SOURCE TEXT; those assertions
- * were not coverage. They passed unchanged for a hook that swallowed a 500 from
- * `/api/files` and raised the flag anyway, and one of them (`setSweepDone(true)`
- * appears exactly twice) actively blocked the fix.
+ * included. Grepping the hook's SOURCE TEXT cannot pin it: such assertions pass
+ * unchanged for a hook that swallows a 500 from `/api/files` and raises the flag anyway.
  */
 describe("shouldRaiseSweepDone", () => {
   const settled = { status: "success", producedFileRead: "ok", logSweep: "ok" } as const;
@@ -623,7 +590,7 @@ describe("shouldRaiseSweepDone", () => {
 
   it("refuses to settle when the final log sweep was attempted and failed", () => {
     // An errored sweep yields `[]`, indistinguishable from a run that wrote no
-    // frames — and the card's set is the UNION of the frames and the read.
+    // frames — and the line's set is the UNION of the frames and the read.
     expect(shouldRaiseSweepDone({ ...settled, logSweep: "failed" })).toBe(false);
   });
 
@@ -661,6 +628,10 @@ describe("shouldRaiseSweepDone", () => {
   });
 });
 
+const hook = await Bun.file(
+  fileURLToPath(new URL("../src/ui/use-run-log-stream.ts", import.meta.url)),
+).text();
+
 /**
  * The two guards that survive as source-text greps. There is NO DOM harness in
  * this repo (no jsdom, no happy-dom, no testing-library), so `useRunLogStream`
@@ -677,31 +648,22 @@ describe("shouldRaiseSweepDone", () => {
  * more, with the invariant itself asserted directly beside it — which is the
  * exact shape of the second case: the `toContain` says only "the hook calls the
  * shared path builder", and what that builder must produce is then asserted on
- * its own return value, two lines down. Positives that tried to carry the
- * invariant themselves are gone, in both the species this suite has seen (see
- * the `autoPresentFile` block above, where both were demonstrated): one pinned a
- * whole unwrapped call expression and failed on a prettier rewrap, while a call
- * whose result was discarded would have passed it; the other was already
- * satisfied by an unrelated identifier in the same file, so the defect it
- * existed to catch left the suite green.
+ * its own return value, two lines down. A positive grep that carries the invariant itself
+ * is inadmissible: pinning a whole unwrapped call expression breaks on a prettier rewrap and
+ * passes for a call whose result is discarded, and a token already present elsewhere in the
+ * file passes whatever the defect.
  */
 describe("useRunLogStream source guards", () => {
-  const hook = readFileSync(
-    fileURLToPath(new URL("../src/ui/use-run-log-stream.ts", import.meta.url)),
-    "utf8",
-  );
-
-  it("no longer exposes a liveness flag anything could mistake for settlement", () => {
-    // `live` started `false`, flipped only on the SSE handshake (losing the
-    // race against the two plain GETs fired in the same tick) and never flipped
-    // at all when no SSE was opened. Nothing but a grep can see it come back.
+  it("exposes no liveness flag anything could mistake for settlement", () => {
+    // A flag set on the SSE handshake loses the race against the two plain GETs fired in
+    // the same tick, and never flips when no SSE is opened. Nothing but a grep can see it.
     expect(hook).not.toContain("setLive");
     expect(hook).not.toContain("es.onopen");
   });
 
   it("reads the produced-file set from the authoritative endpoint, filtered", () => {
-    // Two halves, because neither alone can see the whole claim. The hook no
-    // longer spells the URL out — it and `fetchRunFiles` share one builder — so
+    // Two halves, because neither alone can see the whole claim. The hook does
+    // not spell the URL out — it and `fetchRunFiles` share one builder — so
     // the invariant itself is asserted directly on that builder, and only the
     // fact that the hook REACHES it stays a grep: without a DOM harness nothing
     // can observe the call. Dropping `purpose` (or the `runId` this list is
@@ -715,17 +677,12 @@ describe("useRunLogStream source guards", () => {
 });
 
 /**
- * Pre-#1177 wire shapes are NOT read any more.
+ * The readers accept the canonical spellings only: `event: "file"` frames and the `files`
+ * list of a `run_and_wait` result. A `document` frame (`document_id`) or `documents` list is
+ * ignored.
  *
- * They used to be: a chat session replaying logs written before the rename
- * would find `event: "document"` frames carrying `document_id`, and
- * `run_and_wait` results carrying their list under `documents`. No such row or
- * payload exists, so the readers were narrowed to the canonical spellings.
- *
- * Asserted rather than deleted, because the failure mode is silent in both
- * directions: a reader that quietly re-accepted the old tag would resurrect a
- * second wire vocabulary, and the tests that used to prove the old one worked
- * would have simply disappeared with nothing recording the decision.
+ * Asserted because the failure is silent: a reader that quietly accepted a second wire
+ * vocabulary would show nothing wrong.
  */
 describe("retired `document` wire shapes", () => {
   const settled = { status: "success" as const, sweepDone: true };

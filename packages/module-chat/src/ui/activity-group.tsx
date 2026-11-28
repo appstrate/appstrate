@@ -1,22 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What the assistant did between two texts, on one line: its reasoning and its tool calls, one
- * step or twenty (`activityGroupOf`). While the turn runs, the line is the same disclosure from the
- * first step on, so a second step joining changes only its label. Opened, it is a rail of steps: a
- * reasoning reads in place, a call is a line opening it in the context panel (`ThreadCallLine`). A
- * group of one reasoning opens straight on its text, the line naming it; a settled group of one
- * call is that call's line, nothing to unfold, what follows its name and its failure on the line
- * itself. A call the context panel reveals (`reveal-tool-call.ts`) opens its group: a folded one
- * does not mount its steps.
+ * What the assistant did between two texts, on one line (`activityGroupOf`). A group of one call
+ * is that call's line (`ThreadCallLine`) from its first chunk on; any other group is a disclosure.
+ * A call the context panel reveals (`reveal-tool-call.ts`) opens its group: a folded one does not
+ * mount its steps.
  *
- * Ending the running message, the line is the turn's status: the spark (the status region, beside
- * the trigger), the step in progress, the turn's clock. Settled, it names its one call, or counts
- * them (« 3 consultations · 1 action »), failures apart; a group of reasoning alone reads its
- * first line, and is a plain line, nothing to open, when its text says nothing more.
+ * Ending the running message, the line holds the turn's one status region (spark, step in
+ * progress, clock); settled, it names its call or counts them.
  *
- * `children` is drawn twice: as steps under the rail, and as what must stay in view whatever the
- * fold (`activity-mode.ts`, "breakout": a connect card, a launched run, a created package's link).
+ * `children` is rendered in two places: as steps under the rail, and as the breakout that stays in
+ * view whatever the fold (`activity-mode.ts`: a connect card, a launched run, a created package's
+ * link). The breakout keeps its position in the tree for the group's whole life, so it never
+ * remounts.
  */
 
 import * as React from "react";
@@ -38,7 +34,13 @@ import {
 } from "./conversation-tools.ts";
 import { ThinkingStatus } from "./reasoning.tsx";
 import { useTurnClock } from "./use-turn-clock.ts";
-import { reasoningSaysMore, reasoningTitle, showStep } from "./turn-status.ts";
+import {
+  isCallInProgress,
+  reasoningSaysMore,
+  reasoningTitle,
+  reasoningTitleAt,
+  showStep,
+} from "./turn-status.ts";
 import { showCall } from "./tool-presentation.ts";
 import { deriveToolPhase } from "./tool-result.ts";
 import type { StoredResults } from "./use-call-presentation.ts";
@@ -70,33 +72,59 @@ interface StepMessage {
   readonly parts: readonly unknown[];
 }
 
-/** The reasoning runs among `parts` at `indices`: each is one step under the rail. */
-function reasoningRunsAt(parts: readonly GroupablePart[], indices: readonly number[]): number {
-  let runs = 0;
+/** What the group's line reads off its parts. */
+interface GroupFacts {
+  readonly ids: readonly string[];
+  /** The part index of the group's one call. */
+  readonly onlyIndex?: number;
+  readonly lookups: number;
+  readonly failed: number;
+  /** Each run of consecutive reasoning parts is one step. */
+  readonly reasoningRuns: number;
+  /** The group ends the running message. */
+  readonly running: boolean;
+  /** The step in progress while running. */
+  readonly step?: { label: string; idText?: string };
+  /** A settled group of reasoning alone: its first line, and whether its text says more. */
+  readonly title: string;
+  readonly saysMore: boolean;
+}
+
+function groupFacts(
+  message: StepMessage,
+  indices: readonly number[],
+  stored: StoredResults,
+  t: ChatTranslate,
+): GroupFacts {
+  const parts = message.parts as readonly StepPart[];
+  const lastIndex = indices[indices.length - 1];
+  const running = message.status?.type === "running" && parts.length - 1 === lastIndex;
+  const calls = callsAt(parts, indices);
+  let reasoningRuns = 0;
   let inRun = false;
   for (const i of indices) {
     const reasoning = parts[i]?.type === "reasoning";
-    if (reasoning && !inRun) runs += 1;
+    if (reasoning && !inRun) reasoningRuns += 1;
     inRun = reasoning;
   }
-  return runs;
-}
-
-/** The group's reasoning text, its parts joined. */
-function reasoningTextAt(parts: readonly StepPart[], indices: readonly number[]): string {
-  return indices
-    .map((i) => (parts[i]?.type === "reasoning" ? (parts[i]?.text ?? "") : ""))
-    .join("\n");
-}
-
-/** The first line of the group's reasoning, its title when it holds no call. */
-function reasoningTitleAt(parts: readonly StepPart[], indices: readonly number[]): string {
-  for (const i of indices) {
-    const part = parts[i];
-    const title = part?.type === "reasoning" ? reasoningTitle(part.text ?? "") : "";
-    if (title) return title;
-  }
-  return "";
+  const reasoningAlone = calls.length === 0 && !running;
+  return {
+    ids: calls.map((part) => part.toolCallId ?? ""),
+    onlyIndex: calls.length === 1 ? indices.find((i) => parts[i] === calls[0]) : undefined,
+    lookups: calls.filter(isStampedLookup).length,
+    failed: calls.filter((part) => deriveToolPhase(part) === "error").length,
+    reasoningRuns,
+    running,
+    step: running ? stepInProgress(parts[lastIndex ?? -1], stored, t) : undefined,
+    title: reasoningAlone ? reasoningTitleAt(parts, indices) : "",
+    saysMore:
+      reasoningAlone &&
+      reasoningSaysMore(
+        indices
+          .map((i) => (parts[i]?.type === "reasoning" ? (parts[i]?.text ?? "") : ""))
+          .join("\n"),
+      ),
+  };
 }
 
 const BREAKOUT_MODE: ActivityMode = { mode: "breakout", solo: false };
@@ -111,53 +139,17 @@ export function ActivityGroup({
   children: React.ReactNode;
 }) {
   const { t } = useChatHost();
-  const lastIndex = indices[indices.length - 1];
-  // Strings and numbers, not arrays: a selector returning a fresh value would re-render forever.
-  const joinedIds = useAuiState((s) =>
-    callsAt(s.message.parts as readonly GroupablePart[], indices)
-      .map((part) => part.toolCallId)
-      .join("\n"),
-  );
-  const lookups = useAuiState(
-    (s) =>
-      callsAt(s.message.parts as readonly GroupablePart[], indices).filter(isStampedLookup).length,
-  );
-  const failed = useAuiState(
-    (s) =>
-      callsAt(s.message.parts as readonly GroupablePart[], indices).filter(
-        (part) => deriveToolPhase(part) === "error",
-      ).length,
-  );
-  const reasoningRuns = useAuiState((s) =>
-    reasoningRunsAt(s.message.parts as readonly GroupablePart[], indices),
-  );
-  const running = useAuiState(
-    (s) => s.message.status?.type === "running" && s.message.parts.length - 1 === lastIndex,
-  );
-  // The step in progress while this group ends the running message.
-  const stepOf = (message: StepMessage) => stepInProgress(message, lastIndex, stored, t);
-  const stepLabel = useAuiState((s) => (running ? stepOf(s.message).label : ""));
-  const stepIdText = useAuiState((s) => (running ? (stepOf(s.message).idText ?? "") : ""));
-  const callIds = React.useMemo(() => (joinedIds ? joinedIds.split("\n") : []), [joinedIds]);
-  const calls = callIds.length;
+  // One walk per store update, serialized: a string changes only when a fact does, where a fresh
+  // object would re-render the group on every chunk.
+  const factsKey = useAuiState((s) => JSON.stringify(groupFacts(s.message, indices, stored, t)));
+  const facts = React.useMemo(() => JSON.parse(factsKey) as GroupFacts, [factsKey]);
+  const { ids: callIds, onlyIndex, lookups, failed, reasoningRuns, running, title } = facts;
   // The group's one call, as the thread holds it: an existing object, so a stable selection.
   const onlyCall = useAuiState((s) =>
-    calls === 1
-      ? (callsAt(s.message.parts as readonly StepPart[], indices)[0] ?? undefined)
-      : undefined,
+    onlyIndex === undefined ? undefined : (s.message.parts[onlyIndex] as StepPart | undefined),
   );
-  const title = useAuiState((s) =>
-    calls === 0 && !running
-      ? reasoningTitleAt(s.message.parts as readonly StepPart[], indices)
-      : "",
-  );
-  // A settled group of reasoning alone that says nothing past its title has nothing to open.
-  const plain = useAuiState(
-    (s) =>
-      calls === 0 &&
-      !running &&
-      !reasoningSaysMore(reasoningTextAt(s.message.parts as readonly StepPart[], indices)),
-  );
+  const calls = callIds.length;
+  const stepLabel = facts.step?.label ?? "";
   const subjects = React.useMemo(
     () =>
       callIds.flatMap((id): PresentationSubject[] => {
@@ -193,7 +185,7 @@ export function ActivityGroup({
   const actions = calls - lookups;
 
   const lead = running ? (
-    <ThinkingStatus />
+    <ThinkingStatus label={stepLabel} />
   ) : only ? (
     only.subject ? (
       <SubjectGlyph subject={only.subject} />
@@ -208,99 +200,114 @@ export function ActivityGroup({
     <ListTreeIcon aria-hidden />
   );
 
-  // A settled lone call is the group's line itself: nothing to unfold, a click opens it in the
-  // panel. While the turn runs the group stays its disclosure, so a second step changes no shape.
-  const soloCallId = solo && !running ? onlyCall?.toolCallId : undefined;
-  if (onlyCall && soloCallId) {
-    return (
-      <div className={ACTIVITY_BLOCK_CLASS}>
-        <ThreadCallLine
-          call={{ ...onlyCall, toolCallId: soloCallId, stored: stored.get(soloCallId) }}
-          lead={lead}
-          label={only?.label ?? ""}
-          idText={only?.idText}
-          running={false}
-        />
-        <ActivityModeContext value={BREAKOUT_MODE}>{children}</ActivityModeContext>
-      </div>
-    );
-  }
-
-  if (plain) {
-    // The disclosure's line without its trigger: the trigger adds no padding, the label stays put.
-    return (
-      <div className={ACTIVITY_BLOCK_CLASS}>
-        <ActivityLine lead={lead}>
-          <ActivityLabel>{title || t("reasoning.done")}</ActivityLabel>
-        </ActivityLine>
-      </div>
-    );
-  }
-
   const steps = <ActivityModeContext value={stepMode}>{children}</ActivityModeContext>;
+  const loneCallId = solo && only ? callIds[0] : undefined;
+  const lineKind =
+    onlyCall && only && loneCallId
+      ? "call"
+      : calls === 0 && !running && !facts.saysMore
+        ? "reasoning"
+        : "disclosure";
+  // Ticking every second: out of the line's accessible name.
+  const clockLabel =
+    running && clock ? (
+      <span aria-hidden className="shrink-0 tabular-nums">
+        {clock}
+      </span>
+    ) : null;
 
-  return (
-    <Collapsible
-      open={readerOpen || revealed}
-      onOpenChange={onOpenChange}
-      className={ACTIVITY_BLOCK_CLASS}
-    >
-      {/* The spark is a sibling of the trigger: a live region inside a button is not exposed. */}
+  // A switch of kind remounts the line: focus held in it moves to the new line's control.
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const lineFocused = React.useRef(false);
+  React.useLayoutEffect(() => {
+    const active = document.activeElement;
+    if (!lineFocused.current || (active && active !== document.body)) return;
+    rootRef.current?.firstElementChild?.querySelector<HTMLElement>("button")?.focus();
+  }, [lineKind]);
+
+  const line =
+    lineKind === "call" && onlyCall && only && loneCallId ? (
+      // A lone call is its own line for its whole life: a click opens it in the panel.
+      <ThreadCallLine
+        call={{ ...onlyCall, toolCallId: loneCallId, stored: stored.get(loneCallId) }}
+        lead={lead}
+        label={only.label}
+        idText={only.idText}
+        running={isCallInProgress(onlyCall)}
+        trailing={clockLabel}
+      />
+    ) : lineKind === "reasoning" ? (
+      // Reasoning that says nothing past its title: the disclosure's line without its trigger.
       <ActivityLine lead={lead}>
-        <CollapsibleTrigger render={<ActivityTrigger />}>
-          {running ? (
-            <>
-              <ActivityLabel active>{stepLabel}</ActivityLabel>
-              {stepIdText ? <ActivityId>{stepIdText}</ActivityId> : null}
-            </>
-          ) : only ? (
-            <>
-              <ActivityLabel>{only.label}</ActivityLabel>
-              {only.idText ? <ActivityId>{only.idText}</ActivityId> : null}
-            </>
-          ) : calls === 0 ? (
-            <ActivityLabel>{title || t("reasoning.done")}</ActivityLabel>
-          ) : (
-            <span className="shrink-0">{activityCounts(t, { lookups, actions })}</span>
-          )}
-          {failed > 0 ? (
-            <>
-              <FailedGlyph />
-              <span className="shrink-0">{t("tool.reads.failed", { count: failed })}</span>
-            </>
-          ) : null}
-          {running && clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
-          {!running && calls > 1 ? <SubjectStack subjects={subjects} /> : null}
-          <ActivityChevron />
-        </CollapsibleTrigger>
+        <ActivityLabel>{title || t("reasoning.done")}</ActivityLabel>
       </ActivityLine>
-      <CollapsibleContent className={ACTIVITY_CONTENT_CLASS}>
-        {/* One step: the header names it, so its content opens straight under the header. */}
-        {solo ? steps : <ActivityRail>{steps}</ActivityRail>}
-      </CollapsibleContent>
+    ) : (
+      <Collapsible open={readerOpen || revealed} onOpenChange={onOpenChange}>
+        {/* The spark is a sibling of the trigger: a live region inside a button is not exposed. */}
+        <ActivityLine lead={lead}>
+          <CollapsibleTrigger render={<ActivityTrigger />}>
+            {running ? (
+              <>
+                <ActivityLabel active>{stepLabel}</ActivityLabel>
+                {facts.step?.idText ? <ActivityId>{facts.step.idText}</ActivityId> : null}
+              </>
+            ) : calls === 0 ? (
+              <ActivityLabel>{title || t("reasoning.done")}</ActivityLabel>
+            ) : (
+              <span className="shrink-0">{activityCounts(t, { lookups, actions })}</span>
+            )}
+            {failed > 0 ? (
+              <>
+                <FailedGlyph />
+                <span className="shrink-0">{t("tool.reads.failed", { count: failed })}</span>
+              </>
+            ) : null}
+            {clockLabel}
+            {!running && calls > 1 ? <SubjectStack subjects={subjects} /> : null}
+            <ActivityChevron />
+          </CollapsibleTrigger>
+        </ActivityLine>
+        <CollapsibleContent className={ACTIVITY_CONTENT_CLASS}>
+          {/* One step: the header names it, so its content opens straight under the header. */}
+          {solo ? steps : <ActivityRail>{steps}</ActivityRail>}
+        </CollapsibleContent>
+      </Collapsible>
+    );
+
+  // The line first, the breakout second: whatever the line becomes, the breakout keeps its place.
+  return (
+    <div
+      ref={rootRef}
+      className={ACTIVITY_BLOCK_CLASS}
+      onFocus={(event) => {
+        lineFocused.current = !!rootRef.current?.firstElementChild?.contains(event.target);
+      }}
+      onBlur={(event) => {
+        // A blur to nowhere is also what removing the focused control fires: it keeps the mark.
+        if (event.relatedTarget) lineFocused.current = false;
+      }}
+    >
+      {line}
       <ActivityModeContext value={BREAKOUT_MODE}>{children}</ActivityModeContext>
-    </Collapsible>
+    </div>
   );
 }
 
 /**
  * What the running turn is on, read off the group's last part: the reasoning it writes (its first
- * line once written), the call that runs, or the model thinking after a call's result.
+ * line once written), the call in progress, or the model thinking after a call's result.
  */
 function stepInProgress(
-  message: StepMessage,
-  lastIndex: number | undefined,
+  part: StepPart | undefined,
   stored: StoredResults,
   t: ChatTranslate,
 ): { label: string; idText?: string } {
-  const part = lastIndex === undefined ? undefined : (message.parts[lastIndex] as StepPart);
   if (part?.type === "reasoning") {
     // Its first line once that line is whole: a label that grows word by word pushes the clock.
     const text = (part.text ?? "").trimStart();
     return { label: (text.includes("\n") && reasoningTitle(text)) || t("reasoning.running") };
   }
-  const phase = part?.type === "tool-call" ? deriveToolPhase(part) : undefined;
-  if (part && (phase === "running" || phase === "pending")) {
+  if (part?.type === "tool-call" && isCallInProgress(part)) {
     const presentation = part.toolCallId ? stored.get(part.toolCallId)?.presentation : undefined;
     return showStep(part, presentation, t);
   }

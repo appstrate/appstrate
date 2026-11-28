@@ -57,10 +57,12 @@ export function ActivityLine({
 }
 
 /** The line's disclosure: text that darkens under the pointer, no surface of its own. */
-export const ActivityTrigger = React.forwardRef<
-  HTMLButtonElement,
-  React.ButtonHTMLAttributes<HTMLButtonElement>
->(function ActivityTrigger({ className, type = "button", ...props }, ref) {
+export function ActivityTrigger({
+  className,
+  type = "button",
+  ref,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { ref?: React.Ref<HTMLButtonElement> }) {
   return (
     <button
       ref={ref}
@@ -72,7 +74,7 @@ export const ActivityTrigger = React.forwardRef<
       {...props}
     />
   );
-});
+}
 
 /** Turns once its trigger's panel is open (`data-panel-open`). */
 export function ActivityChevron() {

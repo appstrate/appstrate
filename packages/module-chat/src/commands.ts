@@ -19,9 +19,11 @@ const chatAgentCommandSchema = z.object({
   title: z.string(),
   description: z.string(),
   packageId: z.string(),
+  /** The space the agent is installed in: an agent installed in several has one entry per space. */
+  spaceId: z.string(),
   icon: z.string().nullable(),
   color: z.string().nullable(),
-  /** The integrations the agent uses, as the agents index names and draws them. */
+  /** The integrations the agent uses in `spaceId`, as the agents index names and draws them. */
   integrations: z.array(
     z.object({ id: z.string(), name: z.string(), icon: z.string().nullable() }),
   ),

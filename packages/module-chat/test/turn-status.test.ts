@@ -8,8 +8,10 @@
 import { describe, expect, it } from "bun:test";
 import { formatDuration } from "@appstrate/core/format";
 import {
+  isCallInProgress,
   reasoningSaysMore,
   reasoningTitle,
+  reasoningTitleAt,
   showStep,
   turnClock,
   turnStartOf,
@@ -93,5 +95,27 @@ describe("reasoningSaysMore", () => {
 
   it("is true once a second line holds words", () => {
     expect(reasoningSaysMore("**Le run est terminé.**\n\nJe résume les sorties.")).toBe(true);
+  });
+});
+
+describe("reasoningTitleAt", () => {
+  it("reads the first reasoning at the indices that has words, past calls and blank ones", () => {
+    const parts = [
+      { type: "reasoning", text: "Lister" },
+      { type: "tool-call" },
+      { type: "reasoning", text: " \n" },
+      { type: "reasoning", text: "**Compter**\npuis répondre" },
+    ];
+    expect(reasoningTitleAt(parts, [1, 2, 3])).toBe("Compter");
+    expect(reasoningTitleAt(parts, [1, 2])).toBe("");
+  });
+});
+
+describe("isCallInProgress", () => {
+  it("holds while the call runs or awaits its result, not once it settled", () => {
+    expect(isCallInProgress({ status: { type: "running" } })).toBe(true);
+    expect(isCallInProgress({ status: { type: "requires-action" } })).toBe(true);
+    expect(isCallInProgress({ result: { ok: true } })).toBe(false);
+    expect(isCallInProgress({ isError: true })).toBe(false);
   });
 });

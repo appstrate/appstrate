@@ -346,6 +346,12 @@ describe("the summary, open", () => {
     expect(html).not.toContain("<a ");
   });
 
+  it("draws no number for a run the platform has not numbered", () => {
+    const html = summary([], [makeRun({ id: "run_n", runNumber: null })]);
+    expect(html).not.toContain("#null");
+    expect(html).not.toContain(">#<");
+  });
+
   it("keeps what the cache holds while the panel closes: no skeleton, no read lost", () => {
     const html = summary([], [makeRun({ id: "run_9", runNumber: 9 })], { active: false });
     expect(html).toContain("Rapport");
@@ -580,7 +586,7 @@ describe("the Tools tab, open", () => {
     expect(html).not.toContain(i18n.t("chat:context.tools.notInThread"));
   });
 
-  it("says under the open call that the last reveal found no card", () => {
+  it("says under the open call that the last reveal found no line", () => {
     const html = tools([[toolPart("call_a"), toolPart("call_b")]], {
       openToolCallId: "call_a",
       missing: true,
@@ -697,6 +703,21 @@ describe("the Runs tab, open", () => {
     expect(html).not.toContain(i18n.t("chat:context.showInThread"));
   });
 
+  it("names a run's trigger by its agent and number, described by its start and outcome", () => {
+    const html = runsTab([makeRun({ runNumber: 7, status: "failed", error: "quota exceeded" })]);
+    const [lead, tail] = i18n
+      .t("agents:runs.rowLabel", { number: 7, agent: "\u0000" })
+      .split("\u0000");
+    const trigger = html.match(/<button[^>]*aria-expanded=[^>]*>/)?.[0] ?? "";
+    const label = trigger.match(/aria-label="([^"]+)"/)?.[1] ?? "";
+    expect(label.startsWith(lead!)).toBe(true);
+    expect(label.endsWith(tail!)).toBe(true);
+    const describedBy = trigger.match(/aria-describedby="([^"]+)"/)?.[1];
+    expect(describedBy).toBeDefined();
+    const sub = html.match(new RegExp(`<span id="${describedBy}">([^<]*)</span>`))?.[1] ?? "";
+    expect(sub).toContain("quota exceeded");
+  });
+
   it("follows its agent's name with its integrations once the agents' index answers", () => {
     const queryClient = memberSpaceClient(spaces);
     queryClient.setQueryData(runsKey, list([makeRun({ package_ephemeral: false })]));
@@ -735,7 +756,7 @@ describe("the Runs tab, open", () => {
     expect(html).not.toContain(i18n.t("chat:context.runs.notInThread"));
   });
 
-  it("says under the open run that the last reveal found no card", () => {
+  it("says under the open run that the last reveal found no line", () => {
     const html = runsTab([makeRun()], { openRunId: "run_1", missing: true });
     expect(html.split(i18n.t("chat:context.runs.notInThread")).length - 1).toBe(1);
   });

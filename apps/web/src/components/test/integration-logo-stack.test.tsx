@@ -10,7 +10,7 @@ import type { AgentListIntegration } from "@appstrate/shared-types";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import { render } from "../../test/render.tsx";
-import { IntegrationLogoStack } from "../integration-logo-stack.tsx";
+import { IntegrationLogoStack } from "@appstrate/ui/components/integration-logo-stack";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 

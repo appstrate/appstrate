@@ -10,6 +10,7 @@
  */
 
 import * as React from "react";
+import { cn } from "@appstrate/ui/cn";
 import {
   Collapsible,
   CollapsibleContent,
@@ -25,6 +26,9 @@ import {
   ActivityTrigger,
   FailedGlyph,
 } from "./activity-line.tsx";
+
+/** What sits under a call's line, aligned on its name. */
+export const UNDER_LINE_CLASS = "pb-1.5 pl-6";
 
 /** What a call's line says besides its control. */
 interface CallLineFacts {
@@ -74,7 +78,9 @@ export function CallLine({
         {failure ? <FailedGlyph label={failure.label} /> : null}
       </ActivityLine>
       {errorText ? (
-        <p className="text-muted-foreground pb-1.5 pl-6 text-xs break-words">{errorText}</p>
+        <p className={cn("text-muted-foreground text-xs break-words", UNDER_LINE_CLASS)}>
+          {errorText}
+        </p>
       ) : null}
     </>
   );

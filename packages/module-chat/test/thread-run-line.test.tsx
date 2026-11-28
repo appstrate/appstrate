@@ -9,6 +9,7 @@ import { describe, expect, it } from "bun:test";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 import type { ChatCommands } from "../src/commands.ts";
 import { ThreadRunLine } from "../src/ui/thread-run-line.tsx";
 import { stateTextClass } from "../src/ui/run-events.ts";
@@ -23,9 +24,21 @@ const commands: ChatCommands = {
       title: "Agent amont",
       description: "",
       packageId: "@acme/agent-amont",
+      spaceId: "spc_a",
       icon: null,
       color: "emerald",
       integrations: [{ id: "@acme/slack", name: "Slack", icon: "https://cdn.test/slack.svg" }],
+    },
+    // The same agent installed in another space, with another integration.
+    {
+      name: "run-b-agent-amont",
+      title: "Agent amont",
+      description: "",
+      packageId: "@acme/agent-amont",
+      spaceId: "spc_b",
+      icon: null,
+      color: "emerald",
+      integrations: [{ id: "@acme/gmail", name: "Gmail", icon: "https://cdn.test/gmail.svg" }],
     },
   ],
 };
@@ -41,13 +54,15 @@ function render(
   return renderToStaticMarkup(
     <QueryClientProvider client={client}>
       <ChatHostProvider value={testHost(host)}>
-        <ThreadRunLine
-          runId={undefined}
-          agentLabel="@acme/agent-amont"
-          initialPackageId="@acme/agent-amont"
-          phase="running"
-          {...props}
-        />
+        <TooltipProvider>
+          <ThreadRunLine
+            runId={undefined}
+            agentLabel="@acme/agent-amont"
+            initialPackageId="@acme/agent-amont"
+            phase="running"
+            {...props}
+          />
+        </TooltipProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
   );
@@ -100,11 +115,28 @@ describe("a run's line in the thread", () => {
   });
 
   it("names the agent by its title and draws its integrations' logos", () => {
-    const html = render({ runId: "run_1", initialStatus: "running" });
+    const html = render({ runId: "run_1", initialStatus: "running", spaceId: "spc_a" });
     expect(html).toContain(">Agent amont<");
     expect(html).not.toContain(">@acme/agent-amont<");
     expect(html).toContain('src="https://cdn.test/slack.svg"');
-    expect(html).toContain('aria-label="run.integrations"');
+    expect(html).toContain('data-testid="integration-logo-stack"');
+    expect(html).toContain('aria-label="Integrations: Slack"');
+  });
+
+  it("draws the install of the run's space, not the agent's first entry", () => {
+    const html = render({ runId: "run_1", initialStatus: "running", spaceId: "spc_b" });
+    expect(html).toContain('src="https://cdn.test/gmail.svg"');
+    expect(html).not.toContain("slack.svg");
+    // A space the agent is not offered in holds no install: the neutral tile, no logos.
+    const elsewhere = render({ runId: "run_1", initialStatus: "running", spaceId: "spc_c" });
+    expect(elsewhere).toContain("bg-muted text-muted-foreground flex size-4");
+    expect(elsewhere).not.toContain('data-testid="integration-logo-stack"');
+  });
+
+  it("draws no integrations without the run's space: the first entry's may be another install", () => {
+    const html = render({ runId: "run_1", initialStatus: "running" });
+    expect(html).toContain(">Agent amont<");
+    expect(html).not.toContain('data-testid="integration-logo-stack"');
   });
 
   it("leads with the agent's 16px tile, a neutral bot tile for an agent the data does not hold", () => {
@@ -148,9 +180,17 @@ describe("a run's line in the thread", () => {
     const html = render({ phase: "error", errorText: message });
     expect(html).not.toContain("<button");
     expect(html).toContain("run.launchFailed");
-    expect(html).toContain(
-      `<p class="text-muted-foreground pb-1.5 pl-6 text-xs break-words">${message}</p>`,
-    );
+    expect(html).toContain(`>${message}</p>`);
+  });
+
+  it("keeps the launch call's error under the line when the call errored with a run id", () => {
+    const html = render({
+      runId: "run_1",
+      initialStatus: "running",
+      phase: "error",
+      errorText: "Délai d'attente dépassé",
+    });
+    expect(html).toContain(">Délai d&#x27;attente dépassé</p>");
   });
 
   it("states a failed run's short outcome on the line, with one cross only", () => {
@@ -178,5 +218,30 @@ describe("a run's line in the thread", () => {
       /^<div data-tool-call-id="call_1" data-run-id="run_1" tabindex="-1"/,
     );
     expect(rootClass(html)).toContain("data-[revealed]:ring-2");
+  });
+});
+
+/** The visually hidden status region's text: what the line announces. */
+const announced = (html: string) =>
+  /<span role="status" class="sr-only">([^<]*)<\/span>/.exec(html)?.[1];
+
+describe("what a run's line announces", () => {
+  it("announces the settled outcome", () => {
+    expect(announced(render({ runId: "run_1", initialStatus: "success", phase: "success" }))).toBe(
+      "run.status.success",
+    );
+    expect(announced(render({ phase: "error", errorText: "refusé" }))).toBe("run.launchFailed");
+    expect(
+      announced(
+        render(
+          { runId: "run_1", initialStatus: "running" },
+          { host: { can: () => false, canIn: () => false } },
+        ),
+      ),
+    ).toBe("run.noAccess");
+  });
+
+  it("announces nothing while the run goes", () => {
+    expect(announced(render({ runId: "run_1", initialStatus: "running" }))).toBe("");
   });
 });

@@ -19,6 +19,9 @@ export function TranslatedUiLabels({ children }: { children: ReactNode }) {
       copied: t("btn.copied"),
       copyFailed: t("error.copyFailed"),
       moreInfo: t("btn.moreInfo"),
+      integrations: t("integrationStack.title"),
+      integrationsNamed: (names: string) => t("integrationStack.label", { names }),
+      integrationInactive: (name: string) => t("integrationStack.inactive", { name }),
     }),
     [t],
   );

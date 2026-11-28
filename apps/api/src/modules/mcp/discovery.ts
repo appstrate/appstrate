@@ -19,7 +19,7 @@ import type { DispatchContext } from "./api-call-batch.ts";
 import type { SkillServer } from "./skills.ts";
 import { spaceMismatchRefusal } from "./spaces.ts";
 import { asRecord, dispatchHeaders, type Refusal, type RouteRefusal } from "./tool-results.ts";
-import type { AgentPromptIntegration } from "@appstrate/mcp-transport";
+import { readAgentPromptIntegration, type AgentPromptIntegration } from "@appstrate/mcp-transport";
 
 /** The skills the connection reaches, as the Skills extension serves them. */
 export type McpSkillReader = Pick<SkillServer, "list" | "entry" | "read">;
@@ -96,13 +96,6 @@ export interface AgentHit {
   integrations: AgentPromptIntegration[];
 }
 
-/** One entry of an index row's `integrations`, or `null` when malformed. */
-function readListedIntegration(raw: unknown): AgentPromptIntegration | null {
-  const row = asRecord(raw);
-  if (typeof row?.id !== "string" || typeof row.name !== "string") return null;
-  return { id: row.id, name: row.name, icon: typeof row.icon === "string" ? row.icon : null };
-}
-
 /** A GET dispatched in-process, in the space `ctx` enters. */
 export function dispatchGet(
   ctx: DispatchContext,
@@ -142,7 +135,7 @@ export async function listAgents(
         icon: typeof row?.icon === "string" ? row.icon : null,
         color: typeof row?.color === "string" ? row.color : null,
         integrations: Array.isArray(row?.integrations)
-          ? row.integrations.flatMap((entry) => readListedIntegration(entry) ?? [])
+          ? row.integrations.flatMap((entry) => readAgentPromptIntegration(entry) ?? [])
           : [],
       },
     ];

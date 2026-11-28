@@ -17,7 +17,7 @@ import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import {
   IntegrationLogoStack,
   IntegrationLogoStackSkeleton,
-} from "../../components/integration-logo-stack";
+} from "@appstrate/ui/components/integration-logo-stack";
 import { EmptyState, ErrorState } from "../../components/page-states";
 import { PackageIcon } from "../../components/package-icon";
 import { RowSpaceName } from "../../components/run-row";
@@ -174,7 +174,11 @@ function SummaryRunLine({
           />
         }
         label={agentName}
-        detail={<span className="min-w-0 truncate text-xs">{`#${run.runNumber}`}</span>}
+        detail={
+          run.runNumber != null ? (
+            <span className="min-w-0 truncate text-xs">{`#${run.runNumber}`}</span>
+          ) : null
+        }
         space={spanning ? <RowSpaceName spaceId={run.spaceId} /> : null}
         trailing={<RunStatusBadge status={run.status} unread={run.unread} compact />}
       />
