@@ -6427,11 +6427,13 @@ export interface components {
                 description: string;
                 /** @description `@scope/name`: the seed of the agent's derived colour. */
                 packageId: string;
+                /** @description The space the agent is installed in, where its prompt launches it. An agent installed in several spaces is listed once per space. */
+                spaceId: string;
                 /** @description The agent's chosen icon (`@appstrate/core/appearance` grammar, e.g. `lucide:bot`); null when none. */
                 icon: string | null;
                 /** @description The agent's chosen colour (a palette key); null when none. */
                 color: string | null;
-                /** @description The integrations a launch of the agent uses, as the agents index (`GET /api/agents`) lists them in the space of its prompt; `[]` when none. */
+                /** @description The integrations a launch of the agent uses, as the agents index (`GET /api/agents`) lists them in `spaceId`; `[]` when none. */
                 integrations: {
                     /** @description `@scope/name` integration package id. */
                     id: string;

@@ -17,7 +17,7 @@ import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import {
   IntegrationLogoStack,
   IntegrationLogoStackSkeleton,
-} from "../../components/integration-logo-stack";
+} from "@appstrate/ui/components/integration-logo-stack";
 import { EmptyState, ErrorState } from "../../components/page-states";
 import { PackageIcon } from "../../components/package-icon";
 import { RowSpaceName } from "../../components/run-row";

@@ -18,7 +18,10 @@ import { useSharedFromText } from "../hooks/use-shared-from-text";
 import { PackageSharedFrom } from "./package-shared-from";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { PackageSpaces } from "./package-spaces";
-import { IntegrationLogoStack, IntegrationLogoStackSkeleton } from "./integration-logo-stack";
+import {
+  IntegrationLogoStack,
+  IntegrationLogoStackSkeleton,
+} from "@appstrate/ui/components/integration-logo-stack";
 
 /**
  * A package as a card, the same on every surface (the dashboard, the index

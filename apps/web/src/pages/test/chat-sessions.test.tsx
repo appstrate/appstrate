@@ -204,6 +204,7 @@ describe("chat run line", () => {
     title: "Bot",
     description: "",
     packageId: "@acme/bot",
+    spaceId: "spc_a",
     icon: "lucide:mail",
     color: "teal",
     integrations: [
@@ -218,12 +219,8 @@ describe("chat run line", () => {
       skills: [],
       agents: [agent],
     });
-    const host: ChatHost = {
-      ...hostWith(["runs:read"]),
-      t: (key, params) => (params?.names ? `${key}:${params.names}` : key),
-    };
     return render(
-      <ChatHostProvider value={host}>
+      <ChatHostProvider value={hostWith(["runs:read"])}>
         <ThreadRunLine
           runId={undefined}
           agentLabel="@acme/bot"
@@ -239,14 +236,15 @@ describe("chat run line", () => {
     const html = card("@acme/bot");
     expect(html).toContain("size-4 shrink-0 rounded-sm");
     expect(html).not.toContain("bg-muted text-muted-foreground flex size-4");
-    expect(html).toContain('role="img" aria-label="run.integrations:Gmail, Slack"');
-    expect(html.indexOf("run.integrations")).toBeGreaterThan(html.indexOf("@acme/bot<"));
+    const label = i18n.t("common:integrationStack.label", { names: "Gmail, Slack" });
+    expect(html).toContain(`role="img" aria-label="${label}"`);
+    expect(html.indexOf(label)).toBeGreaterThan(html.indexOf("@acme/bot<"));
   });
 
   it("draws the neutral bot tile, and no logos, for an agent the commands do not hold", () => {
     const html = card("@inline/shadow");
     expect(html).toContain("bg-muted text-muted-foreground flex size-4");
-    expect(html).not.toContain("run.integrations");
+    expect(html).not.toContain('data-testid="integration-logo-stack"');
   });
 
   /** The first element under `node`, through every prop, whose props satisfy `match`. */

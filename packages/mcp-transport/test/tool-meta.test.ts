@@ -8,7 +8,11 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { AGENT_PROMPT_META_KEY, readAgentPromptMeta } from "../src/agent-prompt-meta.ts";
+import {
+  AGENT_PROMPT_META_KEY,
+  readAgentPromptIntegration,
+  readAgentPromptMeta,
+} from "../src/agent-prompt-meta.ts";
 import {
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
@@ -133,22 +137,67 @@ describe("readAgentPromptMeta", () => {
     const integrations = [{ id: "@acme/gmail", name: "Gmail", icon: null }];
     expect(
       readAgentPromptMeta({
-        [key]: { packageId: "@a/b", icon: "lucide:bot", color: null, integrations },
+        [key]: {
+          packageId: "@a/b",
+          spaceId: "spc_a",
+          icon: "lucide:bot",
+          color: null,
+          integrations,
+        },
       }),
-    ).toEqual({ packageId: "@a/b", icon: "lucide:bot", color: null, integrations });
+    ).toEqual({
+      packageId: "@a/b",
+      spaceId: "spc_a",
+      icon: "lucide:bot",
+      color: null,
+      integrations,
+    });
   });
   it("is null when missing or malformed", () => {
-    const base = { packageId: "@a/b", icon: null, color: null, integrations: [] };
+    const base = { packageId: "@a/b", spaceId: "spc_a", icon: null, color: null, integrations: [] };
     expect(readAgentPromptMeta(undefined)).toBeNull();
     expect(readAgentPromptMeta({})).toBeNull();
     expect(readAgentPromptMeta({ [key]: { ...base, packageId: "" } })).toBeNull();
+    expect(readAgentPromptMeta({ [key]: { ...base, spaceId: "" } })).toBeNull();
+    expect(readAgentPromptMeta({ [key]: { ...base, spaceId: undefined } })).toBeNull();
     expect(readAgentPromptMeta({ [key]: { ...base, icon: 1 } })).toBeNull();
     expect(
-      readAgentPromptMeta({ [key]: { packageId: "@a/b", icon: null, integrations: [] } }),
+      readAgentPromptMeta({
+        [key]: { packageId: "@a/b", spaceId: "spc_a", icon: null, integrations: [] },
+      }),
     ).toBeNull();
     expect(readAgentPromptMeta({ [key]: { ...base, integrations: undefined } })).toBeNull();
-    expect(
-      readAgentPromptMeta({ [key]: { ...base, integrations: [{ id: "@acme/x", icon: null }] } }),
-    ).toBeNull();
+  });
+  it("drops a malformed integration entry alone, an empty id included, keeping the agent", () => {
+    const gmail = { id: "@acme/gmail", name: "Gmail", icon: null };
+    const read = readAgentPromptMeta({
+      [key]: {
+        packageId: "@a/b",
+        spaceId: "spc_a",
+        icon: null,
+        color: null,
+        integrations: [
+          gmail,
+          { id: "@acme/x", icon: null },
+          { id: "", name: "Ghost", icon: null },
+          { id: "@acme/y", name: "Y", icon: 3 },
+          null,
+        ],
+      },
+    });
+    expect(read?.integrations).toEqual([gmail]);
+  });
+});
+
+describe("readAgentPromptIntegration", () => {
+  it("reads an entry, and refuses an empty id, a missing name or a non-string icon", () => {
+    expect(readAgentPromptIntegration({ id: "@a/x", name: "X", icon: "logos:x" })).toEqual({
+      id: "@a/x",
+      name: "X",
+      icon: "logos:x",
+    });
+    expect(readAgentPromptIntegration({ id: "", name: "X", icon: null })).toBeNull();
+    expect(readAgentPromptIntegration({ id: "@a/x", icon: null })).toBeNull();
+    expect(readAgentPromptIntegration({ id: "@a/x", name: "X", icon: 1 })).toBeNull();
   });
 });

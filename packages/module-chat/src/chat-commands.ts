@@ -68,6 +68,7 @@ export async function readChatCommands(
                   title: prompt.title ?? prompt.name,
                   description: prompt.description ?? "",
                   packageId: meta.packageId,
+                  spaceId: meta.spaceId,
                   icon: meta.icon,
                   color: meta.color,
                   integrations: meta.integrations,

@@ -46,7 +46,6 @@
   "run.running": "Exécution en cours",
   "run.launchFailed": "Échec du lancement",
   "run.openPage": "Ouvrir la page du run",
-  "run.integrations": "Intégrations : {{names}}",
   "run.status.success": "Complété",
   "run.status.failed": "Échec",
   "run.status.timeout": "Expiré",

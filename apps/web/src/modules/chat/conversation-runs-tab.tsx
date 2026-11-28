@@ -22,7 +22,7 @@ import { EmptyState, ErrorState } from "../../components/page-states";
 import { Waiting } from "../../components/loading-skeletons";
 import { SkeletonLine } from "../../components/skeleton-line";
 import { PackageIcon } from "../../components/package-icon";
-import { IntegrationLogoStack } from "../../components/integration-logo-stack";
+import { IntegrationLogoStack } from "@appstrate/ui/components/integration-logo-stack";
 import { RunDuration } from "../../components/run-duration";
 import { SpaceTilesOf } from "../../components/space-name";
 import { useRowSpaceGrants } from "../../hooks/use-permissions";

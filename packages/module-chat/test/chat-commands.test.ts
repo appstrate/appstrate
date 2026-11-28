@@ -105,9 +105,15 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
       _meta: {
         "dev.appstrate/agent": {
           packageId: "@acme/summarizer",
+          spaceId: "spc_a",
           icon: "lucide:bot",
           color: "teal",
-          integrations: [{ id: "@acme/gmail", name: "Gmail", icon: "logos:gmail" }],
+          // A malformed entry, an empty id included, is dropped alone: the agent stays listed.
+          integrations: [
+            { id: "@acme/gmail", name: "Gmail", icon: "logos:gmail" },
+            { id: "", name: "Ghost", icon: null },
+            { id: "@acme/broken", icon: 3 },
+          ],
         },
       },
     },
@@ -116,6 +122,7 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
       _meta: {
         "dev.appstrate/agent": {
           packageId: "@acme/bare",
+          spaceId: "spc_b",
           icon: null,
           color: null,
           integrations: [],
@@ -127,7 +134,20 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
     {
       name: "run-bad",
       _meta: {
-        "dev.appstrate/agent": { packageId: 3, icon: null, color: null, integrations: [] },
+        "dev.appstrate/agent": {
+          packageId: 3,
+          spaceId: "spc_a",
+          icon: null,
+          color: null,
+          integrations: [],
+        },
+      },
+    },
+    // Without the space it is installed in, the entry cannot say whose install it draws.
+    {
+      name: "run-nospace",
+      _meta: {
+        "dev.appstrate/agent": { packageId: "@acme/x", icon: null, color: null, integrations: [] },
       },
     },
   ];
@@ -159,6 +179,7 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
           title: "Summarizer",
           description: "Summarize the inbox",
           packageId: "@acme/summarizer",
+          spaceId: "spc_a",
           icon: "lucide:bot",
           color: "teal",
           integrations: [{ id: "@acme/gmail", name: "Gmail", icon: "logos:gmail" }],
@@ -168,6 +189,7 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
           title: "run-bare",
           description: "",
           packageId: "@acme/bare",
+          spaceId: "spc_b",
           icon: null,
           color: null,
           integrations: [],

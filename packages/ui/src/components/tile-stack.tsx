@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Fragment, type ReactNode } from "react";
-import { cn } from "@appstrate/ui/cn";
+import { cn } from "../cn.ts";
 
 /**
  * The colour of a stacked tile's ring: the container's `--tile-ring` (the colour of the surface

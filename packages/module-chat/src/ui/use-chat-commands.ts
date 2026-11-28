@@ -35,7 +35,10 @@ function chatCommandsQueryKey(
   return ["packages", "chat-commands", orgId, spaceId, packageAuthoring];
 }
 
-/** Under the shell's `["packages"]` prefix, so a package write refreshes it; stale after 5 s. */
+/**
+ * Under the shell's `["packages"]` prefix, so a package write refreshes it. Otherwise fresh for
+ * five minutes: the catalogue changes only on a package write, and a run's line reads it too.
+ */
 export function useChatCommands(wanted: boolean) {
   const can = useConversationTurnCan();
   const transport = useChatTransport();
@@ -44,23 +47,36 @@ export function useChatCommands(wanted: boolean) {
   return useQuery({
     queryKey: chatCommandsQueryKey(transport?.orgId, spaceId ?? null, packageAuthoring),
     queryFn: () => fetchChatCommands(transport!, spaceId, packageAuthoring),
+    // The route's gate: a space where the chat acts (`can` reads only those). A reader has none.
     enabled: wanted && !!transport && can("chat:write"),
-    staleTime: 5_000,
+    staleTime: COMMANDS_STALE_MS,
   });
 }
 
-/** How an agent is looked up in the commands data: by its prompt name or its package id. */
-export type AgentRef = { promptName: string } | { packageId: string };
+const COMMANDS_STALE_MS = 5 * 60_000;
 
 /**
- * The commands entry of an agent (its key is shared with the `/` menu); none for `undefined`. An
- * agent installed in several spaces is read from its first entry, so its integrations may be those
- * of another space's install than the one a run used.
+ * How an agent is looked up in the commands data: by its prompt name (one per agent and space),
+ * or by its package id, in `spaceId` when the caller knows the space.
+ */
+export type AgentRef = { promptName: string } | { packageId: string; spaceId?: string };
+
+/** Whether `agent` is the entry `agentRef` names. */
+function matchesAgentRef(agent: ChatAgentCommand, agentRef: AgentRef): boolean {
+  if ("promptName" in agentRef) return agent.name === agentRef.promptName;
+  return (
+    agent.packageId === agentRef.packageId &&
+    (agentRef.spaceId === undefined || agent.spaceId === agentRef.spaceId)
+  );
+}
+
+/**
+ * The commands entry of an agent (its key is shared with the `/` menu); none for `undefined`.
+ * Named with a space, it is that space's install, or none when the agent is not offered there;
+ * named without one, an agent installed in several spaces is read from its first entry.
  */
 export function useKnownAgent(agentRef: AgentRef | undefined): ChatAgentCommand | undefined {
   const { data } = useChatCommands(agentRef !== undefined);
   if (!agentRef) return undefined;
-  return data?.agents.find((a) =>
-    "packageId" in agentRef ? a.packageId === agentRef.packageId : a.name === agentRef.promptName,
-  );
+  return data?.agents.find((agent) => matchesAgentRef(agent, agentRef));
 }

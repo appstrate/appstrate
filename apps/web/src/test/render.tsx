@@ -20,12 +20,13 @@ import { I18nextProvider } from "react-i18next";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "../i18n.ts";
+import { TranslatedUiLabels } from "../components/translated-ui-labels.tsx";
 import type { FileDto } from "../hooks/use-files.ts";
 
 /**
  * Render `node` inside the providers the run/agent surfaces need: a query
- * client (panels wire delete/keep mutations on mount), i18n, a router and the
- * app's one tooltip provider (a `Tooltip` throws without it).
+ * client (panels wire delete/keep mutations on mount), i18n and the design system's translated
+ * strings, a router and the app's one tooltip provider (a `Tooltip` throws without it).
  * Providers emit no markup of their own, so a component that needs only one of
  * them renders identically here.
  *
@@ -43,9 +44,11 @@ export function render(
   return renderToStaticMarkup(
     <QueryClientProvider client={options.queryClient ?? new QueryClient()}>
       <I18nextProvider i18n={i18n}>
-        <TooltipProvider>
-          <MemoryRouter initialEntries={options.initialEntries}>{node}</MemoryRouter>
-        </TooltipProvider>
+        <TranslatedUiLabels>
+          <TooltipProvider>
+            <MemoryRouter initialEntries={options.initialEntries}>{node}</MemoryRouter>
+          </TooltipProvider>
+        </TranslatedUiLabels>
       </I18nextProvider>
     </QueryClientProvider>,
   )

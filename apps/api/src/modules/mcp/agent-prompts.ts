@@ -180,6 +180,7 @@ function toPrompt(agent: NamedAgent): Prompt {
     _meta: {
       [AGENT_PROMPT_META_KEY]: {
         packageId: agent.packageId,
+        spaceId: agent.spaceId,
         icon: agent.icon,
         color: agent.color,
         integrations: agent.integrations,

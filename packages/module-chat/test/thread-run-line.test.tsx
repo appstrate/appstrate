@@ -9,6 +9,7 @@ import { describe, expect, it } from "bun:test";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 import type { ChatCommands } from "../src/commands.ts";
 import { ThreadRunLine } from "../src/ui/thread-run-line.tsx";
 import { stateTextClass } from "../src/ui/run-events.ts";
@@ -23,9 +24,21 @@ const commands: ChatCommands = {
       title: "Agent amont",
       description: "",
       packageId: "@acme/agent-amont",
+      spaceId: "spc_a",
       icon: null,
       color: "emerald",
       integrations: [{ id: "@acme/slack", name: "Slack", icon: "https://cdn.test/slack.svg" }],
+    },
+    // The same agent installed in another space, with another integration.
+    {
+      name: "run-b-agent-amont",
+      title: "Agent amont",
+      description: "",
+      packageId: "@acme/agent-amont",
+      spaceId: "spc_b",
+      icon: null,
+      color: "emerald",
+      integrations: [{ id: "@acme/gmail", name: "Gmail", icon: "https://cdn.test/gmail.svg" }],
     },
   ],
 };
@@ -41,13 +54,15 @@ function render(
   return renderToStaticMarkup(
     <QueryClientProvider client={client}>
       <ChatHostProvider value={testHost(host)}>
-        <ThreadRunLine
-          runId={undefined}
-          agentLabel="@acme/agent-amont"
-          initialPackageId="@acme/agent-amont"
-          phase="running"
-          {...props}
-        />
+        <TooltipProvider>
+          <ThreadRunLine
+            runId={undefined}
+            agentLabel="@acme/agent-amont"
+            initialPackageId="@acme/agent-amont"
+            phase="running"
+            {...props}
+          />
+        </TooltipProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
   );
@@ -104,7 +119,18 @@ describe("a run's line in the thread", () => {
     expect(html).toContain(">Agent amont<");
     expect(html).not.toContain(">@acme/agent-amont<");
     expect(html).toContain('src="https://cdn.test/slack.svg"');
-    expect(html).toContain('aria-label="run.integrations"');
+    expect(html).toContain('data-testid="integration-logo-stack"');
+    expect(html).toContain('aria-label="Integrations: Slack"');
+  });
+
+  it("draws the install of the run's space, not the agent's first entry", () => {
+    const html = render({ runId: "run_1", initialStatus: "running", spaceId: "spc_b" });
+    expect(html).toContain('src="https://cdn.test/gmail.svg"');
+    expect(html).not.toContain("slack.svg");
+    // A space the agent is not offered in holds no install: the neutral tile, no logos.
+    const elsewhere = render({ runId: "run_1", initialStatus: "running", spaceId: "spc_c" });
+    expect(elsewhere).toContain("bg-muted text-muted-foreground flex size-4");
+    expect(elsewhere).not.toContain('data-testid="integration-logo-stack"');
   });
 
   it("leads with the agent's 16px tile, a neutral bot tile for an agent the data does not hold", () => {

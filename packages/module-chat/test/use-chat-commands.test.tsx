@@ -15,7 +15,12 @@ import {
   ChatTransportProvider,
   type ChatHost,
 } from "../src/ui/runtime-context.ts";
-import { fetchChatCommands, useChatCommands } from "../src/ui/use-chat-commands.ts";
+import {
+  fetchChatCommands,
+  useChatCommands,
+  useKnownAgent,
+  type AgentRef,
+} from "../src/ui/use-chat-commands.ts";
 import { requestAnswering, transportOf, transportOver } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 
@@ -29,6 +34,7 @@ const commands = {
       title: "Report",
       description: "Weekly report",
       packageId: "@acme/report",
+      spaceId: "spc_a",
       icon: null,
       color: null,
       integrations: [],
@@ -127,5 +133,59 @@ describe("useChatCommands", () => {
     expect(request(writer, { originSpaceId: "spc_b", restricted: true }).fetches).toBe(false);
     const reader = testHost({ can: (permission) => permission !== "chat:write" });
     expect(request(reader, { originSpaceId: "spc_a", restricted: false }).fetches).toBe(false);
+  });
+});
+
+describe("useKnownAgent", () => {
+  // The same agent installed in two spaces, each install with its own integrations.
+  const install = (spaceId: string, name: string, integration: string) => ({
+    name,
+    title: "Report",
+    description: "",
+    packageId: "@acme/report",
+    spaceId,
+    icon: null,
+    color: null,
+    integrations: [{ id: integration, name: integration, icon: null }],
+  });
+  const installs = {
+    skills: [],
+    agents: [
+      install("spc_a", "run-report", "@acme/gmail"),
+      install("spc_b", "run-b-report", "@acme/slack"),
+    ],
+  };
+
+  function KnownProbe({ agentRef }: { agentRef: AgentRef }) {
+    const agent = useKnownAgent(agentRef);
+    return <b data-known={agent ? `${agent.spaceId}:${agent.integrations[0]!.id}` : "none"} />;
+  }
+
+  /** The entry `agentRef` reads, as `space:first integration`, or `none`. */
+  function known(agentRef: AgentRef): string {
+    const qc = new QueryClient();
+    qc.setQueryData(["packages", "chat-commands", undefined, null, true], installs);
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={qc}>
+        <ChatHostProvider value={testHost()}>
+          <KnownProbe agentRef={agentRef} />
+        </ChatHostProvider>
+      </QueryClientProvider>,
+    );
+    return html.match(/data-known="([^"]+)"/)![1]!;
+  }
+
+  it("reads the install of the space it is named with", () => {
+    expect(known({ packageId: "@acme/report", spaceId: "spc_b" })).toBe("spc_b:@acme/slack");
+    expect(known({ packageId: "@acme/report", spaceId: "spc_a" })).toBe("spc_a:@acme/gmail");
+  });
+
+  it("reads none for a space the agent is not offered in, never another space's install", () => {
+    expect(known({ packageId: "@acme/report", spaceId: "spc_c" })).toBe("none");
+  });
+
+  it("reads the first install without a space, and one install by its prompt name", () => {
+    expect(known({ packageId: "@acme/report" })).toBe("spc_a:@acme/gmail");
+    expect(known({ promptName: "run-b-report" })).toBe("spc_b:@acme/slack");
   });
 });

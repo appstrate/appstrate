@@ -28,6 +28,8 @@ const commands: components["schemas"]["ChatCommands"] = {
       title: "Weekly report for `package.json`",
       description: "Builds the weekly report",
       packageId: "@acme/report",
+      // Any space: the menu lists an agent once per space it is installed in.
+      spaceId: "spc_report",
       icon: null,
       color: null,
       integrations: [],

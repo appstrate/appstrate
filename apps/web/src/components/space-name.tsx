@@ -10,7 +10,7 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { spaceTile } from "../lib/identity-tile-props";
 import { spaceLabel, spaceLabels } from "../lib/space-label";
-import { STACK_TILE, TileStack } from "./tile-stack";
+import { STACK_TILE, TileStack } from "@appstrate/ui/components/tile-stack";
 
 /** What naming a space reads of it. */
 export type SpaceListed = Parameters<typeof spaceTile>[0];

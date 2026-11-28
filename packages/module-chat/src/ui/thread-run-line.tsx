@@ -8,8 +8,8 @@
  * is even known, on a line of fixed height: nothing that arrives later moves the block.
  *
  * The lead is the agent's 16px identity tile (`AgentTile`; a neutral bot tile for an inline run or
- * an agent the `/chat/commands` data does not hold). The control is the agent's name (its title in
- * that data, else the launch's label), shimmering while the run is in flight: a button opening the
+ * an agent the `/chat/commands` data does not hold in the run's space). The control is the agent's
+ * name (its title in that data, else the launch's label), shimmering while the run is in flight: a button opening the
  * run in the host's context panel (`openThreadItem`), where its result, files and log follow it;
  * plain text when there is no run to open (a launch that failed, a run the reader cannot read).
  * After it, muted: the run's state, a status icon and its text, which is the run's own log-tool
@@ -18,7 +18,9 @@
  * run's SSE channel (`useRunLogStream`) and paced one at a time (`useLogTicker`, ≥500ms each) with
  * a fade/slide animation, truncated in the room left; `run.starting` before the first log, then
  * `run.running`, and the outcome's short label once terminal. Then the duration, the agent's
- * integration logos, the run's space and the run page's link.
+ * integrations (`IntegrationLogoStack`, the stack the panel's Runs tab and the agent cards draw, as
+ * the `/chat/commands` data holds them for the run's space), the run's space and the run page's
+ * link.
  *
  * What a short state cannot say goes under the line, in full and muted, aligned on the name, as a
  * failed call's message does: a failed or timed-out run's own error, else the launch call's error
@@ -32,6 +34,7 @@ import * as React from "react";
 import { AlertTriangleIcon, ExternalLinkIcon, LockIcon } from "lucide-react";
 import { RunStatusIcon } from "@appstrate/ui/components/run-status";
 import { Spinner } from "@appstrate/ui/components/spinner";
+import { IntegrationLogoStack } from "@appstrate/ui/components/integration-logo-stack";
 import { useLiveElapsedMs } from "@appstrate/ui/use-live-elapsed-ms";
 import { runReadAccess, useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
@@ -60,8 +63,6 @@ import { AgentTile } from "./agent-glyph.tsx";
 import { useKnownAgent } from "./use-chat-commands.ts";
 import { ActivityTrigger } from "./activity-line.tsx";
 import { CallLine, CallName, UNDER_LINE_CLASS } from "./call-step.tsx";
-import { SubjectStack } from "./subject-glyph.tsx";
-import type { ChatAgentCommand } from "../commands.ts";
 
 /**
  * Row of file attachments surfaced under a run's line — the same unified renderer the thread uses
@@ -79,34 +80,6 @@ function FileChips({ files, spaceId }: { files: ChatRunFile[]; spaceId?: string 
         />
       ))}
     </div>
-  );
-}
-
-/**
- * The agent's integrations as stacked logos (each its manifest `icon`, drawn by the
- * `IntegrationIcon` the panel's Runs tab draws too), named for assistive technology.
- */
-function IntegrationLogos({
-  integrations,
-  label,
-}: {
-  integrations: ChatAgentCommand["integrations"];
-  label: (names: string) => string;
-}) {
-  if (integrations.length === 0) return null;
-  const subjects = integrations.map((integration) => ({
-    kind: "integration" as const,
-    id: integration.id,
-    ...(integration.icon && { icons: [{ src: integration.icon }] }),
-  }));
-  return (
-    <span
-      className="flex shrink-0"
-      role="img"
-      aria-label={label(integrations.map((i) => i.name).join(", "))}
-    >
-      <SubjectStack subjects={subjects} />
-    </span>
   );
 }
 
@@ -281,7 +254,7 @@ export function ThreadRunLine({
   // working one).
   const runPath = runId && !runDenied ? buildRunPageHref(packageId, runId) : undefined;
   const effectiveRunHref = runPath ? linkInSpace(runPath, spaceId) : undefined;
-  const agent = useKnownAgent(packageId ? { packageId } : undefined);
+  const agent = useKnownAgent(packageId ? { packageId, spaceId } : undefined);
   const label = agent?.title ?? agentLabel ?? t("run.fallbackLabel");
   const name = <CallName label={label} running={inFlight} />;
 
@@ -319,10 +292,7 @@ export function ThreadRunLine({
                 {formatDuration(elapsedMs, lang)}
               </span>
             ) : null}
-            <IntegrationLogos
-              integrations={agent?.integrations ?? []}
-              label={(names) => t("run.integrations", { names })}
-            />
+            <IntegrationLogoStack integrations={agent?.integrations ?? []} />
             <CallSpace spaceId={spaceId} />
             {effectiveRunHref ? (
               <a

@@ -24,6 +24,7 @@ const commands: ChatCommands = {
       title: "Weekly report",
       description: "",
       packageId: "@acme/report",
+      spaceId: "spc_a",
       icon: "lucide:chart-bar",
       color: "blue",
       integrations: [],

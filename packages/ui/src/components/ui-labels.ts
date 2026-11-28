@@ -11,7 +11,7 @@ export interface Translate<Values> {
 
 /**
  * The few strings the primitives of this package render themselves (the copy button, a dialog's close button, an
- * explanation's ⓘ button, the sidebar's screen-reader chrome). The package carries no
+ * explanation's ⓘ button, the sidebar's screen-reader chrome, the integration stack's names). The package carries no
  * i18n runtime: the host application provides its translations once, at its
  * root, and every primitive reads them from there. English is the default.
  */
@@ -26,6 +26,12 @@ interface UiLabels {
   copied: string;
   copyFailed: string;
   moreInfo: string;
+  /** The integration stack's tooltip heading. */
+  integrations: string;
+  /** The integration stack's accessible name, over its comma-separated names. */
+  integrationsNamed: (names: string) => string;
+  /** An integration of the stack not active in the space. */
+  integrationInactive: (name: string) => string;
 }
 
 export const UiLabelsContext = createContext<UiLabels>({
@@ -39,6 +45,9 @@ export const UiLabelsContext = createContext<UiLabels>({
   copied: "Copied",
   copyFailed: "Could not copy: the browser refused access to the clipboard.",
   moreInfo: "More information",
+  integrations: "Integrations",
+  integrationsNamed: (names) => `Integrations: ${names}`,
+  integrationInactive: (name) => `${name} (not active in this space)`,
 });
 
 export function useUiLabels(): UiLabels {
