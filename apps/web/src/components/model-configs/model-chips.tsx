@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import { TriangleAlert } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import type { OrgModelInfo } from "../../hooks/use-models";
-import { isModelUnpriced } from "../../pages/org-settings/model-pricing";
+import { isModelUnpriced } from "../../lib/model-pricing";
 
 const CHIP =
   "inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs";
@@ -39,11 +39,13 @@ export function ModelChips({
               </span>
             )}
             {isModelUnpriced(model) && (
-              <span title={t("models.unpricedHint")} className="inline-flex shrink-0">
-                <TriangleAlert
-                  className="text-warning size-3.5"
-                  aria-label={t("models.unpriced")}
-                />
+              // Visible text: a title alone never shows on touch.
+              <span
+                title={t("models.unpricedHint")}
+                className="text-warning inline-flex shrink-0 items-center gap-1"
+              >
+                <TriangleAlert className="size-3.5" aria-hidden />
+                {t("models.unpriced")}
               </span>
             )}
           </>

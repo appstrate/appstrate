@@ -4,8 +4,8 @@
  * Preferences › Models: the organization's configurations that let members connect their own key
  * or subscription, one row each. A row says who serves the caller's calls to its models (their
  * own connection, the organization's, or nobody yet), offers « Utiliser ma clé », and holds the
- * menu of the caller's own connection. A configuration that refuses personal connections is not
- * listed.
+ * menu of the caller's own connection. A configuration that refuses personal connections is
+ * listed only where the caller still holds a connection: read-only, with its deletion.
  */
 
 import { useState } from "react";
@@ -19,7 +19,7 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@appstrate/ui/components/item";
-import { ConfirmModal } from "../../components/confirm-modal";
+import { DeleteKeyConfirm } from "../../components/delete-key-confirm";
 import {
   CredentialFormModal,
   type ConnectionFormTarget,
@@ -37,7 +37,6 @@ import { EmptyState, ErrorState } from "../../components/page-states";
 import { TableRowActions } from "../../components/table-row-actions";
 import { useModelConfigs } from "../../hooks/use-model-configs";
 import {
-  useDeleteModelProviderCredential,
   useModelProviderCredentials,
   useProvidersRegistry,
   useUpdateModelProviderCredential,
@@ -47,7 +46,9 @@ import {
 import { usePermissions } from "../../hooks/use-permissions";
 import {
   connectChoices,
+  connectionLabelBody,
   personalServing,
+  preferencesConfigs,
   type ConnectChoice,
   type ModelConfigInfo,
 } from "../../lib/model-configs";
@@ -62,24 +63,30 @@ export function PreferencesModelsPage() {
 
   const configsQuery = useModelConfigs();
   const credentialsQuery = useModelProviderCredentials();
-  const { data: registry } = useProvidersRegistry();
+  const registryQuery = useProvidersRegistry();
+  const registry = registryQuery.data;
   const updateCredential = useUpdateModelProviderCredential();
-  const deleteCredential = useDeleteModelProviderCredential();
 
   const [connecting, setConnecting] = useState<ConnectionFormTarget | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
 
   const own = ownPersonalCredentials(credentialsQuery.data ?? [], userId);
-  const configs = configsQuery.data?.filter((c) => c.personal_connections_allowed);
-  const error = configsQuery.error ?? credentialsQuery.error;
+  const configs = configsQuery.data && preferencesConfigs(configsQuery.data, own);
+  const error = configsQuery.error ?? credentialsQuery.error ?? registryQuery.error;
+  // A row drawn before the caller's connections and the registry would offer « Utiliser ma clé »
+  // to someone who already has one.
+  const loading = !configs || credentialsQuery.isLoading || registryQuery.isLoading;
 
   return (
     <>
-      <p className="text-muted-foreground mb-4 text-sm">{t("modelConfigs.preferences.intro")}</p>
+      {/* The skeleton carries the intro line itself: the page and its fallback stay one shape. */}
+      {(!loading || error) && (
+        <p className="text-muted-foreground mb-4 text-sm">{t("modelConfigs.preferences.intro")}</p>
+      )}
 
       {error ? (
         <ErrorState error={error} />
-      ) : !configs || credentialsQuery.isLoading ? (
+      ) : !configs || loading ? (
         <ModelsPageSkeleton withDefault={false} />
       ) : configs.length === 0 ? (
         <EmptyState icon={KeyRound} message={t("modelConfigs.preferences.empty")} />
@@ -91,7 +98,12 @@ export function PreferencesModelsPage() {
               config={config}
               provider={registry?.find((p) => p.providerId === config.provider_id)}
               own={own}
-              choices={connectChoices(config, registry ?? [], { org: false, personal: canConnect })}
+              choices={connectChoices(
+                config,
+                registry ?? [],
+                { org: false, personal: canConnect },
+                own,
+              )}
               onConnect={(choice) =>
                 setConnecting({
                   kind: "create",
@@ -104,7 +116,7 @@ export function PreferencesModelsPage() {
                 // A refusal is toasted by the mutation cache; the rejection keeps the label typed.
                 await updateCredential.mutateAsync({
                   params: { path: { id: credential.id } },
-                  body: { label },
+                  body: connectionLabelBody(label),
                 });
               }}
               onReplace={(credential) => setConnecting({ kind: "edit", credential })}
@@ -122,25 +134,9 @@ export function PreferencesModelsPage() {
         />
       )}
 
-      <ConfirmModal
-        open={!!confirmDelete}
-        onClose={() => setConfirmDelete(null)}
-        title={t("credentials.deleteTitle")}
-        confirmLabel={t("btn.delete", { ns: "common" })}
-        description={
-          confirmDelete ? t("modelCredentials.deleteConfirm", { label: confirmDelete.label }) : ""
-        }
-        isPending={deleteCredential.isPending}
-        onConfirm={() => {
-          if (!confirmDelete) return;
-          deleteCredential.mutate(
-            { params: { path: { id: confirmDelete.id } } },
-            { onSuccess: () => setConfirmDelete(null) },
-          );
-        }}
-      >
-        <p className="text-muted-foreground text-sm">{t("modelCredentials.deleteImpact")}</p>
-      </ConfirmModal>
+      {confirmDelete && (
+        <DeleteKeyConfirm credential={confirmDelete} onClose={() => setConfirmDelete(null)} />
+      )}
     </>
   );
 }
@@ -170,9 +166,13 @@ function PersonalConfigRow({
   const mine = serving.by === "mine" ? serving.connection : null;
   const allowed = new Set(mine?.allowed_actions ?? []);
   const subscription = mine?.authMode === "oauth2";
+  // The organization switched personal connections off after the caller connected: it serves
+  // nothing now, and only its deletion is left.
+  const refused = !config.personal_connections_allowed;
 
-  const description =
-    serving.by === "mine"
+  const description = refused
+    ? t("modelConfigs.preferences.personalDisabled")
+    : serving.by === "mine"
       ? t("modelConfigs.preferences.servedByMine", {
           account: serving.connection.oauth_email ?? serving.connection.label,
         })
@@ -192,7 +192,7 @@ function PersonalConfigRow({
             </span>
           </ItemTitle>
           <ItemDescription>
-            {mine && renaming ? (
+            {mine && renaming && !refused ? (
               <InlineEditableLabel
                 value={mine.label}
                 editable={allowed.has("edit")}
@@ -206,7 +206,7 @@ function PersonalConfigRow({
           </ItemDescription>
         </ItemContent>
         <ItemActions className={MODEL_ROW_ACTIONS}>
-          <ConfigStateBadge state={serving.state} />
+          {!refused && <ConfigStateBadge state={serving.state} />}
           {!mine && (
             <ConnectMenu
               choices={choices}
@@ -225,7 +225,7 @@ function PersonalConfigRow({
                     icon: Pencil,
                     label: t("btn.rename", { ns: "common" }),
                     onSelect: () => setRenaming(true),
-                    hidden: !allowed.has("edit"),
+                    hidden: refused || !allowed.has("edit"),
                   },
                   {
                     id: "replace",
@@ -234,7 +234,8 @@ function PersonalConfigRow({
                       ? t("modelConfigs.connect.reconnect")
                       : t("credentials.edit"),
                     onSelect: () => onReplace(mine),
-                    hidden: subscription ? !allowed.has("reconnect") : !allowed.has("edit"),
+                    hidden:
+                      refused || (subscription ? !allowed.has("reconnect") : !allowed.has("edit")),
                   },
                   {
                     id: "delete",

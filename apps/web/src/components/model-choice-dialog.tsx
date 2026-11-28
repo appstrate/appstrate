@@ -22,7 +22,7 @@ import { Modal } from "./modal";
 import { ErrorState } from "./page-states";
 import { TextSkeleton } from "./loading-skeletons";
 import { ModelChoiceList } from "./model-choice";
-import { useModelChoice, type DiscoverWith } from "../hooks/use-model-choice";
+import { useModelChoice } from "../hooks/use-model-choice";
 import { choiceRefusal, useApplyModelChoice } from "../hooks/use-apply-model-choice";
 import {
   useModelProviderCredentials,
@@ -31,6 +31,7 @@ import {
 } from "../hooks/use-model-provider-credentials";
 import { useModels, type OrgModelInfo } from "../hooks/use-models";
 import { connectionsOfConfig, modelsOfConfig, type ModelConfigInfo } from "../lib/model-configs";
+import type { DiscoverWith } from "../lib/model-discovery";
 import { modelSource } from "../lib/model-source";
 import { errorMessage } from "../lib/mutation-error";
 
@@ -42,6 +43,8 @@ interface ChoiceBodyProps {
   orgKeyId: string | null;
   tickNew: boolean;
   onClose: () => void;
+  /** After a save; without it a save closes the dialog. */
+  onSaved?: () => void;
   onAdvanced?: (modelId: string) => void;
 }
 
@@ -52,12 +55,13 @@ function ChoiceBody({
   orgKeyId,
   tickNew,
   onClose,
+  onSaved,
   onAdvanced,
 }: ChoiceBodyProps) {
   const { t } = useTranslation(["settings", "common"]);
   const [inlineKey, setInlineKey] = useState("");
   const asksKey = modelSource(provider) === "discover" && orgKeyId === null;
-  const discoverWith: DiscoverWith = orgKeyId
+  const discoverWith: DiscoverWith | null = orgKeyId
     ? { credentialId: orgKeyId }
     : inlineKey.trim()
       ? { inlineApiKey: inlineKey, configId: config.id }
@@ -72,7 +76,7 @@ function ChoiceBody({
     setRefusal(null);
     try {
       await apply({ plan: choice.plan, configId: config.id });
-      onClose();
+      (onSaved ?? onClose)();
     } catch (err) {
       // Refused as a whole or entry by entry: either way nothing was written.
       const refused = choiceRefusal(err, choice.plan);
@@ -169,11 +173,15 @@ export function ModelChoiceDialog({
   config,
   tickNew = false,
   onClose,
+  onSaved,
   onAdvanced,
 }: {
   config: ModelConfigInfo;
   tickNew?: boolean;
+  /** Cancel, Escape, the close button: nothing was saved. */
   onClose: () => void;
+  /** A save went through; absent, `onClose` runs. */
+  onSaved?: () => void;
   /** Where a saved model's finer settings open (the model form), by the model's id. */
   onAdvanced?: (modelId: string) => void;
 }) {
@@ -184,6 +192,8 @@ export function ModelChoiceDialog({
   const registry = registryQuery.data;
   const models = modelsQuery.data;
   const provider = registry?.find((p) => p.providerId === config.provider_id);
+  // The organization's key decides whether the key field shows: the body waits for the connections.
+  const error = registryQuery.error ?? modelsQuery.error ?? credentialsQuery.error;
   const orgKey = connectionsOfConfig(credentialsQuery.data ?? [], config.id).org.find(
     (c) => c.authMode === "api_key" && !c.needs_reconnection,
   );
@@ -191,11 +201,11 @@ export function ModelChoiceDialog({
   return (
     // The configuration's label is known before the lists: the title does not change when they arrive.
     <Modal onClose={onClose} title={t("modelConfigs.choice.title", { label: config.label })}>
-      {!registry || !models || !provider ? (
+      {error || !registry || !models || !provider || credentialsQuery.isLoading ? (
         <>
-          {registryQuery.error || modelsQuery.error ? (
-            <ErrorState error={registryQuery.error ?? modelsQuery.error} compact />
-          ) : registry && models ? (
+          {error ? (
+            <ErrorState error={error} compact />
+          ) : registry && models && !credentialsQuery.isLoading ? (
             <ErrorState message={t("models.form.providerUnavailable")} compact />
           ) : (
             <TextSkeleton lines={4} className="py-2" />
@@ -210,6 +220,7 @@ export function ModelChoiceDialog({
           orgKeyId={orgKey?.id ?? null}
           tickNew={tickNew}
           onClose={onClose}
+          onSaved={onSaved}
           onAdvanced={onAdvanced}
         />
       )}

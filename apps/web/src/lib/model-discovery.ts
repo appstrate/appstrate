@@ -40,24 +40,21 @@ export function discoveryErrorKey(outcome: DiscoveryState["outcome"]): string {
 }
 
 /**
+ * What a listing that needs a key asks with: the configuration's organization connection, or a
+ * key typed for the occasion (sent with the configuration, which carries a gateway's endpoint).
+ */
+export type DiscoverWith = { credentialId: string } | { inlineApiKey: string; configId: string };
+
+/**
  * Exactly one of the two forms: a saved organization key (it carries key and endpoint), or a key
  * typed for this one request, against the configuration's endpoint.
  */
 export type DiscoverBody =
   { credentialId: string } | { providerId: string; api_key: string; config_id: string };
 
-export function buildDiscoverBody(input: {
-  credentialId: string | null;
-  providerId: string;
-  configId: string;
-  inlineApiKey: string;
-}): DiscoverBody {
-  if (input.credentialId) return { credentialId: input.credentialId };
-  return {
-    providerId: input.providerId,
-    api_key: input.inlineApiKey.trim(),
-    config_id: input.configId,
-  };
+export function buildDiscoverBody(providerId: string, using: DiscoverWith): DiscoverBody {
+  if ("credentialId" in using) return { credentialId: using.credentialId };
+  return { providerId, api_key: using.inlineApiKey.trim(), config_id: using.configId };
 }
 
 /** An endpoint is reached over HTTP(S): any other scheme parses and then serves nothing. */

@@ -2,7 +2,7 @@
 
 import { useQueryClient, type MutationMeta, type QueryClient } from "@tanstack/react-query";
 import { $api, type components, type paths } from "../api/client";
-import { invalidatePaths } from "../lib/query-keys";
+import { invalidatePaths, MODEL_CACHE_PATHS } from "../lib/query-keys";
 import { useInvalidatePaths } from "./use-invalidate-paths";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
@@ -66,16 +66,9 @@ export function useProvidersRegistry() {
   );
 }
 
-/** A connection changes which models its configuration serves, and the configuration's state. */
-const CONNECTION_PATHS = [
-  "/api/model-provider-credentials",
-  "/api/model-configs",
-  "/api/models",
-] as const;
-
 /** `meta`: the key form reports a refusal itself. */
 export function useCreateModelProviderCredential(meta?: MutationMeta) {
-  const invalidate = useInvalidatePaths(...CONNECTION_PATHS);
+  const invalidate = useInvalidatePaths(...MODEL_CACHE_PATHS);
   return $api.useMutation("post", "/api/model-provider-credentials", {
     meta,
     onSuccess: invalidate,
@@ -86,7 +79,7 @@ export function useCreateModelProviderCredential(meta?: MutationMeta) {
 // be mutated — delete and re-create to switch providers.
 /** `meta`: the key form shows its refusal inline; a rename reports through the cache. */
 export function useUpdateModelProviderCredential(meta?: MutationMeta) {
-  const invalidate = useInvalidatePaths(...CONNECTION_PATHS);
+  const invalidate = useInvalidatePaths(...MODEL_CACHE_PATHS);
   return $api.useMutation("patch", "/api/model-provider-credentials/{id}", {
     meta,
     onSuccess: invalidate,
@@ -94,7 +87,7 @@ export function useUpdateModelProviderCredential(meta?: MutationMeta) {
 }
 
 export function useDeleteModelProviderCredential() {
-  const invalidate = useInvalidatePaths(...CONNECTION_PATHS);
+  const invalidate = useInvalidatePaths(...MODEL_CACHE_PATHS);
   return $api.useMutation("delete", "/api/model-provider-credentials/{id}", {
     onSuccess: invalidate,
   });
@@ -102,7 +95,7 @@ export function useDeleteModelProviderCredential() {
 
 /** Re-read the connections, the configurations and the models they serve: a test may rotate or flag a subscription, a pairing adds one. */
 export async function invalidateCredentialsAndModels(qc: QueryClient): Promise<void> {
-  await invalidatePaths(qc, [...CONNECTION_PATHS]);
+  await invalidatePaths(qc, [...MODEL_CACHE_PATHS]);
 }
 
 export function useTestModelProviderCredential() {

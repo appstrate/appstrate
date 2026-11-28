@@ -15,6 +15,8 @@ import {
   configUpdateBody,
   connectChoices,
   connectionBody,
+  connectionLabelBody,
+  connectionTestBody,
   connectionsOfConfig,
   createConfigBody,
   defaultModelGroups,
@@ -26,6 +28,8 @@ import {
   onlySubscriptions,
   orgConnectionSummary,
   personalServing,
+  preferencesConfigs,
+  repairableConnections,
   seedModelsBody,
   systemModels,
 } from "../model-configs.ts";
@@ -143,7 +147,7 @@ describe("connectChoices", () => {
 
   it("offers the organization's first, then the caller's own, by kind of secret", () => {
     expect(
-      connectChoices(config, registry, { org: true, personal: true }).map((c) => [
+      connectChoices(config, registry, { org: true, personal: true }, []).map((c) => [
         c.owner,
         c.provider.providerId,
       ]),
@@ -157,11 +161,18 @@ describe("connectChoices", () => {
 
   it("offers no personal connection where the configuration refuses them", () => {
     const closed = { ...config, personal_connections_allowed: false };
-    expect(connectChoices(closed, registry, { org: false, personal: true })).toEqual([]);
+    expect(connectChoices(closed, registry, { org: false, personal: true }, [])).toEqual([]);
+  });
+
+  it("offers no personal connection where the caller already has one in the configuration", () => {
+    const owners = (own: { config_id: string }[]) =>
+      connectChoices(config, registry, { org: true, personal: true }, own).map((c) => c.owner);
+    expect(owners([{ config_id: config.id }])).not.toContain("user");
+    expect(owners([{ config_id: "cfg_other" }])).toContain("user");
   });
 
   it("skips a kind of secret the registry does not know", () => {
-    expect(connectChoices(config, [ANTHROPIC], { org: true, personal: false })).toHaveLength(1);
+    expect(connectChoices(config, [ANTHROPIC], { org: true, personal: false }, [])).toHaveLength(1);
   });
 });
 
@@ -269,29 +280,69 @@ describe("defaultModelGroups", () => {
   const mistral = model({ id: "m3", config_id: "cfg_2" });
   const groq = model({ id: "m4", config_id: "cfg_3" });
   const builtIn = model({ id: "s1", config_id: null, source: "built-in" });
+  const orgKey = connectionFixture({ serves_model_ids: ["m1", "m2"] });
+  const configs = [served, unserved, dead];
+  const groups = defaultModelGroups([sonnet, off, mistral, groq, builtIn], configs, [orgKey]);
 
-  const groups = defaultModelGroups(
-    [sonnet, off, mistral, groq, builtIn],
-    [served, unserved, dead],
-  );
-
-  it("groups by configuration, named after it, the instance's last", () => {
+  it("groups as the other pickers do: by configuration name, the instance's last", () => {
     expect(groups.map((g) => [g.kind, g.name])).toEqual([
-      ["config", "Anthropic"],
-      ["config", "Mistral"],
-      ["config", "Groq"],
+      ["org", "Anthropic"],
+      ["org", "Groq"],
+      ["org", "Mistral"],
       ["system", null],
     ]);
   });
 
   it("leaves out a switched-off model, marks the default", () => {
-    expect(groups[0]!.entries).toEqual([{ model: sonnet, isDefault: true, blocked: null }]);
+    expect(groups[0]!.entries).toEqual([
+      { model: { ...sonnet, billed_to: "org" }, isDefault: true, blocked: null },
+    ]);
+  });
+
+  it("keeps a switched-off model that is the current default, greyed", () => {
+    const [group] = defaultModelGroups([{ ...off, is_default: true }], configs, [orgKey]);
+    expect(group!.entries[0]!.blocked).toBe("disabled");
   });
 
   it("greys a model no live organization connection serves, with its reason", () => {
-    expect(groups[1]!.entries[0]!.blocked).toBe("orgConnectionMissing");
-    expect(groups[2]!.entries[0]!.blocked).toBe("orgUnavailable");
-    expect(groups[3]!.entries[0]!.blocked).toBeNull();
+    const reasons = Object.fromEntries(
+      groups.flatMap((g) => g.entries).map((e) => [e.model.id, e.blocked]),
+    );
+    expect(reasons).toMatchObject({
+      m1: null,
+      m3: "orgConnectionMissing",
+      m4: "orgUnavailable",
+      s1: null,
+    });
+  });
+
+  it("decides per model: a connection serving other models does not make this one eligible", () => {
+    const sibling = model({ id: "m5", config_id: "cfg_1" });
+    const [group] = defaultModelGroups([sonnet, sibling], [served], [orgKey]);
+    expect(group!.entries.map((e) => [e.model.id, e.blocked])).toEqual([
+      ["m1", null],
+      ["m5", "orgConnectionMissing"],
+    ]);
+  });
+
+  it("falls back on the configuration's state when the connections cannot be read", () => {
+    const result = defaultModelGroups([sonnet, mistral, groq], configs, undefined);
+    const reasons = Object.fromEntries(
+      result.flatMap((g) => g.entries).map((e) => [e.model.id, e.blocked]),
+    );
+    expect(reasons).toEqual({ m1: null, m3: "orgConnectionMissing", m4: "orgUnavailable" });
+  });
+
+  it("ignores a dead organization connection and the members' own", () => {
+    const own = connectionFixture({
+      id: "c_me",
+      owner_type: "user",
+      owner_id: "u1",
+      serves_model_ids: ["m1"],
+    });
+    const deadKey = { ...orgKey, needs_reconnection: true };
+    const [group] = defaultModelGroups([sonnet], [served], [own, deadKey]);
+    expect(group!.entries[0]!.blocked).toBe("orgConnectionMissing");
   });
 });
 
@@ -320,7 +371,89 @@ describe("personalServing", () => {
     });
   });
 
+  it("prefers a live subscription over a key, as the server does", () => {
+    const key = { ...mine, id: "c_key" };
+    const subscription = { ...mine, id: "c_sub", authMode: "oauth2" as const };
+    const result = personalServing(config, [key, subscription]);
+    expect(result).toMatchObject({ by: "mine", connection: { id: "c_sub" } });
+  });
+
   it("ignores the caller's connection of another configuration", () => {
     expect(personalServing(config, [{ ...mine, config_id: "cfg_2" }]).by).toBe("org");
+  });
+});
+
+describe("repairableConnections", () => {
+  const dead = connectionFixture({ id: "dead", needs_reconnection: true });
+  const deadSub = connectionFixture({
+    id: "dead_sub",
+    authMode: "oauth2",
+    needs_reconnection: true,
+    allowed_actions: ["reconnect", "delete"],
+  });
+  const live = connectionFixture({ id: "live" });
+  const deadNoRight = connectionFixture({
+    id: "dead_ro",
+    needs_reconnection: true,
+    allowed_actions: [],
+  });
+
+  it("keeps the dead connections the caller may repair, by the action their kind needs", () => {
+    expect(repairableConnections([dead, deadSub, live, deadNoRight]).map((c) => c.id)).toEqual([
+      "dead",
+      "dead_sub",
+    ]);
+  });
+
+  it("does not take « edit » for a subscription's repair", () => {
+    const sub = { ...deadSub, allowed_actions: ["edit" as const] };
+    expect(repairableConnections([sub])).toEqual([]);
+  });
+});
+
+describe("preferencesConfigs", () => {
+  const open = modelConfigFixture({ id: "cfg_open" });
+  const closed = modelConfigFixture({ id: "cfg_closed", personal_connections_allowed: false });
+  const closedWithMine = modelConfigFixture({
+    id: "cfg_closed_mine",
+    personal_connections_allowed: false,
+  });
+  const mine = connectionFixture({ config_id: "cfg_closed_mine", owner_type: "user" });
+
+  it("lists the open configurations, and the closed ones where the caller keeps a connection", () => {
+    expect(preferencesConfigs([open, closed, closedWithMine], [mine]).map((c) => c.id)).toEqual([
+      "cfg_open",
+      "cfg_closed_mine",
+    ]);
+  });
+});
+
+describe("connectionLabelBody", () => {
+  it("sends the label alone, trimmed", () => {
+    expect(connectionLabelBody("  Ma clé  ")).toEqual({ label: "Ma clé" });
+  });
+});
+
+describe("connectionTestBody", () => {
+  it("tries the typed key against the configuration, trimmed", () => {
+    expect(
+      connectionTestBody({
+        providerId: "openai-compatible",
+        configId: "cfg_1",
+        apiKey: "  sk-test ",
+        credentialId: null,
+      }),
+    ).toEqual({ providerId: "openai-compatible", config_id: "cfg_1", api_key: "sk-test" });
+  });
+
+  it("names the stored connection, with no key, when none is typed", () => {
+    expect(
+      connectionTestBody({
+        providerId: "anthropic",
+        configId: "cfg_1",
+        apiKey: "   ",
+        credentialId: "cred_1",
+      }),
+    ).toEqual({ providerId: "anthropic", config_id: "cfg_1", credentialId: "cred_1" });
   });
 });

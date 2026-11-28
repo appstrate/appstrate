@@ -17,14 +17,11 @@ interface CapabilityFields {
   reasoning: boolean;
 }
 
-/** What the list asks of a model id typed by hand: its name and, if wanted, its own capabilities. */
+/** What the list asks of a model id typed by hand, and the model form's controlled values: its name and, if wanted, its own capabilities. */
 export interface ManualRowFields extends CapabilityFields {
   label: string;
   modelId: string;
 }
-
-/** The model form's controlled field values. */
-export type ModelFormFields = ManualRowFields;
 
 /**
  * Catalog-derivable overrides. Sent only when the operator answered for them,
@@ -60,9 +57,9 @@ export interface ModelFormData {
 }
 
 export interface ModelFormPayloadInput {
-  fields: ModelFormFields;
+  fields: ManualRowFields;
   /** RHF `dirtyFields` — the row's name ships only when the operator typed one. */
-  dirtyFields: { [K in keyof ModelFormFields]?: boolean };
+  dirtyFields: { [K in keyof ManualRowFields]?: boolean };
   /** `explicit`: the operator's own values ship (an unticked box included; blank or still-catalog fields do not). `auto`: every field `null`. */
   capabilities: "explicit" | "auto";
   /** The catalog's values for the id; a field still equal to them is not an answer (shipping it would freeze it as an override, cutting off catalog updates). */

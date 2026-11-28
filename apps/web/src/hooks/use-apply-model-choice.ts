@@ -3,6 +3,7 @@
 import { $api, type paths } from "../api/client";
 import { ApiError } from "../api/errors";
 import { useInvalidatePaths } from "./use-invalidate-paths";
+import { MODEL_CACHE_PATHS } from "../lib/query-keys";
 import { rowToEntry } from "../lib/model-form-payload";
 import { refusalMessage } from "../lib/mutation-error";
 import type { ModelChoicePlan } from "../lib/model-choice";
@@ -65,11 +66,7 @@ export function choiceRefusal(err: unknown, plan: ModelChoicePlan): ModelChoiceR
 
 /** Applies a choice in one write: all of it, or — refused — none of it. */
 export function useApplyModelChoice() {
-  const invalidate = useInvalidatePaths(
-    "/api/models",
-    "/api/model-configs",
-    "/api/model-provider-credentials",
-  );
+  const invalidate = useInvalidatePaths(...MODEL_CACHE_PATHS);
   const mutation = $api.useMutation("post", "/api/models/apply", {
     meta: { errorHandledByCaller: true },
     onSuccess: invalidate,

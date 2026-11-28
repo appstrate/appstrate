@@ -37,6 +37,13 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@appstrate/ui/components/item";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@appstrate/ui/components/dropdown-menu";
+import { Label } from "@appstrate/ui/components/label";
 import { Switch } from "@appstrate/ui/components/switch";
 import { cn } from "@appstrate/ui/cn";
 import { useConnectionTest } from "../../hooks/use-connection-test";
@@ -50,14 +57,19 @@ import {
   configState,
   onlySubscriptions,
   orgConnectionSummary,
+  repairableConnections,
   type ConfigState,
   type ConnectChoice,
   type ModelConfigInfo,
 } from "../../lib/model-configs";
 import { PROVIDER_ICONS } from "../icons";
+import { ConfirmModal } from "../confirm-modal";
 import { InlineEditableLabel } from "../inline-editable-label";
+import { SaveFeedback } from "../settings/save-feedback";
+import { SettingRow } from "../settings/setting-row";
 import { TableRowActions } from "../table-row-actions";
 import { TestResultSpan } from "../test-result-span";
+import { IDLE_WRITE, type WriteState } from "../../lib/field-write-state";
 import { ConnectMenu } from "./connect-menu";
 import { ModelChips } from "./model-chips";
 import { MODEL_ROW_ACTIONS, MODEL_ROW_ITEM, MODEL_ROW_MENUS } from "./row-layout";
@@ -101,7 +113,7 @@ export function ConfigLogo({ provider }: { provider: ProviderRegistryEntry | und
   // A direct dict access: `react-hooks/static-components` flags a component taken from a call.
   const Icon = (provider && PROVIDER_ICONS[provider.iconUrl]) ?? Server;
   return (
-    <ItemMedia variant="icon">
+    <ItemMedia>
       <Icon />
     </ItemMedia>
   );
@@ -116,6 +128,9 @@ export function ModelConfigRow({
   can,
   choices,
   defaultOpen = false,
+  open: openProp,
+  onOpenChange,
+  personalWrite = IDLE_WRITE,
   onConnect,
   onChooseModels,
   onOpenModel,
@@ -136,7 +151,12 @@ export function ModelConfigRow({
   can: ConfigPermissions;
   /** The ways the caller may connect it (`connectChoices`). */
   choices: readonly ConnectChoice[];
+  /** Uncontrolled start state; the page that opens rows on demand controls `open` instead. */
   defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** What the last write of the members' switch said, for this configuration. */
+  personalWrite?: WriteState;
   onConnect: (choice: ConnectChoice) => void;
   onChooseModels: () => void;
   onOpenModel: (model: OrgModelInfo) => void;
@@ -147,18 +167,25 @@ export function ModelConfigRow({
   connectionDeeds: ConnectionDeeds;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const [open, setOpen] = useState(defaultOpen);
+  const [openInside, setOpenInside] = useState(defaultOpen);
+  const open = openProp ?? openInside;
+  const setOpen = (next: boolean) => {
+    setOpenInside(next);
+    onOpenChange?.(next);
+  };
   const [renaming, setRenaming] = useState(false);
   const state = configState(config);
   const enabled = models.filter((m) => m.enabled || m.is_default);
   const orgChoices = choices.filter((c) => c.owner === "org");
+  // Dead organization connections are repaired in place: a new one would leave them dead.
+  const repairable = repairableConnections(connections.org);
   const repair =
-    state === "active" ? null : (
+    state === "active" ? null : state === "reconnect" && repairable.length > 0 ? (
+      <ReconnectButton connections={repairable} onPick={connectionDeeds.onReplace} />
+    ) : (
       <ConnectMenu
         choices={state === "reconnect" ? orgChoices : choices}
-        label={t(
-          state === "reconnect" ? "modelConfigs.connect.reconnect" : "modelConfigs.connect.action",
-        )}
+        label={t("modelConfigs.connect.action")}
         variant="default"
         onPick={onConnect}
       />
@@ -179,6 +206,7 @@ export function ModelConfigRow({
       onOpenChange={setOpen}
       className="@container/row rounded-md border"
       data-row
+      data-config-id={config.id}
     >
       <Item size="sm" className={MODEL_ROW_ITEM}>
         <ConfigLogo provider={provider} />
@@ -253,6 +281,7 @@ export function ModelConfigRow({
             choices={choices}
             onConnect={onConnect}
             onTogglePersonal={onTogglePersonal}
+            personalWrite={personalWrite}
             deeds={connectionDeeds}
           />
           <Section
@@ -271,6 +300,42 @@ export function ModelConfigRow({
         </div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/** « Reconnecter » of a row whose organization connections are dead: it repairs them in place. */
+function ReconnectButton({
+  connections,
+  onPick,
+}: {
+  connections: readonly ModelProviderCredentialInfo[];
+  onPick: (credential: ModelProviderCredentialInfo) => void;
+}) {
+  const { t } = useTranslation("settings");
+  const label = t("modelConfigs.connect.reconnect");
+  const [only] = connections;
+  if (connections.length === 1 && only) {
+    return (
+      <Button type="button" size="sm" onClick={() => onPick(only)}>
+        {label}
+      </Button>
+    );
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button type="button" size="sm" />}>
+        {label}
+        <ChevronDown />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-56">
+        {connections.map((c) => (
+          <DropdownMenuItem key={c.id} onClick={() => onPick(c)}>
+            {c.authMode === "oauth2" ? <RefreshCw /> : <KeyRound />}
+            {c.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -301,6 +366,7 @@ function ConnectionsSection({
   choices,
   onConnect,
   onTogglePersonal,
+  personalWrite,
   deeds,
 }: {
   config: ModelConfigInfo;
@@ -309,9 +375,13 @@ function ConnectionsSection({
   choices: readonly ConnectChoice[];
   onConnect: (choice: ConnectChoice) => void;
   onTogglePersonal: (allowed: boolean) => void;
+  personalWrite: WriteState;
   deeds: ConnectionDeeds;
 }) {
-  const { t } = useTranslation("settings");
+  const { t } = useTranslation(["settings", "common"]);
+  // Switching off stops every member's connection from serving: asked first when any exist.
+  const [confirmingOff, setConfirmingOff] = useState(false);
+  const personalCount = config.personal_connection_count;
   const test = useConnectionTest(useTestModelProviderCredential());
   const line = (credential: ModelProviderCredentialInfo, owner?: string) => (
     <ConnectionLine
@@ -351,26 +421,43 @@ function ConnectionsSection({
           {connections.org.map((c) => line(c))}
         </ul>
       )}
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div id={`personal-${config.id}`} className="text-sm font-medium">
-            {config.personal_connection_count === null
+      <SettingRow
+        variant="toggle"
+        className="pb-0"
+        label={
+          <Label htmlFor={`personal-${config.id}`} className="cursor-pointer">
+            {personalCount === null
               ? t("modelConfigs.connections.personal")
-              : t("modelConfigs.connections.personalCount", {
-                  count: config.personal_connection_count,
-                })}
-          </div>
-          <div className="text-muted-foreground text-xs">
-            {t("modelConfigs.connections.personalHint")}
-          </div>
-        </div>
+              : t("modelConfigs.connections.personalCount", { count: personalCount })}
+          </Label>
+        }
+        description={t("modelConfigs.connections.personalHint")}
+        status={<SaveFeedback {...personalWrite} />}
+      >
         <Switch
-          aria-labelledby={`personal-${config.id}`}
+          id={`personal-${config.id}`}
           checked={config.personal_connections_allowed}
-          disabled={!can.writeModels}
-          onCheckedChange={(checked) => onTogglePersonal(checked)}
+          disabled={!can.writeModels || personalWrite.pending}
+          onCheckedChange={(checked) => {
+            if (!checked && personalCount !== 0) setConfirmingOff(true);
+            else onTogglePersonal(checked);
+          }}
         />
-      </div>
+      </SettingRow>
+      <ConfirmModal
+        open={confirmingOff}
+        onClose={() => setConfirmingOff(false)}
+        title={t("modelConfigs.connections.personalOffTitle")}
+        confirmLabel={t("modelConfigs.connections.personalOffAction")}
+        variant="default"
+        description={t("modelConfigs.connections.personalOffConfirm", {
+          label: config.label,
+        })}
+        onConfirm={() => {
+          onTogglePersonal(false);
+          setConfirmingOff(false);
+        }}
+      />
       {connections.personal.length > 0 && (
         <ul className="flex flex-col divide-y rounded-md border">
           {connections.personal.map((c) => line(c, c.owner_name ?? undefined))}
@@ -423,14 +510,18 @@ function ConnectionLine({
         <div className="text-muted-foreground truncate text-xs">
           {owner ? `${credential.label} · ${detail}` : detail}
         </div>
+        {/* Its own line, wrapped: a refusal is a sentence, and beside the badge it was cut. */}
+        {result && (
+          <div role="status" className="mt-1">
+            <TestResultSpan
+              result={result}
+              successKey="credentials.testSuccess"
+              failedKey="credentials.testFailed"
+              wrap
+            />
+          </div>
+        )}
       </div>
-      {result && (
-        <TestResultSpan
-          result={result}
-          successKey="credentials.testSuccess"
-          failedKey="credentials.testFailed"
-        />
-      )}
       <Badge variant={credential.needs_reconnection ? "warning" : "success"}>
         {t(
           credential.needs_reconnection

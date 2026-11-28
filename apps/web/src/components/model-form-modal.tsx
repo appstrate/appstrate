@@ -29,7 +29,7 @@ import {
   buildModelFormPayload,
   modelFormRefusals,
   type ModelFormData,
-  type ModelFormFields,
+  type ManualRowFields,
 } from "@/lib/model-form-payload";
 import { modelSource } from "@/lib/model-source";
 import { rowOverridesCatalog } from "@/lib/row-overrides-catalog";
@@ -65,7 +65,7 @@ function ModelForm({
   const { t } = useTranslation(["settings", "common"]);
   const catalogEntry = (id: string) => provider.models.find((m) => m.id === id);
 
-  const form = useAppForm<ModelFormFields>({
+  const form = useAppForm<ManualRowFields>({
     defaultValues: {
       label: model.label,
       modelId: model.modelId ?? "",

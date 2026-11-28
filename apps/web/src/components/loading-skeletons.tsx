@@ -708,13 +708,16 @@ export function SettingsSkeleton({ rows = 3, className }: { rows?: number; class
 export function ModelsPageSkeleton({ withDefault = true }: { withDefault?: boolean }) {
   return (
     <Waiting>
-      {withDefault && (
+      {withDefault ? (
         <>
           <SettingsSkeleton rows={1} className="mb-8" />
           <div className="mb-4 flex h-6 items-center">
             <Skeleton className="h-4 w-32" />
           </div>
         </>
+      ) : (
+        // Preferences' intro paragraph, above the rows.
+        <SkeletonLine className="mb-4 w-3/4 max-w-full text-sm leading-normal" />
       )}
       <div className="flex flex-col gap-2">
         {Array.from({ length: 3 }, (_, i) => (
@@ -733,7 +736,7 @@ export function ModelsPageSkeleton({ withDefault = true }: { withDefault?: boole
                     <Skeleton className="size-7" />
                   </div>
                 ) : (
-                  <Skeleton className="h-9 w-32 rounded-md" />
+                  <Skeleton className="h-8 w-32 rounded-md" />
                 )}
               </div>
             </div>

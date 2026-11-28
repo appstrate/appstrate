@@ -82,8 +82,8 @@ test.describe("Model configurations — UI", () => {
     const row = await openConfig(page, label);
     await row.getByRole("button", { name: `Actions de la connexion « ${keyLabel} »` }).click();
     await page.getByRole("menuitem", { name: DELETE }).click();
-    const dialog = page.getByRole("alertdialog", { name: "Supprimer la clé ?" });
-    await expect(dialog.getByText(`Supprimer la clé « ${keyLabel} » ?`)).toBeVisible();
+    const dialog = page.getByRole("alertdialog", { name: "Supprimer la connexion ?" });
+    await expect(dialog.getByText(`Supprimer la connexion « ${keyLabel} » ?`)).toBeVisible();
     await dialog.getByRole("button", { name: DELETE, exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(row.getByTitle(keyLabel, { exact: true })).toHaveCount(0);

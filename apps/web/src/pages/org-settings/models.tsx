@@ -13,7 +13,8 @@
  * from « Choisir les modèles ».
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useStore } from "zustand";
 import { useTranslation } from "react-i18next";
 import { Boxes, Plus, Sparkles } from "lucide-react";
 import {
@@ -54,10 +55,14 @@ import { ModelChips } from "../../components/model-configs/model-chips";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { SettingsGroup } from "../../components/settings/setting-row";
 import { SettingsHeading } from "../../components/settings/settings-heading";
+import { IDLE_WRITE, fieldWriteState } from "../../lib/field-write-state";
 import type { MenuAction } from "../../lib/menu-action";
+import { ownPersonalCredentials } from "../../lib/personal-model-credentials";
+import { authStore } from "../../stores/auth-store";
 import {
   configUpdateBody,
   connectChoices,
+  connectionLabelBody,
   connectionsOfConfig,
   isSystemModel,
   modelsOfConfig,
@@ -74,13 +79,17 @@ export function OrgSettingsModelsPage() {
   // `connect` alone lists only the caller's own: the organization's are counted under `read`.
   const canReadCredentials = can("model-provider-credentials:read");
 
+  const userId = useStore(authStore, (s) => s.user?.id);
+
   const modelsQuery = useModels();
   const configsQuery = useModelConfigs();
   const credentialsQuery = useModelProviderCredentials();
-  const { data: registry } = useProvidersRegistry();
+  const registryQuery = useProvidersRegistry();
+  const registry = registryQuery.data;
   const models = modelsQuery.data;
   const configs = configsQuery.data;
   const credentials = credentialsQuery.data ?? [];
+  const own = ownPersonalCredentials(credentials, userId);
   const countsOrgConnections = canReadCredentials && credentialsQuery.data !== undefined;
 
   const updateConfig = useUpdateModelConfig();
@@ -89,7 +98,8 @@ export function OrgSettingsModelsPage() {
   const deleteModel = useDeleteModel();
 
   const [adding, setAdding] = useState(false);
-  /** The configuration just made or asked for: its row opens. */
+  /** The rows the person opened, and the configuration just made or asked for (opened, shown). */
+  const [openIds, setOpenIds] = useState<ReadonlySet<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [choosingId, setChoosingId] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<ConnectionFormTarget | null>(null);
@@ -119,8 +129,31 @@ export function OrgSettingsModelsPage() {
     hidden: !canWriteModels,
   };
 
-  const error = modelsQuery.error ?? configsQuery.error;
+  const error =
+    modelsQuery.error ?? configsQuery.error ?? credentialsQuery.error ?? registryQuery.error;
+  // A row drawn before its connections and its registry entry would show them empty.
+  const loading = !models || !configs || credentialsQuery.isLoading || registryQuery.isLoading;
   const system = systemModels(models ?? []);
+
+  const setOpen = (id: string, open: boolean) =>
+    setOpenIds((ids) => {
+      const next = new Set(ids);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  const focus = (id: string) => {
+    setOpen(id, true);
+    setFocusedId(id);
+  };
+  // A configuration just made or asked for comes into view once its row exists.
+  const focusedRendered = !loading && configs.some((c) => c.id === focusedId);
+  useEffect(() => {
+    if (!focusedId || !focusedRendered) return;
+    document
+      .querySelector(`[data-config-id="${CSS.escape(focusedId)}"]`)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [focusedId, focusedRendered]);
 
   return (
     <>
@@ -128,7 +161,7 @@ export function OrgSettingsModelsPage() {
 
       {error ? (
         <ErrorState error={error} />
-      ) : !models || !configs ? (
+      ) : loading ? (
         <ModelsPageSkeleton />
       ) : (
         <>
@@ -136,6 +169,7 @@ export function OrgSettingsModelsPage() {
             <DefaultModelSetting
               models={models}
               configs={configs}
+              credentials={canReadCredentials ? credentialsQuery.data : undefined}
               registry={registry ?? []}
               canWrite={canWriteModels}
             />
@@ -156,19 +190,26 @@ export function OrgSettingsModelsPage() {
               const connections = connectionsOfConfig(credentials, config.id);
               return (
                 <ModelConfigRow
-                  // A configuration asked for opens: a fresh row is mounted open.
-                  key={config.id === focusedId ? `${config.id}:focused` : config.id}
+                  key={config.id}
                   config={config}
                   provider={registry?.find((p) => p.providerId === config.provider_id)}
                   models={modelsOfConfig(models, config.id)}
                   connections={connections}
                   orgConnectionCount={countsOrgConnections ? connections.org.length : null}
                   can={{ writeModels: canWriteModels, deleteModels: canDeleteModels }}
-                  choices={connectChoices(config, registry ?? [], {
-                    org: canWriteCredentials,
-                    personal: canConnect,
-                  })}
-                  defaultOpen={config.id === focusedId}
+                  choices={connectChoices(
+                    config,
+                    registry ?? [],
+                    { org: canWriteCredentials, personal: canConnect },
+                    own,
+                  )}
+                  open={openIds.has(config.id)}
+                  onOpenChange={(open) => setOpen(config.id, open)}
+                  personalWrite={
+                    updateConfig.variables?.params.path.id === config.id
+                      ? fieldWriteState(updateConfig, "personal_connections_allowed")
+                      : IDLE_WRITE
+                  }
                   onConnect={(choice) =>
                     setConnecting({
                       kind: "create",
@@ -198,7 +239,7 @@ export function OrgSettingsModelsPage() {
                       // A refusal is toasted by the mutation cache; the rejection keeps the label typed.
                       await updateCredential.mutateAsync({
                         params: { path: { id: credential.id } },
-                        body: { label },
+                        body: connectionLabelBody(label),
                       });
                     },
                     onReplace: (credential) => setConnecting({ kind: "edit", credential }),
@@ -212,7 +253,7 @@ export function OrgSettingsModelsPage() {
         </>
       )}
 
-      {adding && <AddConfigFlow onClose={() => setAdding(false)} onFocus={setFocusedId} />}
+      {adding && <AddConfigFlow onClose={() => setAdding(false)} onFocus={focus} />}
 
       {choosingConfig && (
         <ModelChoiceDialog
@@ -305,7 +346,7 @@ function SystemModelsRow({ models }: { models: readonly OrgModelInfo[] }) {
   const { t } = useTranslation("settings");
   return (
     <Item variant="outline" size="sm" className="flex-nowrap items-start">
-      <ItemMedia variant="icon">
+      <ItemMedia>
         <Sparkles />
       </ItemMedia>
       <ItemContent className="min-w-0 gap-2">

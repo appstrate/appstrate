@@ -17,7 +17,7 @@ const credential = (over: Partial<ModelProviderCredentialInfo>): ModelProviderCr
   }) as ModelProviderCredentialInfo;
 
 describe("pickerCredentials", () => {
-  it("keeps the organization's credentials and the caller's own, not another member's", () => {
+  it("keeps the caller's own connections alone: the organization's name nothing, another member's serves nothing", () => {
     const result = pickerCredentials(
       [
         credential({ id: "org" }),
@@ -26,13 +26,10 @@ describe("pickerCredentials", () => {
       ],
       "u1",
     );
-    expect(result.map((c) => [c.id, c.owner])).toEqual([
-      ["org", "org"],
-      ["mine", "me"],
-    ]);
+    expect(result.map((c) => c.id)).toEqual(["mine"]);
   });
 
-  it("reads the models a credential serves off the server, and flags a subscription", () => {
+  it("reads the models a connection serves off the server, its configuration and its health", () => {
     const [subscription] = pickerCredentials(
       [
         credential({
@@ -40,11 +37,18 @@ describe("pickerCredentials", () => {
           authMode: "oauth2",
           owner_type: "user",
           owner_id: "u1",
+          config_id: "cfg_1",
+          needs_reconnection: true,
           serves_model_ids: ["mdl_sonnet"],
         }),
       ],
       "u1",
     );
-    expect(subscription).toMatchObject({ subscription: true, modelIds: ["mdl_sonnet"] });
+    expect(subscription).toMatchObject({
+      subscription: true,
+      configId: "cfg_1",
+      needsReconnection: true,
+      modelIds: ["mdl_sonnet"],
+    });
   });
 });

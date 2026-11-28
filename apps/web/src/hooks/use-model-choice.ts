@@ -5,7 +5,7 @@ import { useOpenRouterSearch } from "../components/model-form/use-open-router-se
 import { useModelDiscovery } from "../components/model-form/use-model-discovery";
 import type { ProviderRegistryEntry } from "./use-model-provider-credentials";
 import type { OrgModelInfo } from "./use-models";
-import { buildDiscoverBody } from "@/lib/model-discovery";
+import { buildDiscoverBody, type DiscoverWith } from "@/lib/model-discovery";
 import { planModelChoice } from "@/lib/model-choice";
 import {
   catalogRows,
@@ -17,18 +17,12 @@ import {
   type ModelPickRow,
 } from "@/lib/model-source";
 
-/**
- * What a listing that needs a key asks with: the configuration's organization connection, or a
- * key typed for the occasion (sent with the configuration, which carries a gateway's endpoint).
- */
-export type DiscoverWith =
-  { credentialId: string } | { inlineApiKey: string; configId: string } | null;
-
 interface ModelChoiceOptions {
   provider: ProviderRegistryEntry;
   /** The models this configuration already makes available. */
   existing: readonly OrgModelInfo[];
-  discoverWith: DiscoverWith;
+  /** `null` while there is nothing to ask with yet (no key typed). */
+  discoverWith: DiscoverWith | null;
   /**
    * A new configuration: a catalog's recommended models start ticked, a detection's every model;
    * a search ticks nothing (it lists hundreds).
@@ -111,14 +105,7 @@ export function useModelChoice({ provider, existing, discoverWith, tickNew }: Mo
 
   const detect = () => {
     if (!discoverWith) return;
-    discover(
-      buildDiscoverBody({
-        credentialId: "credentialId" in discoverWith ? discoverWith.credentialId : null,
-        providerId: provider.providerId,
-        configId: "configId" in discoverWith ? discoverWith.configId : "",
-        inlineApiKey: "inlineApiKey" in discoverWith ? discoverWith.inlineApiKey : "",
-      }),
-    );
+    discover(buildDiscoverBody(provider.providerId, discoverWith));
   };
 
   return {

@@ -8,10 +8,11 @@
 
 import { expect, type APIResponse, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "./api-client.ts";
+import { configRow } from "./models.ts";
 
 /**
  * A personal subscription is added from Preferences › Models, on the row of the configuration it
- * joins (« Utiliser ma clé », then the subscription in its menu).
+ * joins (« Utiliser ma connexion », then the subscription in its menu).
  */
 export const SETTINGS_PATH = "/preferences/models";
 export const STORAGE_KEY = "appstrate:web:pendingPairings";
@@ -32,6 +33,12 @@ const CONFIRM_DIALOG = "Fermer la fenêtre de connexion ?";
 interface DisplayedPairing {
   token: string;
   command: string;
+}
+
+/** The row of the configuration the pairing joins, on the Preferences page. */
+/** The Anthropic configuration's row, where a Claude Code subscription is paired. */
+export function anthropicRow(page: Page): Locator {
+  return configRow(page, CONFIG_LABEL);
 }
 
 export function credentialDialog(page: Page): Locator {
@@ -62,7 +69,7 @@ export async function openModelToPersonalKeys(apiClient: ApiClient): Promise<voi
  * returns the command it shows: a fresh mint, or the pending pairing it resumes.
  */
 export async function openPairingModal(page: Page): Promise<DisplayedPairing> {
-  await page.getByRole("button", { name: "Autres façons de connecter" }).first().click();
+  await anthropicRow(page).getByRole("button", { name: "Autres façons de connecter" }).click();
   await page.getByRole("menuitem", { name: PROVIDER_LABEL }).click();
 
   const dialog = credentialDialog(page);
@@ -90,7 +97,12 @@ export async function closePairingModal(page: Page): Promise<void> {
   await expect(credentialDialog(page)).toBeHidden();
 }
 
-function postRedeem(page: Page, token: string, providerId: string): Promise<APIResponse> {
+function postRedeem(
+  page: Page,
+  token: string,
+  providerId: string,
+  email = `pairing-${Date.now()}@example.test`,
+): Promise<APIResponse> {
   return page.request.post("/api/model-providers-oauth/pair/redeem", {
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     data: {
@@ -99,15 +111,21 @@ function postRedeem(page: Page, token: string, providerId: string): Promise<APIR
       access_token: `fake-${providerId}-access`,
       refresh_token: `fake-${providerId}-refresh`,
       expiresAt: Date.now() + 3_600_000,
-      email: `pairing-${Date.now()}@example.test`,
+      email,
     },
   });
 }
 
-export async function helperRedeem(page: Page, token: string): Promise<{ credentialId: string }> {
-  const res = await postRedeem(page, token, PROVIDER_ID);
+/** The credential the helper stored, and the account it names: what the row then reads. */
+export async function helperRedeem(
+  page: Page,
+  token: string,
+): Promise<{ credentialId: string; email: string }> {
+  const email = `pairing-${Date.now()}@example.test`;
+  const res = await postRedeem(page, token, PROVIDER_ID, email);
   expect(res.status()).toBe(200);
-  return (await res.json()) as { credentialId: string };
+  const { credentialId } = (await res.json()) as { credentialId: string };
+  return { credentialId, email };
 }
 
 /** The token is spent, no credential is created, and the pairing reads `failed`. */

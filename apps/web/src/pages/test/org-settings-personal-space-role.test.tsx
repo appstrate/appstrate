@@ -41,7 +41,7 @@ function renderSetting(permissions: string[], role: SpaceRoleReference | null): 
   if (role) {
     queryClient.setQueryData(
       ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
-      { personal_model_credentials: true, personal_space_role: role },
+      { personal_space_role: role },
     );
   }
   const orgSnapshot = spyOn(orgStore, "getInitialState").mockReturnValue({

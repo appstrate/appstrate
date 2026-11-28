@@ -10,13 +10,13 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { client } from "../api/client";
-import { invalidatePaths } from "../lib/query-keys";
+import { invalidatePaths, MODEL_CACHE_PATHS } from "../lib/query-keys";
 import { seedModelsBody } from "../lib/model-configs";
 import { toastError } from "../lib/mutation-error";
 import { useProvidersRegistry, type ProviderRegistryEntry } from "./use-model-provider-credentials";
 
 interface SeedResult {
-  /** Zero when the org already had models for this credential. */
+  /** Zero when the configuration already had the featured models. */
   created: number;
   promotedDefault: boolean;
 }
@@ -46,7 +46,7 @@ export function useAutoSeedFeaturedModels() {
         ),
       });
       if (!data) return { created: 0, promotedDefault: false };
-      void invalidatePaths(qc, ["/api/models", "/api/model-configs"]);
+      void invalidatePaths(qc, MODEL_CACHE_PATHS);
       return { created: data.created, promotedDefault: data.promoted_default };
     } catch (err) {
       // The subscription is connected either way; models can still be added by hand.

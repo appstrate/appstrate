@@ -26,7 +26,7 @@ import {
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import type { ModelConfigInfo } from "../lib/model-configs";
-import { connectionBody, keyUpdateBody } from "../lib/model-configs";
+import { connectionBody, connectionTestBody, keyUpdateBody } from "../lib/model-configs";
 import { errorMessage } from "../lib/mutation-error";
 import { FormModal } from "./form-modal";
 import { PairingModal } from "./pairing-modal";
@@ -61,7 +61,7 @@ export function CredentialFormModal({
         target={{ ownerType: target.ownerType, configId: target.config.id }}
         onConnected={() => onClose()}
       >
-        <p className="text-muted-foreground text-sm">{payerSentence(t, target.ownerType)}</p>
+        <p className="text-muted-foreground text-sm">{payerSentence(t, target.ownerType, true)}</p>
       </PairingModal>
     );
   }
@@ -80,8 +80,14 @@ export function CredentialFormModal({
   return <ApiKeyForm target={target} onClose={onClose} />;
 }
 
-function payerSentence(t: (key: string) => string, ownerType: "org" | "user"): string {
-  return t(ownerType === "org" ? "modelConfigs.payer.org" : "modelConfigs.payer.user");
+/** Who pays, and what that connection serves: an organization subscription serves less than its key. */
+function payerSentence(
+  t: (key: string) => string,
+  ownerType: "org" | "user",
+  subscription: boolean,
+): string {
+  if (ownerType === "user") return t("modelConfigs.payer.user");
+  return t(subscription ? "modelConfigs.payer.orgSubscription" : "modelConfigs.payer.org");
 }
 
 function ApiKeyForm({ target, onClose }: { target: ConnectionFormTarget; onClose: () => void }) {
@@ -89,10 +95,7 @@ function ApiKeyForm({ target, onClose }: { target: ConnectionFormTarget; onClose
   const credential = target.kind === "edit" ? target.credential : null;
   const providerId =
     target.kind === "edit" ? (target.credential.providerId ?? "") : target.provider.providerId;
-  const baseUrl =
-    target.kind === "edit"
-      ? target.credential.base_url
-      : (target.config.base_url ?? target.provider.defaultBaseUrl);
+  const configId = target.kind === "edit" ? target.credential.config_id : target.config.id;
 
   const create = useCreateModelProviderCredential({ errorHandledByCaller: true });
   const update = useUpdateModelProviderCredential({ errorHandledByCaller: true });
@@ -109,19 +112,18 @@ function ApiKeyForm({ target, onClose }: { target: ConnectionFormTarget; onClose
 
   const testMutation = useTestModelProviderCredentialInline();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
-  const canTest = !!baseUrl && (!!apiKey.trim() || !!credential);
+  const canTest = !!apiKey.trim() || !!credential;
 
   const handleTest = () => {
-    if (!baseUrl) return;
     setTestResult(null);
     testMutation.mutate(
       {
-        body: {
+        body: connectionTestBody({
           providerId,
-          base_url: baseUrl,
-          ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
-          ...(credential ? { credentialId: credential.id } : {}),
-        },
+          configId,
+          apiKey,
+          credentialId: credential?.id ?? null,
+        }),
       },
       {
         onSuccess: (result) => setTestResult(result),
@@ -186,7 +188,7 @@ function ApiKeyForm({ target, onClose }: { target: ConnectionFormTarget; onClose
       }
     >
       {target.kind === "create" && (
-        <p className="text-muted-foreground text-sm">{payerSentence(t, target.ownerType)}</p>
+        <p className="text-muted-foreground text-sm">{payerSentence(t, target.ownerType, false)}</p>
       )}
       <FormItem
         id="pk-apiKey"

@@ -13,7 +13,11 @@
 
 import type { components, paths } from "../api/client";
 import { ApiError } from "../api/errors";
-import type { PickerGroup } from "@appstrate/ui/components/model-picker-groups";
+import {
+  groupModelsForPicker,
+  preferSubscription,
+  type PickerGroup,
+} from "@appstrate/ui/components/model-picker-groups";
 import type {
   ModelProviderCredentialInfo,
   ProviderRegistryEntry,
@@ -95,6 +99,36 @@ export function onlySubscriptions(org: readonly Pick<ModelProviderCredentialInfo
   return org.length > 0 && org.every((c) => c.authMode === "oauth2");
 }
 
+/**
+ * The organization connections a row's « Reconnecter » repairs: the dead ones the caller may act
+ * on (a subscription re-paired, an API key replaced), as the server's `allowed_actions` say.
+ */
+export function repairableConnections<
+  T extends Pick<
+    ModelProviderCredentialInfo,
+    "authMode" | "needs_reconnection" | "allowed_actions"
+  >,
+>(org: readonly T[]): T[] {
+  return org.filter(
+    (c) =>
+      c.needs_reconnection &&
+      c.allowed_actions.includes(c.authMode === "oauth2" ? "reconnect" : "edit"),
+  );
+}
+
+/**
+ * What Preferences › Models lists: the configurations that accept personal connections, and any
+ * where the caller still holds one (the organization may have switched them off since: the
+ * connection stays, serves nothing, and its owner may delete it).
+ */
+export function preferencesConfigs<
+  C extends Pick<ModelConfigInfo, "id" | "personal_connections_allowed">,
+>(configs: readonly C[], own: readonly Pick<ModelProviderCredentialInfo, "config_id">[]): C[] {
+  return configs.filter(
+    (c) => c.personal_connections_allowed || own.some((o) => o.config_id === c.id),
+  );
+}
+
 /** A way to connect a configuration: who owns the connection, and which kind of secret. */
 export interface ConnectChoice {
   owner: "org" | "user";
@@ -103,13 +137,15 @@ export interface ConnectChoice {
 
 /**
  * The connect menu of a configuration: for the organization (`model-provider-credentials:write`),
- * then with the caller's own secret (`:connect`, where the configuration allows it); each by
- * the kinds of secret the configuration accepts (API keys first, as the server lists them).
+ * then with the caller's own secret (`:connect`, where the configuration allows it and the caller
+ * has none yet in it: `own`, their own connections; a replacement is the connection's own menu);
+ * each by the kinds of secret the configuration accepts (API keys first, as the server lists them).
  */
 export function connectChoices(
-  config: Pick<ModelConfigInfo, "accepts" | "personal_connections_allowed">,
+  config: Pick<ModelConfigInfo, "id" | "accepts" | "personal_connections_allowed">,
   registry: readonly ProviderRegistryEntry[],
   can: { org: boolean; personal: boolean },
+  own: readonly Pick<ModelProviderCredentialInfo, "config_id">[],
 ): ConnectChoice[] {
   const providers = config.accepts.flatMap((accepted) => {
     const provider = registry.find((p) => p.providerId === accepted.provider_id);
@@ -117,7 +153,11 @@ export function connectChoices(
   });
   const owners: ConnectChoice["owner"][] = [
     ...(can.org ? (["org"] as const) : []),
-    ...(can.personal && config.personal_connections_allowed ? (["user"] as const) : []),
+    ...(can.personal &&
+    config.personal_connections_allowed &&
+    !own.some((c) => c.config_id === config.id)
+      ? (["user"] as const)
+      : []),
   ];
   return owners.flatMap((owner) => providers.map((provider) => ({ owner, provider })));
 }
@@ -187,6 +227,37 @@ export function keyUpdateBody(apiKey: string): UpdateConnectionBody {
   return { api_key: apiKey.trim() };
 }
 
+/** `PATCH /api/model-provider-credentials/{id}` of a rename: the label alone. */
+export function connectionLabelBody(label: string): UpdateConnectionBody {
+  return { label: label.trim() };
+}
+
+type TestConnectionBody = Omit<
+  paths["/api/model-provider-credentials/test"]["post"]["requestBody"]["content"]["application/json"],
+  "base_url"
+> & { base_url?: string; config_id?: string };
+
+/**
+ * `POST /api/model-provider-credentials/test`: the key typed (or the stored one of `credentialId`,
+ * when none is typed), tried against the configuration the form is attached to: the server reads
+ * the endpoint off it, so a caller who may not name a free `base_url` can still test a gateway.
+ */
+export function connectionTestBody(input: {
+  providerId: string;
+  /** The configuration the form is attached to; a stored connection carries its own. */
+  configId: string | null;
+  apiKey: string;
+  credentialId: string | null;
+}): TestConnectionBody {
+  const apiKey = input.apiKey.trim();
+  return {
+    providerId: input.providerId,
+    ...(input.configId ? { config_id: input.configId } : {}),
+    ...(apiKey ? { api_key: apiKey } : {}),
+    ...(input.credentialId ? { credentialId: input.credentialId } : {}),
+  };
+}
+
 type SeedBody = paths["/api/models/seed"]["post"]["requestBody"]["content"]["application/json"];
 
 /** `POST /api/models/seed`: the onboarding's featured models, into the configuration. */
@@ -194,66 +265,41 @@ export function seedModelsBody(configId: string, modelIds: readonly string[]): S
   return { config_id: configId, model_ids: [...modelIds] };
 }
 
-/** Why a model cannot become the organization default, `null` when it can. */
-function defaultBlock(
-  model: OrgModelInfo,
-  config: ModelConfigInfo | undefined,
-): PickerGroup["entries"][number]["blocked"] {
-  if (isSystemModel(model)) return null;
-  if (!model.enabled) return "disabled";
-  if (!config || config.org_connection === "none") return "orgConnectionMissing";
-  if (config.org_connection === "needs_reconnection" || model.needs_reconnection) {
-    return "orgUnavailable";
-  }
-  return null;
-}
-
 /**
- * The organization default's choices, grouped by configuration (the instance's own last): the
- * default also serves schedules, API keys and end users, so only a model an organization
- * connection serves is eligible; the others stay, greyed with their reason.
+ * The organization default's choices, in the order of the other pickers (the organization's
+ * configurations, the instance's own last). The default also serves schedules, API keys and end
+ * users, which only an organization connection can pay for, as the server's
+ * `assertOrgServesDefault` checks per model: so the list is `groupModelsForPicker` with no human
+ * payer (`scheduled`), where a model counts as served only when a live organization connection
+ * serves it (`serves_model_ids`). `credentials` is `undefined` when the caller cannot read the connections: the configuration's own `org_connection` then decides, for every model of it. The others stay, greyed with their reason. A switched-off model
+ * is listed only when it is the current default.
  */
 export function defaultModelGroups(
   models: readonly OrgModelInfo[],
   configs: readonly ModelConfigInfo[],
+  credentials: readonly ModelProviderCredentialInfo[] | undefined,
 ): PickerGroup[] {
-  const groups: PickerGroup[] = configs.flatMap((config) => {
-    const entries = modelsOfConfig(models, config.id)
-      .filter((m) => m.enabled || m.is_default)
-      .map((model) => ({
-        model,
-        isDefault: model.is_default,
-        blocked: defaultBlock(model, config),
-      }));
-    return entries.length > 0
-      ? [
-          {
-            key: config.id,
-            kind: "config" as const,
-            name: config.label,
-            subscription: false,
-            needs: null,
-            entries,
-          },
-        ]
-      : [];
-  });
-  const system = systemModels(models).filter((m) => m.enabled || m.is_default);
-  if (system.length > 0) {
-    groups.push({
-      key: "system",
-      kind: "system",
-      name: null,
-      subscription: false,
-      needs: null,
-      entries: system.map((model) => ({
-        model,
-        isDefault: model.is_default,
-        blocked: model.enabled ? null : "disabled",
-      })),
+  const served = new Set(
+    (credentials ?? [])
+      .filter((c) => c.owner_type === "org" && !c.needs_reconnection)
+      .flatMap((c) => c.serves_model_ids),
+  );
+  const activeConfigs = new Set(
+    configs.filter((c) => c.org_connection === "active").map((c) => c.id),
+  );
+  const candidates = models
+    .filter((m) => m.enabled || m.is_default)
+    .map((m) => {
+      const orgServes =
+        credentials === undefined
+          ? m.config_id !== null && activeConfigs.has(m.config_id)
+          : served.has(m.id);
+      return {
+        ...m,
+        billed_to: isSystemModel(m) ? ("system" as const) : orgServes ? ("org" as const) : null,
+      };
     });
-  }
-  return groups;
+  return groupModelsForPicker(candidates, { configs, scheduled: true });
 }
 
 type UpdateConfigBody =
@@ -270,7 +316,7 @@ export function configUpdateBody(
 
 /**
  * Who serves the caller's calls to a configuration's models, as Preferences › Models says it:
- * their own connection first (the server prefers it), else the organization's, else nobody.
+ * their own connection first (the server prefers it, a subscription before a key), else the organization's, else nobody.
  */
 export type PersonalServing =
   | { by: "mine"; connection: ModelProviderCredentialInfo; state: ConfigState }
@@ -282,7 +328,10 @@ export function personalServing(
   own: readonly ModelProviderCredentialInfo[],
 ): PersonalServing {
   const mine = own.filter((c) => c.config_id === config.id);
-  const live = mine.find((c) => !c.needs_reconnection);
+  const live = preferSubscription(
+    mine.filter((c) => !c.needs_reconnection),
+    (c) => c.authMode === "oauth2",
+  );
   if (live) return { by: "mine", connection: live, state: "active" };
   if (mine[0]) return { by: "mine", connection: mine[0], state: "reconnect" };
   if (config.org_connection === "active") return { by: "org", state: "active" };

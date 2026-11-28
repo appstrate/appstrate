@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure logic behind the `models.unpriced` badge in `models.tsx`. Split from the
- * page so it is testable without importing the component tree (no DOM in tests).
+ * Pure logic behind the `models.unpriced` flag on a model chip
+ * (`components/model-configs/model-chips.tsx`), testable without the component tree.
  */
 
-import type { OrgModelInfo } from "../../hooks/use-models";
+import type { OrgModelInfo } from "../hooks/use-models";
 
 export type ModelPricingFields = Pick<OrgModelInfo, "source" | "aliased" | "cost">;
 

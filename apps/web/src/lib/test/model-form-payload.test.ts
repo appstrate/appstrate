@@ -13,14 +13,14 @@ import {
   rowToEntry,
   modelFormRefusals,
   type ModelFormData,
-  type ModelFormFields,
+  type ManualRowFields,
   type ModelFormModelEntry,
   type ModelFormPayloadInput,
 } from "../model-form-payload.ts";
 import type { ModelPickRow } from "../model-source.ts";
 import type { CatalogModelValues } from "../row-overrides-catalog.ts";
 
-function fields(overrides: Partial<ModelFormFields> = {}): ModelFormFields {
+function fields(overrides: Partial<ManualRowFields> = {}): ManualRowFields {
   return {
     label: "",
     modelId: "",
@@ -34,7 +34,7 @@ function fields(overrides: Partial<ModelFormFields> = {}): ModelFormFields {
   };
 }
 
-function build(input: Partial<ModelFormPayloadInput> & { fields: ModelFormFields }): ModelFormData {
+function build(input: Partial<ModelFormPayloadInput> & { fields: ManualRowFields }): ModelFormData {
   return buildModelFormPayload({ dirtyFields: {}, capabilities: "auto", ...input });
 }
 
@@ -61,7 +61,7 @@ describe("buildModelFormPayload — a catalogued model, toggle off", () => {
 describe("buildModelFormPayload — capabilities", () => {
   const CUSTOM = fields({ modelId: "qwen3:8b" });
 
-  const explicit = (overrides: Partial<ModelFormFields> = {}) =>
+  const explicit = (overrides: Partial<ManualRowFields> = {}) =>
     build({
       fields: { ...CUSTOM, capabilitiesExplicit: true, ...overrides },
       capabilities: "explicit",
@@ -125,7 +125,7 @@ describe("buildModelFormPayload — explicit capabilities on a catalogued model"
   });
 
   const edit = (
-    overrides: Partial<ModelFormFields> = {},
+    overrides: Partial<ManualRowFields> = {},
     catalogEntry: CatalogModelValues = SONNET,
   ) =>
     build({
@@ -316,7 +316,7 @@ describe("rowToEntry — what a row ships, per describer", () => {
 });
 
 describe("manualRow — an id typed into the model list", () => {
-  const typed = (overrides: Partial<ModelFormFields> = {}) => manualRow(fields(overrides));
+  const typed = (overrides: Partial<ManualRowFields> = {}) => manualRow(fields(overrides));
 
   it("ships the id alone when the operator answered nothing else", () => {
     const row = typed({ modelId: " llama3 " });

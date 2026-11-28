@@ -18,6 +18,7 @@ import type {
   ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
+import type { ConnectionDeeds } from "../../components/model-configs/model-config-row.tsx";
 import { orgModelFixture as model } from "../../test/org-model-fixture.ts";
 import { connectionFixture, modelConfigFixture } from "../../test/model-config-fixtures.ts";
 
@@ -30,6 +31,8 @@ const { PreferencesModelsPage } = await import("../preferences/models.tsx");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { authStore } = await import("../../stores/auth-store.ts");
 const { render } = await import("../../test/render.tsx");
+const { ModelConfigRow } = await import("../../components/model-configs/model-config-row.tsx");
+const { connectChoices } = await import("../../lib/model-configs.ts");
 const i18nModule = await import("../../i18n.ts");
 
 await i18nModule.i18nReady;
@@ -201,6 +204,17 @@ describe("Settings › Models, for an administrator", () => {
     expect(html).toContain("data-page-actions-trigger");
   });
 
+  it("says under the default picker when the default is no longer served, and not when it is", () => {
+    const title = settingsFr["modelConfigs.default.unserved"].replace("{{model}}", SONNET.label);
+    // The fixture's connection serves no model: the default has no organization connection.
+    expect(html).toContain(title);
+    expect(html).toContain(settingsFr["modelPicker.reason.orgConnectionMissing"]);
+    const servedHtml = renderPage("settings", ADMIN, {
+      credentials: [connectionFixture({ serves_model_ids: [SONNET.id] })],
+    }).html;
+    expect(servedHtml).not.toContain(title);
+  });
+
   it("offers « Connecter » on a configuration no organization connection serves", () => {
     expect(rowOf(html, "Mistral")).toContain(`>${settingsFr["modelConfigs.connect.action"]}<`);
     expect(rowOf(html, "Anthropic")).not.toContain(
@@ -264,5 +278,172 @@ describe("Preferences › Models", () => {
       credentials: [],
     });
     expect(html).toContain(settingsFr["modelConfigs.preferences.servedByNone"]);
+  });
+});
+
+describe("Preferences › Models, for a member who may not connect", () => {
+  const { html } = renderPage("preferences", MEMBER);
+
+  it("lists the open configurations, with no way to connect one's own", () => {
+    expect(html).toContain("Anthropic");
+    expect(html).toContain(settingsFr["modelConfigs.preferences.servedByOrg"]);
+    expect(html).not.toContain(settingsFr["modelConfigs.preferences.useMine"]);
+  });
+});
+
+describe("Preferences › Models, once the organization closed personal connections", () => {
+  const mineOnClosed = connectionFixture({
+    id: "cred_me_closed",
+    label: "Ma clé Mistral",
+    config_id: UNSERVED.id,
+    owner_type: "user",
+    owner_id: ME,
+    owner_name: "Moi",
+    allowed_actions: ["delete"],
+  });
+  const { html } = renderPage("preferences", ADMIN, { credentials: [mineOnClosed] });
+
+  it("still lists the configuration the caller holds a connection in, saying it serves nothing", () => {
+    const row = rowOf(html, "Mistral");
+    expect(row).toContain(settingsFr["modelConfigs.preferences.personalDisabled"]);
+    expect(row).not.toContain(settingsFr["modelConfigs.preferences.useMine"]);
+  });
+
+  it("leaves the deletion to its menu", () => {
+    expect(rowOf(html, "Mistral")).toContain("Actions de la connexion « Ma clé Mistral »");
+  });
+
+  it("does not list a closed configuration the caller holds nothing in", () => {
+    const { html: other } = renderPage("preferences", ADMIN);
+    expect(other).not.toContain("Mistral");
+  });
+});
+
+describe("Settings › Models, a configuration whose organization connection is dead", () => {
+  const dead = connectionFixture({
+    id: "cred_dead",
+    label: "Compte Claude",
+    authMode: "oauth2",
+    needs_reconnection: true,
+    allowed_actions: ["reconnect", "delete"],
+  });
+  const config = { ...SERVED, org_connection: "needs_reconnection" as const };
+  const reconnect = settingsFr["modelConfigs.connect.reconnect"];
+
+  it("offers « Reconnecter » for the dead subscription, to repair it where it stands", () => {
+    const { html } = renderPage("settings", ADMIN, { configs: [config], credentials: [dead] });
+    expect(rowOf(html, "Anthropic")).toContain(`>${reconnect}<`);
+  });
+
+  it("offers a new connection when the caller cannot read the dead one", () => {
+    const { html } = renderPage("settings", ADMIN, { configs: [config], credentials: [] });
+    const row = rowOf(html, "Anthropic");
+    expect(row).not.toContain(`>${reconnect}<`);
+    expect(row).toContain(`>${settingsFr["modelConfigs.connect.action"]}<`);
+  });
+});
+
+describe("A configuration row, open", () => {
+  const noop = () => {};
+  const deeds: ConnectionDeeds = {
+    onRename: async () => {},
+    onReplace: noop,
+    onDelete: noop,
+  };
+  const orgKey = connectionFixture({ id: "k1", label: "Clé équipe" });
+  const orgSub = connectionFixture({
+    id: "k2",
+    label: "Compte équipe",
+    authMode: "oauth2",
+    oauth_email: "team@example.com",
+    allowed_actions: ["reconnect", "delete"],
+  });
+  const deadSub = connectionFixture({
+    id: "k3",
+    label: "Compte mort",
+    authMode: "oauth2",
+    needs_reconnection: true,
+    allowed_actions: ["reconnect"],
+  });
+  const readOnly = connectionFixture({ id: "k4", label: "Clé lecture", allowed_actions: [] });
+  const member = connectionFixture({
+    id: "k5",
+    label: "Clé de Camille",
+    owner_type: "user",
+    owner_id: "usr_camille",
+    owner_name: "Camille",
+    allowed_actions: ["delete"],
+  });
+
+  function renderRow(
+    org: ModelProviderCredentialInfo[],
+    personal: ModelProviderCredentialInfo[] = [],
+    over: { config?: ModelConfigInfo; writeModels?: boolean } = {},
+  ): string {
+    const config = over.config ?? SERVED;
+    return render(
+      <ModelConfigRow
+        config={config}
+        provider={ANTHROPIC}
+        models={[SONNET]}
+        connections={{ org, personal }}
+        orgConnectionCount={org.length}
+        can={{ writeModels: over.writeModels ?? true, deleteModels: true }}
+        choices={connectChoices(config, [ANTHROPIC], { org: true, personal: false }, [])}
+        defaultOpen
+        onConnect={noop}
+        onChooseModels={noop}
+        onOpenModel={noop}
+        onRename={async () => {}}
+        onEditEndpoint={noop}
+        onDelete={noop}
+        onTogglePersonal={noop}
+        connectionDeeds={deeds}
+      />,
+    );
+  }
+  const menuOf = (label: string) => `Actions de la connexion « ${label} »`;
+
+  it("offers each connection a menu only where its allowed actions give it something", () => {
+    const html = renderRow([orgKey, orgSub, readOnly]);
+    expect(html).toContain(menuOf("Clé équipe"));
+    expect(html).toContain(menuOf("Compte équipe"));
+    expect(html).not.toContain(menuOf("Clé lecture"));
+  });
+
+  it("shows the members' connections, by their owner, to the caller who reads them", () => {
+    const html = renderRow([orgKey], [member]);
+    expect(html).toContain("Camille");
+    expect(html).toContain(menuOf("Clé de Camille"));
+  });
+
+  it("flags a dead subscription to reconnect", () => {
+    const html = renderRow([deadSub], [], {
+      config: { ...SERVED, org_connection: "needs_reconnection" },
+    });
+    expect(html).toContain("Compte mort");
+    expect(html).toContain(`>${settingsFr["modelConfigs.connect.reconnect"]}<`);
+  });
+
+  it("warns that subscriptions alone do not serve remote runs nor API keys", () => {
+    expect(renderRow([orgSub])).toContain(settingsFr["modelConfigs.connections.onlySubscriptions"]);
+    expect(renderRow([orgSub, orgKey])).not.toContain(
+      settingsFr["modelConfigs.connections.onlySubscriptions"],
+    );
+  });
+
+  it("says when the organization has no connection", () => {
+    const html = renderRow([], [], { config: { ...SERVED, org_connection: "none" } });
+    expect(html).toContain(settingsFr["modelConfigs.connections.noOrg"]);
+  });
+
+  it("draws the members' switch, on as the configuration is, off for a caller who may not write", () => {
+    const switchOf = (html: string) =>
+      /<button[^>]*id="personal-cfg_1"[^>]*>/.exec(html)?.[0] ?? "";
+    const writer = switchOf(renderRow([orgKey]));
+    expect(writer).toContain('aria-checked="true"');
+    expect(writer).not.toContain(' disabled=""');
+    const reader = switchOf(renderRow([orgKey], [], { writeModels: false }));
+    expect(reader).toContain(' disabled=""');
   });
 });

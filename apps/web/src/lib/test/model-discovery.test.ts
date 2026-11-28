@@ -13,26 +13,16 @@ import { buildDiscoverBody, parsesAsUrl } from "../model-discovery.ts";
 
 describe("buildDiscoverBody — a saved key", () => {
   it("names the key and nothing else: it already carries key and endpoint", () => {
-    expect(
-      buildDiscoverBody({
-        credentialId: "cred_1",
-        providerId: "openai-compatible",
-        configId: "cfg_1",
-        inlineApiKey: "sk-typed",
-      }),
-    ).toEqual({ credentialId: "cred_1" });
+    expect(buildDiscoverBody("openai-compatible", { credentialId: "cred_1" })).toEqual({
+      credentialId: "cred_1",
+    });
   });
 });
 
 describe("buildDiscoverBody — a key typed inline", () => {
   it("asks the configuration's endpoint with the key, trimmed", () => {
     expect(
-      buildDiscoverBody({
-        credentialId: null,
-        providerId: "openai-compatible",
-        configId: "cfg_1",
-        inlineApiKey: "  sk-test  ",
-      }),
+      buildDiscoverBody("openai-compatible", { inlineApiKey: "  sk-test  ", configId: "cfg_1" }),
     ).toEqual({ providerId: "openai-compatible", api_key: "sk-test", config_id: "cfg_1" });
   });
 });

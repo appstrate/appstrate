@@ -177,6 +177,9 @@ describe("models page skeleton", () => {
     // Settings: the menu and the chevron; preferences: « Utiliser ma clé ».
     expect(count(settings, "size-7")).toBe(6);
     expect(preferences).not.toContain("size-7");
-    expect(count(preferences, "h-9 w-32")).toBe(3);
+    // The ConnectMenu is a `sm` button (h-8); preferences also leads with its intro line.
+    expect(count(preferences, "h-8 w-32")).toBe(3);
+    expect(preferences).toContain("mb-4 w-3/4");
+    expect(settings).not.toContain("mb-4 w-3/4");
   });
 });

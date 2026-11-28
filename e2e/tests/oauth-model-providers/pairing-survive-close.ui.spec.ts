@@ -19,6 +19,7 @@ import {
   SETTINGS_PATH,
   SUCCESS_TOAST,
   closePairingModal,
+  anthropicRow,
   deleteCredential,
   helperRedeem,
   openModelToPersonalKeys,
@@ -58,14 +59,14 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
 
     await closePairingModal(page);
 
-    const { credentialId } = await helperRedeem(page, token);
+    const { credentialId, email } = await helperRedeem(page, token);
 
     try {
       await expect(page.getByText(SUCCESS_TOAST)).toBeVisible({ timeout: 15_000 });
-      // The configuration's row now names the caller's own connection.
-      await expect(page.getByText(/^Ma connexion · /)).toBeVisible({
-        timeout: 15_000,
-      });
+      // The configuration's row now names the caller's own connection: the paired account.
+      await expect(
+        anthropicRow(page).getByText(`Ma connexion · ${email}`, { exact: true }),
+      ).toBeVisible({ timeout: 15_000 });
 
       await expect.poll(() => readStore(page), { timeout: 15_000 }).toBeNull();
       expect(pairingDeletes).toEqual([]);

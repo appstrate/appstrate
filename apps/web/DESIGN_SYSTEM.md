@@ -435,19 +435,17 @@ zero is not inheritance. Reasoning offers the model's supported levels. An inher
 value removes the override rather than writing a client sentinel.
 
 **The model picker** shows only what the PERSON can use, grouped by who pays, in this
-order: « <key> · Clé org » (the organization's keys, named after the key or, for someone who
-cannot read it, its provider: « Mistral · Clé org »), « <credential> · Clé perso » or
-« … · Abonnement perso » (the models their own credential serves), « Système » (the instance's
-own models). The first row is « Hériter (<model>) » where the usage has an inheritance. The default
-model wears a `Par défaut` badge; a search field appears from eight models. A model the person
-cannot use stays in the list, greyed, with its reason underneath (« Connexion de l'organisation
-à reconnecter », « Sans connexion d'organisation », « Désactivé », « Clé perso requise », « Clé
-perso à reconnecter »), and when the fix is theirs, one link under its group (« Ajouter votre clé
-Anthropic → », to Préférences › Mes clés de modèles). In a schedule every model a personal key or
-subscription serves is greyed with « Une planification ne peut pas encore utiliser une clé perso »
-(the server refuses it: `model_scheduled`). The groups come from what `GET /api/models` already
-says for the caller (`billed_to`, `config_id`, `needs_reconnection`) plus their own
-connections (`lib/model-picker.ts`); a new surface that picks a model uses this component.
+order: one group per configuration the organization serves, named after the configuration
+(« Anthropic », « Mistral »), then the caller's own connections (« Ma connexion · <label> »),
+then « Système » (the instance's own models); a group the caller cannot use at all comes last.
+The first row is « Hériter (<model>) » where the usage has an inheritance. The default model wears
+a `Par défaut` badge; a search field appears from eight models. A model the person cannot use stays
+in the list, greyed, with its reason underneath, and when the fix is theirs, one link under its
+group to Préférences › Modèles. In a schedule a model served only by a personal connection is greyed
+(the server refuses it: `model_credential_required`). The groups come from what `GET /api/models`
+already says for the caller (`billed_to`, `config_id`, `needs_reconnection`) plus their own
+connections (`packages/ui/src/components/model-picker-groups.ts`, `lib/model-picker.ts`); a new
+surface that picks a model uses this component.
 
 ## 6. Forms
 
@@ -556,7 +554,7 @@ connections (`lib/model-picker.ts`); a new surface that picks a model uses this 
     l'endpoint (a gateway), Supprimer (`ConfirmModal`: its connections and models go with it).
     Open, it shows **Connexions** (the organization's lines, the « Connexions personnelles
     autorisées » switch, the members' lines; a line's own menu is its `allowed_actions`:
-    Renommer, Changer la clé or Reconnecter, Supprimer) and **Modèles** (« Choisir les modèles »
+    Renommer, Tester, Changer la clé or Reconnecter, Supprimer) and **Modèles** (« Choisir les modèles »
     and the chips, `components/model-configs/model-chips.tsx`, the default marked « défaut »; a
     chip opens the model form). The page's Actions menu: « Ajouter une configuration ».
   - **« Ajouter une configuration »** (`components/model-configs/add-config-flow.tsx`): the

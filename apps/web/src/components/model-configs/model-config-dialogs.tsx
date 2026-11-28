@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
+import { Label } from "@appstrate/ui/components/label";
 import { Switch } from "@appstrate/ui/components/switch";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { FormItem } from "@/components/app-ui/form-item";
@@ -28,6 +29,7 @@ import {
 import { errorMessage } from "../../lib/mutation-error";
 import { getProviderById } from "../../lib/provider-registry-helpers";
 import { FormModal } from "../form-modal";
+import { SettingRow } from "../settings/setting-row";
 import { EndpointFields } from "../model-form/endpoint-fields";
 import { ProviderPicker } from "../model-form/provider-picker";
 
@@ -159,21 +161,22 @@ export function AddModelConfigDialog({
           >
             <Input type="text" {...register("label")} placeholder={provider.displayName} />
           </FormItem>
-          <div className="flex items-start gap-3">
+          <SettingRow
+            variant="toggle"
+            className="pb-0"
+            label={
+              <Label htmlFor="cfg-personal" className="cursor-pointer">
+                {t("modelConfigs.add.personal")}
+              </Label>
+            }
+            description={t("modelConfigs.connections.personalHint")}
+          >
             <Switch
               id="cfg-personal"
               checked={personalAllowed}
               onCheckedChange={(checked) => setPersonalAllowed(checked)}
             />
-            <div className="min-w-0">
-              <label htmlFor="cfg-personal" className="text-sm font-medium">
-                {t("modelConfigs.add.personal")}
-              </label>
-              <p className="text-muted-foreground text-xs">
-                {t("modelConfigs.connections.personalHint")}
-              </p>
-            </div>
-          </div>
+          </SettingRow>
         </>
       )}
     </FormModal>

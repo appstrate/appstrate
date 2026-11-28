@@ -65,9 +65,10 @@ const ANTHROPIC_MODEL = "claude-x";
  * it must refuse: `POST /api/models/apply` rejects `maxTokens >= contextWindow`
  * (createModelSchema's canonical budget invariant), and both numbers come
  * straight from what the endpoint published. Nothing else about a discovered
- * model is refusable — two identical models are NOT a conflict (`org_models`
- * carries no uniqueness on `(org, model_id)`), so a duplicate cannot stand in
- * for a partial failure.
+ * model is refusable here — a model the configuration already has is refused
+ * too (`model_already_added`, backed by `uq_org_models_config_model` on
+ * `(config_id, model_id)`), but a listing never offers one, so the budget
+ * invariant is what stands in for a partial failure.
  */
 const SPLIT_PATH = "/split/v1";
 const ADDABLE_MODEL = "local-small";

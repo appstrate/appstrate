@@ -10,41 +10,36 @@
 import type { MutationMeta } from "@tanstack/react-query";
 import { $api } from "../api/client";
 import type { ModelConfigInfo } from "../lib/model-configs";
+import { MODEL_CACHE_PATHS } from "../lib/query-keys";
 import { useInvalidatePaths } from "./use-invalidate-paths";
 import { useOrgOnlyScope } from "./use-org-scope";
 
 export type { ModelConfigInfo };
 
 /** `models:read`, like the models list. */
-export function useModelConfigs(enabled = true) {
+export function useModelConfigs() {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/model-configs",
     { params: { header: scope.header } },
-    { enabled: enabled && scope.enabled, select: (e) => e.data },
+    { enabled: scope.enabled, select: (e) => e.data },
   );
 }
 
-const CONFIG_PATHS = [
-  "/api/model-configs",
-  "/api/models",
-  "/api/model-provider-credentials",
-] as const;
-
 /** `meta`: the creation dialog shows its refusal (`model_config_exists`) itself. */
 export function useCreateModelConfig(meta?: MutationMeta) {
-  const invalidate = useInvalidatePaths(...CONFIG_PATHS);
+  const invalidate = useInvalidatePaths(...MODEL_CACHE_PATHS);
   return $api.useMutation("post", "/api/model-configs", { meta, onSuccess: invalidate });
 }
 
 /** `meta`: the endpoint form shows its refusal inline; a rename or the switch go through the toast. */
 export function useUpdateModelConfig(meta?: MutationMeta) {
-  const invalidate = useInvalidatePaths(...CONFIG_PATHS);
+  const invalidate = useInvalidatePaths(...MODEL_CACHE_PATHS);
   return $api.useMutation("patch", "/api/model-configs/{id}", { meta, onSuccess: invalidate });
 }
 
 export function useDeleteModelConfig() {
-  const invalidate = useInvalidatePaths(...CONFIG_PATHS);
+  const invalidate = useInvalidatePaths(...MODEL_CACHE_PATHS);
   return $api.useMutation("delete", "/api/model-configs/{id}", { onSuccess: invalidate });
 }
