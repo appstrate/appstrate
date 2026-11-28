@@ -8,9 +8,11 @@ import {
   createTestUser,
   addOrgMember,
   authHeaders,
+  memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
+  seedModelConfig,
   seedOrgModelProviderKey,
   seedOrgModel,
   seedOrgModelProviderOAuth,
@@ -27,7 +29,11 @@ import {
   lookupCatalogModel,
 } from "../../../src/services/model-catalog.ts";
 import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
-import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
+import {
+  TEST_OAUTH_HOOKS_PROVIDER_ID,
+  TEST_OAUTH_MODEL_ID,
+  TEST_OAUTH_PROVIDER_ID,
+} from "../../helpers/test-oauth-provider.ts";
 import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
@@ -66,7 +72,11 @@ describe("Models API", () => {
       .where(eq(organizations.id, ctx.orgId));
   }
 
-  async function createProviderKey(): Promise<string> {
+  /**
+   * Helper: an organization key of `openai`, which files it under the org's openai
+   * configuration (created on first use); returns that configuration's id.
+   */
+  async function createProviderConfig(): Promise<string> {
     const res = await app.request("/api/model-provider-credentials", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -77,27 +87,35 @@ describe("Models API", () => {
       }),
     });
     expect(res.status).toBe(201);
-    const body = (await res.json()) as any;
-    return body.id;
+    const body = (await res.json()) as { config_id: string };
+    return body.config_id;
   }
 
   /**
-   * Helper: a credential on a user-described gateway, which takes any model id
-   * (a named provider takes only the ids of its catalog offer).
+   * Helper: a configuration of a user-described gateway, which takes any model id
+   * (a named provider takes only the ids of its catalog offer), with an organization
+   * key; returns the configuration's id.
    */
-  async function createGatewayKey(): Promise<string> {
-    const res = await app.request("/api/model-provider-credentials", {
+  async function createGatewayConfig(baseUrl = "https://gateway.example.test/v1"): Promise<string> {
+    const config = await app.request("/api/model-configs", {
+      method: "POST",
+      headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ provider_id: "openai-compatible", base_url: baseUrl }),
+    });
+    expect(config.status).toBe(201);
+    const configId = ((await config.json()) as { id: string }).id;
+    const key = await app.request("/api/model-provider-credentials", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
       body: JSON.stringify({
         label: "Test Gateway Key",
         providerId: "openai-compatible",
         api_key: "sk-test-key-123",
-        base_url_override: "https://gateway.example.test/v1",
+        config_id: configId,
       }),
     });
-    expect(res.status).toBe(201);
-    return ((await res.json()) as { id: string }).id;
+    expect(key.status).toBe(201);
+    return configId;
   }
 
   describe("GET /api/models", () => {
@@ -111,28 +129,13 @@ describe("Models API", () => {
       expect(body.data).toBeArray();
     });
 
-    it("names each row's binding, and the payer of a built-in model", async () => {
-      const credentialId = await createProviderKey();
-      const bound = await seedOrgModel({
-        orgId: ctx.orgId,
-        credentialId,
-        providerId: "openai",
-        modelId: "gpt-4o",
-        label: "Bound",
-      });
-      const [unbound] = await db
-        .insert(orgModels)
-        .values({
-          orgId: ctx.orgId,
-          label: "Unbound",
-          modelId: "gpt-4o-mini",
-          providerId: "openai",
-          credentialId: null,
-          aliased: false,
-          source: "custom",
-          createdBy: ctx.user.id,
-        })
-        .returning({ id: orgModels.id });
+    it("names each row's configuration and who pays it, and the payer of a built-in model", async () => {
+      const configId = await createProviderConfig();
+      const served = await seedOrgModel({ orgId: ctx.orgId, configId, modelId: "gpt-4o" });
+      // A configuration with no connection: its models are listed, nobody pays them.
+      const idle = await seedModelConfig({ orgId: ctx.orgId, providerId: "moonshot" });
+      const [kimi] = listCatalogModels(getModelProvider("moonshot")!).map((m) => m.id);
+      const unserved = await seedOrgModel({ orgId: ctx.orgId, configId: idle, modelId: kimi! });
       initSystemModelProviderKeys([
         {
           id: "sys-key-list-test",
@@ -146,15 +149,16 @@ describe("Models API", () => {
         const res = await app.request("/api/models", { headers: authHeaders(ctx) });
         expect(res.status).toBe(200);
         const body = (await res.json()) as {
-          data: Array<{ id: string; billed_to: string | null; binding: string }>;
+          data: Array<{ id: string; billed_to: string | null; config_id: string | null }>;
         };
         const byId = new Map(body.data.map((m) => [m.id, m]));
         expect(byId.get("sys-model-list-test")).toMatchObject({
           billed_to: "system",
-          binding: "system",
+          config_id: null,
         });
-        expect(byId.get(unbound!.id)).toMatchObject({ binding: "user" });
-        expect(byId.get(bound.id)).toMatchObject({ binding: "org" });
+        expect(byId.get(served.id)).toMatchObject({ billed_to: "org", config_id: configId });
+        expect(byId.get(unserved.id)).toMatchObject({ billed_to: null, config_id: idle });
+        expect(body.data.every((m) => !("binding" in m) && !("credentialId" in m))).toBe(true);
       } finally {
         initSystemModelProviderKeys();
       }
@@ -166,7 +170,7 @@ describe("Models API", () => {
     });
 
     it("strips the backing of a model alias from the list, but not from the create response (Threat A)", async () => {
-      const credentialId = await createGatewayKey();
+      const configId = await createGatewayConfig();
       // A distinctive backing id so the security grep below is unambiguous.
       const realModelId = "secret-backing-zxq9";
 
@@ -178,7 +182,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Appstrate Medium",
           modelId: realModelId,
-          credentialId,
+          config_id: configId,
           aliased: true,
         }),
       });
@@ -200,7 +204,7 @@ describe("Models API", () => {
       expect(row.modelId).toBeNull();
       expect(row.apiShape).toBeNull();
       expect(row.base_url).toBeNull();
-      expect(row.credentialId).toBeNull();
+      expect(row.config_id).toBeNull();
       expect(row.contextWindow).toBeNull();
       expect(row.cost).toBeNull();
 
@@ -213,7 +217,7 @@ describe("Models API", () => {
       // The chat needs the real apiShape/modelId to route an aliased model to
       // the right engine/proxy. The loopback is trusted server code — the
       // backing it reads never reaches the browser. See models.ts GET handler.
-      const credentialId = await createGatewayKey();
+      const configId = await createGatewayConfig();
       const realModelId = "secret-backing-loopback-9q";
       const create = await app.request("/api/models", {
         method: "POST",
@@ -221,7 +225,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Appstrate Medium",
           modelId: realModelId,
-          credentialId,
+          config_id: configId,
           aliased: true,
         }),
       });
@@ -245,7 +249,7 @@ describe("Models API", () => {
       // Real binding is present for the loopback (so the chat can route it).
       expect(row.modelId).toBe(realModelId);
       expect(row.apiShape).not.toBeNull();
-      expect(row.credentialId).toBe(credentialId);
+      expect(row.config_id).toBe(configId);
     });
 
     it("exposes `pi_provider` and `pi_dialect` — the Pi key and the record's dialect, null for a gateway, withheld for an alias", async () => {
@@ -265,7 +269,7 @@ describe("Models API", () => {
       });
       const gateway = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: await createGatewayKey(),
+        configId: await createGatewayConfig(),
         modelId: "any-gateway-model",
       });
       const rowsOf = async (headers: Record<string, string>) => {
@@ -359,26 +363,45 @@ describe("Models API", () => {
   });
 
   describe("POST /api/models", () => {
-    it("refuses an unbound model on a custom endpoint, which only an organization credential can serve — 400", async () => {
+    it("requires a config_id — 400 naming it", async () => {
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "x",
-          modelId: "m",
-          credentialId: null,
-          providerId: "openai-compatible",
-        }),
+        body: JSON.stringify({ label: "x", modelId: "m" }),
       });
 
       expect(res.status).toBe(400);
-      const body = (await res.json()) as any;
-      expect(body.code).toBe("personal_credential_custom_endpoint");
-      expect(body.param).toBe("providerId");
+      const body = (await res.json()) as { errors?: { field: string }[] };
+      expect(body.errors?.map((e) => e.field)).toContain("config_id");
+    });
+
+    it("refuses a configuration of another organization — 404, nothing stored", async () => {
+      const other = await createTestContext({ orgSlug: "models-other-org" });
+      const foreign = await seedModelConfig({ orgId: other.orgId, providerId: "openai" });
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: "gpt-4o", config_id: foreign }),
+      });
+      expect(res.status).toBe(404);
+      expect(await db.select().from(orgModels)).toHaveLength(0);
+    });
+
+    it("creates a model in a configuration with no connection yet: listed, paid by nobody", async () => {
+      const configId = await seedModelConfig({ orgId: ctx.orgId, providerId: "openai" });
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: "gpt-4o", config_id: configId }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { config_id: string; billed_to: string | null };
+      expect(body.config_id).toBe(configId);
+      expect(body.billed_to).toBeNull();
     });
 
     it("creates a model with a valid provider key", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
 
       const res = await app.request("/api/models", {
         method: "POST",
@@ -386,7 +409,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "GPT-4o",
           modelId: "gpt-4o",
-          credentialId,
+          config_id: configId,
         }),
       });
 
@@ -397,7 +420,8 @@ describe("Models API", () => {
       expect(typeof body.id).toBe("string");
       expect(body.label).toBe("GPT-4o");
       expect(body.modelId).toBe("gpt-4o");
-      expect(body.credentialId).toBe(credentialId);
+      expect(body.config_id).toBe(configId);
+      expect(body.billed_to).toBe("org");
       expect(body.source).toBe("custom");
       expect(typeof body.enabled).toBe("boolean");
       expect(typeof body.is_default).toBe("boolean");
@@ -406,13 +430,13 @@ describe("Models API", () => {
     });
 
     it("defaults aliased to false and accepts aliased=true on create (round-trips to GET)", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
 
       // Default: omitted → false.
       const plain = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ label: "Plain", modelId: "gpt-4o", credentialId }),
+        body: JSON.stringify({ label: "Plain", modelId: "gpt-4o", config_id: configId }),
       });
       expect(plain.status).toBe(201);
       expect(((await plain.json()) as any).aliased).toBe(false);
@@ -424,7 +448,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Appstrate Medium",
           modelId: "gpt-4o",
-          credentialId,
+          config_id: configId,
           aliased: true,
         }),
       });
@@ -439,23 +463,23 @@ describe("Models API", () => {
     });
 
     it("rejects an aliased create with no explicit label (would leak the backing) — 400", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         // No `label` — the derive-from-catalog fallback would name the alias
         // after its real backing, which survives the projection.
-        body: JSON.stringify({ modelId: "gpt-4o", credentialId, aliased: true }),
+        body: JSON.stringify({ modelId: "gpt-4o", config_id: configId, aliased: true }),
       });
       expect(res.status).toBe(400);
     });
 
     it("rejects an input modality the runtime cannot boot with — 400, nothing stored", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ modelId: "gpt-4o", credentialId, input: ["text", "audio"] }),
+        body: JSON.stringify({ modelId: "gpt-4o", config_id: configId, input: ["text", "audio"] }),
       });
       expect(res.status).toBe(400);
       expect(res.headers.get("content-type")).toContain("application/problem+json");
@@ -465,12 +489,12 @@ describe("Models API", () => {
       expect(rows).toHaveLength(0);
     });
 
-    it("rejects an alias on an oauth-subscription credential (bearer-swap-only path) — 400", async () => {
+    it("rejects an alias in a subscription provider's configuration (bearer-swap-only path) — 400", async () => {
       // The oauth run path is a pure sidecar bearer-swap: no body rewrite
       // exists there, so an alias could neither be swapped nor masked.
       const row = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
-        providerId: TEST_OAUTH_PROVIDER_ID,
+        providerId: TEST_OAUTH_HOOKS_PROVIDER_ID,
         label: "Test OAuth",
         accessToken: "test-access",
         refreshToken: "test-refresh",
@@ -482,8 +506,8 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Appstrate Subscribed",
-          modelId: TEST_OAUTH_MODEL_ID,
-          credentialId: row.id,
+          modelId: "hooks-model",
+          config_id: row.configId,
           aliased: true,
         }),
       });
@@ -492,18 +516,14 @@ describe("Models API", () => {
       expect(String(body.detail)).toContain("oauth-subscription");
     });
 
-    it("rejects non-UUID credentialId with 400 (built-in slugs like 'anthropic')", async () => {
-      // System-key ids ("anthropic", "openai-prod", …) are slugs, not UUIDs —
-      // they live in SYSTEM_PROVIDER_KEYS env and never appear in the
-      // `model_provider_credentials` table. The UUID validator catches this
-      // before the FK constraint does.
+    it("rejects a non-UUID config_id with 400", async () => {
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Claude Haiku 4 5",
           modelId: "claude-haiku-4-5-20251001",
-          credentialId: "anthropic",
+          config_id: "anthropic",
         }),
       });
       expect(res.status).toBe(400);
@@ -516,14 +536,14 @@ describe("Models API", () => {
       // full window. The edge guard rejects the impossible override before it
       // reaches the runtime (where it would crash the sidecar / pin the
       // compaction threshold at zero).
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Bogus",
           modelId: "bogus-model",
-          credentialId,
+          config_id: configId,
           contextWindow: 256_000,
           maxTokens: 256_000,
         }),
@@ -535,7 +555,7 @@ describe("Models API", () => {
       // The Zod refine only fires when both fields ride together. An omitted
       // contextWindow falls back to the live catalog at read/run time, so the
       // effective pairing must be checked against the catalog value.
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const catalogModel = listCatalogModels(getModelProvider("openai")!).find(
         (m) => m.contextWindow != null,
       )!;
@@ -546,7 +566,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Over Budget",
           modelId: catalogModel.id,
-          credentialId,
+          config_id: configId,
           maxTokens: catalogModel.contextWindow,
         }),
       });
@@ -556,11 +576,15 @@ describe("Models API", () => {
     });
 
     it("refuses a model outside a named provider's catalog offer", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ label: "Unknown", modelId: "no-such-catalog-model", credentialId }),
+        body: JSON.stringify({
+          label: "Unknown",
+          modelId: "no-such-catalog-model",
+          config_id: configId,
+        }),
       });
       expect(res.status).toBe(400);
       const body = (await res.json()) as { code?: string; detail?: string };
@@ -569,60 +593,26 @@ describe("Models API", () => {
     });
 
     it("accepts a lone maxTokens for a gateway model unknown to the catalog (nothing to compare)", async () => {
-      const credentialId = await createGatewayKey();
+      const configId = await createGatewayConfig();
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Uncatalogued",
           modelId: "no-such-catalog-model-zq7",
-          credentialId,
+          config_id: configId,
           maxTokens: 10_000_000,
         }),
       });
       expect(res.status).toBe(201);
     });
 
-    it("rejects a needs-reconnection credential with 400 before inserting (explicit label path)", async () => {
-      // Regression for the hoisted reachability gate: with an explicit label,
-      // the old code skipped `loadInferenceCredentials` entirely, inserted the
-      // row, then 500'd on the bare-resource re-projection (the list
-      // serializer filters models bound to unreachable credentials) — leaving
-      // a phantom row the caller could never see.
-      const dead = await seedOrgModelProviderOAuth({
-        orgId: ctx.orgId,
-        needsReconnection: true,
-      });
-
-      const res = await app.request("/api/models", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Phantom",
-          modelId: "gpt-4o",
-          credentialId: dead.id,
-        }),
-      });
-
-      expect(res.status).toBe(400);
-      const body400 = (await res.json()) as { detail?: string };
-      expect(body400.detail).toContain("unreachable");
-
-      // No phantom row inserted.
-      const rows = await db
-        .select()
-        .from(orgModels)
-        .where(and(eq(orgModels.orgId, ctx.orgId), eq(orgModels.label, "Phantom")));
-      expect(rows).toHaveLength(0);
-    });
-
     // Issue #1358 — `llm_usage.model` stores the org_models row id, so a second
-    // row for the same (credential, model) pair splits that model's spend
-    // across the copies. `uq_org_models_unaliased_binding` is what refuses
-    // it; only the LABEL was deduped before, which is not the invariant.
-    it("refuses a second model for the same credential and model id", async () => {
-      const credentialId = await createProviderKey();
-      const body = JSON.stringify({ modelId: "gpt-4o", credentialId });
+    // row for the same (configuration, model) pair splits that model's spend
+    // across the copies. `uq_org_models_config_model` is what refuses it.
+    it("refuses a second model for the same configuration and model id", async () => {
+      const configId = await createProviderConfig();
+      const body = JSON.stringify({ modelId: "gpt-4o", config_id: configId });
 
       const first = await app.request("/api/models", {
         method: "POST",
@@ -654,11 +644,11 @@ describe("Models API", () => {
     // The index is partial: an alias is a deliberate public identity over a
     // backing model, so it may share a binding with the direct row.
     it("still allows a managed (aliased) model over an already-added binding", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const plain = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ modelId: "gpt-4o", credentialId }),
+        body: JSON.stringify({ modelId: "gpt-4o", config_id: configId }),
       });
       expect(plain.status).toBe(201);
 
@@ -668,22 +658,22 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Appstrate Medium",
           modelId: "gpt-4o",
-          credentialId,
+          config_id: configId,
           aliased: true,
         }),
       });
       expect(alias.status).toBe(201);
     });
 
-    it("still allows the same model id against a different credential", async () => {
-      const first = await createProviderKey();
-      const second = await createProviderKey();
+    it("still allows the same model id in a different configuration", async () => {
+      const first = await createGatewayConfig("https://one.example.test/v1");
+      const second = await createGatewayConfig("https://two.example.test/v1");
 
-      for (const credentialId of [first, second]) {
+      for (const configId of [first, second]) {
         const res = await app.request("/api/models", {
           method: "POST",
           headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-          body: JSON.stringify({ modelId: "gpt-4o", credentialId }),
+          body: JSON.stringify({ modelId: "gpt-4o", config_id: configId }),
         });
         expect(res.status).toBe(201);
       }
@@ -692,7 +682,7 @@ describe("Models API", () => {
 
   describe("DELETE /api/models/:id", () => {
     it("deletes a model and returns 204", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
 
       // Create a model
       const createRes = await app.request("/api/models", {
@@ -701,7 +691,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "To Delete",
           modelId: "gpt-4o-mini",
-          credentialId,
+          config_id: configId,
         }),
       });
       expect(createRes.status).toBe(201);
@@ -736,12 +726,12 @@ describe("Models API", () => {
     });
 
     it("clears the org default pointer when the default model is deleted", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       // First model for the org auto-promotes to the default (pointer set).
       const createRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ label: "Default", modelId: "gpt-4o", credentialId }),
+        body: JSON.stringify({ label: "Default", modelId: "gpt-4o", config_id: configId }),
       });
       const { id } = (await createRes.json()) as any;
 
@@ -769,33 +759,27 @@ describe("Models API", () => {
   });
 
   describe("PATCH /api/models/:id", () => {
-    it("refuses to unbind a model from its custom-endpoint credential — 400, the row keeps its credential", async () => {
-      const credentialId = await createGatewayKey();
-      const model = await seedOrgModel({
-        orgId: ctx.orgId,
-        credentialId,
-        providerId: "openai-compatible",
-        modelId: "gateway-model",
-        label: "Gateway",
-      });
+    it("refuses to move a model to another configuration or connection — 400, nothing written", async () => {
+      const configId = await createGatewayConfig();
+      const model = await seedOrgModel({ orgId: ctx.orgId, configId, modelId: "gateway-model" });
 
-      const res = await app.request(`/api/models/${model.id}`, {
-        method: "PATCH",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId: null }),
-      });
-
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as any).code).toBe("personal_credential_custom_endpoint");
+      for (const body of [{ config_id: crypto.randomUUID() }, { credentialId: null }]) {
+        const res = await app.request(`/api/models/${model.id}`, {
+          method: "PATCH",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify(body),
+        });
+        expect(res.status).toBe(400);
+      }
       const [row] = await db
-        .select({ credentialId: orgModels.credentialId })
+        .select({ configId: orgModels.configId })
         .from(orgModels)
         .where(eq(orgModels.id, model.id));
-      expect(row!.credentialId).toBe(credentialId);
+      expect(row!.configId).toBe(configId);
     });
 
     it("updates a model and returns the full updated resource", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
 
       const createRes = await app.request("/api/models", {
         method: "POST",
@@ -803,7 +787,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Before",
           modelId: "gpt-4o",
-          credentialId,
+          config_id: configId,
         }),
       });
       expect(createRes.status).toBe(201);
@@ -831,11 +815,11 @@ describe("Models API", () => {
     // `buildUpdateSet` skips `undefined` but writes `null`, so an explicit null
     // clears back to the catalog while an omitted key preserves the override.
     it("stores a cost override sent through PUT", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const createRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ label: "Priced", modelId: "gpt-4o", credentialId }),
+        body: JSON.stringify({ label: "Priced", modelId: "gpt-4o", config_id: configId }),
       });
       expect(createRes.status).toBe(201);
       const { id } = (await createRes.json()) as { id: string };
@@ -852,14 +836,14 @@ describe("Models API", () => {
     });
 
     it("clears a cost override back to the catalog with an explicit null", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const createRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Priced",
           modelId: "gpt-4o",
-          credentialId,
+          config_id: configId,
           cost: { input: 3, output: 15 },
         }),
       });
@@ -878,14 +862,14 @@ describe("Models API", () => {
     });
 
     it("leaves an existing cost override intact when PUT does not mention cost", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const createRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Priced",
           modelId: "gpt-4o",
-          credentialId,
+          config_id: configId,
           cost: { input: 3, output: 15 },
         }),
       });
@@ -904,50 +888,13 @@ describe("Models API", () => {
       expect(row!.cost).toEqual({ input: 3, output: 15 });
     });
 
-    it("rejects switching to a needs-reconnection credential with 400, model unchanged", async () => {
-      // Regression for the PUT-side reachability gate: re-pointing a model to
-      // a dead credential used to let the UPDATE land, then the bare-resource
-      // re-read 404'd ("Model not found" after a write that DID succeed).
-      const credentialId = await createProviderKey();
-      const createRes = await app.request("/api/models", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Stable",
-          modelId: "gpt-4o",
-          credentialId,
-        }),
-      });
-      expect(createRes.status).toBe(201);
-      const { id } = (await createRes.json()) as { id: string };
-
-      const dead = await seedOrgModelProviderOAuth({
-        orgId: ctx.orgId,
-        needsReconnection: true,
-      });
-
-      const res = await app.request(`/api/models/${id}`, {
-        method: "PATCH",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId: dead.id }),
-      });
-
-      expect(res.status).toBe(400);
-      const body400 = (await res.json()) as { detail?: string };
-      expect(body400.detail).toContain("unreachable");
-
-      // The write was rejected before landing — credential pointer unchanged.
-      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
-      expect(row!.credentialId).toBe(credentialId);
-    });
-
     it("rejects flipping aliased on an oauth-subscription model — PUT enforces the same invariants as POST", async () => {
       // Regression: PUT used to write `data` (incl. `aliased`) with no
       // invariant check, so a non-aliased oauth model could become aliased by
       // update — a state POST rejects, caught only late at run launch.
       const subscription = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
-        providerId: TEST_OAUTH_PROVIDER_ID,
+        providerId: TEST_OAUTH_HOOKS_PROVIDER_ID,
         label: "Test OAuth",
         accessToken: "test-access",
         refreshToken: "test-refresh",
@@ -959,8 +906,8 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Subscribed",
-          modelId: TEST_OAUTH_MODEL_ID,
-          credentialId: subscription.id,
+          modelId: "hooks-model",
+          config_id: subscription.configId,
         }),
       });
       expect(createRes.status).toBe(201);
@@ -980,12 +927,12 @@ describe("Models API", () => {
     });
 
     it("rejects flipping aliased without a fresh explicit label — the stored label may name the backing", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const createRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         // No label → derived from the catalog (names the backing model).
-        body: JSON.stringify({ modelId: "gpt-4o", credentialId }),
+        body: JSON.stringify({ modelId: "gpt-4o", config_id: configId }),
       });
       expect(createRes.status).toBe(201);
       const { id } = (await createRes.json()) as { id: string };
@@ -1009,52 +956,15 @@ describe("Models API", () => {
       expect(withLabel.status).toBe(200);
     });
 
-    it("rejects re-pointing an aliased model to an oauth-subscription credential", async () => {
-      const credentialId = await createProviderKey();
-      const createRes = await app.request("/api/models", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Appstrate Medium",
-          modelId: "gpt-4o",
-          credentialId,
-          aliased: true,
-        }),
-      });
-      expect(createRes.status).toBe(201);
-      const { id } = (await createRes.json()) as { id: string };
-
-      const oauth = await seedOrgModelProviderOAuth({
-        orgId: ctx.orgId,
-        providerId: TEST_OAUTH_PROVIDER_ID,
-        label: "Test OAuth",
-        accessToken: "test-access",
-        refreshToken: "test-refresh",
-        expiresAt: null,
-        createdBy: ctx.user.id,
-      });
-      const res = await app.request(`/api/models/${id}`, {
-        method: "PATCH",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId: oauth.id }),
-      });
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { detail?: string };
-      expect(String(body.detail)).toContain("oauth-subscription");
-
-      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
-      expect(row!.credentialId).toBe(credentialId);
-    });
-
     it("updates an already-aliased model without re-sending the label (explicit by construction)", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const createRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Appstrate Medium",
           modelId: "gpt-4o",
-          credentialId,
+          config_id: configId,
           aliased: true,
         }),
       });
@@ -1077,14 +987,14 @@ describe("Models API", () => {
     it("rejects a lone maxTokens that meets or exceeds the stored contextWindow override", async () => {
       // The Zod refine only sees the payload — the effective pairing is
       // stored-override vs new-override.
-      const credentialId = await createGatewayKey();
+      const configId = await createGatewayConfig();
       const createRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Budgeted",
           modelId: "no-such-catalog-model-b1",
-          credentialId,
+          config_id: configId,
           contextWindow: 100_000,
         }),
       });
@@ -1106,14 +1016,14 @@ describe("Models API", () => {
     });
 
     it("rejects a lone contextWindow that dips below the stored maxTokens override, accepts a valid one", async () => {
-      const credentialId = await createGatewayKey();
+      const configId = await createGatewayConfig();
       const createRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           label: "Shrinking",
           modelId: "no-such-catalog-model-b2",
-          credentialId,
+          config_id: configId,
           contextWindow: 100_000,
           maxTokens: 50_000,
         }),
@@ -1139,7 +1049,7 @@ describe("Models API", () => {
     it("rejects a modelId change that swaps the catalog under a kept maxTokens override", async () => {
       // The row's maxTokens is valid against gpt-5.5's window; re-pointing
       // modelId at gpt-4o pairs that kept override with a smaller window.
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const openai = getModelProvider("openai")!;
       const wide = lookupCatalogModel(openai, "gpt-5.5")!;
       const narrow = lookupCatalogModel(openai, "gpt-4o")!;
@@ -1148,7 +1058,12 @@ describe("Models API", () => {
       const createRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ label: "Repointed", modelId: "gpt-5.5", credentialId, maxTokens }),
+        body: JSON.stringify({
+          label: "Repointed",
+          modelId: "gpt-5.5",
+          config_id: configId,
+          maxTokens,
+        }),
       });
       expect(createRes.status).toBe(201);
       const { id } = (await createRes.json()) as { id: string };
@@ -1166,11 +1081,11 @@ describe("Models API", () => {
     });
 
     it("refuses a modelId change to an id outside the provider's offer", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const createRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ label: "Offered", modelId: "gpt-5.5", credentialId }),
+        body: JSON.stringify({ label: "Offered", modelId: "gpt-5.5", config_id: configId }),
       });
       expect(createRes.status).toBe(201);
       const { id } = (await createRes.json()) as { id: string };
@@ -1184,35 +1099,10 @@ describe("Models API", () => {
       expect(((await res.json()) as { detail?: string }).detail).toContain("not offered");
     });
 
-    it("refuses a credentialId change that rebinds the model outside the new provider's offer", async () => {
-      const gatewayKey = await createGatewayKey();
-      const createRes = await app.request("/api/models", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Local",
-          modelId: "my-local-model",
-          credentialId: gatewayKey,
-        }),
-      });
-      expect(createRes.status).toBe(201);
-      const { id } = (await createRes.json()) as { id: string };
-
-      const res = await app.request(`/api/models/${id}`, {
-        method: "PATCH",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId: await createProviderKey() }),
-      });
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as { detail?: string }).detail).toContain("not offered");
-      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
-      expect(row!.credentialId).toBe(gatewayKey);
-    });
-
     it("rejects clearing a contextWindow override when the catalog fallback violates the kept maxTokens", async () => {
       // `contextWindow: null` clears the override — the effective value falls
       // back to the live catalog, which must still beat the kept maxTokens.
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const catalogModel = listCatalogModels(getModelProvider("openai")!).find(
         (m) => m.contextWindow != null,
       )!;
@@ -1222,7 +1112,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Cleared",
           modelId: catalogModel.id,
-          credentialId,
+          config_id: configId,
           contextWindow: 10_000_000,
           maxTokens: catalogModel.contextWindow,
         }),
@@ -1239,7 +1129,7 @@ describe("Models API", () => {
     });
 
     it("projects a model alias on the update response — parity with the list (Threat A)", async () => {
-      const credentialId = await createGatewayKey();
+      const configId = await createGatewayConfig();
       // A distinctive backing id so the payload grep below is unambiguous.
       const realModelId = "secret-backing-put-7k4v";
 
@@ -1249,7 +1139,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Appstrate Medium",
           modelId: realModelId,
-          credentialId,
+          config_id: configId,
           aliased: true,
         }),
       });
@@ -1278,7 +1168,7 @@ describe("Models API", () => {
         "provider_name",
         "base_url",
         "modelId",
-        "credentialId",
+        "config_id",
         "contextWindow",
         "maxTokens",
         "cost",
@@ -1298,16 +1188,12 @@ describe("Models API", () => {
       expect(JSON.stringify(updated)).not.toContain(realModelId);
     });
 
-    // The same invariant on the edit path: repointing a row onto a binding
-    // another row already holds is the same duplicate, reached sideways.
-    it("refuses an edit that would collide with another row's binding", async () => {
-      const credentialId = await createProviderKey();
-      const mine = await seedOrgModel({ orgId: ctx.orgId, credentialId, modelId: "gpt-4o" });
-      const other = await seedOrgModel({
-        orgId: ctx.orgId,
-        credentialId,
-        modelId: "gpt-4o-mini",
-      });
+    // The same invariant on the edit path: repointing a row onto a model id
+    // another row of its configuration already holds is the same duplicate.
+    it("refuses an edit that would collide with another row of its configuration", async () => {
+      const configId = await createProviderConfig();
+      const mine = await seedOrgModel({ orgId: ctx.orgId, configId, modelId: "gpt-4o" });
+      const other = await seedOrgModel({ orgId: ctx.orgId, configId, modelId: "gpt-4o-mini" });
 
       const res = await app.request(`/api/models/${other.id}`, {
         method: "PATCH",
@@ -1322,11 +1208,16 @@ describe("Models API", () => {
     });
 
     it("rejects an input modality the runtime cannot boot with — 400, row unchanged", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const createRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ label: "Vision", modelId: "gpt-4o", credentialId, input: ["text"] }),
+        body: JSON.stringify({
+          label: "Vision",
+          modelId: "gpt-4o",
+          config_id: configId,
+          input: ["text"],
+        }),
       });
       expect(createRes.status).toBe(201);
       const { id } = (await createRes.json()) as { id: string };
@@ -1344,7 +1235,7 @@ describe("Models API", () => {
 
   describe("PUT /api/models/default", () => {
     it("sets the default model", async () => {
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
 
       // Create a model first
       const createRes = await app.request("/api/models", {
@@ -1353,7 +1244,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Default Model",
           modelId: "gpt-4o",
-          credentialId,
+          config_id: configId,
         }),
       });
       expect(createRes.status).toBe(201);
@@ -1457,7 +1348,7 @@ describe("Models API", () => {
    * deadlock with the whole suite green.
    */
   describe("dead credential — end-to-end recovery over HTTP", () => {
-    /** A `needsReconnection` OAuth credential with one enabled model bound to it. */
+    /** A `needsReconnection` OAuth organization connection with one enabled model of its configuration. */
     async function seedDeadPair(label: string, providerId: string = TEST_OAUTH_PROVIDER_ID) {
       const cred = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
@@ -1475,7 +1366,7 @@ describe("Models API", () => {
       return { cred, model };
     }
 
-    it("lists the dead model, detaches it, then deletes the credential (204, not 409 credential_in_use)", async () => {
+    it("lists the dead model flagged, then deletes its connection without touching the model", async () => {
       const { cred, model } = await seedDeadPair("Dead model");
 
       // 1. It surfaces on GET — through the real serializer + alias projection.
@@ -1485,19 +1376,16 @@ describe("Models API", () => {
       expect(listed).toBeDefined();
       expect(listed.needs_reconnection).toBe(true);
 
-      // 2. …so it can be detached,
-      const delModel = await app.request(`/api/models/${model.id}`, {
-        method: "DELETE",
-        headers: authHeaders(ctx),
-      });
-      expect(delModel.status).toBe(204);
-
-      // 3. …which releases the FK. This is the 409 the user could never escape.
+      // 2. A model belongs to its configuration, not to a connection: the dead
+      //    connection goes on its own, and the model stays, flagged no more.
       const delCred = await app.request(`/api/model-provider-credentials/${cred.id}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
       expect(delCred.status).toBe(204);
+      const after = await app.request("/api/models", { headers: authHeaders(ctx) });
+      const kept = ((await after.json()) as any).data.find((m: any) => m.id === model.id);
+      expect(kept).toMatchObject({ needs_reconnection: false, billed_to: null });
     });
 
     it("refuses to disable the current org default — 409 model_disabled", async () => {
@@ -1568,12 +1456,10 @@ describe("Models API", () => {
       expect(org!.defaultModelId).toBeNull();
     });
 
-    it("still accepts a model whose credential's providerId is unregistered", async () => {
-      // NOT a 409: the credential is healthy — its provider module was dropped
-      // from `MODULES`, which is why the model is absent from GET /api/models
-      // in the first place. "Reconnect this credential" would be misdirection
-      // about a row the client cannot even see; the fix is to restore the
-      // module. So this behaves exactly as it did before the flag existed.
+    it("refuses a model of an unregistered provider's configuration as the default — 409 model_org_connection_required", async () => {
+      // The provider module was dropped from `MODULES`: the model is absent from
+      // GET /api/models, and no connection of its configuration can serve it, so
+      // the default — which schedules and API keys run on — refuses it.
       const { model } = await seedDeadPair("Orphaned provider", "@gone/provider");
 
       const list = await app.request("/api/models", { headers: authHeaders(ctx) });
@@ -1584,18 +1470,60 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ modelId: model.id }),
       });
-      // 204, not 200: the write lands, but the handler re-reads the list to
-      // echo the effective default and the row is not in it. Pre-existing
-      // shape, unchanged by this branch — the assertion of record is the
-      // stored pointer below.
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as any).code).toBe("model_org_connection_required");
 
       const [org] = await db
         .select({ defaultModelId: organizations.defaultModelId })
         .from(organizations)
         .where(eq(organizations.id, ctx.orgId))
         .limit(1);
-      expect(org!.defaultModelId).toBe(model.id);
+      expect(org!.defaultModelId).toBeNull();
+    });
+
+    it("refuses as the default a model only personal connections serve — 409 model_org_connection_required — until the organization connects", async () => {
+      const member = await memberContext(ctx, "member");
+      const personal = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        providerId: "openai",
+        apiKey: "sk-member",
+        ownerUserId: member.user.id,
+        createdBy: member.user.id,
+      });
+      // The owner holds a personal key too: the default is judged for no payer.
+      await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        providerId: "openai",
+        apiKey: "sk-owner",
+        ownerUserId: ctx.user.id,
+        createdBy: ctx.user.id,
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        configId: personal.configId!,
+        modelId: "gpt-5.5",
+      });
+      const setDefault = () =>
+        app.request("/api/models/default", {
+          method: "PUT",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify({ modelId: model.id }),
+        });
+
+      const refused = await setDefault();
+      expect(refused.status).toBe(409);
+      expect(((await refused.json()) as { code: string }).code).toBe(
+        "model_org_connection_required",
+      );
+
+      // CONTROL: an organization key of the configuration lifts the refusal.
+      await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        providerId: "openai",
+        apiKey: "sk-org",
+        configId: personal.configId!,
+      });
+      expect((await setDefault()).status).toBe(200);
     });
 
     it("answers the Test action with a failed result, not a 404, on a dead model", async () => {
@@ -1677,11 +1605,11 @@ describe("Models API", () => {
 
     it("a system default takes over from an existing custom default", async () => {
       // First custom model auto-promotes to default.
-      const credentialId = await createProviderKey();
+      const configId = await createProviderConfig();
       const createRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ label: "Custom", modelId: "gpt-4o-mini", credentialId }),
+        body: JSON.stringify({ label: "Custom", modelId: "gpt-4o-mini", config_id: configId }),
       });
       const { id: customId } = (await createRes.json()) as any;
 
@@ -1708,6 +1636,7 @@ describe("Models API", () => {
      * helper wouldn't suffice because its provider has no registered
      * `models[]` list.
      */
+    /** The configuration the subscription joins (`test-oauth` → the openai family's). */
     async function seedTestOAuthCredential(): Promise<string> {
       const row = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
@@ -1718,16 +1647,16 @@ describe("Models API", () => {
         expiresAt: null,
         createdBy: ctx.user.id,
       });
-      return row.id;
+      return row.configId!;
     }
 
     it("seeds models atomically and promotes the first as default", async () => {
-      const credentialId = await seedTestOAuthCredential();
+      const configId = await seedTestOAuthCredential();
 
       const res = await app.request("/api/models/seed", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId, model_ids: [TEST_OAUTH_MODEL_ID] }),
+        body: JSON.stringify({ config_id: configId, model_ids: [TEST_OAUTH_MODEL_ID] }),
       });
 
       expect(res.status).toBe(201);
@@ -1743,7 +1672,7 @@ describe("Models API", () => {
       const inserted = await db
         .select()
         .from(orgModels)
-        .where(and(eq(orgModels.orgId, ctx.orgId), eq(orgModels.credentialId, credentialId)));
+        .where(and(eq(orgModels.orgId, ctx.orgId), eq(orgModels.configId, configId)));
       expect(inserted).toHaveLength(1);
       expect(inserted[0]!.modelId).toBe(TEST_OAUTH_MODEL_ID);
       // The default is the org-level pointer, not a per-row flag: the first
@@ -1756,20 +1685,20 @@ describe("Models API", () => {
       expect(org!.defaultModelId).toBe(inserted[0]!.id);
     });
 
-    it("is idempotent — returns created=0 when models already exist for the credential", async () => {
-      const credentialId = await seedTestOAuthCredential();
+    it("is idempotent — returns created=0 when the configuration already has models", async () => {
+      const configId = await seedTestOAuthCredential();
 
       const first = await app.request("/api/models/seed", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId, model_ids: [TEST_OAUTH_MODEL_ID] }),
+        body: JSON.stringify({ config_id: configId, model_ids: [TEST_OAUTH_MODEL_ID] }),
       });
       expect(first.status).toBe(201);
 
       const second = await app.request("/api/models/seed", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId, model_ids: [TEST_OAUTH_MODEL_ID] }),
+        body: JSON.stringify({ config_id: configId, model_ids: [TEST_OAUTH_MODEL_ID] }),
       });
       expect(second.status).toBe(201);
       const body = (await second.json()) as { created: number; promoted_default: boolean };
@@ -1778,7 +1707,7 @@ describe("Models API", () => {
     });
 
     it("rejects a camelCase `modelIds` and answers in snake_case", async () => {
-      const credentialId = await seedTestOAuthCredential();
+      const configId = await seedTestOAuthCredential();
       const post = (body: unknown) =>
         app.request("/api/models/seed", {
           method: "POST",
@@ -1786,9 +1715,11 @@ describe("Models API", () => {
           body: JSON.stringify(body),
         });
 
-      expect((await post({ credentialId, modelIds: [TEST_OAUTH_MODEL_ID] })).status).toBe(400);
+      expect((await post({ config_id: configId, modelIds: [TEST_OAUTH_MODEL_ID] })).status).toBe(
+        400,
+      );
 
-      const res = await post({ credentialId, model_ids: [TEST_OAUTH_MODEL_ID] });
+      const res = await post({ config_id: configId, model_ids: [TEST_OAUTH_MODEL_ID] });
       expect(res.status).toBe(201);
       const body = (await res.json()) as Record<string, unknown>;
       expect(body.promoted_default).toBe(true);
@@ -1796,23 +1727,23 @@ describe("Models API", () => {
     });
 
     it("rejects unknown model_ids with 400", async () => {
-      const credentialId = await seedTestOAuthCredential();
+      const configId = await seedTestOAuthCredential();
 
       const res = await app.request("/api/models/seed", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId, model_ids: ["does-not-exist"] }),
+        body: JSON.stringify({ config_id: configId, model_ids: ["does-not-exist"] }),
       });
 
       expect(res.status).toBe(400);
     });
 
-    it("returns 404 when the credential does not exist", async () => {
+    it("returns 404 when the configuration does not exist", async () => {
       const res = await app.request("/api/models/seed", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          credentialId: "00000000-0000-0000-0000-000000000000",
+          config_id: "00000000-0000-0000-0000-000000000000",
           model_ids: [TEST_OAUTH_MODEL_ID],
         }),
       });
@@ -1821,15 +1752,14 @@ describe("Models API", () => {
     });
 
     it("does NOT promote default when the org already has one", async () => {
+      // Another configuration's model: the seeded one still has none.
       const existingKey = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
-        apiShape: "openai",
-        baseUrl: "https://api.openai.com",
+        providerId: "moonshot",
       });
       const existing = await seedOrgModel({
         orgId: ctx.orgId,
         credentialId: existingKey.id,
-        modelId: "gpt-4o",
         label: "Existing default",
       });
       // The org default is the pointer — point it at the existing model.
@@ -1838,11 +1768,11 @@ describe("Models API", () => {
         .set({ defaultModelId: existing.id })
         .where(eq(organizations.id, ctx.orgId));
 
-      const credentialId = await seedTestOAuthCredential();
+      const configId = await seedTestOAuthCredential();
       const res = await app.request("/api/models/seed", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId, model_ids: [TEST_OAUTH_MODEL_ID] }),
+        body: JSON.stringify({ config_id: configId, model_ids: [TEST_OAUTH_MODEL_ID] }),
       });
 
       expect(res.status).toBe(201);
@@ -1937,7 +1867,7 @@ describe("Models API", () => {
 
   describe("POST /api/models/:id/test — model alias", () => {
     it("refuses the connection test for an alias (timing + upstream-status oracle)", async () => {
-      const credentialId = await createGatewayKey();
+      const configId = await createGatewayConfig();
       const realModelId = "secret-backing-test-9m2p";
 
       const create = await app.request("/api/models", {
@@ -1946,7 +1876,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Appstrate Medium",
           modelId: realModelId,
-          credentialId,
+          config_id: configId,
           aliased: true,
         }),
       });
@@ -1993,18 +1923,28 @@ describe("Models API", () => {
   });
 
   describe("custom (OpenAI-compatible) endpoint — the sequence the SPA emits", () => {
-    it("creates the credential then the model, and lists it", async () => {
+    it("creates the configuration, its connection, then the model, and lists it", async () => {
+      const configRes = await app.request("/api/model-configs", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          provider_id: "openai-compatible",
+          base_url: "http://localhost:11434/v1",
+        }),
+      });
+      expect(configRes.status).toBe(201);
+      const config = (await configRes.json()) as { id: string; base_url: string };
+      expect(config.base_url).toBe("http://localhost:11434/v1");
       const credentialRes = await app.request("/api/model-provider-credentials", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           providerId: "openai-compatible",
           api_key: "sk-test",
-          base_url_override: "http://localhost:11434/v1",
+          config_id: config.id,
         }),
       });
       expect(credentialRes.status).toBe(201);
-      const credential = (await credentialRes.json()) as any;
 
       const createRes = await app.request("/api/models", {
         method: "POST",
@@ -2012,7 +1952,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Local Qwen",
           modelId: "qwen3:8b",
-          credentialId: credential.id,
+          config_id: config.id,
           contextWindow: 32768,
           maxTokens: 8192,
           input: ["text"],
@@ -2021,7 +1961,7 @@ describe("Models API", () => {
       });
       expect(createRes.status).toBe(201);
       const created = (await createRes.json()) as any;
-      // The credential's provider owns both — `org_models` stores neither.
+      // The configuration owns both — `org_models` stores neither.
       expect(created.apiShape).toBe("openai-completions");
       expect(created.base_url).toBe("http://localhost:11434/v1");
       expect(created).not.toHaveProperty("baseUrl");
@@ -2051,11 +1991,7 @@ describe("Models API", () => {
       const res = await app.request("/api/model-provider-credentials", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          providerId: "__custom__",
-          api_key: "sk-test",
-          base_url_override: "http://localhost:11434/v1",
-        }),
+        body: JSON.stringify({ providerId: "__custom__", api_key: "sk-test" }),
       });
       expect(res.status).toBe(400);
       const body = (await res.json()) as any;

@@ -21,7 +21,7 @@ import { db } from "./db.ts";
 import { integrationConnections, runs } from "@appstrate/db/schema";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
-import { seedPackage, seedPublishedVersion } from "./seed.ts";
+import { seedModelConfigFor, seedPackage, seedPublishedVersion } from "./seed.ts";
 import { localIntegrationManifest, httpHeaderDelivery } from "./integration-manifests.ts";
 import type { TestContext } from "./auth.ts";
 import { activatePackage } from "../../src/services/space-packages.ts";
@@ -198,12 +198,14 @@ export async function seedIntegrationConnection(
 
 /** The org needs a resolvable default model for a launch to reach run creation. */
 export async function seedDefaultOrgModel(ctx: TestContext): Promise<void> {
-  const credentialId = await createApiKeyCredential({
+  const configId = await seedModelConfigFor(ctx.orgId, "openai");
+  await createApiKeyCredential({
     orgId: ctx.orgId,
     userId: ctx.user.id,
     ownerUserId: null,
     label: "Connection fixture credential",
     providerId: "openai",
+    configId,
     apiKey: "sk-test-not-a-real-key",
   });
   const modelDbId = await createOrgModel(
@@ -211,7 +213,7 @@ export async function seedDefaultOrgModel(ctx: TestContext): Promise<void> {
     "Connection Fixture GPT",
     "gpt-5.5",
     ctx.user.id,
-    { credentialId },
+    configId,
   );
   await setDefaultModel(ctx.orgId, modelDbId);
 }

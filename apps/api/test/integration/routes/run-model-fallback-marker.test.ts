@@ -72,7 +72,7 @@ describe("run launch — model-fallback marker in run_logs", () => {
     const model = (label: string, modelId: string) =>
       seedOrgModel({ orgId: ctx.orgId, credentialId: cred.id, label, modelId, aliased: false });
     await setDefaultModel(ctx.orgId, (await model(DEFAULT_LABEL, "deepseek-flash")).id);
-    pinnedModelId = (await model(PINNED_LABEL, "deepseek-chat")).id;
+    pinnedModelId = (await model(PINNED_LABEL, "deepseek-v4-pro")).id;
     await seedSpacePackage(ctx.defaultSpaceId, AGENT, { modelId: pinnedModelId });
   });
 

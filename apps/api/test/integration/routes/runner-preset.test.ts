@@ -42,6 +42,7 @@ import {
   seedRun,
   seedSchedule,
   seedApiKey,
+  configIdOf,
 } from "../../helpers/seed.ts";
 import { deactivatePackage } from "../../../src/services/space-packages.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
@@ -573,9 +574,13 @@ describe("runner preset", () => {
       providerId: "openai",
       apiKey: "sk-test-not-a-real-key",
     });
-    const modelDbId = await createOrgModel(owner.orgId, "Runner GPT", "gpt-5.5", owner.user.id, {
-      credentialId,
-    });
+    const modelDbId = await createOrgModel(
+      owner.orgId,
+      "Runner GPT",
+      "gpt-5.5",
+      owner.user.id,
+      await configIdOf(credentialId),
+    );
     await setDefaultModel(owner.orgId, modelDbId);
 
     // A run of the same agent, launched by someone else: the runner holds

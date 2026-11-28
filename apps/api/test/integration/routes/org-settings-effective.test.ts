@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The organization settings a reader sees: `personal_model_credentials` is
- * resolved to its default when the org never set it, and a PATCH of one key
- * never writes the default of another into the stored JSON.
+ * The organization settings a reader sees: the personal space role is resolved
+ * to its default when the org never set it, a PATCH of one key never writes the
+ * default of another into the stored JSON, and the retired
+ * `personal_model_credentials` (now each model configuration's
+ * `personal_connections_allowed`, #2451) is refused rather than ignored.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -56,24 +58,16 @@ describe("organization settings — effective values", () => {
     ctx = await createTestContext();
   });
 
-  it("reads personal_model_credentials as true on an org that never set it", async () => {
+  it("serves no personal_model_credentials and refuses a PATCH naming it", async () => {
     const res = await app.request(settingsUrl(ctx), { headers: { Cookie: ctx.cookie } });
     expect(res.status).toBe(200);
-    expect(
-      ((await res.json()) as { personal_model_credentials: boolean }).personal_model_credentials,
-    ).toBe(true);
+    expect(await res.json()).not.toHaveProperty("personal_model_credentials");
+
+    expect((await patchSettings(ctx, { personal_model_credentials: false })).status).toBe(400);
+    expect((await storedDefault(ctx)).orgSettings).not.toHaveProperty("personal_model_credentials");
   });
 
-  it("reads the stored false once the admin switches the policy off", async () => {
-    expect((await patchSettings(ctx, { personal_model_credentials: false })).status).toBe(200);
-
-    const res = await app.request(settingsUrl(ctx), { headers: { Cookie: ctx.cookie } });
-    expect(
-      ((await res.json()) as { personal_model_credentials: boolean }).personal_model_credentials,
-    ).toBe(false);
-  });
-
-  it("a PATCH of another key does not write the personal_model_credentials default into storage", async () => {
+  it("a PATCH of one key writes no other key into storage", async () => {
     expect((await patchSettings(ctx, { dashboard_sso_enabled: true })).status).toBe(200);
 
     const [row] = await db
@@ -163,7 +157,7 @@ describe("organization settings — effective values", () => {
     expect(await readDefault(ctx)).toEqual({ custom_role_id: own.id });
 
     // A PATCH of another key leaves the custom default where it is.
-    expect((await patchSettings(ctx, { personal_model_credentials: false })).status).toBe(200);
+    expect((await patchSettings(ctx, { restrict_package_copy: true })).status).toBe(200);
     expect(await readDefault(ctx)).toEqual({ custom_role_id: own.id });
     expect((await storedDefault(ctx)).personalSpaceRoleId).toBe(own.id);
 

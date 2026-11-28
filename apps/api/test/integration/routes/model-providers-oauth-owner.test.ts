@@ -3,8 +3,9 @@
 /**
  * Who owns the subscription a pairing produces: `owner_type` on
  * `POST /api/model-providers-oauth/pairing` follows the rule of an API key.
- * `org` needs `write` and makes an organization credential, bindable to a model;
- * `user` needs `connect` and makes the caller's personal one, bound to nothing.
+ * `org` needs `write` and makes an organization connection; `user` needs
+ * `connect` and makes the caller's personal one. Both are filed under the
+ * configuration of the provider's family, whose models they serve.
  * A reconnect names a credential and no owner, and is accepted exactly when the
  * credential lists `reconnect` for the caller. The redeem judges the member who
  * minted the pairing again, on their grants at that moment.
@@ -28,7 +29,7 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
+import { seedModelConfigFor, seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
 import {
@@ -37,7 +38,7 @@ import {
   TEST_OAUTH_PROVIDER_ID,
 } from "../../helpers/test-oauth-provider.ts";
 import { consumePairing, createPairing } from "../../../src/services/model-providers/pairings.ts";
-import { updateOrgSettings } from "../../../src/services/organizations.ts";
+import { updateModelConfig } from "../../../src/services/model-configs.ts";
 
 const app = getTestApp();
 
@@ -48,7 +49,7 @@ interface CredentialRow {
   id: string;
   owner_type: "org" | "user";
   owner_id: string | null;
-  bindable: boolean;
+  config_id: string;
   allowed_actions: string[];
 }
 
@@ -164,20 +165,37 @@ async function credentialCount(orgId: string): Promise<number> {
   return rows.length;
 }
 
-function createModel(ctx: TestContext, credentialId: string) {
+async function configOf(credentialId: string): Promise<string> {
+  const [row] = await db
+    .select({ configId: modelProviderCredentials.configId })
+    .from(modelProviderCredentials)
+    .where(eq(modelProviderCredentials.id, credentialId));
+  return row!.configId!;
+}
+
+async function createModel(ctx: TestContext, credentialId: string) {
   return app.request("/api/models", {
     method: "POST",
     headers: jsonHeaders(ctx),
-    body: JSON.stringify({ modelId: TEST_OAUTH_MODEL_ID, credentialId }),
+    body: JSON.stringify({ modelId: TEST_OAUTH_MODEL_ID, config_id: await configOf(credentialId) }),
   });
 }
 
-function seedModels(ctx: TestContext, credentialId: string) {
+async function seedModels(ctx: TestContext, credentialId: string) {
   return app.request("/api/models/seed", {
     method: "POST",
     headers: jsonHeaders(ctx),
-    body: JSON.stringify({ credentialId, model_ids: [TEST_OAUTH_MODEL_ID] }),
+    body: JSON.stringify({
+      config_id: await configOf(credentialId),
+      model_ids: [TEST_OAUTH_MODEL_ID],
+    }),
   });
+}
+
+/** Switch personal connections off on the configuration test-oauth is filed under. */
+async function disablePersonal(orgId: string): Promise<void> {
+  const configId = await seedModelConfigFor(orgId, TEST_OAUTH_PROVIDER_ID);
+  await updateModelConfig(orgId, configId, { personalConnectionsAllowed: false });
 }
 
 describe("subscription pairings — owner_type", () => {
@@ -208,7 +226,6 @@ describe("subscription pairings — owner_type", () => {
       expect(await listedCredential(admin, id)).toMatchObject({
         owner_type: "org",
         owner_id: null,
-        bindable: true,
         allowed_actions: ["edit", "delete", "test", "reconnect"],
       });
       // A member reads no organization credential.
@@ -226,18 +243,21 @@ describe("subscription pairings — owner_type", () => {
       expect(event!.after).toMatchObject({ ownerType: "org", credentialId: id });
     });
 
-    it("binds an organization model, by creation and by seed", async () => {
+    it("serves an organization model of its configuration, by creation and by seed", async () => {
       const created = await createModel(admin, await pair(admin));
       expect(created.status).toBe(201);
-      expect(await created.json()).toMatchObject({ binding: "org", billed_to: "org" });
+      expect(await created.json()).toMatchObject({ billed_to: "org" });
 
-      const seeded = await seedModels(admin, await pair(admin));
+      // A second subscription lands in the same configuration; seeding the model
+      // id it already serves creates nothing new.
+      const second = await pair(admin);
+      const seeded = await seedModels(admin, second);
       expect(seeded.status).toBe(201);
-      expect(((await seeded.json()) as { created: number }).created).toBe(1);
+      expect(((await seeded.json()) as { created: number }).created).toBe(0);
     });
 
     it("is untouched by the personal-credentials policy, at the mint and at the redeem", async () => {
-      await updateOrgSettings(admin.orgId, { personal_model_credentials: false });
+      await disablePersonal(admin.orgId);
       const id = await pair(admin, { owner_type: "org" });
       expect((await storedCredential(id)).ownerUserId).toBeNull();
 
@@ -248,38 +268,23 @@ describe("subscription pairings — owner_type", () => {
   });
 
   describe("owner_type: user", () => {
-    it("redeems into the caller's personal credential, which binds no model", async () => {
+    it("redeems into the caller's personal connection, filed under the family configuration", async () => {
       const id = await pair(admin, { owner_type: "user" });
 
       expect((await storedCredential(id)).ownerUserId).toBe(admin.user.id);
-      expect(await listedCredential(admin, id)).toMatchObject({
-        owner_type: "user",
-        owner_id: admin.user.id,
-        bindable: false,
-      });
+      const listed = await listedCredential(admin, id);
+      expect(listed).toMatchObject({ owner_type: "user", owner_id: admin.user.id });
+      expect(listed!.config_id).toBe(await seedModelConfigFor(admin.orgId, TEST_OAUTH_PROVIDER_ID));
 
-      for (const res of [await createModel(admin, id), await seedModels(admin, id)]) {
-        expect(res.status).toBe(400);
-        expect(((await res.json()) as { code: string }).code).toBe(
-          "personal_credential_not_bindable",
-        );
-      }
+      // A model of that configuration is created; with no organization
+      // connection, nobody is billed at the organization level.
+      const created = await createModel(admin, id);
+      expect(created.status).toBe(201);
+      expect(((await created.json()) as { billed_to: string | null }).billed_to).not.toBe("org");
     });
 
-    it("refuses at the mint a personal pairing the redeem would refuse: a provider whose endpoint the organization chooses", async () => {
-      // The harness registers module providers with an overridable endpoint.
-      const res = await mint(admin, { providerId: "claude-code", owner_type: "user" });
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as { code: string }).code).toBe(
-        "personal_credential_custom_endpoint",
-      );
-      expect((await mint(admin, { providerId: "claude-code", owner_type: "org" })).status).toBe(
-        201,
-      );
-    });
-
-    it("is refused with 403 while the organization has personal credentials off, an admin included", async () => {
-      await updateOrgSettings(admin.orgId, { personal_model_credentials: false });
+    it("is refused with 403 while the configuration has personal connections off, an admin included", async () => {
+      await disablePersonal(admin.orgId);
       for (const ctx of [admin, member]) {
         const res = await mint(ctx, { owner_type: "user" });
         expect(res.status).toBe(403);
@@ -352,7 +357,7 @@ describe("subscription pairings — owner_type", () => {
           expect((await mint(caller, { credentialId: id })).status).toBe(on ? 201 : 404);
         }
 
-        await updateOrgSettings(admin.orgId, { personal_model_credentials: false });
+        await disablePersonal(admin.orgId);
         for (const { id, policyOff } of cases) {
           const offered =
             (await listedCredential(caller, id))?.allowed_actions.includes("reconnect") ?? false;
@@ -529,7 +534,7 @@ describe("subscription pairings — owner_type", () => {
       expect((await storedCredential(own.id)).accessToken).toBe("own-access");
     });
 
-    it("keeps a personal reconnect for an owner demoted to guest, until the organization turns personal credentials off", async () => {
+    it("keeps a personal reconnect for an owner demoted to guest, until the configuration turns personal connections off", async () => {
       const own = await seedOrgModelProviderOAuth({
         orgId: admin.orgId,
         providerId: TEST_OAUTH_PROVIDER_ID,
@@ -543,7 +548,7 @@ describe("subscription pairings — owner_type", () => {
       expect((await redeem(first, "guest-access")).status).toBe(200);
       expect((await storedCredential(own.id)).accessToken).toBe("guest-access");
 
-      await updateOrgSettings(admin.orgId, { personal_model_credentials: false });
+      await disablePersonal(admin.orgId);
       const refused = await redeem(second, "after-policy");
       expect(refused.status).toBe(403);
       expect(((await refused.json()) as { code: string }).code).toBe(

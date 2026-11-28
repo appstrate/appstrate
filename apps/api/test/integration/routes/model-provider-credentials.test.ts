@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { auditEvents, modelProviderCredentials } from "@appstrate/db/schema";
+import { auditEvents, modelProviderCredentials, orgModels } from "@appstrate/db/schema";
 import { corruptCredentialBlob, seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -47,22 +47,18 @@ describe("Model Provider Keys API", () => {
     ctx = await createTestContext();
   });
 
-  describe("GET /api/model-provider-credentials/registry", () => {
-    it("says which providers accept a personal credential", async () => {
-      const res = await app.request(
-        "/api/model-provider-credentials/registry?fields=providerId,personal_allowed",
-        { headers: authHeaders(ctx) },
-      );
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: { providerId: string; personal_allowed: boolean }[];
-      };
-      const allowed = (id: string) => body.data.find((p) => p.providerId === id)!.personal_allowed;
-      // An overridable endpoint is the organization's to choose; a fixed one may also be a member's own.
-      expect(allowed("openai-compatible")).toBe(false);
-      expect(allowed("test-oauth")).toBe(true);
+  /** A gateway configuration of the org on `baseUrl`: where its connections send their key. */
+  async function gatewayConfig(baseUrl: string): Promise<string> {
+    const res = await app.request("/api/model-configs", {
+      method: "POST",
+      headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ provider_id: "openai-compatible", base_url: baseUrl }),
     });
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
 
+  describe("GET /api/model-provider-credentials/registry", () => {
     it("serves each model's catalog cost, tiers included", async () => {
       const res = await app.request("/api/model-provider-credentials/registry", {
         headers: authHeaders(ctx),
@@ -299,7 +295,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           providerId: "openai-compatible",
           api_key: "sk-local",
-          base_url_override: "http://10.255.255.9:9/v1",
+          config_id: await gatewayConfig("http://10.255.255.9:9/v1"),
         }),
       });
 
@@ -308,31 +304,75 @@ describe("Model Provider Keys API", () => {
       expect(body.label).toStartWith("10.255.255.9:9 · ");
     });
 
-    it("refuses a base URL that is not http(s)", async () => {
+    it("refuses a base URL that is not http(s) on a configuration", async () => {
+      const res = await app.request("/api/model-configs", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          provider_id: "openai-compatible",
+          base_url: "ftp://example.com/v1",
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.errors[0].field).toBe("base_url");
+    });
+
+    it("refuses an endpoint on a connection: it is its configuration's", async () => {
       const res = await app.request("/api/model-provider-credentials", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           providerId: "openai-compatible",
           api_key: "sk-local",
-          base_url_override: "ftp://example.com/v1",
+          base_url_override: "http://10.255.255.9:9/v1",
         }),
       });
-
       expect(res.status).toBe(400);
-      const body = (await res.json()) as any;
-      expect(body.errors[0].field).toBe("base_url_override");
+    });
+
+    it("refuses a gateway connection with no config_id: its endpoint is a configuration's choice", async () => {
+      const res = await app.request("/api/model-provider-credentials", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ providerId: "openai-compatible", api_key: "sk-local" }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { param?: string }).param).toBe("config_id");
+    });
+
+    it("refuses a connection whose provider does not fit the named configuration — 400 connection_provider_mismatch", async () => {
+      const configId = await gatewayConfig("http://10.255.255.9:9/v1");
+      const res = await app.request("/api/model-provider-credentials", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ providerId: "openai", api_key: "sk-x", config_id: configId }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code?: string; param?: string };
+      expect(body.code).toBe("connection_provider_mismatch");
+      expect(body.param).toBe("config_id");
+    });
+
+    it("files a connection with no config_id under its provider's configuration, created once", async () => {
+      const post = (apiKey: string) =>
+        app.request("/api/model-provider-credentials", {
+          method: "POST",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify({ providerId: "openai", api_key: apiKey }),
+        });
+      const first = (await (await post("sk-one")).json()) as { config_id: string };
+      const second = (await (await post("sk-two")).json()) as { config_id: string };
+      expect(first.config_id).toBeString();
+      expect(second.config_id).toBe(first.config_id);
     });
 
     it.each([
       [
         "discover",
-        {
-          providerId: "openai-compatible",
-          api_key: "sk-local",
-          base_url_override: "ftp://x.test/v1",
-        },
-        "base_url_override",
+        { providerId: "openai-compatible", api_key: "sk-local", base_url: "ftp://x.test/v1" },
+        "base_url",
       ],
       [
         "test",
@@ -424,7 +464,7 @@ describe("Model Provider Keys API", () => {
       const res = await post("/api/model-provider-credentials", {
         providerId: "openai-compatible",
         api_key: "sk-local",
-        base_url_override: "http://10.255.255.9:9/v1",
+        config_id: await gatewayConfig("http://10.255.255.9:9/v1"),
       });
       expect(res.status).toBe(201);
       const body = (await res.json()) as Record<string, unknown>;
@@ -514,79 +554,41 @@ describe("Model Provider Keys API", () => {
       expect(found).toBeUndefined();
     });
 
-    it("counts the actual model bindings on GET and refuses DELETE if the earlier zero is stale", async () => {
-      // Create a credential.
+    it("deletes a connection its configuration's models are served by, keeping the models", async () => {
       const createRes = await app.request("/api/model-provider-credentials", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Pinned",
-          providerId: "anthropic",
-          api_key: "sk-anth-test",
-        }),
+        body: JSON.stringify({ label: "Org key", providerId: "anthropic", api_key: "sk-anth" }),
       });
-      const { id: credId } = (await createRes.json()) as { id: string };
-
-      async function usage() {
-        const response = await app.request("/api/model-provider-credentials", {
-          headers: authHeaders(ctx),
-        });
-        expect(response.status).toBe(200);
-        const { data } = (await response.json()) as {
-          data: { id: string; referencing_model_count: number }[];
-        };
-        return data.find((credential) => credential.id === credId)!.referencing_model_count;
-      }
-      expect(await usage()).toBe(0);
-
-      // A model binding can be created after the settings page read its verdict.
+      expect(createRes.status).toBe(201);
+      const { id: credId, config_id: configId } = (await createRes.json()) as {
+        id: string;
+        config_id: string;
+      };
       const modelRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        // `apiShape` / `baseUrl` are deliberately NOT part of this body — they
-        // are pinned by the credential's `providerId`. They used to be sent and
-        // silently stripped; the body is `.strict()` now, so they are gone.
-        body: JSON.stringify({
-          label: "Sonnet pinned",
-          credentialId: credId,
-          modelId: "claude-sonnet-4-6",
-        }),
+        body: JSON.stringify({ config_id: configId, modelId: "claude-sonnet-4-6" }),
       });
       expect(modelRes.status).toBe(201);
+      const { id: modelId } = (await modelRes.json()) as { id: string };
 
-      // Now attempt deletion — FK ON DELETE RESTRICT should surface as 409.
+      const list = await app.request("/api/model-provider-credentials", {
+        headers: authHeaders(ctx),
+      });
+      const { data } = (await list.json()) as {
+        data: { id: string; serves_model_ids: string[] }[];
+      };
+      expect(data.find((c) => c.id === credId)?.serves_model_ids).toEqual([modelId]);
+
+      // No `credential_in_use`: a model is its configuration's, not the connection's.
       const res = await app.request(`/api/model-provider-credentials/${credId}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
-      expect(res.status).toBe(409);
-      const body = (await res.json()) as { code?: string };
-      expect(body.code).toBe("credential_in_use");
-      expect(await usage()).toBe(1);
-      const second = await app.request("/api/models", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Disabled binding",
-          credentialId: credId,
-          modelId: "claude-haiku-4-5-20251001",
-        }),
-      });
-      expect(second.status, await second.clone().text()).toBe(201);
-      const { id: secondId } = (await second.json()) as { id: string };
-      const disable = await app.request(`/api/models/${secondId}`, {
-        method: "PATCH",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ enabled: false }),
-      });
-      expect(disable.status).toBe(200);
-      expect(await usage()).toBe(2);
-      const detach = await app.request(`/api/models/${secondId}`, {
-        method: "DELETE",
-        headers: authHeaders(ctx),
-      });
-      expect(detach.status).toBe(204);
-      expect(await usage()).toBe(1);
+      expect(res.status).toBe(204);
+      const [model] = await db.select().from(orgModels).where(eq(orgModels.id, modelId));
+      expect(model?.configId).toBe(configId);
     });
   });
 
@@ -658,7 +660,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Org A key",
           providerId: "openai-compatible",
-          base_url_override: "https://api.openai.com/v1",
+          config_id: await gatewayConfig("https://api.openai.com/v1"),
           api_key: "sk-org-a",
         }),
       });
@@ -686,7 +688,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Local",
           providerId: "openai-compatible",
-          base_url_override: "http://10.255.255.9:9",
+          config_id: await gatewayConfig("http://10.255.255.9:9"),
           api_key: "sk-local",
         }),
       });
@@ -768,7 +770,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Inline-existing",
           providerId: "openai-compatible",
-          base_url_override: "http://10.255.255.9:9",
+          config_id: await gatewayConfig("http://10.255.255.9:9"),
           api_key: "sk-stored",
         }),
       });
@@ -943,7 +945,7 @@ describe("Model Provider Keys API", () => {
       try {
         const id = await createCredential({
           providerId: "openai-compatible",
-          base_url_override: stored.baseUrl,
+          config_id: await gatewayConfig(stored.baseUrl),
           api_key: "sk-stored",
         });
         const res = await testRoute({
@@ -965,7 +967,7 @@ describe("Model Provider Keys API", () => {
       try {
         const custom = await createCredential({
           providerId: "openai-compatible",
-          base_url_override: stored.baseUrl,
+          config_id: await gatewayConfig(stored.baseUrl),
           api_key: "sk-stored",
         });
         const named = await createCredential({ providerId: "openai", api_key: "sk-named" });
@@ -994,7 +996,7 @@ describe("Model Provider Keys API", () => {
       try {
         const id = await createCredential({
           providerId: "openai-compatible",
-          base_url_override: stored.baseUrl,
+          config_id: await gatewayConfig(stored.baseUrl),
           api_key: "sk-stored",
         });
         const res = await testRoute({

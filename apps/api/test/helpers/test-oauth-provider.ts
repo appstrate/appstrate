@@ -126,6 +126,13 @@ const testApiKeyProvider: ModelProviderDefinition = {
   featuredModels: [],
 };
 
+/** The catalog families the synthetic providers name (`test-oauth` → `openai`). */
+export const TEST_PROVIDER_FAMILIES: readonly string[] = [
+  testOAuthProvider,
+  testOAuthHooksProvider,
+  testApiKeyProvider,
+].flatMap((p) => (p.catalogProviderId ? [p.catalogProviderId] : []));
+
 let registered = false;
 let hooksRegistered = false;
 let apiKeyRegistered = false;

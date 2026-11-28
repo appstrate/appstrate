@@ -36,15 +36,17 @@ import {
   registerTestOAuthHooksProvider,
   registerTestOAuthProvider,
   _resetTestOAuthProviderRegistration,
+  TEST_PROVIDER_FAMILIES,
 } from "./test-oauth-provider.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
 
 export interface SeedTestModelProvidersOptions {
   /**
-   * Module provider ids that keep their production `baseUrlOverridable`
-   * value instead of the harness default. Tests that exercise the unbound
-   * refusal on a fixed-endpoint provider (`openai`, `anthropic`) list them
-   * here so the refusal path is reachable.
+   * Extra module provider ids that keep their production `baseUrlOverridable`
+   * value instead of the harness default. Every family head (a provider some
+   * other provider names as its `catalogProviderId`, e.g. `openai`, `anthropic`)
+   * keeps it already: a gateway configuration only takes connections of its own
+   * provider, so a family head turned gateway would refuse its wrappers.
    */
   readonly fixedEndpoint?: readonly string[];
 }
@@ -61,10 +63,23 @@ export function seedTestModelProviders(options: SeedTestModelProvidersOptions = 
   // monkey-patch the registry. Providers listed in `fixedEndpoint` keep the
   // production value (`core-providers` ships them `baseUrlOverridable: false`,
   // only `openai-compatible` and `anthropic-compatible` are overridable).
-  const fixedEndpoint = new Set(options.fixedEndpoint ?? []);
-  const moduleContributions = getDiscoveredModules()
+  //
+  // A provider another one names as its catalog family (`openai` for `test-oauth`,
+  // `anthropic` for `claude-code`) also keeps its production value: a model
+  // configuration is stored under the family's provider, and a gateway
+  // configuration admits connections of its own provider only, so flipping it
+  // would keep every subscription out of its family's configuration.
+  const contributions = getDiscoveredModules()
     .map((m) => m.modelProviders?.() ?? [])
-    .flat()
-    .map((p) => (fixedEndpoint.has(p.providerId) ? p : { ...p, baseUrlOverridable: true }));
+    .flat();
+  const families = new Set(
+    [...TEST_PROVIDER_FAMILIES, ...contributions.map((p) => p.catalogProviderId)].filter(
+      (id): id is string => typeof id === "string",
+    ),
+  );
+  const fixedEndpoint = new Set([...(options.fixedEndpoint ?? []), ...families]);
+  const moduleContributions = contributions.map((p) =>
+    fixedEndpoint.has(p.providerId) ? p : { ...p, baseUrlOverridable: true },
+  );
   registerModelProviders(moduleContributions);
 }

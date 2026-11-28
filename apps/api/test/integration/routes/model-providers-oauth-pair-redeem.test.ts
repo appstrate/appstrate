@@ -32,7 +32,8 @@ import {
 } from "../../../src/services/model-providers/credentials.ts";
 import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
 import { listCatalogModels } from "../../../src/services/model-catalog.ts";
-import { updateOrgSettings } from "../../../src/services/organizations.ts";
+import { updateModelConfig } from "../../../src/services/model-configs.ts";
+import { seedModelConfigFor } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -161,7 +162,9 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
 
   it("refuses a personal redeem with 403 when the org turned personal credentials off after the mint", async () => {
     const pairing = await mintPairing(ctx, "test-oauth", { ownerType: "user" });
-    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+    await updateModelConfig(ctx.orgId, await seedModelConfigFor(ctx.orgId, "test-oauth"), {
+      personalConnectionsAllowed: false,
+    });
 
     const res = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
@@ -255,7 +258,9 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
       refreshToken: "old-refresh",
     });
     const pairing = await mintPairing(ctx, "test-oauth", { credentialId: subscription });
-    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+    await updateModelConfig(ctx.orgId, await seedModelConfigFor(ctx.orgId, "test-oauth"), {
+      personalConnectionsAllowed: false,
+    });
 
     const res = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",

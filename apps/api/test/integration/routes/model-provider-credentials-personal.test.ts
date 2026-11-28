@@ -21,13 +21,14 @@ import {
   createApiKeyCredential,
   createOAuthCredential,
 } from "../../../src/services/model-providers/credentials.ts";
-import { updateOrgSettings } from "../../../src/services/organizations.ts";
+import { updateModelConfig } from "../../../src/services/model-configs.ts";
+import { seedModelConfigFor } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
 const CREDENTIALS = "/api/model-provider-credentials";
 const PAIRINGS = "/api/model-providers-oauth/pairing";
-/** Baseline test provider: overridable, so a personal credential on it is refused. */
+/** Baseline test provider: overridable, so its connections join a configuration of an endpoint. */
 const CUSTOM_ENDPOINT_PROVIDER = "test-apikey";
 /** Fixed endpoint, so a personal key can be created on it. */
 const FIXED_KEY_PROVIDER = "test-fixed-apikey";
@@ -42,6 +43,13 @@ interface CredentialRow {
   owner_type: "org" | "user";
   owner_id: string | null;
   owner_name: string | null;
+}
+
+/** Switch personal connections off on the configuration `providerId`'s connections join. */
+async function disallowPersonal(orgId: string, providerId: string): Promise<string> {
+  const configId = await seedModelConfigFor(orgId, providerId);
+  await updateModelConfig(orgId, configId, { personalConnectionsAllowed: false });
+  return configId;
 }
 
 function jsonHeaders(ctx: TestContext): Record<string, string> {
@@ -128,19 +136,42 @@ describe("personal model credentials — routes", () => {
       expect(await listCredentials(admin)).toHaveLength(0);
     });
 
-    it("a personal credential on a custom-endpoint provider is refused with 400", async () => {
+    it("a personal credential joins a gateway configuration: the endpoint is the configuration's", async () => {
+      const config = await app.request("/api/model-configs", {
+        method: "POST",
+        headers: jsonHeaders(admin),
+        body: JSON.stringify({
+          provider_id: CUSTOM_ENDPOINT_PROVIDER,
+          base_url: "https://llm.example.test/v1",
+        }),
+      });
+      expect(config.status).toBe(201);
+      const configId = ((await config.json()) as { id: string }).id;
+
       const res = await createCredential(member, {
         providerId: CUSTOM_ENDPOINT_PROVIDER,
         api_key: "sk-member-custom",
         owner_type: "user",
+        config_id: configId,
       });
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { code: string };
-      expect(body.code).toBe("personal_credential_custom_endpoint");
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as CredentialRow & { config_id: string; base_url: string };
+      expect(body.owner_id).toBe(member.user.id);
+      expect(body.config_id).toBe(configId);
+      expect(body.base_url).toBe("https://llm.example.test/v1");
+
+      // Without a configuration a member picks no endpoint of its own.
+      const unfiled = await createCredential(member, {
+        providerId: CUSTOM_ENDPOINT_PROVIDER,
+        api_key: "sk-member-custom",
+        owner_type: "user",
+      });
+      expect(unfiled.status).toBe(400);
+      expect(((await unfiled.json()) as { param: string }).param).toBe("config_id");
     });
 
-    it("the org policy off refuses personal credentials with 403, not organization ones", async () => {
-      await updateOrgSettings(admin.orgId, { personal_model_credentials: false });
+    it("a configuration that disallows personal connections refuses them with 403, not organization ones", async () => {
+      await disallowPersonal(admin.orgId, FIXED_KEY_PROVIDER);
 
       const personal = await createCredential(member, {
         providerId: FIXED_KEY_PROVIDER,
@@ -221,9 +252,8 @@ describe("personal model credentials — routes", () => {
     });
   });
 
-  describe("allowed actions and bindability", () => {
+  describe("allowed actions", () => {
     interface ActionRow extends CredentialRow {
-      bindable: boolean;
       allowed_actions: string[];
     }
 
@@ -233,7 +263,7 @@ describe("personal model credentials — routes", () => {
       return ((await res.json()) as { data: ActionRow[] }).data;
     }
 
-    it("the admin sees an organization key as bindable and editable, a member's personal one as delete only", async () => {
+    it("the admin sees an organization key as editable, a member's personal one as delete only", async () => {
       await createApiKeyCredential({
         orgId: admin.orgId,
         userId: admin.user.id,
@@ -254,10 +284,9 @@ describe("personal model credentials — routes", () => {
       const rows = await listRows(admin);
       const org = rows.find((c) => c.label === "Org key");
       const personal = rows.find((c) => c.label === "Member key");
-      expect(org!.bindable).toBe(true);
       expect(org!.allowed_actions).toContain("edit");
-      expect(personal!.bindable).toBe(false);
       expect(personal!.allowed_actions).toEqual(["delete"]);
+      expect(org).not.toHaveProperty("bindable");
     });
 
     it("a member sees its own personal credential with edit, delete and test", async () => {
@@ -499,7 +528,7 @@ describe("personal model credentials — routes", () => {
       expect((await probe(member, id)).status).toBe(404);
     });
 
-    it("the org policy off refuses probes that spend a member's personal key", async () => {
+    it("a configuration that disallows personal connections refuses probes that spend a member's personal key", async () => {
       const id = await createApiKeyCredential({
         orgId: admin.orgId,
         userId: member.user.id,
@@ -517,7 +546,7 @@ describe("personal model credentials — routes", () => {
         apiKey: "sk-admin",
         ownerUserId: admin.user.id,
       });
-      await updateOrgSettings(admin.orgId, { personal_model_credentials: false });
+      await disallowPersonal(admin.orgId, FIXED_KEY_PROVIDER);
 
       const own = await probe(member, id);
       expect(own.status).toBe(403);
@@ -574,20 +603,6 @@ describe("personal model credentials — routes", () => {
       expect(adminRes.status).toBe(200);
       expect(((await adminRes.json()) as { error: string }).error).toBe("BLOCKED_URL");
     });
-
-    it("the inline test refuses a member a custom-endpoint provider", async () => {
-      const res = await app.request(`${CREDENTIALS}/test`, {
-        method: "POST",
-        headers: jsonHeaders(member),
-        body: JSON.stringify({
-          providerId: CUSTOM_ENDPOINT_PROVIDER,
-          base_url: "https://llm.example.test/v1",
-          api_key: "sk-member",
-        }),
-      });
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as { param: string }).param).toBe("providerId");
-    });
   });
 
   describe("subscription pairings", () => {
@@ -616,8 +631,9 @@ describe("personal model credentials — routes", () => {
       expect(((await ownRead.json()) as { status: string }).status).toBe("pending");
     });
 
-    it("the org policy off refuses a pairing mint with 403", async () => {
-      await updateOrgSettings(admin.orgId, { personal_model_credentials: false });
+    it("a configuration that disallows personal connections refuses a personal pairing mint with 403", async () => {
+      // `test-oauth` joins its family's (openai) configuration.
+      await disallowPersonal(admin.orgId, OAUTH_PROVIDER);
       const res = await app.request(PAIRINGS, {
         method: "POST",
         headers: jsonHeaders(member),

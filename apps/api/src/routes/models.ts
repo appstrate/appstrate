@@ -19,6 +19,7 @@ import {
   deleteOrgModel,
   setDefaultModel,
   writeDefaultModel,
+  assertOrgServesDefault,
   seedOrgModelsForConfig,
   testModelConnection,
   testModelConfig,
@@ -434,6 +435,21 @@ export function createModelsRouter() {
         prepared.push({ modelId: entry.modelId, ...ready });
       } catch (err) {
         refuse(`add.${index}`, err);
+      }
+    }
+    // The default must be served by an organization connection, as `PUT /api/models/default`
+    // requires; judged on the configuration, since the model may be created below.
+    if (data.default_model_id !== undefined) {
+      try {
+        await assertOrgServesDefault(orgId, {
+          modelId: data.default_model_id,
+          aliased: false,
+          configId: config.id,
+          configProviderId: config.providerId,
+          personalConnectionsAllowed: config.personalConnectionsAllowed,
+        });
+      } catch (err) {
+        refuse("default_model_id", err);
       }
     }
     if (refusals.length > 0) throw validationFailed(refusals);

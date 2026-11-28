@@ -28,7 +28,7 @@ const app = getTestApp();
 const MODEL_BODY = JSON.stringify({
   label: "Test",
   modelId: "gpt-4",
-  credentialId: crypto.randomUUID(),
+  config_id: crypto.randomUUID(),
 });
 
 describe("RBAC — Permission enforcement", () => {
@@ -56,9 +56,10 @@ describe("RBAC — Permission enforcement", () => {
         headers: authHeaders(owner, { "Content-Type": "application/json" }),
         body: MODEL_BODY,
       });
-      expect(res.status).toBe(400);
+      // Past the guard: the unknown configuration is the handler's 404.
+      expect(res.status).toBe(404);
       expect(((await res.json()) as { detail: string }).detail).toContain(
-        "credentialId is unreachable",
+        "Model configuration not found",
       );
     });
 
@@ -68,9 +69,10 @@ describe("RBAC — Permission enforcement", () => {
         headers: authHeaders(admin, { "Content-Type": "application/json" }),
         body: MODEL_BODY,
       });
-      expect(res.status).toBe(400);
+      // Past the guard: the unknown configuration is the handler's 404.
+      expect(res.status).toBe(404);
       expect(((await res.json()) as { detail: string }).detail).toContain(
-        "credentialId is unreachable",
+        "Model configuration not found",
       );
     });
 

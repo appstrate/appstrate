@@ -72,6 +72,16 @@ export async function resolveChatModel(
     return { subscription: false };
   }
 
+  // Nothing serves the user, and a reconnect of a dead connection would: ask for it.
+  // Checked before the provider: with no serving connection, `providerId` is the
+  // configuration's, whose auth mode says nothing of the dead subscription.
+  if (
+    resolved.credentialSource === null &&
+    (await modelNeedsReconnection(orgId, presetId, userId))
+  ) {
+    return { subscription: true, needsReconnection: true };
+  }
+
   const provider = getModelProvider(resolved.providerId);
   if (!provider || provider.authMode !== "oauth2") {
     return { subscription: false };
@@ -93,14 +103,6 @@ export async function resolveChatModel(
     return { subscription: false };
   }
 
-  // An unbound subscription model names no credential the user can spend: a dead
-  // one of theirs asks for a reconnect, none at all for a credential to add.
-  if (
-    resolved.credentialSource === null &&
-    (await modelNeedsReconnection(orgId, presetId, userId))
-  ) {
-    return { subscription: true, needsReconnection: true };
-  }
   const { credentialId } = requireBoundModel(resolved, userId);
   if (!credentialId) {
     return { subscription: true, needsReconnection: true };

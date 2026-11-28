@@ -86,9 +86,12 @@ const configKey = (providerId: string, baseUrl: string | null) =>
   `${providerId}\u0000${baseUrl ?? ""}`;
 const time = (d: Date | string) => new Date(d).getTime();
 
+/** Registers the providers the platform ships; one already registered (a second run in the same process) is kept. */
 function registerProviders(): void {
   for (const module of [coreProvidersModule, claudeCodeModule, codexModule]) {
-    registerModelProviders(module.modelProviders?.() ?? []);
+    registerModelProviders(
+      (module.modelProviders?.() ?? []).filter((def) => !getModelProvider(def.providerId)),
+    );
   }
 }
 

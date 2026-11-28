@@ -74,11 +74,11 @@ describe("live model catalog — what an org and a system model get", () => {
     initSystemModelProviderKeys();
   });
 
-  async function createModel(modelId: string, credentialId: string) {
+  async function createModel(modelId: string, configId: string) {
     return app.request("/api/models", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ label: modelId, modelId, credentialId }),
+      body: JSON.stringify({ label: modelId, modelId, config_id: configId }),
     });
   }
 
@@ -89,11 +89,11 @@ describe("live model catalog — what an org and a system model get", () => {
       body: JSON.stringify({ label: "Anthropic", providerId: "anthropic", api_key: "sk-ant-test" }),
     });
     expect(credential.status).toBe(201);
-    const credentialId = ((await credential.json()) as { id: string }).id;
+    const configId = ((await credential.json()) as { config_id: string }).config_id;
 
     // Not offered yet: a named provider binds only the ids of its offer.
     const refused = async () => {
-      const res = await createModel(NEXT, credentialId);
+      const res = await createModel(NEXT, configId);
       return { status: res.status, detail: ((await res.json()) as { detail: string }).detail };
     };
     const notOffered = {
@@ -104,7 +104,7 @@ describe("live model catalog — what an org and a system model get", () => {
 
     await apply([record]);
 
-    const created = await createModel(NEXT, credentialId);
+    const created = await createModel(NEXT, configId);
     expect(created.status).toBe(201);
     const { id } = (await created.json()) as { id: string };
     const listed = async () => {

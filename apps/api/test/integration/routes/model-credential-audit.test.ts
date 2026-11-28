@@ -17,6 +17,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
+import { seedModelConfigFor } from "../../helpers/seed.ts";
 import { auditEvents } from "@appstrate/db/schema";
 import {
   createApiKeyCredential,
@@ -110,6 +111,7 @@ describe("model credential audit", () => {
       label: "Org key",
       providerId: ORG_KEY_PROVIDER,
       apiKey: "sk-before",
+      configId: await seedModelConfigFor(admin.orgId, ORG_KEY_PROVIDER),
     });
     const secret = "sk-rotated-secret-do-not-audit";
 

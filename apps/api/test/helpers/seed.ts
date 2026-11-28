@@ -492,6 +492,18 @@ import {
   isGatewayProvider,
 } from "../../src/services/model-providers/credential-chain.ts";
 
+/** The configuration a stored connection is filed under. */
+export async function configIdOf(credentialId: string): Promise<string> {
+  const [row] = await db
+    .select({ configId: modelProviderCredentials.configId })
+    .from(modelProviderCredentials)
+    .where(eq(modelProviderCredentials.id, credentialId))
+    .limit(1);
+  if (!row?.configId)
+    throw new Error(`configIdOf: connection ${credentialId} has no configuration`);
+  return row.configId;
+}
+
 /**
  * The model configuration a seeded connection or model of `providerId` joins: its family's
  * (gateway: per endpoint, the provider default when none is given), created when missing.
@@ -526,6 +538,30 @@ export async function seedModelConfigFor(
       label: getModelProvider(configProviderId)?.displayName ?? configProviderId,
       baseUrl: endpoint,
       personalConnectionsAllowed,
+    })
+    .returning({ id: modelConfigs.id });
+  return row!.id;
+}
+
+/**
+ * A model configuration stored under exactly `providerId` (no family normalisation), for
+ * tests that pick the configuration's provider themselves.
+ */
+export async function seedModelConfig(overrides: {
+  orgId: string;
+  providerId: string;
+  baseUrl?: string | null;
+  label?: string;
+  personalConnectionsAllowed?: boolean;
+}): Promise<string> {
+  const [row] = await db
+    .insert(modelConfigs)
+    .values({
+      orgId: overrides.orgId,
+      providerId: overrides.providerId,
+      label: overrides.label ?? overrides.providerId,
+      baseUrl: overrides.baseUrl ?? null,
+      personalConnectionsAllowed: overrides.personalConnectionsAllowed ?? true,
     })
     .returning({ id: modelConfigs.id });
   return row!.id;
@@ -570,8 +606,9 @@ function defaultProviderId(apiShape: string | undefined, baseUrl: string | undef
   if (baseUrl && /mistral\.ai/i.test(baseUrl)) return "mistral";
 
   // Otherwise route by wire format. `openai-completions` is served by the
-  // `cerebras` registry entry (apiShape match); the canonical `openai`
-  // provider uses `openai-responses` natively.
+  // `openai-compatible` gateway (no catalog: its connections serve any model id,
+  // as `servesModel` reads it); the canonical `openai` provider uses
+  // `openai-responses` natively.
   switch (apiShape) {
     case "anthropic-messages":
       return "anthropic";
@@ -580,7 +617,7 @@ function defaultProviderId(apiShape: string | undefined, baseUrl: string | undef
     case "openai":
       return "openai-compatible";
     case "openai-completions":
-      return "cerebras";
+      return "openai-compatible";
     case "mistral-conversations":
       return "mistral";
   }

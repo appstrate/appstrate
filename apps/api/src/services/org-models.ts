@@ -824,25 +824,34 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
     modelDbId === null || isSystemModel(modelDbId)
       ? null
       : await loadOrgModelHead(orgId, modelDbId);
-  if (row?.enabled) {
-    const connections = await listConfigConnections(orgId, [row.configId]);
-    const outcome = await pickServing(candidatesFor(connections, row, null), (c) =>
-      connectionState(orgId, c, true),
-    );
-    if (!outcome.served && outcome.deadOrg) {
-      throw conflict(
-        "model_needs_reconnection",
-        "This model's organization connection must be reconnected before it can be the default model. Reconnect it, or pick another model.",
-      );
-    }
-    if (!outcome.served) {
-      throw conflict(
-        "model_org_connection_required",
-        "The default model serves schedules, API keys and end users, which only an organization connection can pay for. Connect the organization to this model's configuration, or pick another model.",
-      );
-    }
-  }
+  if (row?.enabled) await assertOrgServesDefault(orgId, row);
   await db.transaction((tx) => writeDefaultModel(tx, orgId, modelDbId, !!row));
+}
+
+/**
+ * Refuse a model as the default unless a live ORGANIZATION connection of its
+ * configuration serves it (409 `model_needs_reconnection` when one would after a
+ * reconnect, else 409 `model_org_connection_required`). Decrypts: call it before
+ * any transaction. Shared by {@link setDefaultModel} and `POST /api/models/apply`,
+ * which may name a model it creates in the same write.
+ */
+export async function assertOrgServesDefault(orgId: string, model: ConfiguredModel): Promise<void> {
+  const connections = await listConfigConnections(orgId, [model.configId]);
+  const outcome = await pickServing(candidatesFor(connections, model, null), (c) =>
+    connectionState(orgId, c, true),
+  );
+  if (!outcome.served && outcome.deadOrg) {
+    throw conflict(
+      "model_needs_reconnection",
+      "This model's organization connection must be reconnected before it can be the default model. Reconnect it, or pick another model.",
+    );
+  }
+  if (!outcome.served) {
+    throw conflict(
+      "model_org_connection_required",
+      "The default model serves schedules, API keys and end users, which only an organization connection can pay for. Connect the organization to this model's configuration, or pick another model.",
+    );
+  }
 }
 
 /**

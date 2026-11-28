@@ -37,7 +37,9 @@ import {
 } from "../../helpers/auth.ts";
 import type { ModelProviderCredentialAction } from "@appstrate/shared-types";
 import { ApiError } from "../../../src/lib/errors.ts";
-import { updateOrgSettings } from "../../../src/services/organizations.ts";
+import { updateModelConfig } from "../../../src/services/model-configs.ts";
+import { seedModelConfig, seedModelConfigFor } from "../../helpers/seed.ts";
+
 import {
   assertCredentialEditable,
   credentialActions,
@@ -88,6 +90,13 @@ const adminCaller = (orgId: string): ModelCredentialCaller => ({
   deletesOrg: true,
   connects: true,
 });
+
+/** Switch personal connections off on the configuration `providerId` is filed under. */
+async function disablePersonal(orgId: string, providerId: string): Promise<void> {
+  await updateModelConfig(orgId, await seedModelConfigFor(orgId, providerId), {
+    personalConnectionsAllowed: false,
+  });
+}
 
 describe("model-provider-credentials service — api_key path", () => {
   beforeEach(async () => {
@@ -162,12 +171,9 @@ describe("model-provider-credentials service — api_key path", () => {
     ).rejects.toThrow(/requires OAuth/);
   });
 
-  it("honors baseUrlOverride only for openai-compatible", async () => {
-    // This test pins the prod-strict semantics: only providers declaring
-    // `baseUrlOverridable: true` accept a baseUrlOverride. The shared test
-    // fixture flips that flag globally for harness convenience, so we
-    // restore prod registration just for this case and reseed the baseline
-    // afterwards.
+  it("serves a gateway connection at its configuration's endpoint, a fixed one at the provider's", async () => {
+    // The endpoint is the configuration's (`model_configs.base_url`), never the
+    // connection's: the retired `base_url_override` column is left unwritten.
     resetModelProviders();
     registerModelProvider({
       providerId: "openai",
@@ -195,7 +201,11 @@ describe("model-provider-credentials service — api_key path", () => {
     });
     try {
       const ctx = await createTestContext({ orgSlug: "mpc-svc-override" });
-      // openai-compatible: override is honored.
+      const gatewayConfig = await seedModelConfig({
+        orgId: ctx.orgId,
+        providerId: "openai-compatible",
+        baseUrl: "http://localhost:11435",
+      });
       const compatId = await createApiKeyCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
@@ -203,12 +213,11 @@ describe("model-provider-credentials service — api_key path", () => {
         label: "Local Ollama",
         providerId: "openai-compatible",
         apiKey: "ollama-fake-key",
-        baseUrlOverride: "http://localhost:11434",
+        configId: gatewayConfig,
       });
       const compatLoad = await loadInferenceCredentials(ctx.orgId, compatId);
-      expect(compatLoad!.baseUrl).toBe("http://localhost:11434");
+      expect(compatLoad!.baseUrl).toBe("http://localhost:11435");
 
-      // openai: override is silently ignored (not overridable).
       const openaiId = await createApiKeyCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
@@ -216,7 +225,6 @@ describe("model-provider-credentials service — api_key path", () => {
         label: "OpenAI",
         providerId: "openai",
         apiKey: "sk-foo",
-        baseUrlOverride: "http://attacker.example/openai",
       });
       const openaiLoad = await loadInferenceCredentials(ctx.orgId, openaiId);
       expect(openaiLoad!.baseUrl).toBe("https://api.openai.com/v1");
@@ -969,6 +977,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       label: "Org key",
       providerId: "test-apikey",
       apiKey: "sk-org",
+      configId: await seedModelConfigFor(ctx.orgId, "test-apikey"),
     });
     const personalId = await createOAuthCredential({
       orgId: ctx.orgId,
@@ -1005,7 +1014,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
     );
   });
 
-  it("mayProbeCredential refuses the owner's personal credential with 403 while the org policy is off", async () => {
+  it("mayProbeCredential refuses the owner's personal credential with 403 while its configuration has personal connections off", async () => {
     const ctx = await createTestContext({ orgSlug: "mpc-svc-probe-policy" });
     const personalId = await createOAuthCredential({
       orgId: ctx.orgId,
@@ -1023,6 +1032,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       label: "Org key",
       providerId: "test-apikey",
       apiKey: "sk-org",
+      configId: await seedModelConfigFor(ctx.orgId, "test-apikey"),
     });
     const caller: ModelCredentialCaller = {
       orgId: ctx.orgId,
@@ -1032,7 +1042,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       deletesOrg: true,
       connects: true,
     };
-    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+    await disablePersonal(ctx.orgId, "test-oauth");
 
     const error = await mayProbeCredential(caller, personalId).catch((err: unknown) => err);
     expect(error).toBeInstanceOf(ApiError);
@@ -1052,6 +1062,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       label: "Org key",
       providerId: "test-apikey",
       apiKey: "sk-org",
+      configId: await seedModelConfigFor(ctx.orgId, "test-apikey"),
     });
     const personalId = await createOAuthCredential({
       orgId: ctx.orgId,
@@ -1088,9 +1099,9 @@ describe("model-provider-credentials service — visibility and the personal-cre
     expect(await refused(deleter, personalId, "edit")).toBe(true);
   });
 
-  it("createOAuthCredential refuses a personal subscription while the org policy is off, not an organization one", async () => {
+  it("createOAuthCredential refuses a personal subscription while its configuration has personal connections off, not an organization one", async () => {
     const ctx = await createTestContext({ orgSlug: "mpc-svc-policy" });
-    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+    await disablePersonal(ctx.orgId, "test-oauth");
 
     const error = await createOAuthCredential({
       orgId: ctx.orgId,

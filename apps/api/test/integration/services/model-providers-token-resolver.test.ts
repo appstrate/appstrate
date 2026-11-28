@@ -39,6 +39,11 @@ import {
 } from "../../../src/services/model-providers/token-resolver.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { getEnv } from "@appstrate/env";
+import { seedTestModelProviders } from "../../helpers/model-providers.ts";
+
+// `createOAuthCredential` files the credential under its provider's configuration,
+// which reads the registry: register the synthetic providers this file seeds against.
+seedTestModelProviders();
 
 // ─── globalThis.fetch swap ───────────────────────────────────
 
