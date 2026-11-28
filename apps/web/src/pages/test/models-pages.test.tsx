@@ -177,6 +177,12 @@ describe("Settings › Models, for a member who may only read models", () => {
     expect(html).toContain(SYSTEM.label);
   });
 
+  it("says the organization's connection by its state, with no count it cannot read", () => {
+    const row = rowOf(html, "Anthropic");
+    expect(row).toContain(`· ${settingsFr["modelConfigs.summary.orgConnection"]}`);
+    expect(row).not.toContain("1 connexion de l'organisation");
+  });
+
   it("offers no repair to a member who may not connect", () => {
     expect(rowOf(html, "Mistral")).not.toContain(`>${settingsFr["modelConfigs.connect.action"]}<`);
   });
@@ -202,11 +208,19 @@ describe("Settings › Models, for an administrator", () => {
     );
   });
 
-  it("summarises a configuration on one line", () => {
+  it("summarises a configuration on one line, counting the organization's connections", () => {
     const row = rowOf(html, "Anthropic");
     expect(row).toContain("1 modèle");
-    expect(row).toContain(settingsFr["modelConfigs.summary.orgConnection"]);
+    expect(row).toContain("1 connexion de l'organisation");
     expect(row).toContain("0 connexion perso");
+    expect(rowOf(html, "Mistral")).toContain(settingsFr["modelConfigs.summary.noOrgConnection"]);
+  });
+
+  it("says how many organization connections serve a configuration", () => {
+    const two = renderPage("settings", ADMIN, {
+      credentials: [connectionFixture(), connectionFixture({ id: "cred_org_2" })],
+    }).html;
+    expect(rowOf(two, "Anthropic")).toContain("2 connexions de l'organisation");
   });
 
   it("says when there is no configuration yet, with the way to add one", () => {

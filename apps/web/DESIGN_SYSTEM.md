@@ -548,7 +548,11 @@ connections (`lib/model-picker.ts`); a new surface that picks a model uses this 
     its icon, its label (an `InlineEditableLabel`), its state badge (`ConfigStateBadge`: Active,
     À connecter, À reconnecter, Système) and the repair it needs (`ConnectMenu`,
     `components/model-configs/connect-menu.tsx`: one button and the other ways to connect in its
-    dropdown, grouped by owner, each group saying who pays). Its « … » menu: Renommer, Modifier
+    dropdown, grouped by owner, each group saying who pays). Its summary counts the
+    organization's connections when the caller reads them (« 2 connexions de l'organisation »),
+    else says their state. In a narrow row (a phone, `@container/row` below `@xl`,
+    `components/model-configs/row-layout.ts`, shared with Preferences and the skeleton) the badge,
+    the repair and the menus go under the label and summary. Its « … » menu: Renommer, Modifier
     l'endpoint (a gateway), Supprimer (`ConfirmModal`: its connections and models go with it).
     Open, it shows **Connexions** (the organization's lines, the « Connexions personnelles
     autorisées » switch, the members' lines; a line's own menu is its `allowed_actions`:

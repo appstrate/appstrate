@@ -58,6 +58,7 @@ import { useSpaceResolver } from "./hooks/use-current-space";
 import { useOverviewRules } from "./hooks/use-overview-mode";
 import { useHome, useStudioReach } from "./hooks/use-can-reach";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
+import { routeOf } from "./lib/route-match";
 import {
   sidebarWidthCss,
   useChatSidebarStore,
@@ -420,6 +421,19 @@ function skeletonOf(path: RoutePath): ReactNode {
   );
 }
 
+/**
+ * A settings scope's wait (its layout's chunk, its permissions) drawn as the page the address
+ * opens on, so the first paint already has that page's shape; the scope's index waits as a page
+ * of fields.
+ */
+function SettingsLandingSkeleton() {
+  const landing = routeOf(useLocation().pathname);
+  if (!landing || !inLayout(landing) || (LAYOUTS as readonly RoutePath[]).includes(landing)) {
+    return <SettingsSkeleton />;
+  }
+  return <>{skeletonOf(landing)}</>;
+}
+
 function pageRoute(path: RoutePath) {
   const skeleton = skeletonOf(path);
   return (
@@ -441,7 +455,7 @@ function layoutRoute(layout: LayoutPath) {
       key={layout}
       path={layout}
       element={
-        <RouteGate path={layout} pending={<SettingsSkeleton />}>
+        <RouteGate path={layout} pending={<SettingsLandingSkeleton />}>
           {PAGES[layout]}
         </RouteGate>
       }
@@ -741,7 +755,13 @@ export function App() {
                     {flatPaths(true).map(pageRoute)}
                     <Route
                       element={
-                        <Suspense fallback={<OverlayPanelSkeleton />}>
+                        <Suspense
+                          fallback={
+                            <OverlayPanelSkeleton>
+                              <SettingsLandingSkeleton />
+                            </OverlayPanelSkeleton>
+                          }
+                        >
                           <UnifiedSettingsLayout />
                         </Suspense>
                       }

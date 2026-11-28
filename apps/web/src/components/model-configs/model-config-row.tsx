@@ -49,6 +49,7 @@ import type { OrgModelInfo } from "../../hooks/use-models";
 import {
   configState,
   onlySubscriptions,
+  orgConnectionSummary,
   type ConfigState,
   type ConnectChoice,
   type ModelConfigInfo,
@@ -59,6 +60,7 @@ import { TableRowActions } from "../table-row-actions";
 import { TestResultSpan } from "../test-result-span";
 import { ConnectMenu } from "./connect-menu";
 import { ModelChips } from "./model-chips";
+import { MODEL_ROW_ACTIONS, MODEL_ROW_ITEM, MODEL_ROW_MENUS } from "./row-layout";
 
 /** What the caller may do to a configuration (the connections answer for themselves). */
 export interface ConfigPermissions {
@@ -110,6 +112,7 @@ export function ModelConfigRow({
   provider,
   models,
   connections,
+  orgConnectionCount,
   can,
   choices,
   defaultOpen = false,
@@ -128,6 +131,8 @@ export function ModelConfigRow({
   models: readonly OrgModelInfo[];
   /** Its connections the caller can read. */
   connections: { org: ModelProviderCredentialInfo[]; personal: ModelProviderCredentialInfo[] };
+  /** How many organization connections it has, `null` when the caller cannot read them. */
+  orgConnectionCount: number | null;
   can: ConfigPermissions;
   /** The ways the caller may connect it (`connectChoices`). */
   choices: readonly ConnectChoice[];
@@ -159,24 +164,26 @@ export function ModelConfigRow({
       />
     );
 
+  const orgSummary = orgConnectionSummary(config.org_connection, orgConnectionCount);
   const summary = [
     t("modelConfigs.summary.models", { count: enabled.length }),
-    t(
-      config.org_connection === "none"
-        ? "modelConfigs.summary.noOrgConnection"
-        : "modelConfigs.summary.orgConnection",
-    ),
+    "count" in orgSummary ? t(orgSummary.key, { count: orgSummary.count }) : t(orgSummary.key),
     ...(config.personal_connections_allowed && config.personal_connection_count !== null
       ? [t("modelConfigs.summary.personal", { count: config.personal_connection_count })]
       : []),
   ].join(" · ");
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="rounded-md border" data-row>
-      <Item size="sm" className="flex-nowrap">
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="@container/row rounded-md border"
+      data-row
+    >
+      <Item size="sm" className={MODEL_ROW_ITEM}>
         <ConfigLogo provider={provider} />
         <ItemContent className="min-w-0">
-          <ItemTitle className="min-w-0">
+          <ItemTitle className="max-w-full min-w-0">
             <InlineEditableLabel
               value={config.label}
               editable={can.writeModels}
@@ -185,54 +192,56 @@ export function ModelConfigRow({
               onSave={onRename}
             />
           </ItemTitle>
-          <ItemDescription className="truncate">{summary}</ItemDescription>
+          <ItemDescription>{summary}</ItemDescription>
         </ItemContent>
-        <ItemActions className="shrink-0">
+        <ItemActions className={MODEL_ROW_ACTIONS}>
           <ConfigStateBadge state={state} />
           {repair}
-          <TableRowActions
-            menuLabel={t("modelConfigs.menu", { label: config.label })}
-            renaming={renaming}
-            actions={[
-              {
-                id: "rename",
-                icon: Pencil,
-                label: t("btn.rename", { ns: "common" }),
-                onSelect: () => setRenaming(true),
-                hidden: !can.writeModels,
-              },
-              {
-                id: "endpoint",
-                icon: Server,
-                label: t("modelConfigs.editEndpoint"),
-                onSelect: onEditEndpoint,
-                hidden: !can.writeModels || config.base_url === null,
-              },
-              {
-                id: "delete",
-                icon: Trash2,
-                label: t("btn.delete", { ns: "common" }),
-                onSelect: onDelete,
-                destructive: true,
-                hidden: !can.deleteModels,
-              },
-            ]}
-          />
-          <CollapsibleTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="size-7 p-0"
-                aria-label={t(open ? "modelConfigs.collapse" : "modelConfigs.expand", {
-                  label: config.label,
-                })}
-              />
-            }
-          >
-            <ChevronDown className={cn("transition-transform", open && "rotate-180")} />
-          </CollapsibleTrigger>
+          <div className={MODEL_ROW_MENUS}>
+            <TableRowActions
+              menuLabel={t("modelConfigs.menu", { label: config.label })}
+              renaming={renaming}
+              actions={[
+                {
+                  id: "rename",
+                  icon: Pencil,
+                  label: t("btn.rename", { ns: "common" }),
+                  onSelect: () => setRenaming(true),
+                  hidden: !can.writeModels,
+                },
+                {
+                  id: "endpoint",
+                  icon: Server,
+                  label: t("modelConfigs.editEndpoint"),
+                  onSelect: onEditEndpoint,
+                  hidden: !can.writeModels || config.base_url === null,
+                },
+                {
+                  id: "delete",
+                  icon: Trash2,
+                  label: t("btn.delete", { ns: "common" }),
+                  onSelect: onDelete,
+                  destructive: true,
+                  hidden: !can.deleteModels,
+                },
+              ]}
+            />
+            <CollapsibleTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="size-7 p-0"
+                  aria-label={t(open ? "modelConfigs.collapse" : "modelConfigs.expand", {
+                    label: config.label,
+                  })}
+                />
+              }
+            >
+              <ChevronDown className={cn("transition-transform", open && "rotate-180")} />
+            </CollapsibleTrigger>
+          </div>
         </ItemActions>
       </Item>
       <CollapsibleContent>

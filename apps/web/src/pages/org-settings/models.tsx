@@ -71,6 +71,8 @@ export function OrgSettingsModelsPage() {
   const canDeleteModels = can("models:delete");
   const canWriteCredentials = can("model-provider-credentials:write");
   const canConnect = can("model-provider-credentials:connect");
+  // `connect` alone lists only the caller's own: the organization's are counted under `read`.
+  const canReadCredentials = can("model-provider-credentials:read");
 
   const modelsQuery = useModels();
   const configsQuery = useModelConfigs();
@@ -79,6 +81,7 @@ export function OrgSettingsModelsPage() {
   const models = modelsQuery.data;
   const configs = configsQuery.data;
   const credentials = credentialsQuery.data ?? [];
+  const countsOrgConnections = canReadCredentials && credentialsQuery.data !== undefined;
 
   const updateConfig = useUpdateModelConfig();
   const deleteConfig = useDeleteModelConfig();
@@ -149,57 +152,61 @@ export function OrgSettingsModelsPage() {
                 <EmptyStateAction action={addConfig} />
               </EmptyState>
             )}
-            {configs.map((config) => (
-              <ModelConfigRow
-                // A configuration asked for opens: a fresh row is mounted open.
-                key={config.id === focusedId ? `${config.id}:focused` : config.id}
-                config={config}
-                provider={registry?.find((p) => p.providerId === config.provider_id)}
-                models={modelsOfConfig(models, config.id)}
-                connections={connectionsOfConfig(credentials, config.id)}
-                can={{ writeModels: canWriteModels, deleteModels: canDeleteModels }}
-                choices={connectChoices(config, registry ?? [], {
-                  org: canWriteCredentials,
-                  personal: canConnect,
-                })}
-                defaultOpen={config.id === focusedId}
-                onConnect={(choice) =>
-                  setConnecting({
-                    kind: "create",
-                    config,
-                    provider: choice.provider,
-                    ownerType: choice.owner,
-                  })
-                }
-                onChooseModels={() => setChoosingId(config.id)}
-                onOpenModel={(model) => setEditModelId(model.id)}
-                onRename={async (label) => {
-                  await updateConfig.mutateAsync({
-                    params: { path: { id: config.id } },
-                    body: configUpdateBody({ label }),
-                  });
-                }}
-                onEditEndpoint={() => setEndpointId(config.id)}
-                onDelete={() => setDeletingConfigId(config.id)}
-                onTogglePersonal={(allowed) =>
-                  updateConfig.mutate({
-                    params: { path: { id: config.id } },
-                    body: configUpdateBody({ personalConnectionsAllowed: allowed }),
-                  })
-                }
-                connectionDeeds={{
-                  onRename: async (credential, label) => {
-                    // A refusal is toasted by the mutation cache; the rejection keeps the label typed.
-                    await updateCredential.mutateAsync({
-                      params: { path: { id: credential.id } },
-                      body: { label },
+            {configs.map((config) => {
+              const connections = connectionsOfConfig(credentials, config.id);
+              return (
+                <ModelConfigRow
+                  // A configuration asked for opens: a fresh row is mounted open.
+                  key={config.id === focusedId ? `${config.id}:focused` : config.id}
+                  config={config}
+                  provider={registry?.find((p) => p.providerId === config.provider_id)}
+                  models={modelsOfConfig(models, config.id)}
+                  connections={connections}
+                  orgConnectionCount={countsOrgConnections ? connections.org.length : null}
+                  can={{ writeModels: canWriteModels, deleteModels: canDeleteModels }}
+                  choices={connectChoices(config, registry ?? [], {
+                    org: canWriteCredentials,
+                    personal: canConnect,
+                  })}
+                  defaultOpen={config.id === focusedId}
+                  onConnect={(choice) =>
+                    setConnecting({
+                      kind: "create",
+                      config,
+                      provider: choice.provider,
+                      ownerType: choice.owner,
+                    })
+                  }
+                  onChooseModels={() => setChoosingId(config.id)}
+                  onOpenModel={(model) => setEditModelId(model.id)}
+                  onRename={async (label) => {
+                    await updateConfig.mutateAsync({
+                      params: { path: { id: config.id } },
+                      body: configUpdateBody({ label }),
                     });
-                  },
-                  onReplace: (credential) => setConnecting({ kind: "edit", credential }),
-                  onDelete: setDeletingConnection,
-                }}
-              />
-            ))}
+                  }}
+                  onEditEndpoint={() => setEndpointId(config.id)}
+                  onDelete={() => setDeletingConfigId(config.id)}
+                  onTogglePersonal={(allowed) =>
+                    updateConfig.mutate({
+                      params: { path: { id: config.id } },
+                      body: configUpdateBody({ personalConnectionsAllowed: allowed }),
+                    })
+                  }
+                  connectionDeeds={{
+                    onRename: async (credential, label) => {
+                      // A refusal is toasted by the mutation cache; the rejection keeps the label typed.
+                      await updateCredential.mutateAsync({
+                        params: { path: { id: credential.id } },
+                        body: { label },
+                      });
+                    },
+                    onReplace: (credential) => setConnecting({ kind: "edit", credential }),
+                    onDelete: setDeletingConnection,
+                  }}
+                />
+              );
+            })}
             {system.length > 0 && <SystemModelsRow models={system} />}
           </div>
         </>

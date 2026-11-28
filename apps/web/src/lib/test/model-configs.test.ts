@@ -24,6 +24,7 @@ import {
   keyUpdateBody,
   modelsOfConfig,
   onlySubscriptions,
+  orgConnectionSummary,
   personalServing,
   seedModelsBody,
   systemModels,
@@ -102,6 +103,37 @@ describe("the connections of a configuration", () => {
     expect(onlySubscriptions([sub])).toBe(true);
     expect(onlySubscriptions([sub, org])).toBe(false);
     expect(onlySubscriptions([])).toBe(false);
+  });
+});
+
+describe("orgConnectionSummary", () => {
+  it("counts the organization's connections the caller reads", () => {
+    expect(orgConnectionSummary("active", 2)).toEqual({
+      key: "modelConfigs.summary.orgConnections",
+      count: 2,
+    });
+    expect(orgConnectionSummary("needs_reconnection", 1)).toEqual({
+      key: "modelConfigs.summary.orgConnections",
+      count: 1,
+    });
+  });
+
+  it("says the state alone when the caller cannot read them", () => {
+    expect(orgConnectionSummary("active", null)).toEqual({
+      key: "modelConfigs.summary.orgConnection",
+    });
+    expect(orgConnectionSummary("active", 0)).toEqual({
+      key: "modelConfigs.summary.orgConnection",
+    });
+  });
+
+  it("says there is none, whatever the count", () => {
+    expect(orgConnectionSummary("none", null)).toEqual({
+      key: "modelConfigs.summary.noOrgConnection",
+    });
+    expect(orgConnectionSummary("none", 0)).toEqual({
+      key: "modelConfigs.summary.noOrgConnection",
+    });
   });
 });
 

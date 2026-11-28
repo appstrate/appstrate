@@ -28,6 +28,11 @@ import { InlineEditableLabel } from "../../components/inline-editable-label";
 import { ModelsPageSkeleton } from "../../components/loading-skeletons";
 import { ConnectMenu } from "../../components/model-configs/connect-menu";
 import { ConfigLogo, ConfigStateBadge } from "../../components/model-configs/model-config-row";
+import {
+  MODEL_ROW_ACTIONS,
+  MODEL_ROW_ITEM,
+  MODEL_ROW_MENUS,
+} from "../../components/model-configs/row-layout";
 import { EmptyState, ErrorState } from "../../components/page-states";
 import { TableRowActions } from "../../components/table-row-actions";
 import { useModelConfigs } from "../../hooks/use-model-configs";
@@ -176,64 +181,75 @@ function PersonalConfigRow({
         : t("modelConfigs.preferences.servedByNone");
 
   return (
-    <Item variant="outline" size="sm" className="flex-nowrap" data-row>
-      <ConfigLogo provider={provider} />
-      <ItemContent className="min-w-0">
-        <ItemTitle className="min-w-0">{config.label}</ItemTitle>
-        <ItemDescription className="truncate">
-          {mine && renaming ? (
-            <InlineEditableLabel
-              value={mine.label}
-              editable={allowed.has("edit")}
-              editing={renaming}
-              onEditingChange={setRenaming}
-              onSave={(label) => onRename(mine, label)}
+    // The container the row's layout answers to: its own width, not the screen's.
+    <div className="@container/row" data-row>
+      <Item variant="outline" size="sm" className={MODEL_ROW_ITEM}>
+        <ConfigLogo provider={provider} />
+        <ItemContent className="min-w-0">
+          <ItemTitle className="max-w-full min-w-0">
+            <span className="truncate" title={config.label}>
+              {config.label}
+            </span>
+          </ItemTitle>
+          <ItemDescription>
+            {mine && renaming ? (
+              <InlineEditableLabel
+                value={mine.label}
+                editable={allowed.has("edit")}
+                editing={renaming}
+                onEditingChange={setRenaming}
+                onSave={(label) => onRename(mine, label)}
+              />
+            ) : (
+              description
+            )}
+          </ItemDescription>
+        </ItemContent>
+        <ItemActions className={MODEL_ROW_ACTIONS}>
+          <ConfigStateBadge state={serving.state} />
+          {!mine && (
+            <ConnectMenu
+              choices={choices}
+              label={t("modelConfigs.preferences.useMine")}
+              onPick={onConnect}
             />
-          ) : (
-            description
           )}
-        </ItemDescription>
-      </ItemContent>
-      <ItemActions className="shrink-0">
-        <ConfigStateBadge state={serving.state} />
-        {!mine && (
-          <ConnectMenu
-            choices={choices}
-            label={t("modelConfigs.preferences.useMine")}
-            onPick={onConnect}
-          />
-        )}
-        {mine && (
-          <TableRowActions
-            menuLabel={t("modelConfigs.connections.menu", { label: mine.label })}
-            renaming={renaming}
-            actions={[
-              {
-                id: "rename",
-                icon: Pencil,
-                label: t("btn.rename", { ns: "common" }),
-                onSelect: () => setRenaming(true),
-                hidden: !allowed.has("edit"),
-              },
-              {
-                id: "replace",
-                icon: subscription ? RefreshCw : KeyRound,
-                label: subscription ? t("modelConfigs.connect.reconnect") : t("credentials.edit"),
-                onSelect: () => onReplace(mine),
-                hidden: subscription ? !allowed.has("reconnect") : !allowed.has("edit"),
-              },
-              {
-                id: "delete",
-                icon: Trash2,
-                label: t("btn.delete", { ns: "common" }),
-                onSelect: () => onDelete(mine),
-                destructive: true,
-                hidden: !allowed.has("delete"),
-              },
-            ]}
-          />
-        )}
-      </ItemActions>
-    </Item>
+          {mine && (
+            <div className={MODEL_ROW_MENUS}>
+              <TableRowActions
+                menuLabel={t("modelConfigs.connections.menu", { label: mine.label })}
+                renaming={renaming}
+                actions={[
+                  {
+                    id: "rename",
+                    icon: Pencil,
+                    label: t("btn.rename", { ns: "common" }),
+                    onSelect: () => setRenaming(true),
+                    hidden: !allowed.has("edit"),
+                  },
+                  {
+                    id: "replace",
+                    icon: subscription ? RefreshCw : KeyRound,
+                    label: subscription
+                      ? t("modelConfigs.connect.reconnect")
+                      : t("credentials.edit"),
+                    onSelect: () => onReplace(mine),
+                    hidden: subscription ? !allowed.has("reconnect") : !allowed.has("edit"),
+                  },
+                  {
+                    id: "delete",
+                    icon: Trash2,
+                    label: t("btn.delete", { ns: "common" }),
+                    onSelect: () => onDelete(mine),
+                    destructive: true,
+                    hidden: !allowed.has("delete"),
+                  },
+                ]}
+              />
+            </div>
+          )}
+        </ItemActions>
+      </Item>
+    </div>
   );
 }

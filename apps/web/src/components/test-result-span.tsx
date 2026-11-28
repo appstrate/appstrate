@@ -14,10 +14,13 @@ export function TestResultSpan({
   result,
   successKey,
   failedKey,
+  wrap = false,
 }: {
   result: TestResult;
   successKey: string;
   failedKey: string;
+  /** On a line of its own (a form's body): the whole sentence wraps instead of truncating. */
+  wrap?: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const accepted =
@@ -33,6 +36,7 @@ export function TestResultSpan({
       ? t(successKey, { latency: result.latency })
       : (failure ?? t(failedKey, { message: result.message }));
   const tone = accepted ? "text-warning" : result.ok ? "text-green-500" : "text-destructive";
+  if (wrap) return <span className={`block text-sm break-words ${tone}`}>{message}</span>;
   return (
     // Truncating, and titled: this sits in an actions cell beside buttons, and
     // a failure message is as long as the server made it. Left to grow it

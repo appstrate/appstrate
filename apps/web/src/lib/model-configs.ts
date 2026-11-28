@@ -70,6 +70,24 @@ export function connectionsOfConfig(
 }
 
 /**
+ * What a collapsed row says of the organization's connections: none, their number when the caller
+ * reads them (`orgCount`, `null` without `model-provider-credentials:read`), else the state alone.
+ */
+export type OrgConnectionSummary =
+  | { key: "modelConfigs.summary.noOrgConnection" }
+  | { key: "modelConfigs.summary.orgConnection" }
+  | { key: "modelConfigs.summary.orgConnections"; count: number };
+
+export function orgConnectionSummary(
+  orgConnection: ModelConfigInfo["org_connection"],
+  orgCount: number | null,
+): OrgConnectionSummary {
+  if (orgConnection === "none") return { key: "modelConfigs.summary.noOrgConnection" };
+  if (orgCount === null || orgCount === 0) return { key: "modelConfigs.summary.orgConnection" };
+  return { key: "modelConfigs.summary.orgConnections", count: orgCount };
+}
+
+/**
  * The organization connects only subscriptions: the LLM proxy (remote runs, API keys) never
  * serves through one.
  */

@@ -173,24 +173,16 @@ function ApiKeyForm({ target, onClose }: { target: ConnectionFormTarget; onClose
       isPending={mutation.isPending}
       formProps={{ noValidate: true }}
       secondaryActions={
-        <div className="mr-auto flex items-center gap-2">
-          <PendingButton
-            type="button"
-            variant="outline"
-            onClick={handleTest}
-            pending={testMutation.isPending}
-            disabled={!canTest}
-          >
-            {t("credentials.test")}
-          </PendingButton>
-          {testResult && (
-            <TestResultSpan
-              result={testResult}
-              successKey="credentials.testSuccess"
-              failedKey="credentials.testFailed"
-            />
-          )}
-        </div>
+        <PendingButton
+          type="button"
+          variant="outline"
+          className="sm:mr-auto"
+          onClick={handleTest}
+          pending={testMutation.isPending}
+          disabled={!canTest}
+        >
+          {t("credentials.test")}
+        </PendingButton>
       }
     >
       {target.kind === "create" && (
@@ -210,6 +202,18 @@ function ApiKeyForm({ target, onClose }: { target: ConnectionFormTarget; onClose
           placeholder={t("credentials.form.apiKeyPlaceholder")}
         />
       </FormItem>
+      {/* Its own line in the body: a refusal is a sentence, and beside the footer's buttons it
+          pushed « Annuler » and « Enregistrer » out of the dialog. */}
+      {testResult && (
+        <div role="status">
+          <TestResultSpan
+            result={testResult}
+            successKey="credentials.testSuccess"
+            failedKey="credentials.testFailed"
+            wrap
+          />
+        </div>
+      )}
     </FormModal>
   );
 }

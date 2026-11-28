@@ -1543,6 +1543,8 @@
   "modelConfigs.summary.models_other": "{{count}} models",
   "modelConfigs.summary.orgConnection": "organization connection",
   "modelConfigs.summary.noOrgConnection": "no organization connection",
+  "modelConfigs.summary.orgConnections_one": "{{count}} organization connection",
+  "modelConfigs.summary.orgConnections_other": "{{count}} organization connections",
   "modelConfigs.summary.personal_one": "{{count}} personal connection",
   "modelConfigs.summary.personal_other": "{{count}} personal connections",
   "modelConfigs.menu": "Actions for “{{label}}”",
