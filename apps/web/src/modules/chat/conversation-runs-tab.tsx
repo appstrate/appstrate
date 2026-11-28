@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { ActivityIcon, ChevronRightIcon, ExternalLinkIcon, MessageSquareIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -257,7 +257,7 @@ function RunDisclosure({
   useEffect(() => {
     if (settledLate) onSettled();
   }, [settledLate, onSettled]);
-  const logs = visibleLogEntries(stream.logs);
+  const logs = useMemo(() => visibleLogEntries(stream.logs), [stream.logs]);
   const ref = useRef<HTMLDivElement>(null);
   // Opened from the thread's run line or by a reveal that missed, the line comes into sight.
   useEffect(() => {

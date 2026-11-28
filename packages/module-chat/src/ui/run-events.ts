@@ -119,6 +119,11 @@ export function runOutcomeText(
   return runFailureMessage(status, error) ?? t(runStatusLineKey(status));
 }
 
+/** The state text's classes: a log line is monospace, every state replays the enter animation. */
+export function stateTextClass(log: boolean): string {
+  return `${log ? "font-mono " : ""}animate-in fade-in slide-in-from-bottom-1 ease-surface duration-base`;
+}
+
 /** Is this op-id one whose result we can mine for a launched run id? */
 export function isRunLaunchOp(opId: string | undefined): opId is RunLaunchOp {
   return !!opId && (RUN_LAUNCH_OPS as readonly string[]).includes(opId);

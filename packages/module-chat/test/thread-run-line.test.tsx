@@ -11,6 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ChatCommands } from "../src/commands.ts";
 import { ThreadRunLine } from "../src/ui/thread-run-line.tsx";
+import { stateTextClass } from "../src/ui/run-events.ts";
 import { ChatHostProvider, type ChatHost, type ThreadItem } from "../src/ui/runtime-context.ts";
 import { testHost } from "./test-host.ts";
 
@@ -83,6 +84,13 @@ function clickable(node: ReactNode): ReactElement<{ onClick: () => void }> | und
 }
 
 describe("a run's line in the thread", () => {
+  it("keeps a log line's monospace and its enter animation as separate classes", () => {
+    const html = renderToStaticMarkup(<span className={stateTextClass(true)} />);
+    expect(html).toContain("font-mono animate-in");
+    expect(html).not.toContain("font-monoanimate-in");
+    expect(stateTextClass(false)).toStartWith("animate-in");
+  });
+
   it("is a line with no border, background or card padding", () => {
     const root = rootClass(render());
     expect(root).not.toMatch(/(^|\s)border(\s|$|-)/);

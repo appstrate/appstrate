@@ -687,7 +687,7 @@ describe("the Runs tab, open", () => {
     );
   }
 
-  it("draws a run as the thread's card does: its agent, its number, its outcome, folded", () => {
+  it("draws a run as the thread's run line does: its agent, its number, its outcome, folded", () => {
     const html = runsTab([makeRun({ runNumber: 7, package_ephemeral: false })]);
     expect(rowsOf(html)).toBe(1);
     expect(html).not.toContain('aria-expanded="true"');

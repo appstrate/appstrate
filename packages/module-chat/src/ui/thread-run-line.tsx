@@ -50,6 +50,7 @@ import {
   runStatusLineKey,
   visibleLogEntries,
   type ChatRunFile,
+  stateTextClass,
 } from "./run-events.ts";
 import type { RunStatus } from "@appstrate/core/run-status";
 import { FileAttachment } from "./file-attachment.tsx";
@@ -302,10 +303,7 @@ export function ThreadRunLine({
               </span>
               {state ? (
                 <span className="grid min-w-0 *:col-start-1 *:row-start-1 *:truncate">
-                  <span
-                    key={state.id}
-                    className={`${state.log ? "font-mono" : ""}animate-in fade-in slide-in-from-bottom-1 ease-surface duration-base`}
-                  >
+                  <span key={state.id} className={stateTextClass(state.log)}>
                     {state.text}
                   </span>
                 </span>
@@ -326,6 +324,7 @@ export function ThreadRunLine({
                 href={effectiveRunHref}
                 className="hover:text-foreground flex h-full shrink-0 items-center"
                 title={t("run.openPage")}
+                aria-label={t("run.openPage")}
               >
                 <ExternalLinkIcon className="size-3.5" />
               </a>
