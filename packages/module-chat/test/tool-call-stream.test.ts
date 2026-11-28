@@ -134,16 +134,16 @@ function threadPart(part: Extract<UIMessage["parts"][number], { toolCallId: stri
 }
 
 describe("a turn's tool calls, from the engine's chunks", () => {
-  it("is folded by the thread off the stamp, counted by the panel off the stamp and presentation", async () => {
+  it("joins the thread's activity line, counted by the panel off the stamp and presentation", async () => {
     const message = await streamedTurn();
     const parts = message.parts.filter(isToolUIPart);
     expect(parts.map((part) => part.toolCallId)).toEqual(["s1", "s2", "g1", "m1"]);
 
     const folded = parts.map((part) => activityGroupOf(threadPart(part)) !== null);
     const lookups = conversationTools([message]).calls.map((c) => c.lookup);
-    // Both stamped searches fold, the failed one included; the failed write does not, nor the
-    // Gmail GET, whose method lands with its result: its card stays where it was drawn.
-    expect(folded).toEqual([true, true, false, false]);
+    // Every call joins the turn's activity line, decided on its tool name alone: nothing moves
+    // when a result lands.
+    expect(folded).toEqual([true, true, true, true]);
     // The panel counts the GET a lookup.
     expect(lookups).toEqual([true, false, false, true]);
   });

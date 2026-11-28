@@ -3,8 +3,8 @@
 /**
  * A skill the assistant reads (`read_resource`, or the forwarded `read`, on its `SKILL.md`) is
  * drawn with the user's skill chip, read for that message only, with an « Épingler » action while
- * the conversation can take the pin; a running read and a failed one each say so. Any other read
- * keeps the generic tool row. SSR only.
+ * the conversation can take the pin; a running read and a failed one each say so. The chip stays
+ * in view under its activity group's line; any other read keeps nothing there. SSR only.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -15,7 +15,7 @@ import { MessageProvider, type ThreadMessage } from "@assistant-ui/react";
 import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "../src/skills.ts";
 import { ChatHostProvider, ChatTransportProvider } from "../src/ui/runtime-context.ts";
 import { skillLoadOf, type StoredSkills } from "../src/ui/chat-skills.ts";
-import { ResourceReadTool } from "../src/ui/skill-load.tsx";
+import { SkillReadBreakout } from "../src/ui/skill-load.tsx";
 import {
   ConversationSkillsProvider,
   type ConversationSkillsState,
@@ -88,7 +88,9 @@ function render(
         <ChatTransportProvider value={transport}>
           <ConversationSkillsProvider value={conversation}>
             <MessageProvider message={MESSAGE} index={0}>
-              <ResourceReadTool {...(props as unknown as Parameters<typeof ResourceReadTool>[0])} />
+              <SkillReadBreakout
+                {...(props as unknown as Parameters<typeof SkillReadBreakout>[0])}
+              />
             </MessageProvider>
           </ConversationSkillsProvider>
         </ChatTransportProvider>
@@ -114,7 +116,7 @@ describe("skillLoadOf", () => {
   });
 });
 
-describe("ResourceReadTool", () => {
+describe("SkillReadBreakout", () => {
   const chip = (html: string) => html.match(/<span[^>]*data-testid="directive-chip"[^>]*>/)?.[0];
   const live = (html: string) =>
     html.match(/<span[^>]*data-testid="skill-load-live"[^>]*>([^<]*)</);
@@ -196,7 +198,7 @@ describe("ResourceReadTool", () => {
     expect(html).not.toContain("skill-load-pin");
   });
 
-  it("draws a skill loaded through the forwarded `read` the same way; any other read keeps the generic card, named as a read", () => {
+  it("draws a skill loaded through the forwarded `read` the same way; any other read keeps nothing in view", () => {
     const skill = render({
       toolName: "read",
       args: { uri: SKILL_MD, space_id: "spc_a" },
@@ -211,16 +213,12 @@ describe("ResourceReadTool", () => {
       result: { content: [{ type: "text", text: "file" }] },
       status: { type: "complete" },
     });
-    expect(file).not.toContain("directive-chip");
-    expect(file).toContain(">tool.name.read<");
-    expect(file).toContain("appfile://spc_a/fil_1");
+    expect(file).toBe("");
     const guide = render({
       args: { uri: "skill://spc_a/acme/tone/brand-tone/refs/guide.md" },
       result: { content: [{ type: "text", text: "guide" }] },
       status: { type: "complete" },
     });
-    expect(guide).not.toContain("directive-chip");
-    expect(guide).not.toContain("skill-load");
-    expect(guide).toContain("read_resource");
+    expect(guide).toBe("");
   });
 });

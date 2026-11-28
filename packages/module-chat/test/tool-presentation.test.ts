@@ -3,14 +3,14 @@
 /**
  * `src/ui/tool-presentation.ts` (how a call is named, in the thread and the context panel),
  * and what counts as a lookup (`conversation-tools.ts`): `isPanelLookup`, `activityGroupOf`,
- * `endsFolded`.
+ * `endsInActivity`.
  */
 
 import { describe, it, expect } from "bun:test";
 import { BookOpenIcon, EyeIcon, FileTextIcon, PlugIcon, Trash2Icon, ZapIcon } from "lucide-react";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { callPresentation, showCall } from "../src/ui/tool-presentation.ts";
-import { activityGroupOf, endsFolded, isPanelLookup } from "../src/ui/conversation-tools.ts";
+import { activityGroupOf, endsInActivity, isPanelLookup } from "../src/ui/conversation-tools.ts";
 
 /** The FR bundle's verbs and tags; a key it lacks shows its default value, else the key. */
 const FR: Record<string, string> = {
@@ -326,49 +326,43 @@ describe("isPanelLookup", () => {
 });
 
 describe("activityGroupOf", () => {
-  const read = { type: "tool-call", providerMetadata: { appstrate: { lookup: true } } };
+  const read = {
+    type: "tool-call",
+    toolName: "search",
+    providerMetadata: { appstrate: { lookup: true } },
+  };
 
-  it("folds reasoning and stamped lookups into the activity group", () => {
+  it("makes reasoning and every tool call one activity group, a lookup or not", () => {
     expect(activityGroupOf({ type: "reasoning" })).toEqual(["group-activity", "group-reasoning"]);
     expect(activityGroupOf(read)).toEqual(["group-activity"]);
-  });
-
-  it("never folds an unstamped call, a read whose method lands with its result included", () => {
-    expect(activityGroupOf({ type: "tool-call" })).toBeNull();
-    expect(
-      activityGroupOf({ type: "tool-call", status: { type: "complete" }, result: { content: [] } }),
-    ).toBeNull();
+    expect(activityGroupOf({ type: "tool-call", toolName: "invoke_operation" })).toEqual([
+      "group-activity",
+    ]);
     expect(activityGroupOf({ type: "text" })).toBeNull();
   });
 
-  it("keeps a failed lookup in its group: membership is the pre-call stamp alone", () => {
+  it("leaves a call whose card is its whole display out of any group", () => {
+    expect(activityGroupOf({ type: "tool-call", toolName: "run_and_wait" })).toBeNull();
+  });
+
+  it("decides on the tool's name alone: a result or a failure moves nothing", () => {
     expect(activityGroupOf({ ...read, status: { type: "complete" }, isError: true })).toEqual([
       "group-activity",
     ]);
   });
 });
 
-describe("endsFolded", () => {
-  const read = (toolCallId: string) => ({
-    type: "tool-call",
-    toolCallId,
-    providerMetadata: { appstrate: { lookup: true } },
-  });
-  const reasoning = { type: "reasoning" };
+describe("endsInActivity", () => {
+  const read = { type: "tool-call", toolName: "search", toolCallId: "a" };
 
-  it("is true when the trailing activity parts hold two lookups, reasoning between them or not", () => {
-    expect(endsFolded([read("a"), read("b")])).toBe(true);
-    expect(endsFolded([read("a"), reasoning, read("b"), reasoning])).toBe(true);
+  it("is true when the last part belongs to an activity group", () => {
+    expect(endsInActivity([read])).toBe(true);
+    expect(endsInActivity([{ type: "text" }, { type: "reasoning" }])).toBe(true);
   });
 
-  it("is false for one lookup, an empty message, or a tail outside the group", () => {
-    expect(endsFolded([])).toBe(false);
-    expect(endsFolded([reasoning, read("a"), reasoning])).toBe(false);
-    expect(endsFolded([read("a"), read("b"), { type: "tool-call", toolCallId: "w" }])).toBe(false);
-    expect(endsFolded([read("a"), read("b"), { type: "text" }])).toBe(false);
-  });
-
-  it("counts only the group that ends the message", () => {
-    expect(endsFolded([read("a"), { type: "text" }, read("b")])).toBe(false);
+  it("is false for an empty message, a text tail, or a card of its own", () => {
+    expect(endsInActivity([])).toBe(false);
+    expect(endsInActivity([read, { type: "text" }])).toBe(false);
+    expect(endsInActivity([read, { type: "tool-call", toolName: "run_and_wait" }])).toBe(false);
   });
 });

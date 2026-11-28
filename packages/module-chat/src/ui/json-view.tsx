@@ -13,7 +13,7 @@ export function JsonView({ value, copyLabel }: { value: unknown; copyLabel: stri
   return (
     <div className="relative">
       <CopyButton value={text} label={copyLabel} className="absolute top-1 right-1" />
-      <pre className="overflow-x-auto rounded bg-black/5 p-3 pr-9 text-xs whitespace-pre-wrap dark:bg-white/5">
+      <pre className="bg-muted overflow-x-auto rounded-md p-3 pr-9 text-xs whitespace-pre-wrap">
         {text}
       </pre>
     </div>

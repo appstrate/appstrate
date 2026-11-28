@@ -110,8 +110,8 @@ export function ChatRunProgressCard({
   modalTitle,
   details,
 }: {
-  /** The call the card stands for: the context panel reveals it by this id. */
-  toolCallId: string;
+  /** The call the card stands for, when the context panel reveals it by this card. */
+  toolCallId?: string | undefined;
   runId: string | undefined;
   initialStatus?: string;
   agentLabel?: string;
@@ -232,7 +232,7 @@ export function ChatRunProgressCard({
   return (
     <div
       {...anchor}
-      className={`bg-card text-card-foreground relative isolate my-3 w-full rounded-lg border ${REVEAL_RING_CLASS}`}
+      className={`bg-card text-card-foreground relative isolate my-2 w-full rounded-lg border ${REVEAL_RING_CLASS}`}
     >
       {/* Full-card click target (opens the detail modal). Behind the content so
           the run-page link can re-enable pointer events for itself — avoids
