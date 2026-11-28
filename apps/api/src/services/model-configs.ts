@@ -94,7 +94,7 @@ async function findConfig(
  * creation without `config_id`, pairing redeem, onboarding). A gateway has no implicit one:
  * its endpoint must be chosen.
  */
-export async function ensureModelConfig(
+async function ensureModelConfig(
   executor: DbOrTx,
   orgId: string,
   providerId: string,

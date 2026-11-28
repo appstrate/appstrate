@@ -28,7 +28,7 @@ const MAX_LISTING_PAGES = 10;
 
 /**
  * Upper bound on one page's response body. The endpoint is operator-supplied
- * (`POST /discover` takes an arbitrary `base_url_override`): buffering whatever
+ * (`POST /discover` takes an arbitrary `base_url`): buffering whatever
  * it streams is bounded by the request timeout in duration, not in bytes.
  */
 const MAX_LISTING_BODY_BYTES = 4 * 1024 * 1024;

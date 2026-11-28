@@ -25,7 +25,7 @@ export const modelProviderCredentialsPaths = {
           name: "fields",
           in: "query",
           description:
-            "Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, personal_allowed, featured, live_model_search, models. An unknown field is a 400.",
+            "Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, live_model_search, models. An unknown field is a 400.",
           schema: { type: "string" },
         },
       ],
@@ -244,7 +244,7 @@ export const modelProviderCredentialsPaths = {
                   type: "string",
                   minLength: 1,
                   description:
-                    "Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `base_url_override` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials.",
+                    "Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the configuration's endpoint host for a gateway configuration. Either way it is deduped against existing org credentials.",
                 },
                 providerId: {
                   type: "string",
@@ -521,7 +521,7 @@ export const modelProviderCredentialsPaths = {
         },
         "400": {
           description:
-            "Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `providerId` is unknown or OAuth-only, or `base_url_override` is sent to a provider that does not accept one.",
+            "Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `providerId` is unknown or OAuth-only.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

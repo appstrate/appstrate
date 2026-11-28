@@ -18752,7 +18752,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `base_url_override` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials. */
+                    /** @description Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the configuration's endpoint host for a gateway configuration. Either way it is deduped against existing org credentials. */
                     label?: string;
                     /** @description Canonical registry providerId (`openai`, `anthropic`, `openai-compatible`, …). Discovered via `GET /api/model-provider-credentials/registry`. Only providers with `authMode: api_key` are accepted here; OAuth providers go through the pairing flow. */
                     providerId: string;
@@ -18886,7 +18886,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `providerId` is unknown or OAuth-only, or `base_url_override` is sent to a provider that does not accept one. */
+            /** @description Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `providerId` is unknown or OAuth-only. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18917,7 +18917,7 @@ export interface operations {
                 limit?: number;
                 /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
-                /** @description Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, personal_allowed, featured, live_model_search, models. An unknown field is a 400. */
+                /** @description Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, live_model_search, models. An unknown field is a 400. */
                 fields?: string;
             };
             header?: {

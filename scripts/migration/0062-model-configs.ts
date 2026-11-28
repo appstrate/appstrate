@@ -14,9 +14,10 @@
  *   else none), created when missing — label the provider's display name (`host · name` for a
  *   gateway), `personal_connections_allowed` the organization's retired
  *   `personal_model_credentials` setting (absent = true). A connection of an unregistered provider
- *   is reported and left alone (the guard then keeps refusing boot until it is resolved by hand);
+ *   joins a configuration of its own provider id, reported (the platform cannot serve it while no
+ *   module in `MODULES` registers it);
  * - a model bound to a connection (`credential_id`) joins that connection's configuration, an
- *   unbound one its provider's family configuration;
+ *   unbound one its provider's family configuration (a gateway's: its default endpoint);
  * - two models landing on the same (configuration, model id) are one: the enabled one is kept,
  *   then the oldest; `organizations.default_model_id`, `space_packages.model_id` and
  *   `package_schedules.model_id_override` are repointed to it and the others deleted
@@ -50,9 +51,7 @@ import {
   isGatewayProvider,
   rankCandidates,
 } from "../../apps/api/src/services/model-providers/credential-chain.ts";
-import coreProvidersModule from "../../apps/api/src/modules/core-providers/index.ts";
-import claudeCodeModule from "../../packages/module-claude-code/src/index.ts";
-import codexModule from "../../packages/module-codex/src/index.ts";
+import { getModuleRegistry, importModule } from "../../apps/api/src/lib/modules/module-loader.ts";
 
 interface CredentialRow {
   id: string;
@@ -86,20 +85,35 @@ const configKey = (providerId: string, baseUrl: string | null) =>
   `${providerId}\u0000${baseUrl ?? ""}`;
 const time = (d: Date | string) => new Date(d).getTime();
 
-/** Registers the providers the platform ships; one already registered (a second run in the same process) is kept. */
-function registerProviders(): void {
-  for (const module of [coreProvidersModule, claudeCodeModule, codexModule]) {
-    registerModelProviders(
-      (module.modelProviders?.() ?? []).filter((def) => !getModelProvider(def.providerId)),
-    );
+/**
+ * Registers the model providers of the modules `MODULES` loads, as the platform does at boot
+ * (`scripts/verify-system-models.ts`); one already registered (a second run in the same
+ * process) is kept.
+ */
+async function registerProviders(): Promise<string[]> {
+  const names: string[] = [];
+  for (const specifier of getModuleRegistry()) {
+    const defs = (await importModule(specifier)).modelProviders?.() ?? [];
+    registerModelProviders(defs.filter((def) => !getModelProvider(def.providerId)));
+    names.push(...defs.map((d) => d.providerId));
   }
+  return names;
 }
 
-/** The configuration a connection belongs to, or null for an unregistered provider. */
-function connectionKey(row: CredentialRow): { providerId: string; baseUrl: string | null } | null {
-  if (!getModelProvider(row.provider_id)) return null;
+/**
+ * The configuration a connection belongs to. A provider no loaded module registers keeps a
+ * configuration of its own id (its endpoint override included): the platform cannot serve it
+ * today, and the row must not hold the boot guard.
+ */
+function connectionKey(row: CredentialRow): { providerId: string; baseUrl: string | null } {
+  if (!getModelProvider(row.provider_id)) {
+    return { providerId: row.provider_id, baseUrl: row.base_url_override ?? null };
+  }
   const providerId = configProviderOf(row.provider_id);
-  const baseUrl = isGatewayProvider(row.provider_id) ? (row.base_url_override ?? null) : null;
+  // A gateway connection without an endpoint override used the provider default.
+  const baseUrl = isGatewayProvider(row.provider_id)
+    ? (row.base_url_override ?? getModelProvider(row.provider_id)?.defaultBaseUrl ?? null)
+    : null;
   return { providerId, baseUrl };
 }
 
@@ -120,7 +134,7 @@ export async function runModelConfigs(options: {
   const { apply, out } = options;
   const { db, toRows } = await import("@appstrate/db/client");
   out(await describeDatabaseTarget());
-  registerProviders();
+  out(`providers registered from MODULES: ${(await registerProviders()).join(", ")}`);
 
   const orgIds = toRows<{ org_id: string }>(
     await db.execute(sql`
@@ -130,7 +144,7 @@ export async function runModelConfigs(options: {
   ).map((r) => r.org_id);
   out(`organizations to migrate: ${orgIds.length}`);
 
-  let skippedUnknown = 0;
+  let unregistered = 0;
   let servingChanges = 0;
   for (const orgId of orgIds) {
     const work = async (tx: typeof db) => {
@@ -189,14 +203,11 @@ export async function runModelConfigs(options: {
           continue;
         }
         const key = connectionKey(c);
-        if (!key) {
-          skippedUnknown++;
-          out(`  [${orgId}] UNKNOWN provider, connection left alone: ${c.id} ${c.provider_id}`);
-          continue;
-        }
-        if (isGatewayProvider(c.provider_id) && !key.baseUrl) {
-          // A gateway connection without an endpoint override used the provider default.
-          key.baseUrl = getModelProvider(c.provider_id)?.defaultBaseUrl ?? null;
+        if (!getModelProvider(c.provider_id)) {
+          unregistered++;
+          out(
+            `  [${orgId}] unregistered provider, own configuration: connection ${c.id} ${c.provider_id}`,
+          );
         }
         const cfg = await ensure(key.providerId, key.baseUrl);
         credConfig.set(c.id, cfg.id);
@@ -219,17 +230,20 @@ export async function runModelConfigs(options: {
           target.set(m.id, bound);
           continue;
         }
-        if (!m.provider_id || !getModelProvider(m.provider_id)) {
-          skippedUnknown++;
-          out(`  [${orgId}] UNKNOWN provider, model left alone: ${m.id} ${m.provider_id ?? "-"}`);
+        // `provider_id` was NOT NULL until 0119, so an unmigrated row carries one.
+        const providerId = m.provider_id!;
+        if (!getModelProvider(providerId)) {
+          unregistered++;
+          out(`  [${orgId}] unregistered provider, own configuration: model ${m.id} ${providerId}`);
+          target.set(m.id, (await ensure(providerId, null)).id);
           continue;
         }
-        if (isGatewayProvider(m.provider_id)) {
-          skippedUnknown++;
-          out(`  [${orgId}] unbound gateway model, no endpoint to join, left alone: ${m.id}`);
-          continue;
-        }
-        target.set(m.id, (await ensure(configProviderOf(m.provider_id), null)).id);
+        // An unbound gateway model served nothing before (a personal connection could not carry
+        // an endpoint): it joins the provider's default endpoint, which an admin can edit.
+        const baseUrl = isGatewayProvider(providerId)
+          ? (getModelProvider(providerId)?.defaultBaseUrl ?? null)
+          : null;
+        target.set(m.id, (await ensure(configProviderOf(providerId), baseUrl)).id);
       }
 
       // Duplicates on (configuration, model id): keep the enabled one, then the oldest.
@@ -318,7 +332,7 @@ export async function runModelConfigs(options: {
     }
   }
 
-  out(`left alone (unknown provider / unbound gateway model): ${skippedUnknown}`);
+  out(`rows of a provider no loaded module registers (own configuration): ${unregistered}`);
   out(`models whose serving organization connection changes: ${servingChanges}`);
   if (!apply) {
     out("0062: DRY RUN — nothing written. Re-run with --apply to commit.");

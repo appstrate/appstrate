@@ -7,7 +7,7 @@ import { lookupCatalogModel, piProviderOf, restrictsToOffer } from "../model-cat
 import { getModelProvider } from "./registry.ts";
 
 /** The catalog family a provider's models belong to (a wrapper serves its catalog provider's ids). */
-export function familyOf(providerId: string): string {
+function familyOf(providerId: string): string {
   return getModelProvider(providerId)?.catalogProviderId ?? providerId;
 }
 

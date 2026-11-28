@@ -8,7 +8,7 @@
  */
 
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   modelConfigs,
@@ -297,25 +297,34 @@ describe("0062 — model configurations", () => {
     expect(await pending()).toBe(0);
   });
 
-  it("leaves an unbound gateway model alone, and --apply then refuses to report success", async () => {
+  it("joins an unbound gateway model to the provider's default endpoint configuration", async () => {
     const orphan = await model(b, {
       modelId: "anything",
       providerId: "openai-compatible",
       minute: 9,
     });
 
-    await expect(run(true)).rejects.toThrow("rows without a configuration are left");
-    expect(lines.some((l) => l.includes(`unbound gateway model`) && l.includes(orphan))).toBe(true);
-    expect((await modelRow(orphan))!.configId).toBeNull();
-    // Everything else was committed, organization by organization.
-    expect(
-      (
-        await db
-          .select({ configId: orgModels.configId })
-          .from(orgModels)
-          .where(inArray(orgModels.id, [ids.kept, ids.claude]))
-      ).every((r) => r.configId !== null),
-    ).toBe(true);
-    expect(await pending()).toBe(1);
+    await run(true);
+    const cfg = await db
+      .select()
+      .from(modelConfigs)
+      .where(eq(modelConfigs.id, (await modelRow(orphan))!.configId!));
+    expect(cfg[0]!.providerId).toBe("openai-compatible");
+    expect(await pending()).toBe(0);
+  });
+
+  it("gives a provider no loaded module registers a configuration of its own id", async () => {
+    const stray = await connection(b, "retired-provider", { minute: 9 });
+    const strayModel = await model(b, { modelId: "m", providerId: "retired-provider", minute: 9 });
+
+    await run(true);
+    const [conn] = await db
+      .select({ configId: modelProviderCredentials.configId })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, stray));
+    const [cfg] = await db.select().from(modelConfigs).where(eq(modelConfigs.id, conn!.configId!));
+    expect(cfg!.providerId).toBe("retired-provider");
+    expect((await modelRow(strayModel))!.configId).toBe(cfg!.id);
+    expect(await pending()).toBe(0);
   });
 });
