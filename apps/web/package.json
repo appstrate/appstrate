@@ -27,7 +27,7 @@
     "@tailwindcss/typography": "^0.5.20",
     "@tanstack/react-query": "^5.108.4",
     "@tanstack/react-virtual": "^3.14.28",
-    "better-auth": "1.7.27",
+    "better-auth": "1.7.28",
     "cron-parser": "^5.10.6",
     "emojibase-data": "18.0.0",
     "frimousse": "0.4.0",
