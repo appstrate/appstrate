@@ -41,7 +41,7 @@ import {
   servesModel,
   type ConnectionCandidate,
 } from "./model-providers/credential-chain.ts";
-import { loadModelConfig } from "./model-configs.ts";
+import { loadModelConfig, type ModelConfigRow } from "./model-configs.ts";
 import type { ModelPayer } from "@appstrate/core/model-payer";
 import { EncryptionKeyUnavailableError } from "../lib/stored-credential.ts";
 import type { ModelApiShape, PiModelDialect } from "@appstrate/core/sidecar-types";
@@ -259,7 +259,7 @@ type ConnectionState = { creds: InferenceCredentials } | "dead" | "unavailable";
 
 async function connectionState(
   orgId: string,
-  connection: ConnectionCandidate,
+  connection: Pick<ConnectionCandidate, "id" | "ownerUserId">,
   strict: boolean,
 ): Promise<ConnectionState> {
   try {
@@ -282,6 +282,8 @@ interface ServingOutcome<T extends ConnectionCandidate> {
   dead: boolean;
   /** Some ORGANIZATION candidate is dead but listed. */
   deadOrg: boolean;
+  /** Some SUBSCRIPTION candidate is dead but listed: a reconnect of it would serve. */
+  deadSubscription: boolean;
 }
 
 /** The first ranked candidate that serves, and what the others say when none does. */
@@ -291,15 +293,19 @@ async function pickServing<T extends ConnectionCandidate>(
 ): Promise<ServingOutcome<T>> {
   let dead = false;
   let deadOrg = false;
+  let deadSubscription = false;
   for (const connection of ranked) {
     const s = await state(connection);
-    if (typeof s === "object") return { served: { connection, creds: s.creds }, dead, deadOrg };
+    if (typeof s === "object") {
+      return { served: { connection, creds: s.creds }, dead, deadOrg, deadSubscription };
+    }
     if (s === "dead") {
       dead = true;
       if (connection.ownerUserId === null) deadOrg = true;
+      if (getModelProvider(connection.providerId)?.authMode === "oauth2") deadSubscription = true;
     }
   }
-  return { served: null, dead, deadOrg };
+  return { served: null, dead, deadOrg, deadSubscription };
 }
 
 /** The connections of these configurations of the org. */
@@ -314,16 +320,14 @@ async function listConfigConnections(
       providerId: modelProviderCredentials.providerId,
       ownerUserId: modelProviderCredentials.ownerUserId,
       createdAt: modelProviderCredentials.createdAt,
-      configId: modelProviderCredentials.configId,
+      configId: modelConfigs.id,
     })
     .from(modelProviderCredentials)
+    .innerJoin(modelConfigs, eq(modelConfigs.id, modelProviderCredentials.configId))
     .where(
-      and(
-        eq(modelProviderCredentials.orgId, orgId),
-        inArray(modelProviderCredentials.configId, [...configIds]),
-      ),
+      and(eq(modelProviderCredentials.orgId, orgId), inArray(modelConfigs.id, [...configIds])),
     );
-  return rows.map((r) => ({ ...r, configId: r.configId! }));
+  return rows;
 }
 
 /** A model row with its configuration, as serving reads it. */
@@ -363,6 +367,7 @@ export async function listOrgModels(
   const joined = await db
     .select({
       row: orgModels,
+      configId: modelConfigs.id,
       configProviderId: modelConfigs.providerId,
       configBaseUrl: modelConfigs.baseUrl,
       personalConnectionsAllowed: modelConfigs.personalConnectionsAllowed,
@@ -379,7 +384,7 @@ export async function listOrgModels(
   // only a row whose configuration's provider is not registered is dropped.
   const rows = joined
     .filter((j) => getModelProvider(j.configProviderId))
-    .map((j) => ({ ...j.row, ...j, configId: j.row.configId! }));
+    .map((j) => ({ ...j.row, ...j }));
 
   const connections = await listConfigConnections(orgId, [...new Set(rows.map((r) => r.configId))]);
   // A connection is read once per call, however many models it serves.
@@ -522,7 +527,7 @@ export async function getOrgModelRow(
 ): Promise<
   | {
       label: string;
-      configId: string | null;
+      configId: string;
       aliased: boolean;
       modelId: string;
       contextWindow: number | null;
@@ -533,13 +538,14 @@ export async function getOrgModelRow(
   const [row] = await executor
     .select({
       label: orgModels.label,
-      configId: orgModels.configId,
+      configId: modelConfigs.id,
       aliased: orgModels.aliased,
       modelId: orgModels.modelId,
       contextWindow: orgModels.contextWindow,
       maxTokens: orgModels.maxTokens,
     })
     .from(orgModels)
+    .innerJoin(modelConfigs, eq(modelConfigs.id, orgModels.configId))
     .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, id)] }))
     .limit(1);
   return row;
@@ -605,25 +611,45 @@ async function asDuplicateModel(
   );
 }
 
-export async function createOrgModel(
+export interface OrgModelCapabilities {
+  input?: ModelInputModality[];
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  cost?: ModelCost;
+  aliased?: boolean;
+}
+
+/** The model as the default pointer's gate reads it: its configuration and what it is. */
+function configuredModel(
+  config: ModelConfigRow,
+  modelId: string,
+  aliased: boolean | undefined,
+): ConfiguredModel {
+  return {
+    modelId,
+    aliased: aliased === true,
+    configId: config.id,
+    configProviderId: config.providerId,
+    personalConnectionsAllowed: config.personalConnectionsAllowed,
+  };
+}
+
+/**
+ * Insert a model into `config` (already loaded). `promote` points the org default at it when
+ * it is the org's first model: the caller settles it before any transaction with
+ * {@link orgServesModel}, since the default is only ever a model an organization connection serves.
+ */
+export async function createOrgModelInConfig(
   orgId: string,
+  config: ModelConfigRow,
   label: string,
   modelId: string,
   userId: string,
-  configId: string,
-  capabilities?: {
-    input?: ModelInputModality[];
-    contextWindow?: number;
-    maxTokens?: number;
-    reasoning?: boolean;
-    cost?: ModelCost;
-    aliased?: boolean;
-  },
-  executor: DbOrTx = db,
+  capabilities: OrgModelCapabilities | undefined,
+  executor: DbOrTx,
+  promote: boolean,
 ): Promise<string> {
-  if (!(await loadModelConfig(orgId, configId, executor))) {
-    throw notFound("Model configuration not found");
-  }
   // The catch sits OUTSIDE the transaction on purpose: a failed statement
   // aborts it, so `asDuplicateModel`'s lookup could not run inside.
   try {
@@ -634,7 +660,7 @@ export async function createOrgModel(
           orgId,
           label,
           modelId,
-          configId,
+          configId: config.id,
           input: capabilities?.input ?? null,
           contextWindow: capabilities?.contextWindow ?? null,
           maxTokens: capabilities?.maxTokens ?? null,
@@ -646,13 +672,27 @@ export async function createOrgModel(
         })
         .returning({ id: orgModels.id });
 
-      // If this is the first model for the org, point the org default at it.
-      await defaultModel.promoteIfFirst(tx, orgId, row!.id);
+      if (promote) await defaultModel.promoteIfFirst(tx, orgId, row!.id);
       return row!.id;
     });
   } catch (err) {
-    return await asDuplicateModel(err, orgId, configId, modelId, executor);
+    return await asDuplicateModel(err, orgId, config.id, modelId, executor);
   }
+}
+
+/** {@link createOrgModelInConfig} for a configuration named by id, on the default connection. */
+export async function createOrgModel(
+  orgId: string,
+  label: string,
+  modelId: string,
+  userId: string,
+  configId: string,
+  capabilities?: OrgModelCapabilities,
+): Promise<string> {
+  const config = await loadModelConfig(orgId, configId);
+  if (!config) throw notFound("Model configuration not found");
+  const promote = await orgServesModel(orgId, config, modelId, capabilities?.aliased === true);
+  return createOrgModelInConfig(orgId, config, label, modelId, userId, capabilities, db, promote);
 }
 
 export async function updateOrgModel(
@@ -711,7 +751,6 @@ export async function updateOrgModel(
     });
   } catch (err) {
     // Repointing a row's model id can land on one its configuration already holds.
-    if (current.configId === null) throw err;
     await asDuplicateModel(err, orgId, current.configId, data.modelId ?? current.modelId, executor);
   }
   clearResolvedModelCache();
@@ -728,6 +767,14 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
   // If the deleted model was the org default, clear the now-dangling pointer so
   // the resolver falls cleanly to the system cascade (no stale-id badge).
   await defaultModel.clearDanglingPointer(orgId, modelDbId);
+}
+
+/** Clear the default pointers that still name a deleted model (a configuration's removal). */
+export async function clearModelPointers(
+  orgId: string,
+  modelDbIds: readonly string[],
+): Promise<void> {
+  for (const id of modelDbIds) await defaultModel.clearDanglingPointer(orgId, id);
 }
 
 /**
@@ -752,11 +799,14 @@ interface SeedModelsInput {
 export async function seedOrgModelsForConfig(
   orgId: string,
   userId: string,
-  configId: string,
+  config: ModelConfigRow,
   input: SeedModelsInput,
 ): Promise<SeedModelsResult> {
-  if (!(await loadModelConfig(orgId, configId))) throw notFound("Model configuration not found");
+  const configId = config.id;
   if (input.models.length === 0) return { created: 0, ids: [], promotedDefault: false };
+  // The default is only ever a model an organization connection serves: settled before the transaction.
+  const first = input.models[0]!;
+  const promote = await orgServesModel(orgId, config, first.id, false);
 
   return db.transaction(async (tx) => {
     const existing = await tx
@@ -793,7 +843,7 @@ export async function seedOrgModelsForConfig(
       .returning({ id: orgModels.id });
 
     const promotedDefault =
-      inserted.length > 0
+      promote && inserted.length > 0
         ? await defaultModel.setDefaultIfUnset(tx, orgId, inserted[0]!.id)
         : false;
 
@@ -836,10 +886,7 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
  * which may name a model it creates in the same write.
  */
 export async function assertOrgServesDefault(orgId: string, model: ConfiguredModel): Promise<void> {
-  const connections = await listConfigConnections(orgId, [model.configId]);
-  const outcome = await pickServing(candidatesFor(connections, model, null), (c) =>
-    connectionState(orgId, c, true),
-  );
+  const outcome = await orgServing(orgId, model, true);
   if (!outcome.served && outcome.deadOrg) {
     throw conflict(
       "model_needs_reconnection",
@@ -852,6 +899,43 @@ export async function assertOrgServesDefault(orgId: string, model: ConfiguredMod
       "The default model serves schedules, API keys and end users, which only an organization connection can pay for. Connect the organization to this model's configuration, or pick another model.",
     );
   }
+}
+
+/** The organization connections of `model`'s configuration, and what each says. */
+function orgServing(orgId: string, model: ConfiguredModel, strict: boolean) {
+  return listConfigConnections(orgId, [model.configId]).then((connections) =>
+    pickServing(candidatesFor(connections, model, null), (c) => connectionState(orgId, c, strict)),
+  );
+}
+
+/**
+ * Whether a live organization connection serves `model`: the predicate of
+ * {@link assertOrgServesDefault}, answered as a boolean (a key missing from the keyring reads as
+ * not serving) for the auto-promotion to default. Decrypts: call it before any transaction.
+ */
+export async function orgServesModel(
+  orgId: string,
+  config: ModelConfigRow,
+  modelId: string,
+  aliased: boolean,
+): Promise<boolean> {
+  return (
+    (await orgServing(orgId, configuredModel(config, modelId, aliased), false)).served !== null
+  );
+}
+
+/**
+ * Whether an organization API-key connection of `config` could serve `modelId` as an alias:
+ * the ranking's own rule (an alias is never served by a subscription or a personal connection).
+ * Reads the connections, decrypts nothing.
+ */
+export async function aliasIsServable(
+  orgId: string,
+  config: ModelConfigRow,
+  modelId: string,
+): Promise<boolean> {
+  const connections = await listConfigConnections(orgId, [config.id]);
+  return candidatesFor(connections, configuredModel(config, modelId, true), null).length > 0;
 }
 
 /**
@@ -939,6 +1023,8 @@ export interface ResolvedModel extends Pick<
   credentialSource: ModelPayer | null;
   /** The member whose own credential serves the call — set iff credentialSource === "user". */
   payerUserId?: string;
+  /** Set on an unserved model: one of the caller's subscription connections is dead, a reconnect would serve. */
+  deadSubscription?: true;
   /**
    * Model-alias flag (LLM-gateway alias pattern). When true the run executor
    * hands the sidecar the {@link aliasId} as the container's `MODEL_ID` and the
@@ -1304,7 +1390,7 @@ export async function loadRunModel(
     }
     const state = await connectionState(
       orgId,
-      { ...binding, id: credentialId, createdAt: new Date() },
+      { id: credentialId, ownerUserId: binding.ownerUserId },
       false,
     );
     return typeof state === "object"
@@ -1370,7 +1456,7 @@ async function resolveDbModel(
     );
   }
   const connections = await listConfigConnections(orgId, [row.configId]);
-  const { served, deadOrg } = await pickServing(
+  const { served, deadOrg, deadSubscription } = await pickServing(
     candidatesFor(connections, row, payerUserId, viaProxy),
     (c) => connectionState(orgId, c, true),
   );
@@ -1384,12 +1470,13 @@ async function resolveDbModel(
   // A dead organization connection is the organization's to reconnect: the model is
   // unusable, as a dead bound credential always was.
   if (deadOrg) return null;
-  return buildResolvedModel(row, {
+  const unserved = buildResolvedModel(row, {
     providerId: row.configProviderId,
     apiShape: def.apiShape,
     baseUrl: effectiveBaseUrl(def, row.configBaseUrl),
     apiKey: "",
   });
+  return deadSubscription ? { ...unserved, deadSubscription: true } : unserved;
 }
 
 /**

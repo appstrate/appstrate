@@ -6,8 +6,10 @@ import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "@appstrate/core/list-query";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { internalError, notFound } from "../lib/errors.ts";
+import { endpointUrlSchema } from "../lib/endpoint-url.ts";
+import { internalError } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { clearModelPointers } from "../services/org-models.ts";
 import {
   createModelConfig,
   deleteModelConfig,
@@ -16,13 +18,10 @@ import {
   updateModelConfig,
 } from "../services/model-configs.ts";
 
-/** Not `z.httpUrl()`: that one refuses the IP or `localhost` of a self-hosted endpoint. */
-const endpointUrlSchema = z.url({ protocol: /^https?$/ });
-
 export const createModelConfigSchema = z
   .object({
     provider_id: z.string().min(1, "provider_id is required"),
-    label: z.string().min(1).max(120).optional(),
+    label: z.string().trim().min(1).max(120).optional(),
     /** Required for a gateway provider (its endpoint), refused for any other. */
     base_url: endpointUrlSchema.optional(),
     personal_connections_allowed: z.boolean().optional(),
@@ -31,12 +30,15 @@ export const createModelConfigSchema = z
 
 export const updateModelConfigSchema = z
   .object({
-    label: z.string().min(1).max(120).optional(),
-    /** A gateway's endpoint; refused for any other provider. */
+    label: z.string().trim().min(1).max(120).optional(),
+    /** A gateway's endpoint; refused for any other provider. Cannot move while the configuration has connections. */
     base_url: endpointUrlSchema.optional(),
     personal_connections_allowed: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .refine((body) => Object.values(body).some((value) => value !== undefined), {
+    message: "Set at least one of label, base_url, personal_connections_allowed",
+  });
 
 /** Whether the caller reads the organization's connections (who holds a personal one). */
 function readsCredentials(c: Context<AppEnv>): boolean {
@@ -110,21 +112,54 @@ export function createModelConfigsRouter() {
     return c.json(await configResponse(c, id));
   });
 
-  // DELETE /api/model-configs/:id — delete it with its connections and models
-  router.delete("/:id", requirePermission("models", "delete"), async (c) => {
-    const id = c.req.param("id")!;
-    const orgId = c.get("orgId");
-    const before = await getModelConfigInfo(orgId, id, { readsCredentials: false });
-    if (!before) throw notFound("Model configuration not found");
-    await deleteModelConfig(orgId, id);
-    await recordAuditFromContext(c, {
-      action: "model_config.deleted",
-      resourceType: "model_config",
-      resourceId: id,
-      before: { providerId: before.provider_id, label: before.label },
-    });
-    return c.body(null, 204);
-  });
+  // DELETE /api/model-configs/:id — delete it with its connections and models. It removes
+  // connections and models, so it takes both delete permissions and audits each removal.
+  router.delete(
+    "/:id",
+    requirePermission("models", "delete"),
+    requirePermission("model-provider-credentials", "delete"),
+    async (c) => {
+      const id = c.req.param("id")!;
+      const orgId = c.get("orgId");
+      const removed = await deleteModelConfig(orgId, id);
+      await clearModelPointers(
+        orgId,
+        removed.models.map((m) => m.id),
+      );
+      for (const connection of removed.connections) {
+        await recordAuditFromContext(c, {
+          action: "model_provider_credential.deleted",
+          resourceType: "model_provider_credential",
+          resourceId: connection.id,
+          before: {
+            ownerType: connection.ownerUserId === null ? "org" : "user",
+            ownerId: connection.ownerUserId,
+            providerId: connection.providerId,
+            label: connection.label,
+            configId: id,
+            ...(connection.ownerUserId !== null && connection.ownerUserId !== c.get("user").id
+              ? { breakGlass: true }
+              : {}),
+          },
+        });
+      }
+      for (const model of removed.models) {
+        await recordAuditFromContext(c, {
+          action: "model.deleted",
+          resourceType: "model",
+          resourceId: model.id,
+          before: { modelId: model.modelId, label: model.label, configId: id },
+        });
+      }
+      await recordAuditFromContext(c, {
+        action: "model_config.deleted",
+        resourceType: "model_config",
+        resourceId: id,
+        before: { providerId: removed.config.providerId, label: removed.config.label },
+      });
+      return c.body(null, 204);
+    },
+  );
 
   return router;
 }

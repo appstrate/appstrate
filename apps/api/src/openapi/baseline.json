@@ -13800,7 +13800,7 @@
                   "base_url": {
                     "type": "string",
                     "format": "uri",
-                    "description": "The endpoint of a gateway configuration (`baseUrlOverridable` provider): required at creation for a gateway, refused (`400`, param `base_url`) for any other provider."
+                    "description": "The endpoint of a gateway configuration (`baseUrlOverridable` provider): required at creation for a gateway, refused (`400`, param `base_url`) for any other provider. Stored canonical (lowercase host, no trailing slash): `https://h/v1` and `https://h/v1/` are one endpoint."
                   },
                   "personal_connections_allowed": {
                     "type": "boolean",
@@ -13862,7 +13862,7 @@
         },
         "tags": ["Models"],
         "summary": "Update a model configuration",
-        "description": "Merge semantics: an absent field is left unchanged. Turning `personal_connections_allowed` off keeps the members' connections, which stop serving (and end the runs on one). **Permission:** `models:write`.",
+        "description": "Merge semantics: an absent field is left unchanged, and a body that sets none is a `400`. A gateway's `base_url` cannot change while the configuration has any connection, organization or personal (`409 model_config_has_connections`): remove them first. Turning `personal_connections_allowed` off keeps the members' connections, which stop serving (and end the runs on one). **Permission:** `models:write`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -13892,12 +13892,13 @@
                   "base_url": {
                     "type": "string",
                     "format": "uri",
-                    "description": "The endpoint of a gateway configuration (`baseUrlOverridable` provider): required at creation for a gateway, refused (`400`, param `base_url`) for any other provider."
+                    "description": "The endpoint of a gateway configuration (`baseUrlOverridable` provider): required at creation for a gateway, refused (`400`, param `base_url`) for any other provider. Stored canonical (lowercase host, no trailing slash): `https://h/v1` and `https://h/v1/` are one endpoint."
                   },
                   "personal_connections_allowed": {
                     "type": "boolean"
                   }
                 },
+                "minProperties": 1,
                 "additionalProperties": false
               }
             }
@@ -13935,7 +13936,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`model_config_exists` — another configuration of the organization already has this endpoint; the problem body carries `existing_config_id`.",
+            "description": "`model_config_exists` — another configuration of the organization already has this endpoint; the problem body carries `existing_config_id`. `model_config_has_connections` — `base_url` cannot move while the configuration has connections; the problem body carries `connection_count`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13953,7 +13954,7 @@
         },
         "tags": ["Models"],
         "summary": "Delete a model configuration",
-        "description": "Delete a configuration with its connections and models. The organization default is cleared when it named one of its models. **Permission:** `models:delete`.",
+        "description": "Delete a configuration with its connections and models. The organization default is cleared when it named one of its models, and each removed connection and model leaves its own audit entry (`model_provider_credential.deleted`, `model.deleted`). **Permission:** `models:delete` and `model-provider-credentials:delete`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -14287,7 +14288,7 @@
         },
         "tags": ["Model Provider Credentials"],
         "summary": "Create a model provider credential",
-        "description": "Create a new LLM model provider credential. The plaintext API key is encrypted at rest under a versioned envelope. **Permission:** `model-provider-credentials:write` for an organization credential (`owner_type: org`, the default); `model-provider-credentials:connect` for a personal credential (`owner_type: user`), which belongs to the caller and serves only their own calls. The connection joins a model configuration (`config_id`, else its provider's family configuration). A personal connection is refused with `403 personal_model_credentials_disabled` when that configuration does not allow personal connections.",
+        "description": "Create a new LLM model provider credential. The plaintext API key is encrypted at rest under a versioned envelope. **Permission:** `model-provider-credentials:write` for an organization credential (`owner_type: org`, the default); `model-provider-credentials:connect` for a personal credential (`owner_type: user`), which belongs to the caller and serves only their own calls. The connection joins a model configuration (`config_id`, else its provider's family configuration, which only a caller holding `models:write` creates when it is missing: `409 model_config_required` otherwise). A personal connection is refused with `403 personal_connections_disabled` when that configuration does not allow personal connections.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -14319,7 +14320,7 @@
                   "config_id": {
                     "type": "string",
                     "format": "uuid",
-                    "description": "The model configuration the connection joins (`GET /api/model-configs`); its endpoint is the connection's. Absent: the provider's family configuration, created when missing — refused (`400`, param `config_id`) for a gateway provider (`baseUrlOverridable: true`), whose endpoint a configuration chooses. A provider that does not fit the configuration is `400 connection_provider_mismatch`; a personal connection to a configuration that does not allow them is `403 personal_model_credentials_disabled`."
+                    "description": "The model configuration the connection joins (`GET /api/model-configs`); its endpoint is the connection's. Absent: the provider's family configuration, created when missing for a caller who holds `models:write` (`409 model_config_required` otherwise) — refused (`400`, param `config_id`) for a gateway provider (`baseUrlOverridable: true`), whose endpoint a configuration chooses. A provider that does not fit the configuration is `400 connection_provider_mismatch`; a personal connection to a configuration that does not allow them is `403 personal_connections_disabled`."
                   },
                   "owner_type": {
                     "type": "string",
@@ -14366,7 +14367,27 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — caller lacks `model-provider-credentials:write` (organization credential) or `model-provider-credentials:connect` (`owner_type: user`), or `personal_model_credentials_disabled` — the configuration does not allow personal connections.",
+            "description": "Forbidden — caller lacks `model-provider-credentials:write` (organization credential) or `model-provider-credentials:connect` (`owner_type: user`), or `personal_connections_disabled` — the configuration does not allow personal connections.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — `config_id` names no model configuration of this organization.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`model_config_required` (param `config_id`) — no `config_id` was given, the organization has no configuration for the provider's family, and the caller does not hold `models:write`, the only grant that creates one.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14392,7 +14413,7 @@
         },
         "tags": ["Model Provider Credentials"],
         "summary": "Test model provider credential configuration inline",
-        "description": "Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId`: its provider, API shape and base URL are used, and its stored API key when `api_key` is omitted. `base_url` must then equal the credential's, unless `api_key` is supplied for a provider accepting a base URL override; a built-in (system) credential is refused with 403, and a personal credential with `403 personal_model_credentials_disabled` while its model configuration does not allow personal connections. Without a stored credential, the provider's own API shape is used and `base_url` must be its default unless it accepts an override; a provider accepting one is refused with 400 to a caller without `model-provider-credentials:write`. The test follows the provider's definition: a provider whose model listing is unauthenticated is tested with one minimal chat completion instead of `GET <base_url>/models`. **Permission:** `model-provider-credentials:read` or `:connect`; a `credentialId` the caller may not use answers `404`. Rate limited to 5 requests per minute.",
+        "description": "Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId`: its provider, API shape and base URL are used, and its stored API key when `api_key` is omitted. `base_url` must then equal the credential's, unless the caller holds `model-provider-credentials:write` and supplies `api_key` for a provider accepting a base URL override (the owner of a personal connection cannot point it at another endpoint); a built-in (system) credential is refused with 403, and a personal credential with `403 personal_connections_disabled` while its model configuration does not allow personal connections. Without a stored credential, the provider's own API shape is used. A gateway provider (one accepting a base URL override) is probed at the endpoint of a stored configuration of the organization (`config_id`, whose provider must fit); a free `base_url` instead is accepted only from a caller holding `model-provider-credentials:write`, and a gateway with neither is `400` (param `config_id`). Any other provider is probed at its default `base_url`, which may be omitted. The test follows the provider's definition: a provider whose model listing is unauthenticated is tested with one minimal chat completion instead of `GET <base_url>/models`. **Permission:** `model-provider-credentials:read` or `:connect`; a `credentialId` the caller may not use answers `404`. Rate limited to 5 requests per minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -14404,7 +14425,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["providerId", "base_url"],
+                "required": ["providerId"],
                 "properties": {
                   "providerId": {
                     "type": "string",
@@ -14414,7 +14435,12 @@
                   "base_url": {
                     "type": "string",
                     "format": "uri",
-                    "description": "Model provider API base URL"
+                    "description": "Model provider API base URL. For a gateway without a stored credential, only a caller holding `model-provider-credentials:write` may set it; never together with `config_id`."
+                  },
+                  "config_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The model configuration (`GET /api/model-configs`) whose endpoint a draft key is probed at; its provider must fit `providerId`. Unknown for this organization: `404`."
                   },
                   "api_key": {
                     "type": "string",
@@ -14458,6 +14484,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -14887,7 +14916,7 @@
         },
         "tags": ["Model Provider Credentials"],
         "summary": "Mint a one-shot pairing token for the connect helper",
-        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper@0.3.x <token>` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Two body shapes. A new connection sends `owner_type`, as on `POST /api/model-provider-credentials`: `org` (default) pairs an organization credential, which an organization model may be bound to and which then serves every caller; `user` pairs the caller's personal credential, serving only their own calls. A reconnect sends `credentialId` and no `owner_type` (the credential names its own owner, and the two together are a `400`): it updates that exact credential in place, and is accepted exactly when the credential lists the `reconnect` action for the caller. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. **Permission:** a new connection needs `model-provider-credentials:write` for `owner_type: org`, `model-provider-credentials:connect` for `owner_type: user` (`403` otherwise, and `403 personal_model_credentials_disabled` for `user` while its model configuration does not allow personal connections). A reconnect the caller may not make answers `404`, except the caller's own personal credential while its model configuration does not allow personal connections, which answers `403 personal_model_credentials_disabled`. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).",
+        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper@0.3.x <token>` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Two body shapes. A new connection sends `owner_type`, as on `POST /api/model-provider-credentials`: `org` (default) pairs an organization credential, which serves every caller of its configuration's models; `user` pairs the caller's personal credential, serving only their own calls. A reconnect sends `credentialId` and no `owner_type` (the credential names its own owner, and the two together are a `400`): it updates that exact credential in place, and is accepted exactly when the credential lists the `reconnect` action for the caller. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. **Permission:** a new connection needs `model-provider-credentials:write` for `owner_type: org`, `model-provider-credentials:connect` for `owner_type: user` (`403` otherwise, and `403 personal_connections_disabled` for `user` while its model configuration does not allow personal connections). A reconnect the caller may not make answers `404`, except the caller's own personal credential while its model configuration does not allow personal connections, which answers `403 personal_connections_disabled`. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -14920,7 +14949,7 @@
                   "config_id": {
                     "type": "string",
                     "format": "uuid",
-                    "description": "New connection: the model configuration it joins, kept on the pairing and used at redeem. Absent: the provider's family configuration, created at redeem when missing. Never sent with `credentialId`: a reconnect keeps its configuration."
+                    "description": "New connection: the model configuration it joins, kept on the pairing and used at redeem. Absent: the provider's family configuration, created at redeem when missing, and only for a minter who holds `models:write` (`409 model_config_required` at mint and at redeem otherwise). Never sent with `credentialId`: a reconnect keeps its configuration."
                   }
                 },
                 "additionalProperties": false
@@ -14973,7 +15002,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — a new connection whose caller lacks `model-provider-credentials:write` (`owner_type: org`) or `model-provider-credentials:connect` (`owner_type: user`); or `personal_model_credentials_disabled` — a personal connection, or a reconnect of the caller's own personal credential, to a configuration that does not allow personal connections.",
+            "description": "Forbidden — a new connection whose caller lacks `model-provider-credentials:write` (`owner_type: org`) or `model-provider-credentials:connect` (`owner_type: user`); or `personal_connections_disabled` — a personal connection, or a reconnect of the caller's own personal credential, to a configuration that does not allow personal connections.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14984,6 +15013,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`model_config_required` (on `config_id`) — no `config_id` was given, the organization has no configuration for the provider's family, and the caller does not hold `models:write`, the only grant that creates one. Ask a member who manages models to create the configuration, or pass its `config_id`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -15113,7 +15152,7 @@
         },
         "tags": ["Model Provider Credentials"],
         "summary": "Redeem a pairing token: post the OAuth credential bundle back to the platform",
-        "description": "Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider / owner and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, owner or credential. The request carries no principal, so the member who minted the pairing is judged again on what the organization grants them at this moment, by the rules of the mint: a new connection needs `model-provider-credentials:write` (organization) or `model-provider-credentials:connect` (personal) and answers `403` without it, or once the member left; a reconnect needs the credential to still list `reconnect` for them and answers `404` otherwise. A personal credential answers `403 personal_model_credentials_disabled` when its model configuration stopped allowing personal connections after the mint. The token is single-use and consumed before anything is judged, the request body included: a refused redeem spends it (a retry answers `410`) and is recorded on the pairing, which `GET /pairing/{id}` then reads as `failed`; a new pairing must be minted. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.",
+        "description": "Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider / owner and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, owner or credential. The request carries no principal, so the member who minted the pairing is judged again on what the organization grants them at this moment, by the rules of the mint: a new connection needs `model-provider-credentials:write` (organization) or `model-provider-credentials:connect` (personal) and answers `403` without it, or once the member left; a reconnect needs the credential to still list `reconnect` for them and answers `404` otherwise. A personal credential answers `403 personal_connections_disabled` when its model configuration stopped allowing personal connections after the mint. The token is single-use and consumed before anything is judged, the request body included: a refused redeem spends it (a retry answers `410`) and is recorded on the pairing, which `GET /pairing/{id}` then reads as `failed`; a new pairing must be minted. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.",
         "requestBody": {
           "required": true,
           "content": {
@@ -15206,6 +15245,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`model_config_required` (on `config_id`) — the pairing names no configuration, the organization has none for the provider's family, and the member who minted it no longer holds `models:write`, the only grant that creates one.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "410": {
             "description": "Gone — pairing token expired or already consumed.",
@@ -34167,7 +34216,7 @@
             }
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an model no connection of its configuration serves for the caller (the organization has none that serves it and the caller has no usable personal one; a run: the connection it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -34230,7 +34279,7 @@
             }
           },
           "503": {
-            "description": "`encryption_key_unavailable` — the model's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration; nothing is sent upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`).",
+            "description": "`encryption_key_unavailable` — the model's connection is encrypted under a key id missing from the platform's keyring. Operator configuration; nothing is sent upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -34469,7 +34518,7 @@
             }
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an model no connection of its configuration serves for the caller (the organization has none that serves it and the caller has no usable personal one; a run: the connection it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -34532,7 +34581,7 @@
             }
           },
           "503": {
-            "description": "`encryption_key_unavailable` — the model's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration; nothing is sent upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`).",
+            "description": "`encryption_key_unavailable` — the model's connection is encrypted under a key id missing from the platform's keyring. Operator configuration; nothing is sent upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -34795,7 +34844,7 @@
             }
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an model no connection of its configuration serves for the caller (the organization has none that serves it and the caller has no usable personal one; a run: the connection it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -34858,7 +34907,7 @@
             }
           },
           "503": {
-            "description": "`encryption_key_unavailable` — the model's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration; nothing is sent upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`).",
+            "description": "`encryption_key_unavailable` — the model's connection is encrypted under a key id missing from the platform's keyring. Operator configuration; nothing is sent upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -35090,7 +35139,7 @@
             }
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an model no connection of its configuration serves for the caller (the organization has none that serves it and the caller has no usable personal one; a run: the connection it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -35153,7 +35202,7 @@
             }
           },
           "503": {
-            "description": "`encryption_key_unavailable` — the model's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration; nothing is sent upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`).",
+            "description": "`encryption_key_unavailable` — the model's connection is encrypted under a key id missing from the platform's keyring. Operator configuration; nothing is sent upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -35339,7 +35388,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an model no connection of its configuration serves for the caller (the organization has none that serves it and the caller has no usable personal one; a run: the connection it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -35569,7 +35618,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an model no connection of its configuration serves for the caller (the organization has none that serves it and the caller has no usable personal one; a run: the connection it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -35799,7 +35848,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an model no connection of its configuration serves for the caller (the organization has none that serves it and the caller has no usable personal one; a run: the connection it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -36029,7 +36078,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an model no connection of its configuration serves for the caller (the organization has none that serves it and the caller has no usable personal one; a run: the connection it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -40032,7 +40081,7 @@
           },
           "providerId": {
             "type": ["string", "null"],
-            "description": "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. Also set on an unbound model (`credentialId: null`), where it names the provider each member's own credential must come from. `null` for managed models — binding not exposed."
+            "description": "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. The configuration's provider when no connection serves the model for the caller, so a client knows which provider a connection must come from. `null` for managed models — binding not exposed."
           },
           "provider_name": {
             "type": ["string", "null"],
@@ -40090,7 +40139,7 @@
           },
           "needs_reconnection": {
             "type": "boolean",
-            "description": "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. On an unbound model (`credentialId: null`) it is read for the caller, like `billed_to`: true when nothing of the caller's serves it and one of their own credentials for it must be reconnected."
+            "description": "True when nothing serves the model for the caller and a connection of its configuration that would is dead — a subscription flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. Read for the caller, like `billed_to`. The model is listed so it can be inspected or deleted, but it is not usable for inference until that connection is reconnected, and it cannot be made the organization default. Always false for built-in models, which read their key from the environment."
           },
           "aliased": {
             "type": "boolean",
@@ -41761,7 +41810,7 @@
         }
       },
       "RunAdmissionConflict": {
-        "description": "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — a declared integration blocks the launch: `errors[]` carries one item per integration (`field: integrations.<id>`), and a `must_choose_connection` item lists `candidate_connections` to pick from via `connection_overrides`. What does not block is a `warnings[]` item of the success response (see LaunchWarnings). Or `model_credential_required` — the model is unbound and the caller has no usable personal credential for it.",
+        "description": "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — a declared integration blocks the launch: `errors[]` carries one item per integration (`field: integrations.<id>`), and a `must_choose_connection` item lists `candidate_connections` to pick from via `connection_overrides`. What does not block is a `warnings[]` item of the success response (see LaunchWarnings). Or `model_credential_required` — no connection of the model's configuration serves it for the caller (the organization has none that serves it, and the caller has no usable personal one).",
         "headers": {
           "Request-Id": {
             "$ref": "#/components/headers/RequestId"

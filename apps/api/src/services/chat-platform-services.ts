@@ -72,13 +72,11 @@ export async function resolveChatModel(
     return { subscription: false };
   }
 
-  // Nothing serves the user, and a reconnect of a dead connection would: ask for it.
-  // Checked before the provider: with no serving connection, `providerId` is the
-  // configuration's, whose auth mode says nothing of the dead subscription.
-  if (
-    resolved.credentialSource === null &&
-    (await modelNeedsReconnection(orgId, presetId, userId))
-  ) {
+  // Nothing serves the user and one of their subscriptions is dead: a reconnect would serve.
+  // Read off the resolution, before the provider: with no serving connection, `providerId` is
+  // the configuration's, whose auth mode says nothing of the dead subscription. A dead API key
+  // is no subscription: the turn goes to the gateway, which names it.
+  if (resolved.credentialSource === null && resolved.deadSubscription) {
     return { subscription: true, needsReconnection: true };
   }
 

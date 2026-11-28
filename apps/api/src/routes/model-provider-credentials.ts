@@ -46,11 +46,9 @@ import {
   internalError,
   systemEntityForbidden,
 } from "../lib/errors.ts";
+import { endpointUrlSchema } from "../lib/endpoint-url.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
-
-/** Not `z.httpUrl()`: that one refuses the IP or `localhost` of a self-hosted endpoint. */
-const endpointUrlSchema = z.url({ protocol: /^https?$/ });
 
 /** Read the credential list, the pickers and the probes: an org reader or a member with its own key. */
 const VIEW_CREDENTIALS = ["model-provider-credentials:read", "model-provider-credentials:connect"];
@@ -74,8 +72,8 @@ export const createSchema = z
     api_key: z.string().min(1, "api_key is required"),
     /**
      * The configuration the connection joins. Absent: its provider's family
-     * configuration, created when missing (refused for a gateway, whose endpoint
-     * is a configuration's choice).
+     * configuration, created when missing for a caller who holds `models:write`
+     * (refused for a gateway, whose endpoint is a configuration's choice).
      */
     config_id: z.uuid().optional(),
     owner_type: credentialOwnerTypeSchema,
@@ -219,10 +217,15 @@ async function draftBaseUrl(
   return body.base_url ?? cfg.defaultBaseUrl;
 }
 
+/**
+ * A draft key test. A gateway is probed at a stored configuration's endpoint (`config_id`);
+ * a free `base_url` is for a caller who writes organization credentials.
+ */
 export const testInlineSchema = z
   .object({
     providerId: z.string().min(1),
-    base_url: endpointUrlSchema,
+    base_url: endpointUrlSchema.optional(),
+    config_id: z.uuid().optional(),
     api_key: z.string().optional(),
     credentialId: z.string().optional(),
   })
@@ -232,8 +235,10 @@ const sameBaseUrl = (a: string, b: string) => a.replace(/\/+$/, "") === b.replac
 
 /**
  * Resolve the `POST /test` body into the endpoint to probe. A stored credential
- * supplies provider, api shape and base URL; `base_url` may differ from the
- * stored one only with a caller-supplied key on a `baseUrlOverridable` provider.
+ * supplies provider, api shape and base URL: `base_url` may differ from the stored one only
+ * for a caller who writes organization credentials, with its own key, on a
+ * `baseUrlOverridable` provider. A draft key on a gateway targets a stored configuration's
+ * endpoint; a free `base_url` is for that same writer.
  */
 async function resolveTestTarget(
   caller: ModelCredentialCaller,
@@ -249,12 +254,14 @@ async function resolveTestTarget(
     const creds = visible ? await loadInferenceCredentials(caller.orgId, body.credentialId) : null;
     if (creds) {
       const overridable = getModelProvider(creds.providerId)?.baseUrlOverridable === true;
-      if (!sameBaseUrl(body.base_url, creds.baseUrl) && !(callerKey && overridable)) {
+      const movesEndpoint =
+        body.base_url !== undefined && !sameBaseUrl(body.base_url, creds.baseUrl);
+      if (movesEndpoint && !(caller.writesOrg && callerKey && overridable)) {
         throw invalidRequest("base_url must be the credential's base URL", "base_url");
       }
       return {
         ...creds,
-        baseUrl: callerKey ? body.base_url : creds.baseUrl,
+        baseUrl: movesEndpoint ? body.base_url! : creds.baseUrl,
         apiKey: callerKey ?? creds.apiKey,
       };
     }
@@ -262,18 +269,44 @@ async function resolveTestTarget(
   if (!callerKey) throw invalidRequest("API key is required", "api_key");
   const cfg = getModelProvider(body.providerId);
   if (!cfg) throw invalidRequest(`Unknown providerId: ${body.providerId}`, "providerId");
-  if (!cfg.baseUrlOverridable && !sameBaseUrl(body.base_url, cfg.defaultBaseUrl)) {
-    throw invalidRequest(
-      `Provider ${cfg.providerId} does not accept a base URL override`,
-      "base_url",
-    );
-  }
   return {
     providerId: cfg.providerId,
     apiShape: cfg.apiShape,
-    baseUrl: body.base_url,
+    baseUrl: await draftTestBaseUrl(caller, cfg, body),
     apiKey: callerKey,
   };
+}
+
+/** The endpoint a draft key test probes. */
+async function draftTestBaseUrl(
+  caller: ModelCredentialCaller,
+  cfg: ModelProviderDefinition,
+  body: { config_id?: string; base_url?: string },
+): Promise<string> {
+  if (!cfg.baseUrlOverridable) {
+    if (body.config_id !== undefined) return draftBaseUrl(caller.orgId, cfg, body);
+    if (body.base_url !== undefined && !sameBaseUrl(body.base_url, cfg.defaultBaseUrl)) {
+      throw invalidRequest(
+        `Provider ${cfg.providerId} does not accept a base URL override`,
+        "base_url",
+      );
+    }
+    return cfg.defaultBaseUrl;
+  }
+  if (body.config_id !== undefined) return draftBaseUrl(caller.orgId, cfg, body);
+  if (body.base_url === undefined) {
+    throw invalidRequest(
+      `Provider ${cfg.providerId} is probed at a configuration's endpoint: pass config_id`,
+      "config_id",
+    );
+  }
+  if (!caller.writesOrg) {
+    throw invalidRequest(
+      "A free base_url needs model-provider-credentials:write: pass the config_id of the configuration to probe",
+      "base_url",
+    );
+  }
+  return body.base_url;
 }
 
 /**
@@ -379,15 +412,14 @@ export function createModelProviderCredentialsRouter() {
       );
     }
 
-    // The endpoint a gateway connection's label names; the service settles the configuration.
-    const configBaseUrl = data.config_id
-      ? ((await loadModelConfig(caller.orgId, data.config_id))?.baseUrl ?? null)
-      : null;
+    // Read once: it names the endpoint a gateway connection's label shows and is the one the service writes under.
+    const config = data.config_id ? await loadModelConfig(caller.orgId, data.config_id) : null;
+    if (data.config_id && !config) throw notFound("Model configuration not found");
     // Always dedupe — a user-supplied label is suffixed on collision too, so
     // labels stay unique within the org (same scheme as org models).
     const label = await dedupeCredentialLabel(
       caller.orgId,
-      data.label?.trim() || deriveCredentialLabel(cfg, configBaseUrl),
+      data.label?.trim() || deriveCredentialLabel(cfg, config?.baseUrl ?? null),
       ownerUserId,
     );
 
@@ -398,7 +430,8 @@ export function createModelProviderCredentialsRouter() {
         label,
         providerId,
         apiKey,
-        ...(data.config_id ? { configId: data.config_id } : {}),
+        ...(config ? { config } : {}),
+        mayCreateConfig: caller.createsConfigs,
         ownerUserId,
       });
       await recordAuditFromContext(c, {

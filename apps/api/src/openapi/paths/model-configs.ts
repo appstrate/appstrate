@@ -18,7 +18,7 @@ const baseUrlProperty = {
   type: "string",
   format: "uri",
   description:
-    "The endpoint of a gateway configuration (`baseUrlOverridable` provider): required at creation for a gateway, refused (`400`, param `base_url`) for any other provider.",
+    "The endpoint of a gateway configuration (`baseUrlOverridable` provider): required at creation for a gateway, refused (`400`, param `base_url`) for any other provider. Stored canonical (lowercase host, no trailing slash): `https://h/v1` and `https://h/v1/` are one endpoint.",
 };
 
 export const modelConfigsPaths = {
@@ -118,7 +118,7 @@ export const modelConfigsPaths = {
       tags: ["Models"],
       summary: "Update a model configuration",
       description:
-        "Merge semantics: an absent field is left unchanged. Turning `personal_connections_allowed` off keeps the members' connections, which stop serving (and end the runs on one). **Permission:** `models:write`.",
+        "Merge semantics: an absent field is left unchanged, and a body that sets none is a `400`. A gateway's `base_url` cannot change while the configuration has any connection, organization or personal (`409 model_config_has_connections`): remove them first. Turning `personal_connections_allowed` off keeps the members' connections, which stop serving (and end the runs on one). **Permission:** `models:write`.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }, idParam],
       requestBody: {
         required: true,
@@ -131,6 +131,7 @@ export const modelConfigsPaths = {
                 base_url: baseUrlProperty,
                 personal_connections_allowed: { type: "boolean" },
               },
+              minProperties: 1,
               additionalProperties: false,
             },
           },
@@ -148,7 +149,7 @@ export const modelConfigsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`model_config_exists` — another configuration of the organization already has this endpoint; the problem body carries `existing_config_id`.",
+            "`model_config_exists` — another configuration of the organization already has this endpoint; the problem body carries `existing_config_id`. `model_config_has_connections` — `base_url` cannot move while the configuration has connections; the problem body carries `connection_count`.",
           content: problem,
         },
       },
@@ -159,7 +160,7 @@ export const modelConfigsPaths = {
       tags: ["Models"],
       summary: "Delete a model configuration",
       description:
-        "Delete a configuration with its connections and models. The organization default is cleared when it named one of its models. **Permission:** `models:delete`.",
+        "Delete a configuration with its connections and models. The organization default is cleared when it named one of its models, and each removed connection and model leaves its own audit entry (`model_provider_credential.deleted`, `model.deleted`). **Permission:** `models:delete` and `model-provider-credentials:delete`.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }, idParam],
       responses: {
         "204": { description: "Model configuration deleted", headers: REQUEST_ID_ONLY_HEADERS },

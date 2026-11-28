@@ -312,7 +312,7 @@ export const responses = {
       "(`field: integrations.<id>`), and a `must_choose_connection` item lists " +
       "`candidate_connections` to pick from via `connection_overrides`. What does not block is " +
       "a `warnings[]` item of the success response (see LaunchWarnings). Or `model_credential_required` — " +
-      "the model is unbound and the caller has no usable personal credential for it.",
+      "no connection of the model's configuration serves it for the caller (the organization has none that serves it, and the caller has no usable personal one).",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {

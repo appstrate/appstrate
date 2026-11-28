@@ -52,7 +52,7 @@ import {
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
 import {
-  personalModelCredentialsDisabled,
+  personalConnectionsDisabled,
   serializeOAuthTokenResponse,
 } from "../services/model-providers/credentials.ts";
 import {
@@ -918,8 +918,7 @@ async function assertOAuthModelCredential(credentialId: string, run: VerifiedRun
   if (pinned !== credentialId) {
     throw forbidden(`Credential ${credentialId} not pinned to this run`);
   }
-  let row:
-    { orgId: string; ownerUserId: string | null; personalAllowed: boolean | null } | undefined;
+  let row: { orgId: string; ownerUserId: string | null; personalAllowed: boolean } | undefined;
   try {
     [row] = await db
       .select({
@@ -928,7 +927,7 @@ async function assertOAuthModelCredential(credentialId: string, run: VerifiedRun
         personalAllowed: modelConfigs.personalConnectionsAllowed,
       })
       .from(modelProviderCredentials)
-      .leftJoin(modelConfigs, eq(modelConfigs.id, modelProviderCredentials.configId))
+      .innerJoin(modelConfigs, eq(modelConfigs.id, modelProviderCredentials.configId))
       // Keyed by the (non-null) pin — equal to the requested credentialId by
       // the gate above, so the run can only ever read its own credential.
       .where(eq(modelProviderCredentials.id, pinned))
@@ -955,7 +954,7 @@ async function assertOAuthModelCredential(credentialId: string, run: VerifiedRun
     throw forbidden(`Credential ${credentialId} is another member's`);
   }
   // Its configuration switching personal connections off ends the runs on one too.
-  if (row.ownerUserId !== null && row.personalAllowed === false) {
-    throw personalModelCredentialsDisabled();
+  if (row.ownerUserId !== null && !row.personalAllowed) {
+    throw personalConnectionsDisabled();
   }
 }

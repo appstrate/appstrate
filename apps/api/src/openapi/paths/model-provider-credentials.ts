@@ -230,7 +230,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Create a model provider credential",
       description:
-        "Create a new LLM model provider credential. The plaintext API key is encrypted at rest under a versioned envelope. **Permission:** `model-provider-credentials:write` for an organization credential (`owner_type: org`, the default); `model-provider-credentials:connect` for a personal credential (`owner_type: user`), which belongs to the caller and serves only their own calls. The connection joins a model configuration (`config_id`, else its provider's family configuration). A personal connection is refused with `403 personal_model_credentials_disabled` when that configuration does not allow personal connections.",
+        "Create a new LLM model provider credential. The plaintext API key is encrypted at rest under a versioned envelope. **Permission:** `model-provider-credentials:write` for an organization credential (`owner_type: org`, the default); `model-provider-credentials:connect` for a personal credential (`owner_type: user`), which belongs to the caller and serves only their own calls. The connection joins a model configuration (`config_id`, else its provider's family configuration, which only a caller holding `models:write` creates when it is missing: `409 model_config_required` otherwise). A personal connection is refused with `403 personal_connections_disabled` when that configuration does not allow personal connections.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -261,7 +261,7 @@ export const modelProviderCredentialsPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "The model configuration the connection joins (`GET /api/model-configs`); its endpoint is the connection's. Absent: the provider's family configuration, created when missing — refused (`400`, param `config_id`) for a gateway provider (`baseUrlOverridable: true`), whose endpoint a configuration chooses. A provider that does not fit the configuration is `400 connection_provider_mismatch`; a personal connection to a configuration that does not allow them is `403 personal_model_credentials_disabled`.",
+                    "The model configuration the connection joins (`GET /api/model-configs`); its endpoint is the connection's. Absent: the provider's family configuration, created when missing for a caller who holds `models:write` (`409 model_config_required` otherwise) — refused (`400`, param `config_id`) for a gateway provider (`baseUrlOverridable: true`), whose endpoint a configuration chooses. A provider that does not fit the configuration is `400 connection_provider_mismatch`; a personal connection to a configuration that does not allow them is `403 personal_connections_disabled`.",
                 },
                 owner_type: {
                   type: "string",
@@ -299,7 +299,24 @@ export const modelProviderCredentialsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:
-            "Forbidden — caller lacks `model-provider-credentials:write` (organization credential) or `model-provider-credentials:connect` (`owner_type: user`), or `personal_model_credentials_disabled` — the configuration does not allow personal connections.",
+            "Forbidden — caller lacks `model-provider-credentials:write` (organization credential) or `model-provider-credentials:connect` (`owner_type: user`), or `personal_connections_disabled` — the configuration does not allow personal connections.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "404": {
+          description: "Not found — `config_id` names no model configuration of this organization.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "409": {
+          description:
+            "`model_config_required` (param `config_id`) — no `config_id` was given, the organization has no configuration for the provider's family, and the caller does not hold `models:write`, the only grant that creates one.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -318,7 +335,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Test model provider credential configuration inline",
       description:
-        "Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId`: its provider, API shape and base URL are used, and its stored API key when `api_key` is omitted. `base_url` must then equal the credential's, unless `api_key` is supplied for a provider accepting a base URL override; a built-in (system) credential is refused with 403, and a personal credential with `403 personal_model_credentials_disabled` while its model configuration does not allow personal connections. Without a stored credential, the provider's own API shape is used and `base_url` must be its default unless it accepts an override; a provider accepting one is refused with 400 to a caller without `model-provider-credentials:write`. The test follows the provider's definition: a provider whose model listing is unauthenticated is tested with one minimal chat completion instead of `GET <base_url>/models`. **Permission:** `model-provider-credentials:read` or `:connect`; a `credentialId` the caller may not use answers `404`. Rate limited to 5 requests per minute.",
+        "Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId`: its provider, API shape and base URL are used, and its stored API key when `api_key` is omitted. `base_url` must then equal the credential's, unless the caller holds `model-provider-credentials:write` and supplies `api_key` for a provider accepting a base URL override (the owner of a personal connection cannot point it at another endpoint); a built-in (system) credential is refused with 403, and a personal credential with `403 personal_connections_disabled` while its model configuration does not allow personal connections. Without a stored credential, the provider's own API shape is used. A gateway provider (one accepting a base URL override) is probed at the endpoint of a stored configuration of the organization (`config_id`, whose provider must fit); a free `base_url` instead is accepted only from a caller holding `model-provider-credentials:write`, and a gateway with neither is `400` (param `config_id`). Any other provider is probed at its default `base_url`, which may be omitted. The test follows the provider's definition: a provider whose model listing is unauthenticated is tested with one minimal chat completion instead of `GET <base_url>/models`. **Permission:** `model-provider-credentials:read` or `:connect`; a `credentialId` the caller may not use answers `404`. Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -326,7 +343,7 @@ export const modelProviderCredentialsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["providerId", "base_url"],
+              required: ["providerId"],
               properties: {
                 providerId: {
                   type: "string",
@@ -337,7 +354,14 @@ export const modelProviderCredentialsPaths = {
                 base_url: {
                   type: "string",
                   format: "uri",
-                  description: "Model provider API base URL",
+                  description:
+                    "Model provider API base URL. For a gateway without a stored credential, only a caller holding `model-provider-credentials:write` may set it; never together with `config_id`.",
+                },
+                config_id: {
+                  type: "string",
+                  format: "uuid",
+                  description:
+                    "The model configuration (`GET /api/model-configs`) whose endpoint a draft key is probed at; its provider must fit `providerId`. Unknown for this organization: `404`.",
                 },
                 api_key: {
                   type: "string",
@@ -369,6 +393,7 @@ export const modelProviderCredentialsPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
         "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },

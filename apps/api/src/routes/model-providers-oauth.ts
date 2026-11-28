@@ -9,7 +9,11 @@ import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { importOAuthModelProviderConnection } from "../services/model-providers/oauth-flow.ts";
 import { isOAuthModelProvider } from "../services/model-providers/registry.ts";
-import { findFamilyConfig, resolveConnectionConfig } from "../services/model-configs.ts";
+import {
+  findFamilyConfig,
+  modelConfigRequired,
+  resolveConnectionConfig,
+} from "../services/model-configs.ts";
 import { db } from "@appstrate/db/client";
 import {
   cancelPairing,
@@ -30,7 +34,7 @@ import {
   getOrgModelProviderCredential,
   loadCredentialBinding,
   MANAGE_CREDENTIALS,
-  personalModelCredentialsDisabled,
+  personalConnectionsDisabled,
   reconnectVerdict,
   requestModelCredentialCaller,
   resolveCredentialOwner,
@@ -276,20 +280,21 @@ export function createModelProvidersOAuthRouter() {
     if (input.credentialId !== undefined) {
       const credential = await getOrgModelProviderCredential(caller, input.credentialId);
       const binding = credential ? await loadCredentialBinding(orgId, credential.id) : null;
-      const verdict = credential
-        ? reconnectVerdict(
-            caller,
-            {
-              source: credential.source,
-              ownerUserId: credential.owner_id,
-              authMode: credential.authMode,
-              providerId: credential.providerId,
-            },
-            input.providerId,
-            binding?.personalConnectionsAllowed ?? true,
-          )
-        : "absent";
-      if (verdict === "policy_off") throw personalModelCredentialsDisabled();
+      const verdict =
+        credential && binding
+          ? reconnectVerdict(
+              caller,
+              {
+                source: credential.source,
+                ownerUserId: credential.owner_id,
+                authMode: credential.authMode,
+                providerId: credential.providerId,
+              },
+              input.providerId,
+              binding.personalConnectionsAllowed,
+            )
+          : "absent";
+      if (verdict === "policy_off") throw personalConnectionsDisabled();
       if (!credential || verdict === "absent") {
         throw notFound("Model provider credential not found");
       }
@@ -300,10 +305,19 @@ export function createModelProvidersOAuthRouter() {
       // The redeem's own guards: a pairing it would refuse is never minted. The family
       // configuration is created at redeem, not here, so an abandoned pairing leaves none.
       const config = input.config_id
-        ? await resolveConnectionConfig(db, orgId, input.providerId, input.config_id, user.id)
+        ? await resolveConnectionConfig(
+            db,
+            orgId,
+            input.providerId,
+            input.config_id,
+            user.id,
+            false,
+          )
         : await findFamilyConfig(orgId, input.providerId);
+      // Only a `models:write` holder's redeem creates the family configuration.
+      if (!config && !caller.createsConfigs) throw modelConfigRequired(input.providerId);
       if (ownerUserId !== null && config && !config.personalConnectionsAllowed) {
-        throw personalModelCredentialsDisabled();
+        throw personalConnectionsDisabled();
       }
     }
 

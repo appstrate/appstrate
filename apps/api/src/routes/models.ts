@@ -14,12 +14,15 @@ import {
   listOrgModels,
   getOrgModel,
   getOrgModelRow,
-  createOrgModel,
+  createOrgModelInConfig,
   updateOrgModel,
   deleteOrgModel,
   setDefaultModel,
   writeDefaultModel,
   assertOrgServesDefault,
+  aliasIsServable,
+  orgServesModel,
+  type OrgModelCapabilities,
   seedOrgModelsForConfig,
   testModelConnection,
   testModelConfig,
@@ -221,6 +224,20 @@ function throwOnModelOutsideOffer(providerId: string, modelId: string): void {
   }
 }
 
+/** An alias is served by an organization API-key connection of its configuration only, never by a subscription or a personal one. */
+async function assertAliasServable(
+  orgId: string,
+  config: ModelConfigRow,
+  modelId: string,
+): Promise<void> {
+  if (!(await aliasIsServable(orgId, config, modelId))) {
+    throw invalidRequest(
+      "An aliased model is served by an organization API-key connection of its configuration, and none serves it: connect one first.",
+      "aliased",
+    );
+  }
+}
+
 /** The fields of a model to create that its configuration does not decide. */
 type ModelCreateFields = Omit<z.infer<typeof createModelSchema>, "config_id">;
 
@@ -241,10 +258,11 @@ async function loadModelTargetConfig(orgId: string, configId: string): Promise<M
  */
 async function prepareModelCreate(
   orgId: string,
-  providerId: string,
+  config: ModelConfigRow,
   data: ModelCreateFields,
   pendingLabels: readonly string[] = [],
-): Promise<{ label: string; capabilities: Parameters<typeof createOrgModel>[5] }> {
+): Promise<{ label: string; capabilities: OrgModelCapabilities; promote: boolean }> {
+  const providerId = config.providerId;
   const { modelId, input, contextWindow, maxTokens, reasoning, cost, aliased } = data;
   throwOnModelOutsideOffer(providerId, modelId);
   // Model-alias guards — shared invariant rule:
@@ -255,6 +273,7 @@ async function prepareModelCreate(
         authMode: isOAuthModelProvider(providerId) ? "oauth2" : "api_key",
       }),
     );
+    await assertAliasServable(orgId, config, modelId);
   }
   // Token-budget invariant on the EFFECTIVE state: an override omitted
   // from the payload falls back to the live catalog at read/run time, so
@@ -269,7 +288,13 @@ async function prepareModelCreate(
   // caller omits it. Needs the provider to pick the right catalog
   // (handles `catalogProviderId` for OAuth wrappers).
   const label = data.label ?? (await deriveModelLabel(orgId, providerId, modelId, pendingLabels));
-  return { label, capabilities: { input, contextWindow, maxTokens, reasoning, cost, aliased } };
+  // The default is only ever a model an organization connection serves; judged before any write.
+  const promote = await orgServesModel(orgId, config, modelId, aliased === true);
+  return {
+    label,
+    capabilities: { input, contextWindow, maxTokens, reasoning, cost, aliased },
+    promote,
+  };
 }
 
 export function createModelsRouter() {
@@ -303,8 +328,17 @@ export function createModelsRouter() {
     try {
       const { modelId } = data;
       const config = await loadModelTargetConfig(orgId, data.config_id);
-      const { label, capabilities } = await prepareModelCreate(orgId, config.providerId, data);
-      const id = await createOrgModel(orgId, label, modelId, user.id, config.id, capabilities);
+      const { label, capabilities, promote } = await prepareModelCreate(orgId, config, data);
+      const id = await createOrgModelInConfig(
+        orgId,
+        config,
+        label,
+        modelId,
+        user.id,
+        capabilities,
+        db,
+        promote,
+      );
       await recordAuditFromContext(c, {
         action: "model.created",
         resourceType: "model",
@@ -349,7 +383,7 @@ export function createModelsRouter() {
     }
 
     try {
-      const result = await seedOrgModelsForConfig(orgId, user.id, config.id, { models });
+      const result = await seedOrgModelsForConfig(orgId, user.id, config, { models });
       await recordAuditFromContext(c, {
         action: "model.seeded",
         resourceType: "model",
@@ -422,13 +456,14 @@ export function createModelsRouter() {
     const prepared: {
       modelId: string;
       label: string;
-      capabilities: Parameters<typeof createOrgModel>[5];
+      capabilities: OrgModelCapabilities;
+      promote: boolean;
     }[] = [];
     for (const [index, entry] of data.add.entries()) {
       try {
         const ready = await prepareModelCreate(
           orgId,
-          config.providerId,
+          config,
           entry,
           prepared.map((p) => p.label),
         );
@@ -459,14 +494,15 @@ export function createModelsRouter() {
       const created = new Map<string, string>();
       for (const [index, model] of prepared.entries()) {
         try {
-          const id = await createOrgModel(
+          const id = await createOrgModelInConfig(
             orgId,
+            config,
             model.label,
             model.modelId,
             user.id,
-            config.id,
             model.capabilities,
             tx,
+            model.promote,
           );
           created.set(model.modelId, id);
         } catch (err) {
@@ -688,10 +724,11 @@ export function createModelsRouter() {
       throw notFound("Model not found");
     }
     // The provider is the configuration's: a model never changes configuration.
-    const config = current.configId ? await loadModelConfig(orgId, current.configId) : null;
+    const config = await loadModelConfig(orgId, current.configId);
     if (!config) throw notFound("Model not found");
     const providerId = config.providerId;
-    if (data.aliased ?? current.aliased) {
+    const effectiveAlias = data.aliased ?? current.aliased;
+    if (effectiveAlias) {
       throwOnAliasViolation(
         checkAliasInvariants({
           // A false→true flip must carry a fresh explicit label: the row's
@@ -702,6 +739,10 @@ export function createModelsRouter() {
           authMode: isOAuthModelProvider(providerId) ? "oauth2" : "api_key",
         }),
       );
+      // A row that is an alias already stays editable (switched off, relabelled) whatever serves it now.
+      if (!current.aliased || data.modelId !== undefined) {
+        await assertAliasServable(orgId, config, data.modelId ?? current.modelId);
+      }
     }
 
     // The offer and token-budget checks run on the EFFECTIVE post-update

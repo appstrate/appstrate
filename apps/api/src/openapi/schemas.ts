@@ -2477,7 +2477,7 @@ export const schemas = {
       providerId: {
         type: ["string", "null"],
         description:
-          "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. Also set on an unbound model (`credentialId: null`), where it names the provider each member's own credential must come from. `null` for managed models — binding not exposed.",
+          "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. The configuration's provider when no connection serves the model for the caller, so a client knows which provider a connection must come from. `null` for managed models — binding not exposed.",
       },
       provider_name: {
         type: ["string", "null"],
@@ -2520,7 +2520,7 @@ export const schemas = {
       needs_reconnection: {
         type: "boolean",
         description:
-          "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. On an unbound model (`credentialId: null`) it is read for the caller, like `billed_to`: true when nothing of the caller's serves it and one of their own credentials for it must be reconnected.",
+          "True when nothing serves the model for the caller and a connection of its configuration that would is dead — a subscription flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. Read for the caller, like `billed_to`. The model is listed so it can be inspected or deleted, but it is not usable for inference until that connection is reconnected, and it cannot be made the organization default. Always false for built-in models, which read their key from the environment.",
       },
       aliased: {
         type: "boolean",

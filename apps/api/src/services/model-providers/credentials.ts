@@ -28,7 +28,7 @@ import { MODEL_CREDENTIAL_OWNERS } from "@appstrate/core/model-payer";
 import { inTransaction, mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { ApiError, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
-import { resolveConnectionConfig } from "../model-configs.ts";
+import { resolveConnectionConfig, type ModelConfigRow } from "../model-configs.ts";
 import { getModelProvider } from "./registry.ts";
 import type {
   CredentialDeathCause,
@@ -77,6 +77,8 @@ export interface ModelCredentialCaller {
   deletesOrg: boolean;
   /** Holds `model-provider-credentials:connect` (own personal credentials). */
   connects: boolean;
+  /** Holds `models:write`: the only grant that creates a model configuration, explicitly or implicitly. */
+  createsConfigs: boolean;
 }
 
 function modelCredentialCaller(
@@ -91,6 +93,7 @@ function modelCredentialCaller(
     writesOrg: permissions.has("model-provider-credentials:write"),
     deletesOrg: permissions.has("model-provider-credentials:delete"),
     connects: permissions.has("model-provider-credentials:connect"),
+    createsConfigs: permissions.has("models:write"),
   };
 }
 
@@ -269,8 +272,8 @@ interface CredentialMetadata {
   id: string;
   orgId: string;
   providerId: string;
-  /** The configuration the connection serves (set on every row once script 0062 ran). */
-  configId: string | null;
+  /** The configuration the connection serves. */
+  configId: string;
   config: ModelProviderDefinition;
   /** Registry-derived — see {@link DecryptedModelProviderCredentials}. */
   apiShape: ModelApiShape;
@@ -289,13 +292,13 @@ async function selectCredential(
       id: modelProviderCredentials.id,
       orgId: modelProviderCredentials.orgId,
       providerId: modelProviderCredentials.providerId,
-      configId: modelProviderCredentials.configId,
+      configId: modelConfigs.id,
       configBaseUrl: modelConfigs.baseUrl,
       credentialsEncrypted: modelProviderCredentials.credentialsEncrypted,
       needsReconnection: modelProviderCredentials.needsReconnection,
     })
     .from(modelProviderCredentials)
-    .leftJoin(modelConfigs, eq(modelConfigs.id, modelProviderCredentials.configId))
+    .innerJoin(modelConfigs, eq(modelConfigs.id, modelProviderCredentials.configId))
     .where(eq(modelProviderCredentials.id, id))
     .limit(1);
   if (!row) return null;
@@ -343,10 +346,10 @@ export async function loadCredentialRow(
 
 // ─── Create ────────────────────────────────────────────────────────────────
 
-export function personalModelCredentialsDisabled(): ApiError {
+export function personalConnectionsDisabled(): ApiError {
   return new ApiError({
     status: 403,
-    code: "personal_model_credentials_disabled",
+    code: "personal_connections_disabled",
     title: "Forbidden",
     detail: "This model configuration does not allow personal connections",
   });
@@ -355,22 +358,26 @@ export function personalModelCredentialsDisabled(): ApiError {
 /**
  * The configuration a new connection is written under, settled in its transaction: the
  * named one (the org's, and the provider fits it), else the provider's family
- * configuration, created when missing; a personal connection needs it to allow them.
+ * configuration, created when missing and `mayCreateConfig`; a personal connection needs
+ * it to allow them.
  */
 async function admitConfig(
   tx: DbOrTx,
-  input: { orgId: string; userId: string; providerId: string; configId?: string },
+  input: { orgId: string; userId: string; providerId: string },
+  named: ModelConfigRow | string | undefined,
   ownerUserId: string | null,
+  mayCreateConfig: boolean,
 ): Promise<string> {
   const config = await resolveConnectionConfig(
     tx,
     input.orgId,
     input.providerId,
-    input.configId,
+    named,
     input.userId,
+    mayCreateConfig,
   );
   if (ownerUserId !== null && !config.personalConnectionsAllowed) {
-    throw personalModelCredentialsDisabled();
+    throw personalConnectionsDisabled();
   }
   return config.id;
 }
@@ -381,8 +388,11 @@ interface CreateApiKeyCredentialInput {
   label: string;
   providerId: string;
   apiKey: string;
-  /** The configuration it serves; absent = its provider's family configuration. */
+  /** The configuration it serves, by id or as a row the caller read already; neither = its provider's family configuration. */
   configId?: string;
+  config?: ModelConfigRow;
+  /** The caller holds `models:write`: a missing family configuration is created for it. */
+  mayCreateConfig: boolean;
   /** The member who owns a personal credential; `null` = organization credential. */
   ownerUserId: string | null;
 }
@@ -415,7 +425,13 @@ export async function createApiKeyCredential(
     // organization exit holds while it deletes their credentials, so a credential
     // created during the exit cannot outlive it.
     async (tx) => {
-      const configId = await admitConfig(tx, input, ownerUserId);
+      const configId = await admitConfig(
+        tx,
+        input,
+        input.config ?? input.configId,
+        ownerUserId,
+        input.mayCreateConfig,
+      );
       if (ownerUserId && !(await lockOrgMember(tx, input.orgId, ownerUserId))) {
         throw forbidden("Not a member of this organization");
       }
@@ -503,13 +519,12 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
       ownerUserId,
     },
     async (tx) => {
-      const configId = await admitConfig(tx, input, ownerUserId);
       const minter = await lockMinter(tx, input.orgId, input.userId);
       if (!minter) throw forbidden("Not a member of this organization");
       if (!mayCreateCredential(minter, ownerUserId)) {
         throw forbidden("The member who minted this pairing may not create this credential");
       }
-      return configId;
+      return admitConfig(tx, input, input.configId, ownerUserId, minter.createsConfigs);
     },
   );
 }
@@ -558,19 +573,18 @@ export async function reconnectOAuthCredential(
         personalAllowed: modelConfigs.personalConnectionsAllowed,
       })
       .from(modelProviderCredentials)
-      .leftJoin(modelConfigs, eq(modelConfigs.id, modelProviderCredentials.configId))
+      .innerJoin(modelConfigs, eq(modelConfigs.id, modelProviderCredentials.configId))
       .where(where)
       .for("update", { of: modelProviderCredentials });
     if (!row) return false;
-    const personalAllowed = row.personalAllowed ?? true;
     const facts: CredentialFacts = {
       source: "custom",
       ownerUserId: row.ownerUserId,
       authMode: getModelProvider(input.providerId)?.authMode ?? "api_key",
       providerId: input.providerId,
     };
-    const verdict = reconnectVerdict(minter, facts, input.providerId, personalAllowed);
-    if (verdict === "policy_off") throw personalModelCredentialsDisabled();
+    const verdict = reconnectVerdict(minter, facts, input.providerId, row.personalAllowed);
+    if (verdict === "policy_off") throw personalConnectionsDisabled();
     if (verdict === "absent") return false;
 
     // Only the old identity is read: an unreadable blob, or one under a missing key, is absent.
@@ -681,8 +695,8 @@ interface CredentialBinding {
   providerId: string;
   /** `null` for an organization connection. */
   ownerUserId: string | null;
-  configId: string | null;
-  /** Its configuration's switch (true before script 0062 assigned one). */
+  configId: string;
+  /** Its configuration's switch. */
   personalConnectionsAllowed: boolean;
 }
 
@@ -698,11 +712,11 @@ export async function loadCredentialBinding(
     .select({
       providerId: modelProviderCredentials.providerId,
       ownerUserId: modelProviderCredentials.ownerUserId,
-      configId: modelProviderCredentials.configId,
+      configId: modelConfigs.id,
       personalConnectionsAllowed: modelConfigs.personalConnectionsAllowed,
     })
     .from(modelProviderCredentials)
-    .leftJoin(modelConfigs, eq(modelConfigs.id, modelProviderCredentials.configId))
+    .innerJoin(modelConfigs, eq(modelConfigs.id, modelProviderCredentials.configId))
     .where(
       scopedWhere(modelProviderCredentials, {
         orgId,
@@ -710,9 +724,7 @@ export async function loadCredentialBinding(
       }),
     )
     .limit(1);
-  return row
-    ? { ...row, personalConnectionsAllowed: row.personalConnectionsAllowed ?? true }
-    : null;
+  return row ?? null;
 }
 
 /**
@@ -738,7 +750,7 @@ export async function mayProbeCredential(
   const row = await loadCredentialBinding(caller.orgId, id);
   if (!row || !mayProbe(caller, row.ownerUserId)) return false;
   if (row.ownerUserId !== null && !row.personalConnectionsAllowed) {
-    throw personalModelCredentialsDisabled();
+    throw personalConnectionsDisabled();
   }
   return true;
 }
@@ -1229,13 +1241,14 @@ export async function listOrgModelProviderCredentials(
     .select({
       credential: modelProviderCredentials,
       ownerName: user.name,
+      configId: modelConfigs.id,
       configProviderId: modelConfigs.providerId,
       configBaseUrl: modelConfigs.baseUrl,
       personalAllowed: modelConfigs.personalConnectionsAllowed,
     })
     .from(modelProviderCredentials)
     .leftJoin(user, eq(user.id, modelProviderCredentials.ownerUserId))
-    .leftJoin(modelConfigs, eq(modelConfigs.id, modelProviderCredentials.configId))
+    .innerJoin(modelConfigs, eq(modelConfigs.id, modelProviderCredentials.configId))
     .where(
       scopedWhere(modelProviderCredentials, {
         orgId: caller.orgId,
@@ -1246,20 +1259,13 @@ export async function listOrgModelProviderCredentials(
         ],
       }),
     );
-  const servedBy = (r: {
-    providerId: string;
-    configId: string | null;
-    configProviderId: string | null;
-  }) =>
-    r.configProviderId === null
-      ? []
-      : models
-          .filter(
-            (m) =>
-              m.configId === r.configId &&
-              servesModel(r.providerId, r.configProviderId!, m.modelId),
-          )
-          .map((m) => m.id);
+  const servedBy = (r: { providerId: string; configId: string; configProviderId: string }) =>
+    models
+      .filter(
+        (m) =>
+          m.configId === r.configId && servesModel(r.providerId, r.configProviderId, m.modelId),
+      )
+      .map((m) => m.id);
 
   // Built-in credentials whose EVERY backing model is an alias:
   // hide the binding (apiShape + baseUrl) so the endpoint host doesn't reveal
@@ -1285,12 +1291,13 @@ export async function listOrgModelProviderCredentials(
   return mergeSystemAndDb({
     system,
     rows: rows.map(
-      ({ credential, ownerName, configProviderId, configBaseUrl, personalAllowed }) => ({
+      ({ credential, ownerName, configId, configProviderId, configBaseUrl, personalAllowed }) => ({
         ...credential,
         ownerName,
+        configId,
         configProviderId,
         configBaseUrl,
-        personalAllowed: personalAllowed ?? true,
+        personalAllowed,
       }),
     ),
     mapSystem: (id, def): ModelProviderCredentialInfo => {
