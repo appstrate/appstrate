@@ -1360,6 +1360,8 @@ export interface SpaceInfo {
    * door for every role; runs keep their connections. Always `true` on a personal space.
    */
   credential_proxy_open: boolean;
+  /** Whether the caller's role in this space shows the Studio surface. */
+  shows_studio: boolean;
   /**
    * Whether this is one member's personal space (RBAC spec §3.6). Reached by
    * its owner alone — organization owners and admins included — takes no other

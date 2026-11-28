@@ -61,8 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`personal_space_role` in `orgSettingsSchema` and `orgSettingsReadSchema`** — BREAKING. The
   personal-space default role is no longer stored in the settings document but in two columns of
-  the organization; the key is part of neither schema, and the read schema passes a stored one
-  through untyped until script 0060 removes it. The org settings as
+  the organization; the key is part of neither schema, and a stored `personal_space_role` key is
+  ignored on read (`toOrgSettings` serves the role from the columns), and script 0060 removes it. The org settings as
   served (`OrgSettings` in `@appstrate/shared-types`) follow `orgSettingsWireSchema`, where
   `personal_space_role` is a role reference object, never a bare string.
 - **`SPACE_CHOICE_META_KEY`** — BREAKING (`@appstrate/core/mcp-spaces`). An MCP call that needs a

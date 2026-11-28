@@ -13,8 +13,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { platformReadEnvKeys } from "../../apps/api/src/lib/platform-env-keys.ts";
+import { FOREIGN_ENV_NAMESPACES } from "../../packages/env/test/foreign-env-namespaces.ts";
 import {
-  FOREIGN_ENV_NAMESPACES,
   PLATFORM_ENV_NAMESPACES,
   envNamespace,
   findUnreadEnvKeys,

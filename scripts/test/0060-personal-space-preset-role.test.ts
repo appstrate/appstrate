@@ -54,9 +54,11 @@ describe("0060 — the personal-space preset role leaves org_settings", () => {
   });
 
   it("--apply copies the preset, removes the key, keeps other keys", async () => {
+    const updatedAtBefore = (await rowOf(viewer)).updatedAt;
     await run(true);
     expect(lines.at(-1)).toBe("0060: APPLIED — committed.");
     const v = await rowOf(viewer);
+    expect(v.updatedAt).toEqual(updatedAtBefore);
     expect(v.personalSpacePresetRole).toBe("viewer");
     expect(v.orgSettings).toEqual({ dashboard_sso_enabled: true });
     expect((await rowOf(untouched)).personalSpacePresetRole).toBeNull();

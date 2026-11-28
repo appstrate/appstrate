@@ -209,7 +209,12 @@ describe("the Connecter action", () => {
   }
 
   it("is offered when the viewer reaches the agent's page and sees its Connexions tab", async () => {
-    expect(await actionFor(["agents:read", "integrations:read"])).toBeDefined();
+    const action = (await actionFor(["agents:read", "integrations:read"])) as {
+      label: string;
+      onClick: unknown;
+    };
+    expect(action.label).toBe(i18nModule.default.t("detail.integrationConnect", { ns: "agents" }));
+    expect(typeof action.onClick).toBe("function");
   });
 
   it("is withheld from a role without the Studio, where the agent's page is", async () => {

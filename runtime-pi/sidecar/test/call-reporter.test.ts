@@ -316,16 +316,16 @@ describe("createCallReporter — retry and drain deadline", () => {
       fetchFn: hangingFetch,
       flushIntervalMs: 60_000,
       maxBatch: 1,
-      drainDeadlineMs: 400,
+      drainDeadlineMs: 600,
     });
     reporter.report(record({ outcome: "200" }));
     const started = Date.now();
     const first = reporter.drain();
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 400));
     reporter.report(record({ outcome: "201" }));
     await Promise.all([first, reporter.drain()]);
-    // The second joined the first's deadline (400 ms from its start), not a fresh one (500 ms).
-    expect(Date.now() - started).toBeLessThan(450);
+    // The second joined the first's deadline (600 ms from its start), not a fresh one (1000 ms).
+    expect(Date.now() - started).toBeLessThan(800);
   });
 });
 
@@ -368,7 +368,7 @@ describe("connectionCallJournal", () => {
         call_id: expect.stringMatching(
           /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/,
         ),
-        called_at: expect.any(String),
+        called_at: "2026-03-01T10:00:00.000Z",
         integration_id: "@test/integ",
         connection_id: null,
         method: "PATCH",

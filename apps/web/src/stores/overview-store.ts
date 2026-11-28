@@ -26,7 +26,7 @@ export const overviewStore = createStore<OverviewState>()((set) => ({
   chosen: persisted.read(),
   set: (key, on) => {
     // The persisted map, not this tab's copy: another tab may have written since.
-    const chosen = persisted.read();
+    const chosen = { ...persisted.read() };
     if (on) chosen[key] = true;
     else delete chosen[key];
     persisted.write(chosen);

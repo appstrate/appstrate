@@ -547,16 +547,14 @@ export async function listDeliveries(
 
 export function buildEventEnvelope(params: {
   eventType: string;
-  run: Record<string, unknown>;
+  subject: Record<string, unknown>;
   payloadMode: "full" | "summary";
 }): { eventId: string; payload: Record<string, unknown> } {
   const eventId = prefixedId("evt");
 
-  // Default the inner `object` discriminator to "run" so run-lifecycle
-  // callers don't have to set it; callers for non-run events (e.g.
-  // `dispatchRunConnectionMissingWebhook`) put their own discriminator
-  // on the event's subject (`params.run`) before calling.
-  const execObj: Record<string, unknown> = { object: "run", ...params.run };
+  // The inner `object` discriminator defaults to "run"; callers for non-run events (e.g.
+  // `dispatchRunConnectionMissingWebhook`) set their own on `params.subject`.
+  const execObj: Record<string, unknown> = { object: "run", ...params.subject };
 
   // Summary mode: strip result and input
   if (params.payloadMode === "summary") {
@@ -651,7 +649,7 @@ export async function dispatchWebhookEvents(
 
     const { eventId, payload } = buildEventEnvelope({
       eventType,
-      run: subject,
+      subject,
       payloadMode: wh.payloadMode as "full" | "summary",
     });
 
@@ -671,7 +669,7 @@ export async function sendTestPing(
   const eventType = "test.ping";
   const envelope = buildEventEnvelope({
     eventType,
-    run: { id: "run_test", packageId: "test", status: "success" },
+    subject: { id: "run_test", packageId: "test", status: "success" },
     payloadMode: webhook.payloadMode,
   });
   const queue = await getDeliveryQueue();

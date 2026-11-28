@@ -59,14 +59,16 @@ const ICONIFY_SVG_BASE = "https://api.iconify.design";
 
 /**
  * A manifest `icon` (`parseIcon`'s grammar) as MCP icons a client draws from `src` alone: an image
- * URL or data URI as it is, an Iconify id as its SVG file on the Iconify API, an emoji as an inline
- * SVG. `undefined` for a value no surface can draw.
+ * `https:` URL or `data:image/` URI as it is, an Iconify id as its SVG file on the Iconify API, an
+ * emoji as an inline SVG. `undefined` for a value no surface can draw (an `http:` URL included).
  */
 export function manifestIcons(value: unknown): PresentationIcon[] | undefined {
   const icon = parseIcon(value);
   if (!icon) return undefined;
   switch (icon.kind) {
     case "url": {
+      // MCP icon rules: a client fetches only `https:` or an inline image.
+      if (!/^(https:|data:image\/)/i.test(icon.src)) return undefined;
       const mime = /^data:(image\/[a-z0-9.+-]+)[;,]/i.exec(icon.src)?.[1];
       return [{ src: icon.src, ...(mime ? { mimeType: mime.toLowerCase() } : {}) }];
     }

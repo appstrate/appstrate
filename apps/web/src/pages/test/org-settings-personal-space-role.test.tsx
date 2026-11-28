@@ -10,6 +10,7 @@ import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import settingsFr from "../../locales/fr/settings.json";
+import type { SpaceRoleReference } from "../../hooks/use-roles.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -34,10 +35,7 @@ const i18nModule = await import("../../i18n.ts");
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
 
-function renderSetting(
-  permissions: string[],
-  role: { preset_role: string } | { custom_role_id: string } | null,
-): string {
+function renderSetting(permissions: string[], role: SpaceRoleReference | null): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   seedOrgAndRoles(queryClient, permissions);
   if (role) {

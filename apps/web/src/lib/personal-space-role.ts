@@ -24,7 +24,7 @@ export const FOLLOW_ORG_DEFAULT = "org-default";
 export function followLabel(member: OrgMember, t: (key: string) => string): string {
   const role = member.personal_space_default_role;
   if (!role) return t("settings:userDetail.personalSpaceRoleNoDefault");
-  return spaceRoleLabel(role, t) ?? role.name;
+  return spaceRoleLabel(role, t);
 }
 
 /** The org setting's PATCH body for a picked select value. */

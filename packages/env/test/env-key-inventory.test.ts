@@ -2,8 +2,8 @@
 
 import { describe, it, expect } from "bun:test";
 import { envSchema } from "../src/index.ts";
+import { FOREIGN_ENV_NAMESPACES } from "./foreign-env-namespaces.ts";
 import {
-  FOREIGN_ENV_NAMESPACES,
   PLATFORM_ENV_NAMESPACES,
   envNamespace,
   findUnreadEnvKeys,

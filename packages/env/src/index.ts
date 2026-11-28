@@ -1073,7 +1073,6 @@ const { getEnv, resetCache } = createEnvGetter(envSchema);
 export { getEnv };
 export const _resetCacheForTesting = resetCache;
 export {
-  FOREIGN_ENV_NAMESPACES,
   INFRA_ENV_KEYS,
   PLATFORM_ENV_NAMESPACES,
   envNamespace,

@@ -61,7 +61,8 @@ const TRANSPILER_CACHE_PATH = "/runtime/.transpiler-cache";
 /**
  * Must exceed `SIDECAR_SIGTERM_GRACE_SECONDS` of `@appstrate/core/sidecar-types` (5 s; the sidecar's
  * 4 s journal drain deadline plus margins), so a drain that is landing is not cut short. Kept as a
- * literal: the guest bundle is built standalone and does not pull in core.
+ * literal: the guest bundle is built standalone and does not pull in core; a unit test pins the
+ * relation.
  */
 const SIDECAR_STOP_GRACE_MS = 6_000;
 

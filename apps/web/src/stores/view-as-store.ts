@@ -12,15 +12,8 @@ import { createStore } from "zustand/vanilla";
 import type { components } from "../api/schema";
 import { queryClient } from "../lib/query-client";
 import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
-import {
-  LOCAL_STORAGE_KEYS,
-  createLocalStore,
-  jsonCodec,
-  storageKey,
-} from "@appstrate/ui/local-storage";
+import { LOCAL_STORAGE_KEYS, createLocalStore, jsonCodec } from "@appstrate/ui/local-storage";
 import { getCurrentOrgId, orgStore } from "./org-store";
-
-export const STORAGE_KEY = storageKey(LOCAL_STORAGE_KEYS.viewAs);
 
 /** Banner labels are captured on entry: resolving them later needs reads the preview may forbid. */
 const personaSchema = z.object({

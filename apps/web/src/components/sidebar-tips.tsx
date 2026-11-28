@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useLayoutEffect, useState, type FocusEvent, type ReactNode } from "react";
+import { useEffect, useState, type FocusEvent, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -145,8 +145,6 @@ function useSidebarTipFacts(dismissed: readonly string[]): SidebarTipFacts {
  */
 export function SidebarTips() {
   const { user } = useAuth();
-  const userId = user?.id ?? null;
-  useLayoutEffect(() => dismissedTipsStore.bind(userId), [userId]);
   const [dismissed, setDismissed] = dismissedTipsStore.useValue();
   const facts = useSidebarTipFacts(dismissed);
   const { pathname } = useLocation();

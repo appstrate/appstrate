@@ -71,7 +71,11 @@ function isErrorPayload(unwrapped: unknown): boolean {
   return false;
 }
 
-/** `unwrapMcpResult` of a result without the model's turn-budget note block. */
+/**
+ * `unwrapMcpResult` of a result without the model's turn-budget note block. A reader of the tool's
+ * own payload calls this; `unwrapMcpResult` direct is for readers of a raw result that never carries
+ * the note block (run-launch and auth-offer extractors).
+ */
 export function unwrapToolResult(result: unknown): unknown {
   return unwrapMcpResult(omitTurnBudgetNote(result));
 }

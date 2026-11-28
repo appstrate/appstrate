@@ -415,15 +415,21 @@ describe("authority — `<type>:share` in the home space", () => {
       }),
       "note",
     );
-    // A person is no share target: the body names a space and nothing else.
-    await expectProblem(
-      await app.request(`/api/packages/${AGENT}/shares`, {
-        method: "POST",
-        headers: { ...author.headers(homeId), "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: recipient.userId }),
-      }),
-      400,
-    );
+    // A person is no share target, and the retired `target` envelope is gone: the body names a
+    // space and nothing else.
+    for (const body of [
+      { user_id: recipient.userId },
+      { target: { kind: "space", spaceId: openId } },
+    ]) {
+      await expectProblem(
+        await app.request(`/api/packages/${AGENT}/shares`, {
+          method: "POST",
+          headers: { ...author.headers(homeId), "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        400,
+      );
+    }
     expect(await placementsOutside(AGENT, homeId)).toEqual([]);
   });
 

@@ -124,8 +124,16 @@ function parseDetail(space: DetailSpace, result: unknown): SpaceDetail | undefin
     connections === undefined ||
     connectableEnvelope === undefined ||
     agentsEnvelope === undefined
-  )
+  ) {
+    logger.warn(
+      "get_me of a space answered another space or a context without its lists — left out",
+      {
+        spaceId: space.id,
+        answeredSpaceId: body.space?.id,
+      },
+    );
     return undefined;
+  }
   const total = (value: number, listed: unknown[] | null): number =>
     listed === null ? 0 : Math.max(value, listed.length);
   const connectable = space.integrations ? connectableEnvelope.data : null;

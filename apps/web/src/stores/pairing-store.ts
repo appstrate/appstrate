@@ -16,7 +16,7 @@ import {
   storageKey,
 } from "@appstrate/ui/local-storage";
 
-export const STORAGE_KEY = storageKey(LOCAL_STORAGE_KEYS.pendingPairings);
+const STORAGE_KEY = storageKey(LOCAL_STORAGE_KEYS.pendingPairings);
 
 // Bounds the entries no poll ends; it does not complete a pairing. Sized past the server row's
 // lifetime (1 h grace + 15 min sweep), so a polled entry reaches its outcome first.

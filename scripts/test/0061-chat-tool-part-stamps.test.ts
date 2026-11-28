@@ -48,9 +48,9 @@ describe("rewriteToolPartStamps (0061)", () => {
       { content: [payload], isError: false, actedSpaceIds: ["spc_a", "spc_b"] },
       { resultProviderMetadata: { appstrate: { durationMs: 12 }, other: 1 } },
     );
-    const { parts, acted, notes } = rewriteToolPartStamps([old]);
+    const { parts, acted, dropped, notes } = rewriteToolPartStamps([old]);
     const part = parts[0] as Part;
-    expect([acted, notes]).toEqual([1, 0]);
+    expect([acted, dropped, notes]).toEqual([1, 0, 0]);
     expect(part.output).toEqual({ content: [payload], isError: false });
     expect(readAppstrateToolPartMetadata(part.resultProviderMetadata)).toEqual({
       durationMs: 12,
@@ -79,7 +79,9 @@ describe("rewriteToolPartStamps (0061)", () => {
 
   it("drops a malformed actedSpaceIds from the output without stamping it", () => {
     const old = tool({ content: [payload], actedSpaceIds: [1, 2] });
-    const part = rewriteToolPartStamps([old]).parts[0] as Part;
+    const { parts, acted, dropped } = rewriteToolPartStamps([old]);
+    const part = parts[0] as Part;
+    expect([acted, dropped]).toEqual([0, 1]);
     expect(part.output).toEqual({ content: [payload] });
     expect(part.resultProviderMetadata).toBeUndefined();
   });
@@ -109,8 +111,8 @@ describe("rewriteToolPartStamps (0061)", () => {
       { type: "tool-pending", toolCallId: "c", state: "input-available", input: {} },
       { type: "text", text: NOTE },
     ];
-    const { parts, acted, notes } = rewriteToolPartStamps(kept);
-    expect([acted, notes]).toEqual([0, 0]);
+    const { parts, acted, dropped, notes } = rewriteToolPartStamps(kept);
+    expect([acted, dropped, notes]).toEqual([0, 0, 0]);
     expect(parts).toEqual(kept);
   });
 });
@@ -134,12 +136,16 @@ describe("0061 — chat tool part stamps rewritten", () => {
       content: [payload, { type: "text", text: NOTE }],
       actedSpaceIds: ["spc_a"],
     });
+    const malformed = tool({ content: [payload], actedSpaceIds: [1] });
     const [row] = await db
       .insert(chatMessages)
       .values({
         sessionId,
         messageId: "m1",
-        content: { role: "assistant", parts: [{ type: "text", text: "hi" }, untouched, old] },
+        content: {
+          role: "assistant",
+          parts: [{ type: "text", text: "hi" }, untouched, old, malformed],
+        },
       })
       .returning({ seq: chatMessages.seq });
     await db.insert(chatMessages).values({
@@ -151,10 +157,16 @@ describe("0061 — chat tool part stamps rewritten", () => {
       (await db.select().from(chatMessages).where(eq(chatMessages.seq, row!.seq)))[0]!.content;
     const before = JSON.stringify(await stored());
 
-    expect(await pendingToolPartStamps()).toEqual({ scanned: 2, parts: 1, blocks: 1, rows: 1 });
+    expect(await pendingToolPartStamps()).toEqual({
+      scanned: 2,
+      parts: 1,
+      dropped: 1,
+      blocks: 1,
+      rows: 1,
+    });
     await run(false);
     expect(lines).toContain(
-      "messages scanned: 2, parts rewritten (actedSpaceIds): 1, blocks marked (turn budget): 1, rows changed: 1",
+      "messages scanned: 2, parts rewritten (actedSpaceIds): 1, dropped (malformed actedSpaceIds): 1, blocks marked (turn budget): 1, rows changed: 1",
     );
     expect(JSON.stringify(await stored())).toBe(before);
 
@@ -168,6 +180,8 @@ describe("0061 — chat tool part stamps rewritten", () => {
     expect(readAppstrateToolPartMetadata(parts[2]!.resultProviderMetadata)?.actedSpaceIds).toEqual([
       "spc_a",
     ]);
+    expect(parts[3]!.output).toEqual({ content: [payload] });
+    expect(parts[3]!.resultProviderMetadata).toBeUndefined();
 
     const after = JSON.stringify(await stored());
     expect((await pendingToolPartStamps()).rows).toBe(0);

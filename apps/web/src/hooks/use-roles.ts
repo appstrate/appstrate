@@ -84,6 +84,14 @@ export function spaceRoleValue(role: {
 
 /** A preset's slug is translated; a custom bundle renders its author's name. `t` is a parameter (hence the namespace-qualified key) so paths holding another namespace's `t` reuse it. */
 export function spaceRoleLabel(
+  role: SpaceRoleReference & { name: string },
+  t: (key: string) => string,
+): string;
+export function spaceRoleLabel(
+  role: (SpaceRoleReference & { name: string }) | null | undefined,
+  t: (key: string) => string,
+): string | null;
+export function spaceRoleLabel(
   role: (SpaceRoleReference & { name: string }) | null | undefined,
   t: (key: string) => string,
 ): string | null {
@@ -112,7 +120,7 @@ export function spaceRoleDescription(role: RoleObject, t: (key: string) => strin
 export const DEFAULT_SPACE_ROLE_VALUE = spaceRoleValue({ preset_role: "operator" });
 
 /** A role on the wire: exactly one of the two fields. */
-export type SpaceRoleReference = { preset_role: SpaceRolePreset } | { custom_role_id: string };
+export type SpaceRoleReference = components["schemas"]["OrgSettings"]["personal_space_role"];
 
 /** Turn a select value back into the request body's role half. */
 export function spaceRoleAssignment(value: string): SpaceRoleReference {

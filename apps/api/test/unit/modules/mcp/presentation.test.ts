@@ -198,6 +198,11 @@ describe("manifestIcons", () => {
     ]);
   });
 
+  it("drops an image URL an MCP client may not load", () => {
+    expect(manifestIcons("http://example.test/a.svg")).toBeUndefined();
+    expect(manifestIcons("data:text/html;base64,AAAA")).toBeUndefined();
+  });
+
   it("points an Iconify id, Lucide's included, at its SVG file", () => {
     expect(manifestIcons("logos:slack-icon")).toEqual([
       { src: "https://api.iconify.design/logos/slack-icon.svg", mimeType: "image/svg+xml" },

@@ -38,10 +38,12 @@ import { effectivePermissions, orgPermissions, type Permission } from "./permiss
 import {
   resolveSpaceRole,
   spacePermissions,
+  toSpaceRoleReference,
   type SpaceMemberRow,
   type SpaceRoleRef,
 } from "./space-role.ts";
 import { canGrantSpaceRole } from "./space-role-policy.ts";
+import { auditSpaceRole } from "./space-role-assignment.ts";
 import {
   loadSpaceAccess,
   validateSpaceInOrg,
@@ -567,15 +569,15 @@ export function personaMemberships(
   return overlay;
 }
 
-const roleAudit = (ref: SpaceRoleRef) =>
-  ref.kind === "preset" ? { presetRole: ref.preset } : { customRoleId: ref.role.id };
-
 /** The persona as an audit payload records it — camelCase explicit keys (CASING_CONVENTIONS 4m). */
 export function viewAsAudit(persona: ViewAsPersona): Record<string, unknown> {
   return {
     orgRole: persona.orgRole,
     space: persona.space
-      ? { spaceId: persona.space.spaceId, role: roleAudit(persona.space.role) }
+      ? {
+          spaceId: persona.space.spaceId,
+          role: auditSpaceRole(toSpaceRoleReference(persona.space.role)),
+        }
       : null,
   };
 }

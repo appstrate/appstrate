@@ -364,7 +364,7 @@ describe("view as role", () => {
           orgRole: "member",
           space: {
             spaceId: owner.defaultSpaceId,
-            role: { presetRole: "builder" },
+            role: { presetRole: "builder", customRoleId: null },
           },
         },
       });
@@ -531,7 +531,7 @@ describe("view as role", () => {
       orgRole: "member",
       space: {
         spaceId: owner.defaultSpaceId,
-        role: { presetRole: "admin" },
+        role: { presetRole: "admin", customRoleId: null },
       },
     });
     // The control: the same write with no header carries no persona at all.

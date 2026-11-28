@@ -102,6 +102,8 @@ export function createCallReporter(opts: {
         });
         await res.body?.cancel().catch(() => {});
         if (res.ok) return;
+        // A 429 is terminal too: it does not occur in practice, one serial POST at a time (at most one
+        // per flush interval) against the route's 200/min per run token and path (RUN_ROUTE_RATE_PER_MIN).
         if (res.status < 500 || attempt === 2 || deadline?.aborted) {
           logger.warn("integration call report refused, records dropped", {
             status: res.status,
@@ -230,7 +232,6 @@ export function connectionCallJournal(
   },
 ): CallJournal {
   return (call) => {
-    const durationMs = Math.max(0, Math.round(call.durationMs));
     const revision =
       call.credential && binding.source && SUCCESS_OUTCOME.test(call.outcome)
         ? binding.source.streakEndingRevision(call.credential.revision)
@@ -245,7 +246,7 @@ export function connectionCallJournal(
         method: call.method,
         host: call.host,
         outcome: call.outcome,
-        duration_ms: durationMs,
+        duration_ms: Math.max(0, Math.round(call.durationMs)),
         ...(revision !== undefined ? { credential_revision: revision } : {}),
       },
       revision !== undefined && source ? () => source.streakNotEnded(revision) : undefined,

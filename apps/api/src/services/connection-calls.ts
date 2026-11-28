@@ -53,7 +53,7 @@ export interface ConnectionCallFilters {
   connectionId?: string;
   actorId?: string;
   runId?: string;
-  /** Inclusive bounds on when the call started (`created_at`). */
+  /** Inclusive bounds on when the row was written (`created_at`). */
   startDate?: Date;
   endDate?: Date;
 }

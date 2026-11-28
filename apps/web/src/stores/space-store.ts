@@ -20,7 +20,7 @@ const persistedRemembered = createLocalStore(
 
 /** Applies `change` to the PERSISTED map, not this tab's copy: another tab may have written since. */
 function writeRemembered(change: (map: Record<string, string>) => void): Record<string, string> {
-  const remembered = persistedRemembered.read();
+  const remembered = { ...persistedRemembered.read() };
   change(remembered);
   persistedRemembered.write(remembered);
   return remembered;

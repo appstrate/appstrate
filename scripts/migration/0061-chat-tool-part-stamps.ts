@@ -19,9 +19,15 @@
  * a stored result that starts with that line and carries no marker gets the block `turnBudgetNoteBlock`
  * produces (marker and `assistant` audience). Without it an old result shows the line to its reader.
  *
+ * A malformed `actedSpaceIds` (not an array of strings) is removed from the output and stamped nowhere;
+ * the summary counts those separately ("dropped").
+ *
  * Not a boot guard: not running it changes what an old conversation DISPLAYS, nothing else. The app may
- * keep running. Only `chat_messages.content` is written; one transaction on `--apply`, which exits 1
- * unless nothing is left. Idempotent: a second run finds nothing. Targets `DATABASE_URL` or
+ * keep running. Only `chat_messages.content` is written. `--apply` commits per page of 100 rows: each
+ * page is selected FOR UPDATE, rewritten and committed in its own short transaction (`lock_timeout`
+ * 5s), so locks are never held across pages. The rewrite is idempotent and keyset-resumable: an
+ * interrupted run is simply re-run. The final "left" verification runs outside any write transaction
+ * and exits 1 unless nothing is left. Targets `DATABASE_URL` or
  * `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`).
  */
 
@@ -69,15 +75,18 @@ function markNote(blocks: unknown[]): unknown[] | undefined {
 
 /**
  * The parts of one message with both contracts brought to the current form, and how many parts
- * changed for (a) and how many blocks were marked for (b). Pure, so the written shape is tested
+ * changed for (a), how many malformed `actedSpaceIds` were dropped unstamped, and how many blocks were
+ * marked for (b). Pure, so the written shape is tested
  * without a database.
  */
 export function rewriteToolPartStamps(parts: readonly unknown[]): {
   parts: unknown[];
   acted: number;
+  dropped: number;
   notes: number;
 } {
   let acted = 0;
+  let dropped = 0;
   let notes = 0;
   const next = parts.map((part) => {
     if (!isObject(part) || !isToolPart(part) || !("output" in part)) return part;
@@ -86,9 +95,11 @@ export function rewriteToolPartStamps(parts: readonly unknown[]): {
 
     if (isObject(output) && "actedSpaceIds" in output) {
       const { actedSpaceIds, ...rest } = output;
-      acted += 1;
       output = rest;
-      if (isStringArray(actedSpaceIds)) {
+      if (!isStringArray(actedSpaceIds)) {
+        dropped += 1;
+      } else {
+        acted += 1;
         const meta = isObject(result.resultProviderMetadata) ? result.resultProviderMetadata : {};
         const appstrate = isObject(meta.appstrate) ? meta.appstrate : {};
         if (appstrate.actedSpaceIds === undefined) {
@@ -109,42 +120,59 @@ export function rewriteToolPartStamps(parts: readonly unknown[]): {
 
     return output === part.output ? result : { ...result, output };
   });
-  return { parts: next, acted, notes };
+  return { parts: next, acted, dropped, notes };
 }
 
 /** Narrows the scan to messages that can carry either form; the exact test is `rewriteToolPartStamps`. */
 const CANDIDATE = sql`(${chatMessages.content}::text LIKE '%actedSpaceIds%' OR ${chatMessages.content}::text LIKE '%[turn budget] %')`;
 
-type Counts = { scanned: number; parts: number; blocks: number; rows: number };
+type Counts = { scanned: number; parts: number; dropped: number; blocks: number; rows: number };
 
-/** Keyset pages bound the rows held at once. */
-async function scanToolPartStamps(
+const PAGE_SIZE = 100;
+
+/**
+ * One keyset page after `after`. A writing page (`write` given) selects FOR UPDATE so a concurrent
+ * upsert cannot be overwritten by a stale copy; the caller owns the surrounding transaction.
+ */
+async function scanPage(
   database: Pick<Db, "select">,
+  after: number | undefined,
+  counts: Counts,
   write?: (seq: number, content: ChatMessageContent) => Promise<void>,
-): Promise<Counts> {
-  const counts: Counts = { scanned: 0, parts: 0, blocks: 0, rows: 0 };
+): Promise<{ size: number; last: number | undefined }> {
+  const page = database
+    .select({ seq: chatMessages.seq, content: chatMessages.content })
+    .from(chatMessages)
+    .where(and(CANDIDATE, after === undefined ? undefined : gt(chatMessages.seq, after)))
+    .orderBy(chatMessages.seq)
+    .limit(PAGE_SIZE);
+  const rows = await (write ? page.for("update") : page);
+  for (const row of rows) {
+    counts.scanned++;
+    const stored: unknown = row.content.parts;
+    const { parts, acted, dropped, notes } = rewriteToolPartStamps(
+      Array.isArray(stored) ? stored : [],
+    );
+    if (acted === 0 && dropped === 0 && notes === 0) continue;
+    counts.rows++;
+    counts.parts += acted;
+    counts.dropped += dropped;
+    counts.blocks += notes;
+    if (write) await write(row.seq, { ...row.content, parts } as ChatMessageContent);
+  }
+  return { size: rows.length, last: rows[rows.length - 1]?.seq };
+}
+
+const emptyCounts = (): Counts => ({ scanned: 0, parts: 0, dropped: 0, blocks: 0, rows: 0 });
+
+/** Read-only scan of every candidate page; writes nothing. */
+async function scanToolPartStamps(database: Pick<Db, "select">): Promise<Counts> {
+  const counts = emptyCounts();
   let after: number | undefined;
   for (;;) {
-    const page = database
-      .select({ seq: chatMessages.seq, content: chatMessages.content })
-      .from(chatMessages)
-      .where(and(CANDIDATE, after === undefined ? undefined : gt(chatMessages.seq, after)))
-      .orderBy(chatMessages.seq)
-      .limit(100);
-    // A writing pass locks the page so a concurrent upsert cannot be overwritten by a stale copy.
-    const rows = await (write ? page.for("update") : page);
-    for (const row of rows) {
-      counts.scanned++;
-      const stored: unknown = row.content.parts;
-      const { parts, acted, notes } = rewriteToolPartStamps(Array.isArray(stored) ? stored : []);
-      if (acted === 0 && notes === 0) continue;
-      counts.rows++;
-      counts.parts += acted;
-      counts.blocks += notes;
-      if (write) await write(row.seq, { ...row.content, parts } as ChatMessageContent);
-    }
-    if (rows.length < 100) return counts;
-    after = rows[rows.length - 1]!.seq;
+    const { size, last } = await scanPage(database, after, counts);
+    if (size < PAGE_SIZE) return counts;
+    after = last;
   }
 }
 
@@ -154,7 +182,7 @@ export async function pendingToolPartStamps(): Promise<Counts> {
 }
 
 const describe = (c: Counts) =>
-  `messages scanned: ${c.scanned}, parts rewritten (actedSpaceIds): ${c.parts}, blocks marked (turn budget): ${c.blocks}, rows changed: ${c.rows}`;
+  `messages scanned: ${c.scanned}, parts rewritten (actedSpaceIds): ${c.parts}, dropped (malformed actedSpaceIds): ${c.dropped}, blocks marked (turn budget): ${c.blocks}, rows changed: ${c.rows}`;
 
 export async function runChatToolPartStamps(options: {
   apply: boolean;
@@ -169,17 +197,25 @@ export async function runChatToolPartStamps(options: {
     return;
   }
 
-  await db.transaction(async (tx) => {
-    await tx.execute("SET LOCAL lock_timeout = '5s'");
-    await tx.execute("SET LOCAL statement_timeout = '300s'");
-    const done = await scanToolPartStamps(tx, async (seq, content) => {
-      await tx.update(chatMessages).set({ content }).where(eq(chatMessages.seq, seq));
+  // One transaction per page: the FOR UPDATE locks last for that page only, and a failure mid-run
+  // leaves committed pages in the current form (the rewrite is idempotent, so a re-run resumes).
+  const done = emptyCounts();
+  let after: number | undefined;
+  for (;;) {
+    const { size, last } = await db.transaction(async (tx) => {
+      await tx.execute("SET LOCAL lock_timeout = '5s'");
+      await tx.execute("SET LOCAL statement_timeout = '300s'");
+      return scanPage(tx, after, done, async (seq, content) => {
+        await tx.update(chatMessages).set({ content }).where(eq(chatMessages.seq, seq));
+      });
     });
-    out(describe(done));
-    const left = await scanToolPartStamps(tx);
-    out(`left: ${left.rows}`);
-    if (left.rows !== 0) throw new Error("tool parts in the old form are left after --apply");
-  });
+    if (size < PAGE_SIZE) break;
+    after = last;
+  }
+  out(describe(done));
+  const left = await scanToolPartStamps(db);
+  out(`left: ${left.rows}`);
+  if (left.rows !== 0) throw new Error("tool parts in the old form are left after --apply");
   out("0061: APPLIED — committed.");
 }
 
@@ -200,7 +236,9 @@ if (import.meta.main) {
     await runChatToolPartStamps({ apply, out });
     code = 0;
   } catch (error) {
-    process.stdout.write(`0061: FAILED, nothing committed — ${getErrorMessage(error)}\n`);
+    process.stdout.write(
+      `0061: FAILED (pages already committed stay valid; re-run to resume) — ${getErrorMessage(error)}\n`,
+    );
   } finally {
     await closeDb?.();
   }

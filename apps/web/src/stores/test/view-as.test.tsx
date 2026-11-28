@@ -32,8 +32,9 @@ const {
   readStoredPreview,
   takeViewAsStopped,
   toViewAsPersona,
-  STORAGE_KEY,
 } = await import("../view-as-store.ts");
+const { LOCAL_STORAGE_KEYS, storageKey } = await import("@appstrate/ui/local-storage");
+const STORAGE_KEY = storageKey(LOCAL_STORAGE_KEYS.viewAs);
 const { orgKeys } = await import("../../lib/query-keys.ts");
 const { orgStore } = await import("../org-store.ts");
 const { spaceStore } = await import("../space-store.ts");

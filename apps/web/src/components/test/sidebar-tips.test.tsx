@@ -16,7 +16,8 @@ const storage = installFakeStorage({
 
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { SidebarTips } = await import("../sidebar-tips.tsx");
-const { dismissedTipsStore } = await import("../../stores/sidebar-tips-store.ts");
+const { authStore } = await import("../../stores/auth-store.ts");
+await import("../../stores/sidebar-tips-store.ts");
 const { memberSpaceClient, renderInSpace, testSpace } = await import("../../test/space-context.ts");
 
 await i18nReady;
@@ -27,8 +28,8 @@ function tips(
   permissions: string[],
   { userId = "u_1", path = "/" }: { userId?: string; path?: string } = {},
 ) {
-  // A static render runs no layout effect: bind the user the way `SidebarTips` does.
-  dismissedTipsStore.bind(userId);
+  // The tips store follows the auth store: signing the user in binds their dismissed cards.
+  authStore.setState({ user: { id: userId, email: "u@example.test", emailVerified: true } });
   const queryClient = memberSpaceClient([testSpace("spc_a", permissions)]);
   queryClient.setQueryData(["get", "/api/me/connections", {}], { object: "list", data: [] });
   return renderInSpace(<SidebarTips />, {

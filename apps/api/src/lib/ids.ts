@@ -30,7 +30,7 @@ export function assertSpaceId(id: string, param = "space_id"): void {
 /**
  * Whether `id` is a canonical space-role id (`SPACE_ROLE_ID_REGEX`). The predicate half of
  * {@link assertSpaceRoleId}, for the body field that is validated by Zod
- * (`spaceRoleAssignmentShape.custom_role_id`) rather than by a throw.
+ * (`SPACE_ROLE_ID_REGEX` in core's `spaceRoleReferenceSchema`) rather than by a throw.
  */
 export function isSpaceRoleId(id: string): boolean {
   return SPACE_ROLE_ID_REGEX.test(id);
