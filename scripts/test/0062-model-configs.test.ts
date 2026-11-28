@@ -23,8 +23,10 @@ import {
   assertNoPendingDataScripts,
   PENDING_DATA_SCRIPTS,
 } from "../../apps/api/src/lib/boot-guards/pending-data-scripts.ts";
+import type { ModelProviderDefinition } from "@appstrate/core/module";
 import {
   getModelProvider,
+  registerModelProvider,
   resetModelProviders,
 } from "../../apps/api/src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../../apps/api/test/helpers/model-providers.ts";
@@ -93,6 +95,31 @@ async function model(
   return row!.id;
 }
 
+// The anthropic subscription the fold is asserted on. `claude-code` is an opt-in module the CI
+// `MODULES` leaves out, so the test registers its own copy; the script skips a provider already
+// registered, whatever `MODULES` holds.
+const claudeCodeSubscription: ModelProviderDefinition = {
+  providerId: "claude-code",
+  displayName: "Claude Code",
+  iconUrl: "anthropic",
+  description: "Anthropic subscription for the 0062 fold.",
+  apiShape: "anthropic-messages",
+  defaultBaseUrl: "https://api.anthropic.example.test",
+  baseUrlOverridable: false,
+  authMode: "oauth2",
+  oauth: {
+    clientId: "test-client-id",
+    authorizationUrl: "https://auth.example.test/authorize",
+    tokenUrl: "https://auth.example.test/token",
+    refreshUrl: "https://auth.example.test/token",
+    scopes: ["openid"],
+    pkce: "S256",
+  },
+  catalogProviderId: "anthropic",
+  featuredModels: [],
+  modelDiscovery: { mode: "static" },
+};
+
 const configsOf = (orgId: string) =>
   db.select().from(modelConfigs).where(eq(modelConfigs.orgId, orgId));
 const connectionConfig = async (id: string) =>
@@ -134,6 +161,7 @@ describe("0062 — model configurations", () => {
   beforeEach(async () => {
     await truncateAll();
     resetModelProviders();
+    registerModelProvider(claudeCodeSubscription);
     lines.length = 0;
     a = await createTestContext({ orgSlug: "mig0062-a" });
     b = await createTestContext({ orgSlug: "mig0062-b" });
