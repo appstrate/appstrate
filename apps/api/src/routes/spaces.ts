@@ -84,7 +84,12 @@ import {
   requireAnyPermission,
   requirePermission,
 } from "../middleware/require-permission.ts";
-import { auditSpaceRole, toAssignment } from "../lib/space-role-assignment.ts";
+import {
+  auditSpaceRole,
+  exactlyOneRole,
+  spaceRoleAssignmentShape,
+  toAssignment,
+} from "../lib/space-role-assignment.ts";
 import { spaceRoleReferenceSchema } from "@appstrate/core/permissions";
 import type { PackageType } from "@appstrate/core/validation";
 import type { SpaceSweepResult } from "@appstrate/shared-types";
@@ -218,19 +223,15 @@ export const updateSpaceSchema = z
   .strict();
 
 /** Exactly one user reference and one role assignment. */
-export const addSpaceMemberSchema = z
-  .intersection(
-    z
-      .object({
-        userId: z.string().min(1).optional(),
-        email: z.string().trim().toLowerCase().pipe(z.email()).optional(),
-      })
-      .strict(),
-    spaceRoleReferenceSchema,
-  )
-  .refine((data) => (data.userId !== undefined) !== (data.email !== undefined), {
-    message: "Provide exactly one of userId or email",
-  });
+export const addSpaceMemberSchema = exactlyOneRole(
+  z.object({
+    userId: z.string().min(1).optional(),
+    email: z.string().trim().toLowerCase().pipe(z.email()).optional(),
+    ...spaceRoleAssignmentShape,
+  }),
+).refine((data) => (data.userId !== undefined) !== (data.email !== undefined), {
+  message: "Provide exactly one of userId or email",
+});
 
 // Neither body carries the agent's stored input values: `PUT
 // /api/agents/{scope}/{name}/input-settings` is their single write path,

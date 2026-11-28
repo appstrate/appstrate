@@ -15,6 +15,8 @@
  * regex, not decoration.
  */
 
+import { z } from "zod";
+import { spaceRoleAssignmentShape } from "../../../src/lib/space-role-assignment.ts";
 import { describe, it, expect } from "bun:test";
 import { ApiError } from "@appstrate/core/api-errors";
 import { assertSpaceId, assertSpaceRoleId } from "../../../src/lib/ids.ts";
@@ -159,4 +161,14 @@ describe("assertSpaceRoleId", () => {
       expect(err.message).toContain("Malformed space role id");
     });
   }
+});
+
+describe("spaceRoleAssignmentShape.custom_role_id", () => {
+  const schema = z.object(spaceRoleAssignmentShape);
+  it("refuses a malformed id and accepts a canonical one", () => {
+    expect(schema.safeParse({ custom_role_id: "srl_nope" }).success).toBe(false);
+    expect(
+      schema.safeParse({ custom_role_id: "srl_0f6c4c4e-1b2a-4c3d-8e9f-0a1b2c3d4e5f" }).success,
+    ).toBe(true);
+  });
 });

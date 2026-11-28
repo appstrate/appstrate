@@ -1,15 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Role-assignment helpers over core's `spaceRoleReferenceSchema` (exactly one of `preset_role` /
- * `custom_role_id`): routes intersect it with what sits beside the role.
+ * The "exactly one role reference" rule for a body that carries fields beside the role (a space
+ * id, a user reference): a flat object, the form the OpenAPI request-body comparison reads. A body
+ * that is the role alone uses core's `spaceRoleReferenceSchema`.
  */
 
 import { z } from "zod";
-import { spaceRoleReferenceSchema } from "@appstrate/core/permissions";
+import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import type { SpaceAssignment, SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceRoleAssignment } from "@appstrate/shared-types";
-import { isSpaceId } from "./ids.ts";
+import { isSpaceId, isSpaceRoleId } from "./ids.ts";
+
+/** `.refine()` returns a wrapper nothing can `.extend()`, so shape and rule ship apart. */
+export const spaceRoleAssignmentShape = {
+  preset_role: z.enum(SPACE_ROLE_PRESETS).optional(),
+  custom_role_id: z
+    .string()
+    .refine(isSpaceRoleId, {
+      message: "Malformed space role id. Expected `srl_` followed by a canonical UUID.",
+    })
+    .optional(),
+};
+
+export function exactlyOneRole<Shape extends z.ZodRawShape>(schema: z.ZodObject<Shape>) {
+  return schema.strict().refine(
+    (v) => {
+      const { preset_role, custom_role_id } = v as {
+        preset_role?: unknown;
+        custom_role_id?: unknown;
+      };
+      return (preset_role === undefined) !== (custom_role_id === undefined);
+    },
+    { message: "exactly one of preset_role or custom_role_id is required" },
+  );
+}
 
 export function toAssignment(data: {
   preset_role?: SpaceRolePreset;
@@ -20,16 +45,14 @@ export function toAssignment(data: {
     : { custom_role_id: data.custom_role_id! };
 }
 
-export const spaceAssignmentSchema = z.intersection(
-  z
-    .object({
-      // Reject a malformed ID before looking up its space.
-      spaceId: z.string().refine(isSpaceId, {
-        message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
-      }),
-    })
-    .strict(),
-  spaceRoleReferenceSchema,
+export const spaceAssignmentSchema = exactlyOneRole(
+  z.object({
+    // Reject a malformed ID before looking up its space.
+    spaceId: z.string().refine(isSpaceId, {
+      message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
+    }),
+    ...spaceRoleAssignmentShape,
+  }),
 );
 
 /** A `space_members` row's role columns, one set; how audits name a role (CASING_CONVENTIONS 4m). */
