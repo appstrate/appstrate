@@ -1,0 +1,359 @@
+#!/usr/bin/env bun
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * 0062 — every model connection and every organization model joins a model configuration:
+ *
+ *   set -a && . ./.env && set +a && bun scripts/migration/0062-model-configs.ts [--apply]
+ *
+ * Drizzle `0119` adds `model_configs` and the nullable `config_id` on
+ * `model_provider_credentials` and `org_models`. This fills them:
+ *
+ * - a connection with no configuration joins the configuration keyed on
+ *   (`configProviderOf(provider_id)`, its `base_url_override` when the provider is a gateway,
+ *   else none), created when missing — label the provider's display name (`host · name` for a
+ *   gateway), `personal_connections_allowed` the organization's retired
+ *   `personal_model_credentials` setting (absent = true). A connection of an unregistered provider
+ *   is reported and left alone (the guard then keeps refusing boot until it is resolved by hand);
+ * - a model bound to a connection (`credential_id`) joins that connection's configuration, an
+ *   unbound one its provider's family configuration;
+ * - two models landing on the same (configuration, model id) are one: the enabled one is kept,
+ *   then the oldest; `organizations.default_model_id`, `space_packages.model_id` and
+ *   `package_schedules.model_id_override` are repointed to it and the others deleted
+ *   (`runs.model_id` and `llm_usage` are history and are not touched);
+ * - the retired `personal_model_credentials` key is removed from `org_settings`.
+ *
+ * The report lists, per model, the organization connection that served it before (its binding)
+ * and the one serving it after (the oldest organization connection of its configuration that
+ * serves the model), every difference by id. Personal connections are not compared: who pays
+ * with one depends on the caller.
+ *
+ * Run after drizzle `0119` has applied and BEFORE the app starts: the platform refuses to boot
+ * until it has run (the `0062` entry of `PENDING_DATA_SCRIPTS`,
+ * `apps/api/src/lib/boot-guards/pending-data-scripts.ts`). Dry run by default: plans and reports,
+ * writes nothing. With `--apply`, one transaction per organization; it exits 1 unless no row is
+ * left without a configuration. Idempotent. Counts UNMEASURED: rehearse on a restored dump and
+ * record them in the README's Log. Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with
+ * neither (`lib/database-target.ts`).
+ */
+
+import { parseArgs } from "node:util";
+import { sql } from "drizzle-orm";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { describeDatabaseTarget, exitUnlessDatabaseNamed } from "./lib/database-target.ts";
+import {
+  getModelProvider,
+  registerModelProviders,
+} from "../../apps/api/src/services/model-providers/registry.ts";
+import {
+  configProviderOf,
+  isGatewayProvider,
+  rankCandidates,
+} from "../../apps/api/src/services/model-providers/credential-chain.ts";
+import coreProvidersModule from "../../apps/api/src/modules/core-providers/index.ts";
+import claudeCodeModule from "../../packages/module-claude-code/src/index.ts";
+import codexModule from "../../packages/module-codex/src/index.ts";
+
+interface CredentialRow {
+  id: string;
+  org_id: string;
+  provider_id: string;
+  owner_user_id: string | null;
+  base_url_override: string | null;
+  config_id: string | null;
+  created_at: Date | string;
+}
+
+interface ModelRow {
+  id: string;
+  org_id: string;
+  model_id: string;
+  provider_id: string | null;
+  credential_id: string | null;
+  config_id: string | null;
+  enabled: boolean;
+  created_at: Date | string;
+}
+
+interface ConfigRow {
+  id: string;
+  org_id: string;
+  provider_id: string;
+  base_url: string | null;
+}
+
+const configKey = (providerId: string, baseUrl: string | null) =>
+  `${providerId}\u0000${baseUrl ?? ""}`;
+const time = (d: Date | string) => new Date(d).getTime();
+
+function registerProviders(): void {
+  for (const module of [coreProvidersModule, claudeCodeModule, codexModule]) {
+    registerModelProviders(module.modelProviders?.() ?? []);
+  }
+}
+
+/** The configuration a connection belongs to, or null for an unregistered provider. */
+function connectionKey(row: CredentialRow): { providerId: string; baseUrl: string | null } | null {
+  if (!getModelProvider(row.provider_id)) return null;
+  const providerId = configProviderOf(row.provider_id);
+  const baseUrl = isGatewayProvider(row.provider_id) ? (row.base_url_override ?? null) : null;
+  return { providerId, baseUrl };
+}
+
+function configLabel(providerId: string, baseUrl: string | null): string {
+  const name = getModelProvider(providerId)?.displayName ?? providerId;
+  if (!baseUrl) return name;
+  try {
+    return `${new URL(baseUrl).host} · ${name}`;
+  } catch {
+    return `${baseUrl} · ${name}`;
+  }
+}
+
+export async function runModelConfigs(options: {
+  apply: boolean;
+  out: (line: string) => void;
+}): Promise<void> {
+  const { apply, out } = options;
+  const { db, toRows } = await import("@appstrate/db/client");
+  out(await describeDatabaseTarget());
+  registerProviders();
+
+  const orgIds = toRows<{ org_id: string }>(
+    await db.execute(sql`
+      SELECT org_id FROM model_provider_credentials WHERE config_id IS NULL
+      UNION SELECT org_id FROM org_models WHERE config_id IS NULL
+      ORDER BY org_id`),
+  ).map((r) => r.org_id);
+  out(`organizations to migrate: ${orgIds.length}`);
+
+  let skippedUnknown = 0;
+  let servingChanges = 0;
+  for (const orgId of orgIds) {
+    const work = async (tx: typeof db) => {
+      const settings = toRows<{ personal: unknown }>(
+        await tx.execute(
+          sql`SELECT org_settings->'personal_model_credentials' AS personal FROM organizations WHERE id = ${orgId}`,
+        ),
+      )[0];
+      const personalAllowed = settings?.personal !== false;
+      const credentials = toRows<CredentialRow>(
+        await tx.execute(sql`
+          SELECT id, org_id, provider_id, owner_user_id, base_url_override, config_id, created_at
+          FROM model_provider_credentials WHERE org_id = ${orgId} ORDER BY created_at, id`),
+      );
+      const models = toRows<ModelRow>(
+        await tx.execute(sql`
+          SELECT id, org_id, model_id, provider_id, credential_id, config_id, enabled, created_at
+          FROM org_models WHERE org_id = ${orgId} ORDER BY created_at, id`),
+      );
+      const configs = toRows<ConfigRow>(
+        await tx.execute(
+          sql`SELECT id, org_id, provider_id, base_url FROM model_configs WHERE org_id = ${orgId}`,
+        ),
+      );
+      const byKey = new Map(configs.map((c) => [configKey(c.provider_id, c.base_url), c]));
+      const byId = new Map(configs.map((c) => [c.id, c]));
+
+      const ensure = async (providerId: string, baseUrl: string | null): Promise<ConfigRow> => {
+        const existing = byKey.get(configKey(providerId, baseUrl));
+        if (existing) return existing;
+        const label = configLabel(providerId, baseUrl);
+        out(`  [${orgId}] config ${providerId}${baseUrl ? ` @ ${baseUrl}` : ""} — "${label}"`);
+        const created: ConfigRow = apply
+          ? toRows<ConfigRow>(
+              await tx.execute(sql`
+                INSERT INTO model_configs (org_id, provider_id, label, base_url, personal_connections_allowed)
+                VALUES (${orgId}, ${providerId}, ${label}, ${baseUrl}, ${personalAllowed})
+                RETURNING id, org_id, provider_id, base_url`),
+            )[0]!
+          : {
+              id: `planned:${providerId}:${baseUrl ?? ""}`,
+              org_id: orgId,
+              provider_id: providerId,
+              base_url: baseUrl,
+            };
+        byKey.set(configKey(providerId, baseUrl), created);
+        byId.set(created.id, created);
+        return created;
+      };
+
+      // Connections.
+      const credConfig = new Map<string, string>();
+      for (const c of credentials) {
+        if (c.config_id) {
+          credConfig.set(c.id, c.config_id);
+          continue;
+        }
+        const key = connectionKey(c);
+        if (!key) {
+          skippedUnknown++;
+          out(`  [${orgId}] UNKNOWN provider, connection left alone: ${c.id} ${c.provider_id}`);
+          continue;
+        }
+        if (isGatewayProvider(c.provider_id) && !key.baseUrl) {
+          // A gateway connection without an endpoint override used the provider default.
+          key.baseUrl = getModelProvider(c.provider_id)?.defaultBaseUrl ?? null;
+        }
+        const cfg = await ensure(key.providerId, key.baseUrl);
+        credConfig.set(c.id, cfg.id);
+        if (apply) {
+          await tx.execute(
+            sql`UPDATE model_provider_credentials SET config_id = ${cfg.id} WHERE id = ${c.id}`,
+          );
+        }
+      }
+
+      // Models: target configuration.
+      const target = new Map<string, string>();
+      for (const m of models) {
+        if (m.config_id) {
+          target.set(m.id, m.config_id);
+          continue;
+        }
+        const bound = m.credential_id ? credConfig.get(m.credential_id) : undefined;
+        if (bound) {
+          target.set(m.id, bound);
+          continue;
+        }
+        if (!m.provider_id || !getModelProvider(m.provider_id)) {
+          skippedUnknown++;
+          out(`  [${orgId}] UNKNOWN provider, model left alone: ${m.id} ${m.provider_id ?? "-"}`);
+          continue;
+        }
+        if (isGatewayProvider(m.provider_id)) {
+          skippedUnknown++;
+          out(`  [${orgId}] unbound gateway model, no endpoint to join, left alone: ${m.id}`);
+          continue;
+        }
+        target.set(m.id, (await ensure(configProviderOf(m.provider_id), null)).id);
+      }
+
+      // Duplicates on (configuration, model id): keep the enabled one, then the oldest.
+      const groups = new Map<string, ModelRow[]>();
+      for (const m of models) {
+        const cfg = target.get(m.id);
+        if (!cfg) continue;
+        const k = `${cfg}\u0000${m.model_id}`;
+        groups.set(k, [...(groups.get(k) ?? []), m]);
+      }
+      for (const group of groups.values()) {
+        if (group.length < 2) continue;
+        const [keep, ...drop] = [...group].sort(
+          (a, b) =>
+            Number(b.enabled) - Number(a.enabled) || time(a.created_at) - time(b.created_at),
+        );
+        for (const d of drop) {
+          out(`  [${orgId}] duplicate model ${d.id} (${d.model_id}) merged into ${keep!.id}`);
+          target.delete(d.id);
+          if (!apply) continue;
+          await tx.execute(
+            sql`UPDATE organizations SET default_model_id = ${keep!.id} WHERE id = ${orgId} AND default_model_id = ${d.id}`,
+          );
+          await tx.execute(
+            sql`UPDATE space_packages SET model_id = ${keep!.id} WHERE model_id = ${d.id}`,
+          );
+          await tx.execute(
+            sql`UPDATE package_schedules SET model_id_override = ${keep!.id} WHERE model_id_override = ${d.id}`,
+          );
+          await tx.execute(sql`DELETE FROM org_models WHERE id = ${d.id}`);
+        }
+      }
+
+      // Serving, before vs after, for each model kept.
+      for (const m of models) {
+        const cfgId = target.get(m.id);
+        if (!cfgId) continue;
+        const cfg = byId.get(cfgId);
+        if (!cfg) continue;
+        const connections = credentials
+          .filter((c) => credConfig.get(c.id) === cfgId)
+          .map((c) => ({
+            ...c,
+            providerId: c.provider_id,
+            ownerUserId: c.owner_user_id,
+            createdAt: new Date(c.created_at),
+          }));
+        const after =
+          rankCandidates(connections, {
+            configProviderId: cfg.provider_id,
+            personalConnectionsAllowed: false,
+            modelId: m.model_id,
+            aliased: false,
+            payerUserId: null,
+          })[0]?.id ?? null;
+        const before =
+          m.credential_id &&
+          credentials.find((c) => c.id === m.credential_id)?.owner_user_id === null
+            ? m.credential_id
+            : null;
+        if (before !== after) {
+          servingChanges++;
+          out(
+            `  [${orgId}] serving changes: model ${m.id} (${m.model_id}) ${before ?? "unbound"} -> ${after ?? "none"}`,
+          );
+        }
+        if (apply && !m.config_id) {
+          await tx.execute(sql`UPDATE org_models SET config_id = ${cfgId} WHERE id = ${m.id}`);
+        }
+      }
+
+      if (apply) {
+        await tx.execute(
+          sql`UPDATE organizations SET org_settings = org_settings - 'personal_model_credentials' WHERE id = ${orgId} AND org_settings ? 'personal_model_credentials'`,
+        );
+      }
+    };
+
+    if (apply) {
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+        await work(tx as unknown as typeof db);
+      });
+    } else {
+      await work(db);
+    }
+  }
+
+  out(`left alone (unknown provider / unbound gateway model): ${skippedUnknown}`);
+  out(`models whose serving organization connection changes: ${servingChanges}`);
+  if (!apply) {
+    out("0062: DRY RUN — nothing written. Re-run with --apply to commit.");
+    return;
+  }
+  const left = toRows<{ n: number | string }>(
+    await db.execute(sql`
+      SELECT (SELECT count(*) FROM model_provider_credentials WHERE config_id IS NULL)
+           + (SELECT count(*) FROM org_models WHERE config_id IS NULL) AS n`),
+  )[0];
+  out(`left without a configuration: ${Number(left?.n ?? 0)}`);
+  if (Number(left?.n ?? 0) !== 0)
+    throw new Error("rows without a configuration are left after --apply");
+  out("0062: APPLIED — committed.");
+}
+
+if (import.meta.main) {
+  exitUnlessDatabaseNamed();
+  let code = 1;
+  let closeDb: (() => Promise<void>) | undefined;
+  try {
+    const { values } = parseArgs({
+      args: process.argv.slice(2),
+      options: { apply: { type: "boolean" } },
+      strict: true,
+    });
+    const apply = values.apply === true;
+    ({ closeDb } = await import("@appstrate/db/client"));
+    const out = (line: string) => process.stdout.write(`${line}\n`);
+    out(`0062 — ${apply ? "APPLY" : "DRY RUN"}`);
+    await runModelConfigs({ apply, out });
+    code = 0;
+  } catch (error) {
+    process.stdout.write(
+      `0062: FAILED — ${getErrorMessage(error)}. Each organization is one transaction; a re-run with --apply finishes what is left.\n`,
+    );
+  } finally {
+    await closeDb?.();
+  }
+  process.exit(code);
+}
