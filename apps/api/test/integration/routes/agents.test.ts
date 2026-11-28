@@ -1830,7 +1830,7 @@ describe("Agents API", () => {
     it("returns the bare model-setting resource (same shape as GET)", async () => {
       await seedModelAgent();
       const key = await seedOrgModelProviderKey({ orgId: ctx.orgId });
-      const model = await seedOrgModel({ orgId: ctx.orgId, credentialId: key.id });
+      const model = await seedOrgModel({ orgId: ctx.orgId, configId: key.configId! });
 
       const res = await patchModel(model.id);
       expect(res.status).toBe(200);
@@ -1876,7 +1876,7 @@ describe("Agents API", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: credential.id,
+        configId: credential.configId!,
         modelId: "gpt-5.6-luna",
       });
 
@@ -1934,7 +1934,7 @@ describe("Agents API", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: credential.id,
+        configId: credential.configId!,
         modelId: "gpt-5.6-luna",
       });
 
@@ -1950,7 +1950,7 @@ describe("Agents API", () => {
       const otherKey = await seedOrgModelProviderKey({ orgId: otherCtx.orgId });
       const otherModel = await seedOrgModel({
         orgId: otherCtx.orgId,
-        credentialId: otherKey.id,
+        configId: otherKey.configId!,
       });
 
       const res = await patchModel(otherModel.id);

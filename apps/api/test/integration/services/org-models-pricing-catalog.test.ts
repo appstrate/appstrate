@@ -34,8 +34,7 @@ describe("loadModel — catalog fallback", () => {
     // form — the catalog should kick in.
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "GPT-4o preset",
       modelId: "gpt-4o",
       enabled: true,
@@ -60,8 +59,7 @@ describe("loadModel — catalog fallback", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "GPT-4o with org discount",
       modelId: "gpt-4o",
       enabled: true,
@@ -84,8 +82,7 @@ describe("loadModel — catalog fallback", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "Custom fine-tune",
       modelId: "ft:gpt-4o:my-org:custom:xyz123",
       enabled: true,
@@ -109,8 +106,7 @@ describe("loadModel — catalog fallback", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "GPT-4o catalog",
       modelId: "gpt-4o",
       enabled: true,
@@ -135,8 +131,7 @@ describe("loadModel — catalog fallback", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: cred.id,
-        providerId: cred.providerId,
+        configId: cred.configId!,
         modelId,
       });
       return (await loadModel(ctx.orgId, model.id, null))!.piProvider;
@@ -162,8 +157,7 @@ describe("loadModel — catalog fallback", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: cred.id,
-        providerId: cred.providerId,
+        configId: cred.configId!,
         modelId,
         reasoning,
       });

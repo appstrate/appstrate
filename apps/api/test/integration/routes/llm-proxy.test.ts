@@ -28,16 +28,18 @@
  * network traffic leaves the test harness.
  */
 
-import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, spyOn } from "bun:test";
+import type { ModelProviderDefinition } from "@appstrate/core/module";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage, modelProviderCredentials } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { logger } from "../../../src/lib/logger.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
+import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
+import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import {
   seedApiKey,
   seedModelConfigFor,
@@ -86,6 +88,35 @@ function restoreCacheEnv(): void {
 
 const app = getTestApp();
 
+/**
+ * `openai` and `mistral` keep their production endpoint, so the wire-shape tests below reach the
+ * allowlisted mock (`api.*.test`) through a gateway configuration of the same wire format. Only
+ * `openai-compatible` (completions) and `anthropic-compatible` ship as gateways.
+ */
+const RESPONSES_GATEWAY = "test-gateway-openai-responses";
+const MISTRAL_GATEWAY = "test-gateway-mistral-conversations";
+
+function registerShapeGateway(providerId: string, apiShape: ModelProviderDefinition["apiShape"]) {
+  registerModelProvider({
+    providerId,
+    displayName: providerId,
+    iconUrl: "openai",
+    description: "Synthetic gateway for the llm-proxy wire-shape tests.",
+    apiShape,
+    defaultBaseUrl: "https://gateway.example.test/v1",
+    baseUrlOverridable: true,
+    authMode: "api_key",
+    featuredModels: [],
+  });
+}
+
+beforeAll(() => {
+  seedTestModelProviders();
+  registerShapeGateway(RESPONSES_GATEWAY, "openai-responses");
+  registerShapeGateway(MISTRAL_GATEWAY, "mistral-conversations");
+});
+afterAll(() => seedTestModelProviders());
+
 interface Harness {
   ctx: TestContext;
   apiKey: string;
@@ -113,7 +144,7 @@ async function buildHarness(overrides?: {
   });
   const model = await seedOrgModel({
     orgId: ctx.orgId,
-    credentialId: providerKey.id,
+    configId: providerKey.configId!,
     label: "Preset",
     modelId: overrides?.modelId ?? "gpt-4o-2024-08-06",
     enabled: true,
@@ -489,6 +520,7 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       writesOrg: true,
       deletesOrg: true,
       connects: true,
+      createsConfigs: true,
     });
     expect(listed.find((c) => c.id === h.credentialId)!.needs_reconnection).toBe(true);
     expect((await call()).status).not.toBe(401);
@@ -668,13 +700,14 @@ describe("POST /api/llm-proxy/anthropic-messages/v1/messages", () => {
 
   it("forwards with x-api-key and merges SSE usage frames", async () => {
     const h = await buildHarness({
+      providerId: "anthropic-compatible",
       apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.test",
       modelId: "claude-sonnet-4-5-20250929",
       upstreamKey: "sk-ant-42",
     });
 
-    let captured: { headers: Headers; bodyBytes: Uint8Array } | null = null;
+    let captured: { url: string; headers: Headers; bodyBytes: Uint8Array } | null = null;
 
     const sseBody =
       `event: message_start\n` +
@@ -686,8 +719,9 @@ describe("POST /api/llm-proxy/anthropic-messages/v1/messages", () => {
       `event: message_stop\n` +
       `data: {"type":"message_stop"}\n\n`;
 
-    mockUpstream(async (_input, init) => {
+    mockUpstream(async (input, init) => {
       captured = {
+        url: typeof input === "string" ? input : (input as URL).toString(),
         headers: new Headers(init?.headers as Record<string, string>),
         bodyBytes: init?.body as Uint8Array,
       };
@@ -720,6 +754,7 @@ describe("POST /api/llm-proxy/anthropic-messages/v1/messages", () => {
     expect(echoedBody).toBe(sseBody);
 
     expect(captured).not.toBeNull();
+    expect(captured!.url).toBe("https://api.anthropic.test/v1/messages");
     expect(captured!.headers.get("x-api-key")).toBe("sk-ant-42");
     expect(captured!.headers.get("anthropic-version")).toBe("2024-10-01");
     const forwardedBody = JSON.parse(new TextDecoder().decode(captured!.bodyBytes));
@@ -774,6 +809,7 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
 
   it("forwards with Authorization: Bearer and substitutes the model id", async () => {
     const h = await buildHarness({
+      providerId: MISTRAL_GATEWAY,
       apiShape: "mistral-conversations",
       baseUrl: "https://api.mistral.test",
       modelId: "mistral-large-latest",
@@ -850,6 +886,7 @@ describe("POST /api/llm-proxy/openai-responses/v1/responses", () => {
 
   it("forwards to /v1/responses and meters the streamed response.completed usage", async () => {
     const h = await buildHarness({
+      providerId: RESPONSES_GATEWAY,
       apiShape: "openai-responses",
       baseUrl: "https://api.openai.test/v1",
       modelId: "gpt-5.1",
@@ -899,15 +936,7 @@ describe("POST /api/llm-proxy/openai-responses/v1/responses", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe(sseBody);
     expect(captured).not.toBeNull();
-    // `openai` keeps its fixed endpoint (a configuration takes no base URL for it). The
-    // egress guard may pin the connection to a resolved address, so the host is either
-    // the provider's or an IP literal, never the configuration's mock host.
-    const forwardedUrl = new URL(captured!.url);
-    expect(forwardedUrl.pathname).toBe("/v1/responses");
-    expect(forwardedUrl.hostname).not.toBe("api.openai.test");
-    expect(
-      forwardedUrl.hostname === "api.openai.com" || /^[\d.]+$|:/.test(forwardedUrl.hostname),
-    ).toBe(true);
+    expect(captured!.url).toBe("https://api.openai.test/v1/responses");
     expect(captured!.headers.get("authorization")).toBe("Bearer sk-upstream-42");
     const forwardedBody = JSON.parse(new TextDecoder().decode(captured!.bodyBytes));
     // Model substituted, `store` forced off; no chat-completions `stream_options`.
@@ -1447,8 +1476,6 @@ describe("POST /api/llm-proxy/* — model-alias swap", () => {
 // before any upstream call. `proxyLlmCall` takes the principal directly, so each
 // credential path is driven without minting a JWT per user.
 describe("POST /api/llm-proxy/* — personal model credentials", () => {
-  const UPSTREAM_BASE = "https://api.openai.test/v1";
-
   /** A run's payment as the run router passes it: the payer the run recorded, and its launch credential. */
   const runPayment = (runCredentialId: string | null, payerUserId: string | null) => ({
     payerUserId,
@@ -1469,20 +1496,17 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     apiKey: string,
     createdAt?: Date,
   ): Promise<string> {
-    const [row] = await db
-      .insert(modelProviderCredentials)
-      .values({
-        orgId: ctx.orgId,
-        configId,
-        ownerUserId: owner,
-        label: apiKey,
-        providerId: "openai",
-        credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey }),
-        createdBy: ctx.user.id,
-        ...(createdAt ? { createdAt } : {}),
-      })
-      .returning({ id: modelProviderCredentials.id });
-    return row!.id;
+    const row = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      configId,
+      providerId: "openai",
+      ownerUserId: owner,
+      label: apiKey,
+      apiKey,
+      createdBy: ctx.user.id,
+      createdAt,
+    });
+    return row.id;
   }
 
   /**
@@ -1497,7 +1521,7 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     orgCredentialId: string | null;
   }> {
     const ctx = await createTestContext({ orgSlug: "personalkeys" });
-    const configId = await seedModelConfigFor(ctx.orgId, "openai", UPSTREAM_BASE);
+    const configId = await seedModelConfigFor(ctx.orgId, "openai");
     const model = await seedOrgModel({
       orgId: ctx.orgId,
       configId,
@@ -1709,7 +1733,7 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     const ctx = await createTestContext({ orgSlug: "proxysubscription" });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      providerId: TEST_OAUTH_PROVIDER_ID,
+      configId: await seedModelConfigFor(ctx.orgId, TEST_OAUTH_PROVIDER_ID),
       modelId: TEST_OAUTH_MODEL_ID,
     });
     const subscription = await seedOrgModelProviderOAuth({
@@ -1732,7 +1756,7 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
 
   it("refuses a model no connection serves with 409 model_credential_required before any upstream call", async () => {
     const ctx = await createTestContext({ orgSlug: "unboundmodel" });
-    const configId = await seedModelConfigFor(ctx.orgId, "openai", UPSTREAM_BASE);
+    const configId = await seedModelConfigFor(ctx.orgId, "openai");
     const model = await seedOrgModel({ orgId: ctx.orgId, configId, modelId: "gpt-4o-2024-08-06" });
 
     await expect(

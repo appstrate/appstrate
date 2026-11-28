@@ -9,9 +9,17 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { modelConfigs, modelProviderPairings } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
 
 const app = getTestApp();
@@ -42,6 +50,84 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     expect(body.command).toBe(`npx @appstrate/connect-helper@0.3.x ${body.token}`);
     // Date string must parse to a future timestamp.
     expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("refuses a member's pairing with 409 model_config_required when no configuration exists", async () => {
+    const member = await memberContext(ctx, "member");
+    const res = await app.request("/api/model-providers-oauth/pairing", {
+      method: "POST",
+      headers: authHeaders(member, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ providerId: "test-oauth", owner_type: "user" }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "model_config_required", param: "config_id" });
+    const configs = await db.select().from(modelConfigs).where(eq(modelConfigs.orgId, ctx.orgId));
+    expect(configs).toHaveLength(0);
+  });
+
+  describe("with config_id", () => {
+    const mint = (body: Record<string, unknown>) =>
+      app.request("/api/model-providers-oauth/pairing", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      });
+
+    const createConfig = async (body: Record<string, unknown>): Promise<string> => {
+      const res = await app.request("/api/model-configs", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(201);
+      return ((await res.json()) as { id: string }).id;
+    };
+
+    it("records the named configuration on the pairing, where its redeem lands", async () => {
+      const configId = await createConfig({ provider_id: "openai" });
+      const res = await mint({ providerId: "test-oauth", config_id: configId });
+      expect(res.status, await res.clone().text()).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      const [row] = await db
+        .select({ configId: modelProviderPairings.configId })
+        .from(modelProviderPairings)
+        .where(eq(modelProviderPairings.id, id));
+      expect(row!.configId).toBe(configId);
+    });
+
+    it("answers 404 for another organization's configuration", async () => {
+      const foreign = await createTestContext({ orgSlug: "pairing-foreign" });
+      const res = await app.request("/api/model-configs", {
+        method: "POST",
+        headers: authHeaders(foreign, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ provider_id: "openai" }),
+      });
+      const { id } = (await res.json()) as { id: string };
+      expect((await mint({ providerId: "test-oauth", config_id: id })).status).toBe(404);
+    });
+
+    it("refuses config_id together with credentialId: it names a new connection's configuration", async () => {
+      const configId = await createConfig({ provider_id: "openai" });
+      const res = await mint({
+        providerId: "test-oauth",
+        config_id: configId,
+        credentialId: crypto.randomUUID(),
+      });
+      await expectRejectedField(res, "config_id");
+    });
+
+    it("refuses a configuration the provider does not fit with connection_provider_mismatch", async () => {
+      const gateway = await createConfig({
+        provider_id: "openai-compatible",
+        base_url: "https://gateway.example.test/v1",
+      });
+      const res = await mint({ providerId: "test-oauth", config_id: gateway });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        code: "connection_provider_mismatch",
+        param: "config_id",
+      });
+    });
   });
 
   it("returns 401 without auth", async () => {

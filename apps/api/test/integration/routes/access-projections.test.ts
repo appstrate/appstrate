@@ -21,7 +21,7 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedAgent,
-  seedModelConfig,
+  seedModelConfigFor,
   seedOrgModel,
   seedPackageShare,
   seedSpace,
@@ -78,8 +78,9 @@ describe("serves_model_ids", () => {
       featuredModels: [],
     });
     const member = await memberContext(owner, "member");
-    const configId = await seedModelConfig({ orgId: owner.orgId, providerId: FIXED_ANTHROPIC });
+    const configId = await seedModelConfigFor(owner.orgId, FIXED_ANTHROPIC);
     const personal = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: owner.orgId,
       userId: member.user.id,
       ownerUserId: member.user.id,
@@ -89,6 +90,7 @@ describe("serves_model_ids", () => {
       apiKey: "sk-ant-personal",
     });
     const orgKey = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: owner.orgId,
       userId: owner.user.id,
       ownerUserId: null,
@@ -108,7 +110,11 @@ describe("serves_model_ids", () => {
       modelId: "gpt-4o-mini",
     });
     // A model of another configuration is never one of its.
-    await seedOrgModel({ orgId: owner.orgId, providerId: "openai", modelId: "gpt-4o-mini" });
+    await seedOrgModel({
+      orgId: owner.orgId,
+      configId: await seedModelConfigFor(owner.orgId, "openai"),
+      modelId: "gpt-4o-mini",
+    });
 
     const res = await app.request("/api/model-provider-credentials", {
       headers: authHeaders(owner),

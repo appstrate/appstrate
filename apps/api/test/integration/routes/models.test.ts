@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 import {
   createTestContext,
   createTestUser,
@@ -12,7 +13,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
-  seedModelConfig,
+  seedModelConfigFor,
   seedOrgModelProviderKey,
   seedOrgModel,
   seedOrgModelProviderOAuth,
@@ -133,7 +134,7 @@ describe("Models API", () => {
       const configId = await createProviderConfig();
       const served = await seedOrgModel({ orgId: ctx.orgId, configId, modelId: "gpt-4o" });
       // A configuration with no connection: its models are listed, nobody pays them.
-      const idle = await seedModelConfig({ orgId: ctx.orgId, providerId: "moonshot" });
+      const idle = await seedModelConfigFor(ctx.orgId, "moonshot");
       const [kimi] = listCatalogModels(getModelProvider("moonshot")!).map((m) => m.id);
       const unserved = await seedOrgModel({ orgId: ctx.orgId, configId: idle, modelId: kimi! });
       initSystemModelProviderKeys([
@@ -257,12 +258,12 @@ describe("Models API", () => {
       const moonshot = await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "moonshot" });
       const named = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: moonshot.id,
+        configId: moonshot.configId!,
         modelId: kimi!,
       });
       const alias = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: moonshot.id,
+        configId: moonshot.configId!,
         modelId: kimiAlias!,
         label: "Managed",
         aliased: true,
@@ -377,7 +378,7 @@ describe("Models API", () => {
 
     it("refuses a configuration of another organization — 404, nothing stored", async () => {
       const other = await createTestContext({ orgSlug: "models-other-org" });
-      const foreign = await seedModelConfig({ orgId: other.orgId, providerId: "openai" });
+      const foreign = await seedModelConfigFor(other.orgId, "openai");
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -388,7 +389,7 @@ describe("Models API", () => {
     });
 
     it("creates a model in a configuration with no connection yet: listed, paid by nobody", async () => {
-      const configId = await seedModelConfig({ orgId: ctx.orgId, providerId: "openai" });
+      const configId = await seedModelConfigFor(ctx.orgId, "openai");
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -680,6 +681,62 @@ describe("Models API", () => {
     });
   });
 
+  describe("POST /api/models — the default is promoted only when a connection serves it", () => {
+    const createModel = (configId: string, modelId: string) =>
+      app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ config_id: configId, modelId, label: modelId }),
+      });
+
+    const defaultModelId = async (): Promise<string | null> => {
+      const [org] = await db
+        .select({ id: organizations.defaultModelId })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId));
+      return org!.id;
+    };
+
+    const familyConfig = async (): Promise<string> => {
+      const res = await app.request("/api/model-configs", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ provider_id: "openai" }),
+      });
+      expect(res.status).toBe(201);
+      return ((await res.json()) as { id: string }).id;
+    };
+
+    it("leaves the default unset when no org connection serves the model", async () => {
+      const configId = await familyConfig();
+      const res = await createModel(configId, "gpt-5.5");
+      expect(res.status, await res.clone().text()).toBe(201);
+      expect(await defaultModelId()).toBeNull();
+    });
+
+    it("leaves the default unset when only a personal connection serves the model", async () => {
+      const configId = await familyConfig();
+      await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        providerId: "openai",
+        configId,
+        ownerUserId: ctx.user.id,
+        createdBy: ctx.user.id,
+      });
+      expect((await createModel(configId, "gpt-5.5")).status).toBe(201);
+      expect(await defaultModelId()).toBeNull();
+    });
+
+    it("promotes the first model when an org connection serves it", async () => {
+      const configId = await familyConfig();
+      await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "openai", configId });
+      const res = await createModel(configId, "gpt-5.5");
+      expect(res.status, await res.clone().text()).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      expect(await defaultModelId()).toBe(id);
+    });
+  });
+
   describe("DELETE /api/models/:id", () => {
     it("deletes a model and returns 204", async () => {
       const configId = await createProviderConfig();
@@ -708,7 +765,7 @@ describe("Models API", () => {
 
     it("clears the setting of an agent that used the deleted model", async () => {
       const key = await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "moonshot" });
-      const model = await seedOrgModel({ orgId: ctx.orgId, credentialId: key.id });
+      const model = await seedOrgModel({ orgId: ctx.orgId, configId: key.configId! });
       const agent = await seedPackage({ orgId: ctx.orgId, id: `@${ctx.org.slug}/modelled` });
       await seedSpacePackage(ctx.defaultSpaceId, agent.id, { modelId: model.id });
 
@@ -763,13 +820,16 @@ describe("Models API", () => {
       const configId = await createGatewayConfig();
       const model = await seedOrgModel({ orgId: ctx.orgId, configId, modelId: "gateway-model" });
 
-      for (const body of [{ config_id: crypto.randomUUID() }, { credentialId: null }]) {
+      for (const [body, field] of [
+        [{ config_id: crypto.randomUUID() }, "config_id"],
+        [{ credentialId: null }, "credentialId"],
+      ] as const) {
         const res = await app.request(`/api/models/${model.id}`, {
           method: "PATCH",
           headers: authHeaders(ctx, { "Content-Type": "application/json" }),
           body: JSON.stringify(body),
         });
-        expect(res.status).toBe(400);
+        await expectRejectedField(res, field);
       }
       const [row] = await db
         .select({ configId: orgModels.configId })
@@ -1292,7 +1352,7 @@ describe("Models API", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: credential.id,
+        configId: credential.configId!,
         label: "Gpt (codex)",
         modelId: TEST_OAUTH_MODEL_ID,
       });
@@ -1358,7 +1418,7 @@ describe("Models API", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: cred.id,
+        configId: cred.configId!,
         label,
         modelId: "gpt-4o",
         enabled: true,
@@ -1390,7 +1450,7 @@ describe("Models API", () => {
 
     it("refuses to disable the current org default — 409 model_disabled", async () => {
       const key = await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "moonshot" });
-      const model = await seedOrgModel({ orgId: ctx.orgId, credentialId: key.id });
+      const model = await seedOrgModel({ orgId: ctx.orgId, configId: key.configId! });
       await db
         .update(organizations)
         .set({ defaultModelId: model.id })
@@ -1415,7 +1475,7 @@ describe("Models API", () => {
       const key = await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "moonshot" });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: key.id,
+        configId: key.configId!,
         enabled: false,
       });
 
@@ -1685,6 +1745,30 @@ describe("Models API", () => {
       expect(org!.defaultModelId).toBe(inserted[0]!.id);
     });
 
+    it("seeds the models but promotes no default when no organization connection serves them", async () => {
+      // Only a personal subscription: it serves its owner, never the organization's default.
+      const personal = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        ownerUserId: ctx.user.id,
+        createdBy: ctx.user.id,
+        expiresAt: null,
+      });
+      const res = await app.request("/api/models/seed", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ config_id: personal.configId, model_ids: [TEST_OAUTH_MODEL_ID] }),
+      });
+      expect(res.status, await res.clone().text()).toBe(201);
+      expect(await res.json()).toMatchObject({ created: 1, promoted_default: false });
+
+      const [org] = await db
+        .select({ defaultModelId: organizations.defaultModelId })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId));
+      expect(org!.defaultModelId).toBeNull();
+    });
+
     it("is idempotent — returns created=0 when the configuration already has models", async () => {
       const configId = await seedTestOAuthCredential();
 
@@ -1759,7 +1843,7 @@ describe("Models API", () => {
       });
       const existing = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: existingKey.id,
+        configId: existingKey.configId!,
         label: "Existing default",
       });
       // The org default is the pointer — point it at the existing model.
@@ -1821,7 +1905,7 @@ describe("Models API", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: key.id,
+        configId: key.configId!,
         modelId: "gpt-4o",
         label: "Member test model",
       });
@@ -1908,7 +1992,7 @@ describe("Models API", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: key.id,
+        configId: key.configId!,
         modelId: "gpt-4o",
         label: "Plain model",
       });

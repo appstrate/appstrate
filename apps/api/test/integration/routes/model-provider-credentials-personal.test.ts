@@ -94,6 +94,8 @@ describe("personal model credentials — routes", () => {
     member = await memberContext(admin, "member");
     otherMember = await memberContext(admin, "member");
     guest = await memberContext(admin, "guest");
+    await seedModelConfigFor(admin.orgId, FIXED_KEY_PROVIDER);
+    await seedModelConfigFor(admin.orgId, OAUTH_PROVIDER);
   });
 
   describe("creating", () => {
@@ -180,7 +182,7 @@ describe("personal model credentials — routes", () => {
       });
       expect(personal.status).toBe(403);
       expect(((await personal.json()) as { code: string }).code).toBe(
-        "personal_model_credentials_disabled",
+        "personal_connections_disabled",
       );
 
       const org = await createCredential(admin, {
@@ -194,6 +196,7 @@ describe("personal model credentials — routes", () => {
   describe("visibility", () => {
     it("a member lists only its own credentials, never the organization's", async () => {
       await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: admin.user.id,
         ownerUserId: null,
@@ -202,6 +205,7 @@ describe("personal model credentials — routes", () => {
         apiKey: "sk-org",
       });
       await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: member.user.id,
         label: "Member key",
@@ -210,6 +214,7 @@ describe("personal model credentials — routes", () => {
         ownerUserId: member.user.id,
       });
       await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: otherMember.user.id,
         label: "Other member key",
@@ -224,6 +229,7 @@ describe("personal model credentials — routes", () => {
 
     it("the admin sees every credential with its owner fields", async () => {
       await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: admin.user.id,
         ownerUserId: null,
@@ -232,6 +238,7 @@ describe("personal model credentials — routes", () => {
         apiKey: "sk-org",
       });
       await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: member.user.id,
         label: "Member key",
@@ -265,6 +272,7 @@ describe("personal model credentials — routes", () => {
 
     it("the admin sees an organization key as editable, a member's personal one as delete only", async () => {
       await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: admin.user.id,
         ownerUserId: null,
@@ -273,6 +281,7 @@ describe("personal model credentials — routes", () => {
         apiKey: "sk-org",
       });
       await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: member.user.id,
         label: "Member key",
@@ -291,6 +300,7 @@ describe("personal model credentials — routes", () => {
 
     it("a member sees its own personal credential with edit, delete and test", async () => {
       await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: member.user.id,
         label: "Member key",
@@ -352,6 +362,7 @@ describe("personal model credentials — routes", () => {
 
     it("a personal label does not suffix a label held by another member's personal credential", async () => {
       await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: otherMember.user.id,
         label: "Shared label",
@@ -374,6 +385,7 @@ describe("personal model credentials — routes", () => {
   describe("editing and deleting", () => {
     it("a member edits its own personal credential", async () => {
       const id = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: member.user.id,
         label: "Before",
@@ -392,6 +404,7 @@ describe("personal model credentials — routes", () => {
 
     it("a member cannot edit or delete another member's credential: 404, and it survives", async () => {
       const id = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: otherMember.user.id,
         label: "Other member key",
@@ -419,6 +432,7 @@ describe("personal model credentials — routes", () => {
 
     it("a member cannot edit or delete an organization credential: 404", async () => {
       const id = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: admin.user.id,
         ownerUserId: null,
@@ -443,6 +457,7 @@ describe("personal model credentials — routes", () => {
 
     it("the admin deletes a member's personal credential (break-glass)", async () => {
       const id = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: member.user.id,
         label: "Member key",
@@ -461,6 +476,7 @@ describe("personal model credentials — routes", () => {
 
     it("a member deletes its own personal credential", async () => {
       const id = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: member.user.id,
         label: "Member key",
@@ -483,6 +499,7 @@ describe("personal model credentials — routes", () => {
 
     const orgKey = () =>
       createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: admin.user.id,
         ownerUserId: null,
@@ -504,6 +521,7 @@ describe("personal model credentials — routes", () => {
 
     it("a member tests its own personal credential", async () => {
       const id = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: member.user.id,
         label: "Member key",
@@ -518,6 +536,7 @@ describe("personal model credentials — routes", () => {
 
     it("a member gets 404 testing another member's personal credential", async () => {
       const id = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: otherMember.user.id,
         label: "Other member key",
@@ -530,6 +549,7 @@ describe("personal model credentials — routes", () => {
 
     it("a configuration that disallows personal connections refuses probes that spend a member's personal key", async () => {
       const id = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: member.user.id,
         label: "Member key",
@@ -539,6 +559,7 @@ describe("personal model credentials — routes", () => {
       });
       // `discover` needs org write, and a personal credential is visible to its owner alone.
       const adminOwn = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: admin.orgId,
         userId: admin.user.id,
         label: "Admin key",
@@ -550,9 +571,7 @@ describe("personal model credentials — routes", () => {
 
       const own = await probe(member, id);
       expect(own.status).toBe(403);
-      expect(((await own.json()) as { code: string }).code).toBe(
-        "personal_model_credentials_disabled",
-      );
+      expect(((await own.json()) as { code: string }).code).toBe("personal_connections_disabled");
 
       const inline = await app.request(`${CREDENTIALS}/test`, {
         method: "POST",
@@ -565,7 +584,7 @@ describe("personal model credentials — routes", () => {
       });
       expect(inline.status).toBe(403);
       expect(((await inline.json()) as { code: string }).code).toBe(
-        "personal_model_credentials_disabled",
+        "personal_connections_disabled",
       );
 
       const discover = await app.request(`${CREDENTIALS}/discover`, {
@@ -575,7 +594,7 @@ describe("personal model credentials — routes", () => {
       });
       expect(discover.status).toBe(403);
       expect(((await discover.json()) as { code: string }).code).toBe(
-        "personal_model_credentials_disabled",
+        "personal_connections_disabled",
       );
 
       expect((await probe(admin, await orgKey())).status).toBe(200);
@@ -640,9 +659,7 @@ describe("personal model credentials — routes", () => {
         body: JSON.stringify({ providerId: OAUTH_PROVIDER, owner_type: "user" }),
       });
       expect(res.status).toBe(403);
-      expect(((await res.json()) as { code: string }).code).toBe(
-        "personal_model_credentials_disabled",
-      );
+      expect(((await res.json()) as { code: string }).code).toBe("personal_connections_disabled");
     });
 
     it("a reconnect pairing must target the caller's own subscription", async () => {

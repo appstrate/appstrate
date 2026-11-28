@@ -58,8 +58,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "Subscription model",
       // An id test-oauth serves: a connection that does not serve the model is
       // no candidate, dead or alive.
@@ -81,8 +80,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "GPT-4o",
       modelId: "gpt-4o",
       enabled: true,
@@ -269,8 +267,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     const { cred } = await seedOAuthModel(true);
     const disabled = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "Disabled on a dead credential",
       // A second binding of the same (credential, model) is refused since
       // `uq_org_models_unaliased_binding`; the disabled row is its own model.

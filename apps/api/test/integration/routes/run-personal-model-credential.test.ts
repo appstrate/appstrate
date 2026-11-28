@@ -98,6 +98,7 @@ describe("run payer — personal model credentials", () => {
   async function seedOrgDefault(): Promise<string> {
     const configId = await openaiConfig();
     const credentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -656,6 +657,7 @@ describe("run admission — the credential a run spends is the one admitted", ()
   it("admits a model of a personal-off configuration on the org credential and a built-in one on the platform key, though the member holds a personal key", async () => {
     const configId = await seedModelConfigFor(ctx.orgId, "openai");
     const orgCredentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,

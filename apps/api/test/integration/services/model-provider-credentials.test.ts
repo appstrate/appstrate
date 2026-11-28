@@ -38,7 +38,7 @@ import {
 import type { ModelProviderCredentialAction } from "@appstrate/shared-types";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { updateModelConfig } from "../../../src/services/model-configs.ts";
-import { seedModelConfig, seedModelConfigFor } from "../../helpers/seed.ts";
+import { seedModelConfigFor } from "../../helpers/seed.ts";
 
 import {
   assertCredentialEditable,
@@ -75,6 +75,7 @@ const orgAdmin = (orgId: string) => ({
   writesOrg: true,
   deletesOrg: true,
   connects: true,
+  createsConfigs: true,
 });
 
 getTestApp(); // boots the model and provider registries
@@ -89,6 +90,7 @@ const adminCaller = (orgId: string): ModelCredentialCaller => ({
   writesOrg: true,
   deletesOrg: true,
   connects: true,
+  createsConfigs: true,
 });
 
 /** Switch personal connections off on the configuration `providerId` is filed under. */
@@ -106,6 +108,7 @@ describe("model-provider-credentials service — api_key path", () => {
   it("stores an opaque envelope, never the plaintext", async () => {
     const ctx = await createTestContext({ orgSlug: "mpc-svc-apikey" });
     const id = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -126,6 +129,7 @@ describe("model-provider-credentials service — api_key path", () => {
   it("loadInferenceCredentials overlays the registry config", async () => {
     const ctx = await createTestContext({ orgSlug: "mpc-svc-load-apikey" });
     const id = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -147,6 +151,7 @@ describe("model-provider-credentials service — api_key path", () => {
     const ctx = await createTestContext({ orgSlug: "mpc-svc-unknown" });
     await expect(
       createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         ownerUserId: null,
@@ -161,6 +166,7 @@ describe("model-provider-credentials service — api_key path", () => {
     const ctx = await createTestContext({ orgSlug: "mpc-svc-mismatch" });
     await expect(
       createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         ownerUserId: null,
@@ -201,12 +207,13 @@ describe("model-provider-credentials service — api_key path", () => {
     });
     try {
       const ctx = await createTestContext({ orgSlug: "mpc-svc-override" });
-      const gatewayConfig = await seedModelConfig({
-        orgId: ctx.orgId,
-        providerId: "openai-compatible",
-        baseUrl: "http://localhost:11435",
-      });
+      const gatewayConfig = await seedModelConfigFor(
+        ctx.orgId,
+        "openai-compatible",
+        "http://localhost:11435",
+      );
       const compatId = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         ownerUserId: null,
@@ -219,6 +226,7 @@ describe("model-provider-credentials service — api_key path", () => {
       expect(compatLoad!.baseUrl).toBe("http://localhost:11435");
 
       const openaiId = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         ownerUserId: null,
@@ -241,6 +249,7 @@ describe("model-provider-credentials service — api_key path", () => {
   it("listModelProviderCredentials never exposes plaintext", async () => {
     const ctx = await createTestContext({ orgSlug: "mpc-svc-list" });
     await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -262,6 +271,7 @@ describe("model-provider-credentials service — api_key path", () => {
   it("rotation: updating apiKey re-encrypts; old plaintext stops decrypting", async () => {
     const ctx = await createTestContext({ orgSlug: "mpc-svc-rotate" });
     const id = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -288,6 +298,7 @@ describe("model-provider-credentials service — api_key path", () => {
   it("metadata-only update leaves the encrypted blob untouched", async () => {
     const ctx = await createTestContext({ orgSlug: "mpc-svc-meta" });
     const id = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -317,6 +328,7 @@ describe("model-provider-credentials service — api_key path", () => {
     const ctxA = await createTestContext({ orgSlug: "mpc-svc-iso-a" });
     const ctxB = await createTestContext({ orgSlug: "mpc-svc-iso-b" });
     const id = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctxA.orgId,
       userId: ctxA.user.id,
       ownerUserId: null,
@@ -553,6 +565,7 @@ describe("model-provider-credentials service — upstream rejections of an api k
   async function apiKeyCredential(slug: string) {
     const ctx = await createTestContext({ orgSlug: slug });
     const id = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -680,6 +693,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
     it("returns custom DB rows tagged source='custom' and never leaks plaintext", async () => {
       const ctx = await createTestContext({ orgSlug: "agg-list-custom" });
       await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         ownerUserId: null,
@@ -738,6 +752,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       // perfectly healthy credential with no Reconnect button.
       const ctx = await createTestContext({ orgSlug: "agg-list-corrupt" });
       const apiKeyId = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         ownerUserId: null,
@@ -774,6 +789,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       // A missing key is the operator's to restore: no "reconnect" badge, but no secret either.
       const ctx = await createTestContext({ orgSlug: "agg-list-missing-kid" });
       const apiKeyId = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         ownerUserId: null,
@@ -805,6 +821,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       const ctxA = await createTestContext({ orgSlug: "agg-load-iso-a" });
       const ctxB = await createTestContext({ orgSlug: "agg-load-iso-b" });
       const idA = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctxA.orgId,
         userId: ctxA.user.id,
         ownerUserId: null,
@@ -971,6 +988,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
     const member = await memberContext(ctx, "member");
     const reader = await memberContext(ctx, "member");
     const orgCredentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -979,6 +997,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       apiKey: "sk-org",
       configId: await seedModelConfigFor(ctx.orgId, "test-apikey"),
     });
+    await seedModelConfigFor(ctx.orgId, "test-oauth");
     const personalId = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: member.user.id,
@@ -995,6 +1014,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       writesOrg: false,
       deletesOrg: false,
       connects: true,
+      createsConfigs: true,
     };
     const readerCaller: ModelCredentialCaller = {
       ...memberCaller,
@@ -1026,6 +1046,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       refreshToken: "rt",
     });
     const orgCredentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -1041,13 +1062,14 @@ describe("model-provider-credentials service — visibility and the personal-cre
       writesOrg: true,
       deletesOrg: true,
       connects: true,
+      createsConfigs: true,
     };
     await disablePersonal(ctx.orgId, "test-oauth");
 
     const error = await mayProbeCredential(caller, personalId).catch((err: unknown) => err);
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).status).toBe(403);
-    expect((error as ApiError).code).toBe("personal_model_credentials_disabled");
+    expect((error as ApiError).code).toBe("personal_connections_disabled");
     // The org credential stays probeable.
     expect(await mayProbeCredential(caller, orgCredentialId)).toBe(true);
   });
@@ -1056,6 +1078,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
     const ctx = await createTestContext({ orgSlug: "mpc-svc-editable" });
     const member = await memberContext(ctx, "member");
     const orgCredentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,
@@ -1064,6 +1087,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       apiKey: "sk-org",
       configId: await seedModelConfigFor(ctx.orgId, "test-apikey"),
     });
+    await seedModelConfigFor(ctx.orgId, "test-oauth");
     const personalId = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: member.user.id,
@@ -1080,6 +1104,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       writesOrg: false,
       deletesOrg: false,
       connects: false,
+      createsConfigs: false,
     };
     const writer = { ...base, writesOrg: true };
     const deleter = { ...base, deletesOrg: true };
@@ -1113,7 +1138,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       refreshToken: "rt",
     }).catch((err: unknown) => err);
     expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).code).toBe("personal_model_credentials_disabled");
+    expect((error as ApiError).code).toBe("personal_connections_disabled");
     expect((error as ApiError).status).toBe(403);
     expect(await db.select().from(modelProviderCredentials)).toHaveLength(0);
 
@@ -1161,6 +1186,7 @@ describe("model-provider-credentials service — membership lock on creation", (
     try {
       const createFor = (userId: string) =>
         createApiKeyCredential({
+          mayCreateConfig: true,
           orgId: ctx.orgId,
           userId,
           ownerUserId: userId,
@@ -1190,6 +1216,7 @@ describe("model-provider-credentials service — membership lock on creation", (
     const ctx = await createTestContext({ orgSlug: "mpc-svc-lock-oauth" });
     const member = await memberContext(ctx, "member");
     const outsider = await createTestUser();
+    await seedModelConfigFor(ctx.orgId, "test-oauth");
     const createFor = (userId: string) =>
       createOAuthCredential({
         orgId: ctx.orgId,
@@ -1229,10 +1256,18 @@ describe("model-provider-credentials service — credentialActions and reconnect
     writesOrg: false,
     deletesOrg: false,
     connects: false,
+    createsConfigs: false,
   } satisfies ModelCredentialCaller;
   const callers = {
-    admin: { ...none, readsOrg: true, writesOrg: true, deletesOrg: true, connects: true },
-    member: { ...none, connects: true },
+    admin: {
+      ...none,
+      readsOrg: true,
+      writesOrg: true,
+      deletesOrg: true,
+      connects: true,
+      createsConfigs: true,
+    },
+    member: { ...none, connects: true, createsConfigs: true },
     reader: { ...none, readsOrg: true },
     delegate: { ...none, userId: null, readsOrg: true, writesOrg: true, deletesOrg: true },
   } satisfies Record<string, ModelCredentialCaller>;

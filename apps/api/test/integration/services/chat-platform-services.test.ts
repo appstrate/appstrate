@@ -25,7 +25,12 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedModelConfigFor, seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
+import {
+  corruptCredentialBlob,
+  seedModelConfigFor,
+  seedOrgModelProviderKey,
+  seedOrgModelProviderOAuth,
+} from "../../helpers/seed.ts";
 import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
@@ -186,6 +191,40 @@ describe("resolveChatModel", () => {
 
       await expect(resolveChatModel(ctx.orgId, presetId, ctx.user.id)).rejects.toThrow();
       expect(await storedNeedsReconnection(credentialId)).toBe(false);
+    });
+  });
+
+  it("asks to reconnect when the payer's only subscription is dead", async () => {
+    await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      ownerUserId: ctx.user.id,
+      createdBy: ctx.user.id,
+      needsReconnection: true,
+    });
+    const presetId = await createSubscriptionModel("Dead subscription");
+
+    expect(await resolveChatModel(ctx.orgId, presetId, ctx.user.id)).toEqual({
+      subscription: true,
+      needsReconnection: true,
+    });
+  });
+
+  it("never answers a subscription reconnect for a dead personal API key", async () => {
+    const configId = await seedModelConfigFor(ctx.orgId, "openai");
+    const key = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      providerId: "openai",
+      configId,
+      ownerUserId: ctx.user.id,
+      createdBy: ctx.user.id,
+    });
+    await corruptCredentialBlob(key.id);
+    const presetId = await createOrgModel(ctx.orgId, "Keyed", "gpt-5.5", ctx.user.id, configId);
+
+    // The turn goes to the gateway, which names the dead key: a reconnect would not serve it.
+    expect(await resolveChatModel(ctx.orgId, presetId, ctx.user.id)).toEqual({
+      subscription: false,
     });
   });
 

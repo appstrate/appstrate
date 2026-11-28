@@ -36,50 +36,29 @@ import {
   registerTestOAuthHooksProvider,
   registerTestOAuthProvider,
   _resetTestOAuthProviderRegistration,
-  TEST_PROVIDER_FAMILIES,
 } from "./test-oauth-provider.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
 
-export interface SeedTestModelProvidersOptions {
-  /**
-   * Extra module provider ids that keep their production `baseUrlOverridable`
-   * value instead of the harness default. Every family head (a provider some
-   * other provider names as its `catalogProviderId`, e.g. `openai`, `anthropic`)
-   * keeps it already: a gateway configuration only takes connections of its own
-   * provider, so a family head turned gateway would refuse its wrappers.
-   */
-  readonly fixedEndpoint?: readonly string[];
-}
+/** The gateway providers production ships (`core-providers`): the only module ones with a chosen endpoint. */
+const GATEWAY_PROVIDER_IDS: ReadonlySet<string> = new Set([
+  "openai-compatible",
+  "anthropic-compatible",
+]);
 
-export function seedTestModelProviders(options: SeedTestModelProvidersOptions = {}): void {
+export function seedTestModelProviders(): void {
   resetModelProviders();
   _resetTestOAuthProviderRegistration();
   registerTestOAuthProvider();
   registerTestOAuthHooksProvider();
   registerTestApiKeyProvider();
-  // Module-contributed providers are registered with `baseUrlOverridable: true`
-  // so the integration harness can point any provider at a mock endpoint
-  // (`api.openai.test`, `api.anthropic.test`, …) without each test having to
-  // monkey-patch the registry. Providers listed in `fixedEndpoint` keep the
-  // production value (`core-providers` ships them `baseUrlOverridable: false`,
-  // only `openai-compatible` and `anthropic-compatible` are overridable).
-  //
-  // A provider another one names as its catalog family (`openai` for `test-oauth`,
-  // `anthropic` for `claude-code`) also keeps its production value: a model
-  // configuration is stored under the family's provider, and a gateway
-  // configuration admits connections of its own provider only, so flipping it
-  // would keep every subscription out of its family's configuration.
-  const contributions = getDiscoveredModules()
-    .map((m) => m.modelProviders?.() ?? [])
-    .flat();
-  const families = new Set(
-    [...TEST_PROVIDER_FAMILIES, ...contributions.map((p) => p.catalogProviderId)].filter(
-      (id): id is string => typeof id === "string",
-    ),
+  // Module providers keep their production `baseUrlOverridable`: only the two
+  // gateway providers take an endpoint per configuration, every other one
+  // (openai, anthropic, mistral, codex, …) is a fixed endpoint. A test that
+  // needs to reach a mock endpoint creates a gateway configuration on it.
+  registerModelProviders(
+    getDiscoveredModules()
+      .map((m) => m.modelProviders?.() ?? [])
+      .flat()
+      .map((p) => ({ ...p, baseUrlOverridable: GATEWAY_PROVIDER_IDS.has(p.providerId) })),
   );
-  const fixedEndpoint = new Set([...(options.fixedEndpoint ?? []), ...families]);
-  const moduleContributions = contributions.map((p) =>
-    fixedEndpoint.has(p.providerId) ? p : { ...p, baseUrlOverridable: true },
-  );
-  registerModelProviders(moduleContributions);
 }

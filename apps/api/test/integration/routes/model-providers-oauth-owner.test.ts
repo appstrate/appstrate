@@ -288,9 +288,7 @@ describe("subscription pairings — owner_type", () => {
       for (const ctx of [admin, member]) {
         const res = await mint(ctx, { owner_type: "user" });
         expect(res.status).toBe(403);
-        expect(((await res.json()) as { code: string }).code).toBe(
-          "personal_model_credentials_disabled",
-        );
+        expect(((await res.json()) as { code: string }).code).toBe("personal_connections_disabled");
       }
     });
   });
@@ -552,7 +550,7 @@ describe("subscription pairings — owner_type", () => {
       const refused = await redeem(second, "after-policy");
       expect(refused.status).toBe(403);
       expect(((await refused.json()) as { code: string }).code).toBe(
-        "personal_model_credentials_disabled",
+        "personal_connections_disabled",
       );
       expect((await storedCredential(own.id)).accessToken).toBe("guest-access");
     });

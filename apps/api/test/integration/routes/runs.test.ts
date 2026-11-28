@@ -249,6 +249,7 @@ describe("Runs API", () => {
       // min length (only the create-route Zod schema does), so this models a
       // stub/misconfigured key reaching resolution.
       const credentialId = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         ownerUserId: null,
@@ -327,6 +328,7 @@ describe("Runs API", () => {
 
     async function seedOrgModel(label: string, modelId = "gpt-5.5"): Promise<string> {
       const credentialId = await createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         ownerUserId: null,

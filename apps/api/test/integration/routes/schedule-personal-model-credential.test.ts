@@ -47,7 +47,7 @@ describe("schedule payer — organization credentials only", () => {
   let ctx: TestContext;
 
   beforeAll(() => {
-    seedTestModelProviders({ fixedEndpoint: ["openai", "anthropic"] });
+    seedTestModelProviders();
     _setOrchestratorForTesting(createFakeOrchestrator());
   });
 
@@ -83,6 +83,7 @@ describe("schedule payer — organization credentials only", () => {
   function seedOrgKey(): Promise<string> {
     return openaiConfig().then((configId) =>
       createApiKeyCredential({
+        mayCreateConfig: true,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         ownerUserId: null,

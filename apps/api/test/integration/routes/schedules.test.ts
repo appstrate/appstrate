@@ -353,7 +353,7 @@ describe("Schedules API", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: credential.id,
+        configId: credential.configId!,
         modelId: "gpt-5.6-luna",
       });
 
@@ -624,7 +624,7 @@ describe("Schedules API", () => {
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
-        credentialId: credential.id,
+        configId: credential.configId!,
         modelId: "gpt-5.6-luna",
       });
 

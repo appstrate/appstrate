@@ -59,6 +59,7 @@ describe("run launch — model_credential_id on an aliased model", () => {
   /** Make an org-default model on a real api_key credential. Returns its id. */
   async function seedDefaultModel(aliased: boolean): Promise<string> {
     const credentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,

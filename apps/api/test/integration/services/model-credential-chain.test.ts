@@ -39,7 +39,6 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import {
-  seedModelConfig,
   seedModelConfigFor,
   seedOrgModel,
   seedOrgModelProviderKey,
@@ -50,7 +49,7 @@ import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 
 getTestApp(); // boots the model and provider registries
 
-beforeAll(() => seedTestModelProviders({ fixedEndpoint: ["openai", "anthropic"] }));
+beforeAll(() => seedTestModelProviders());
 afterAll(() => seedTestModelProviders());
 
 const anthropicIds = listPiModels("anthropic", "anthropic-messages").map((m) => m.id);
@@ -407,11 +406,11 @@ describe("model resolution — the configuration's connections", () => {
   it("names the payer side per caller in billed_to", async () => {
     await orgAnthropicKey();
     const withOrg = await anthropicModel(ANTHROPIC_A, "With org");
-    const gatewayConfig = await seedModelConfig({
-      orgId: ctx.orgId,
-      providerId: "openai-compatible",
-      baseUrl: "https://gateway.example.test/v1",
-    });
+    const gatewayConfig = await seedModelConfigFor(
+      ctx.orgId,
+      "openai-compatible",
+      "https://gateway.example.test/v1",
+    );
     const personalOnly = await createOrgModel(
       ctx.orgId,
       "Personal only",

@@ -200,6 +200,7 @@ export async function seedIntegrationConnection(
 export async function seedDefaultOrgModel(ctx: TestContext): Promise<void> {
   const configId = await seedModelConfigFor(ctx.orgId, "openai");
   await createApiKeyCredential({
+    mayCreateConfig: true,
     orgId: ctx.orgId,
     userId: ctx.user.id,
     ownerUserId: null,

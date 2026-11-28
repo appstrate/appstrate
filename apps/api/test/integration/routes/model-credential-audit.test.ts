@@ -49,6 +49,8 @@ describe("model credential audit", () => {
     admin = await createTestContext();
     member = await memberContext(admin, "member");
     otherMember = await memberContext(admin, "member");
+    // A subscription pairing joins the family configuration; it never creates one.
+    await seedModelConfigFor(admin.orgId, OAUTH_PROVIDER);
   });
 
   it("records the owner of a deleted personal credential, and breakGlass only when an admin removes it", async () => {
@@ -105,6 +107,7 @@ describe("model credential audit", () => {
 
   it("records a rotation as rotated, and never the key itself", async () => {
     const id = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: admin.orgId,
       userId: admin.user.id,
       ownerUserId: null,

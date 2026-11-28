@@ -368,6 +368,7 @@ describe("credential refresh sweep — model provider credentials", () => {
 
   it("skips an API-key credential", async () => {
     await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,

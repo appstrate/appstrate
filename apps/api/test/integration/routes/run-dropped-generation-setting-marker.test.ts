@@ -73,7 +73,7 @@ describe("run launch — dropped-generation-setting marker in run_logs", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
+      configId: cred.configId!,
       label: MODEL_LABEL,
       modelId: "deepseek-flash",
       aliased: false,

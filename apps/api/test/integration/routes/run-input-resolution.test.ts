@@ -81,6 +81,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT_ID);
 
     const credentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       ownerUserId: null,

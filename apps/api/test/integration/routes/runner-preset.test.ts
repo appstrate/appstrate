@@ -567,6 +567,7 @@ describe("runner preset", () => {
     });
 
     const credentialId = await createApiKeyCredential({
+      mayCreateConfig: true,
       orgId: owner.orgId,
       userId: owner.user.id,
       ownerUserId: null,

@@ -213,7 +213,7 @@ describe("buildRunContext generation settings", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
+      configId: cred.configId!,
       modelId: "deepseek-flash",
       aliased,
     });
@@ -267,7 +267,7 @@ describe("buildRunContext generation settings", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
+      configId: cred.configId!,
       modelId: "my-reasoner",
       reasoning: true,
       aliased,

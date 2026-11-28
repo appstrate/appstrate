@@ -3,11 +3,22 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { auditEvents, modelProviderCredentials, orgModels } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  modelConfigs,
+  modelProviderCredentials,
+  orgModels,
+} from "@appstrate/db/schema";
 import { corruptCredentialBlob, seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
@@ -324,12 +335,12 @@ describe("Model Provider Keys API", () => {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          providerId: "openai-compatible",
+          providerId: "openai",
           api_key: "sk-local",
           base_url_override: "http://10.255.255.9:9/v1",
         }),
       });
-      expect(res.status).toBe(400);
+      await expectRejectedField(res, "base_url_override");
     });
 
     it("refuses a gateway connection with no config_id: its endpoint is a configuration's choice", async () => {
@@ -420,11 +431,11 @@ describe("Model Provider Keys API", () => {
 
     it("rejects camelCase `apiKey` / `baseUrlOverride` beside `providerId` on create", async () => {
       const res = await post("/api/model-provider-credentials", {
-        providerId: "openai-compatible",
+        providerId: "openai",
         apiKey: "sk-camel",
         baseUrlOverride: "http://10.255.255.9:9/v1",
       });
-      expect(res.status).toBe(400);
+      await expectRejectedField(res, "baseUrlOverride");
     });
 
     it("rejects camelCase `baseUrl` / `apiKey` beside `providerId` on inline test", async () => {
@@ -581,7 +592,7 @@ describe("Model Provider Keys API", () => {
       };
       expect(data.find((c) => c.id === credId)?.serves_model_ids).toEqual([modelId]);
 
-      // No `credential_in_use`: a model is its configuration's, not the connection's.
+      // A model belongs to its configuration, not to the connection: removing the connection keeps it.
       const res = await app.request(`/api/model-provider-credentials/${credId}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
@@ -1036,5 +1047,102 @@ describe("Model Provider Keys API", () => {
         await foreign.server.stop(true);
       }
     });
+  });
+});
+
+describe("a connection never creates a configuration for a caller without models:write", () => {
+  let owner: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    owner = await createTestContext({ orgSlug: "mpc-config-creation" });
+  });
+
+  const post = (path: string, body: unknown, as: TestContext = owner) =>
+    app.request(path, {
+      method: "POST",
+      headers: authHeaders(as, { "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+
+  const configCount = async () =>
+    (await db.select().from(modelConfigs).where(eq(modelConfigs.orgId, owner.orgId))).length;
+
+  it("refuses a member's credential without config_id when no configuration exists", async () => {
+    const member = await memberContext(owner, "member");
+    const res = await post(
+      "/api/model-provider-credentials",
+      { providerId: "openai", api_key: "sk-member", owner_type: "user" },
+      member,
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "model_config_required", param: "config_id" });
+    expect(await configCount()).toBe(0);
+  });
+
+  it("lets the owner's credential create the family configuration implicitly", async () => {
+    const res = await post("/api/model-provider-credentials", {
+      providerId: "openai",
+      api_key: "sk-owner",
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+    expect(await configCount()).toBe(1);
+  });
+});
+
+describe("POST /api/model-provider-credentials/test — a draft key on a gateway", () => {
+  const GATEWAY = "openai-compatible";
+  const BLOCKED_URL = "http://10.255.255.9:9/v1";
+  let owner: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    owner = await createTestContext({ orgSlug: "mpc-draft-test" });
+  });
+
+  const draft = (as: TestContext, body: Record<string, unknown>) =>
+    app.request("/api/model-provider-credentials/test", {
+      method: "POST",
+      headers: authHeaders(as, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ providerId: GATEWAY, api_key: "sk-draft", ...body }),
+    });
+
+  async function gatewayConfigId(): Promise<string> {
+    const res = await app.request("/api/model-configs", {
+      method: "POST",
+      headers: authHeaders(owner, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ provider_id: GATEWAY, base_url: BLOCKED_URL }),
+    });
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  it("refuses a member's draft without config_id, and a free base_url", async () => {
+    const member = await memberContext(owner, "member");
+    const none = await draft(member, {});
+    expect(none.status).toBe(400);
+    expect(await none.json()).toMatchObject({ code: "invalid_request", param: "config_id" });
+
+    const free = await draft(member, { base_url: BLOCKED_URL });
+    expect(free.status).toBe(400);
+    expect(await free.json()).toMatchObject({ code: "invalid_request", param: "base_url" });
+  });
+
+  it("probes the stored configuration's endpoint when config_id is given", async () => {
+    const configId = await gatewayConfigId();
+    const member = await memberContext(owner, "member");
+    const res = await draft(member, { config_id: configId });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(((await res.json()) as { error: string }).error).toBe("BLOCKED_URL");
+  });
+
+  it("answers 404 for an unknown config_id", async () => {
+    expect((await draft(owner, { config_id: crypto.randomUUID() })).status).toBe(404);
+  });
+
+  it("accepts a free base_url from a model-provider-credentials:write holder", async () => {
+    const res = await draft(owner, { base_url: BLOCKED_URL });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(((await res.json()) as { error: string }).error).toBe("BLOCKED_URL");
   });
 });

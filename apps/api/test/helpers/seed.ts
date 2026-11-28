@@ -489,6 +489,7 @@ import { isNull } from "drizzle-orm";
 import { getModelProvider } from "../../src/services/model-providers/registry.ts";
 import {
   configProviderOf,
+  connectionFitsConfig,
   isGatewayProvider,
 } from "../../src/services/model-providers/credential-chain.ts";
 
@@ -502,6 +503,26 @@ export async function configIdOf(credentialId: string): Promise<string> {
   if (!row?.configId)
     throw new Error(`configIdOf: connection ${credentialId} has no configuration`);
   return row.configId;
+}
+
+/** A seeded connection must sit in a configuration that takes its provider, as production refuses otherwise. */
+async function assertConnectionFitsConfig(
+  orgId: string,
+  configId: string,
+  providerId: string,
+): Promise<void> {
+  const [config] = await db
+    .select({ providerId: modelConfigs.providerId })
+    .from(modelConfigs)
+    .where(and(eq(modelConfigs.orgId, orgId), eq(modelConfigs.id, configId)))
+    .limit(1);
+  if (!config) throw new Error(`seed: configuration ${configId} not found in org ${orgId}`);
+  // A provider the registry no longer knows is a dead-provider fixture: nothing can fit it.
+  if (getModelProvider(providerId) && !connectionFitsConfig(providerId, config.providerId)) {
+    throw new Error(
+      `seed: a ${providerId} connection does not fit a ${config.providerId} configuration`,
+    );
+  }
 }
 
 /**
@@ -543,30 +564,6 @@ export async function seedModelConfigFor(
   return row!.id;
 }
 
-/**
- * A model configuration stored under exactly `providerId` (no family normalisation), for
- * tests that pick the configuration's provider themselves.
- */
-export async function seedModelConfig(overrides: {
-  orgId: string;
-  providerId: string;
-  baseUrl?: string | null;
-  label?: string;
-  personalConnectionsAllowed?: boolean;
-}): Promise<string> {
-  const [row] = await db
-    .insert(modelConfigs)
-    .values({
-      orgId: overrides.orgId,
-      providerId: overrides.providerId,
-      label: overrides.label ?? overrides.providerId,
-      baseUrl: overrides.baseUrl ?? null,
-      personalConnectionsAllowed: overrides.personalConnectionsAllowed ?? true,
-    })
-    .returning({ id: modelConfigs.id });
-  return row!.id;
-}
-
 interface ModelProviderCredentialSeed {
   orgId: string;
   /** Configuration joined; omitted = the provider's (gateway: endpoint's) configuration. */
@@ -574,16 +571,17 @@ interface ModelProviderCredentialSeed {
   label?: string;
   /** Convenience alias for callers that think in apiShape terms — mapped to a built-in providerId. */
   apiShape?: string;
+  /** Endpoint of the configuration this connection joins (gateway providers only); ignored when `configId` is given. */
   baseUrl?: string;
   /** Plaintext API key, wrapped into a `kind: "api_key"` blob before encryption. */
   apiKey?: string;
   /** Canonical registry providerId. Defaults derive from `apiShape` if absent. */
   providerId?: string;
-  /** Override for self-hosted endpoints; honored only by providers with `baseUrlOverridable: true`. */
-  baseUrlOverride?: string | null;
   createdBy?: string | null;
   /** Personal credential owner; omitted = organization credential. */
   ownerUserId?: string | null;
+  /** Row creation time, for tests that order connections. */
+  createdAt?: Date;
 }
 
 /**
@@ -592,10 +590,7 @@ interface ModelProviderCredentialSeed {
  * the helper so existing tests calling `seedOrgModelProviderKey({ apiShape: "openai" })`
  * keep working without each one knowing about providerIds.
  *
- * Returns a registered providerId whose `apiShape` matches. Test-time
- * `seedTestModelProviders` flips `baseUrlOverridable: true` on every
- * registered provider so the credential's `baseUrlOverride` is always
- * honored — pointing any provider at a mock endpoint is trivial.
+ * Returns a registered providerId whose `apiShape` matches.
  */
 function defaultProviderId(apiShape: string | undefined, baseUrl: string | undefined): string {
   // baseUrl host wins over apiShape when both are supplied — catalog tests
@@ -630,14 +625,10 @@ export async function seedOrgModelProviderKey(
   const apiKey = overrides.apiKey ?? "sk-test-placeholder";
   const providerId =
     overrides.providerId ?? defaultProviderId(overrides.apiShape, overrides.baseUrl);
-  // Test-time providers are registered with `baseUrlOverridable: true`
-  // (see `test/helpers/model-providers.ts`), so any `baseUrl` the test passes
-  // through propagates to the credential row as `baseUrlOverride` regardless
-  // of the underlying providerId. The prod registry remains strict.
-  const baseUrlOverride =
-    overrides.baseUrlOverride !== undefined
-      ? overrides.baseUrlOverride
-      : (overrides.baseUrl ?? null);
+  const configId =
+    overrides.configId ??
+    (await seedModelConfigFor(overrides.orgId, providerId, overrides.baseUrl));
+  await assertConnectionFitsConfig(overrides.orgId, configId, providerId);
 
   const [row] = await db
     .insert(modelProviderCredentials)
@@ -646,12 +637,10 @@ export async function seedOrgModelProviderKey(
       label: overrides.label ?? "Test Model Provider Key",
       providerId,
       credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey }),
-      baseUrlOverride,
-      configId:
-        overrides.configId ??
-        (await seedModelConfigFor(overrides.orgId, providerId, baseUrlOverride)),
+      configId,
       createdBy: overrides.createdBy ?? null,
       ownerUserId: overrides.ownerUserId ?? null,
+      ...(overrides.createdAt ? { createdAt: overrides.createdAt } : {}),
     })
     .returning();
   return row!;
@@ -692,6 +681,7 @@ export async function seedOrgModelProviderOAuth(
   const oauthProviderId = overrides.providerId ?? "test-oauth";
   const configId =
     overrides.configId ?? (await seedModelConfigFor(overrides.orgId, oauthProviderId));
+  await assertConnectionFitsConfig(overrides.orgId, configId, oauthProviderId);
   const [row] = await db
     .insert(modelProviderCredentials)
     .values({
@@ -748,49 +738,21 @@ export async function corruptCredentialBlob(credentialId: string): Promise<void>
 
 // ─── Org Models ───────────────────────────────────────────
 
-/**
- * A seeded organization model: its configuration is `configId`, else its (retired, read only by
- * script 0062) `credentialId`'s, else `providerId`'s family configuration.
- */
-type OrgModelInsert = Partial<InferInsertModel<typeof orgModels>> & { orgId: string };
-
-/** `providerId` of a bound credential: an unbound model must name its provider explicitly. */
-async function boundCredential(
-  credentialId: string | null | undefined,
-): Promise<{ providerId: string; configId: string | null } | null> {
-  if (!credentialId) return null;
-  const [row] = await db
-    .select({
-      providerId: modelProviderCredentials.providerId,
-      configId: modelProviderCredentials.configId,
-    })
-    .from(modelProviderCredentials)
-    .where(eq(modelProviderCredentials.id, credentialId))
-    .limit(1);
-  if (!row) throw new Error(`seedOrgModel: credential ${credentialId} not found`);
-  return row;
-}
+/** A seeded organization model lives in a configuration; the retired credential/provider columns stay unwritten. */
+type OrgModelInsert = Omit<
+  Partial<InferInsertModel<typeof orgModels>>,
+  "credentialId" | "providerId" | "configId"
+> & { orgId: string; configId: string };
 
 export async function seedOrgModel(
   overrides: OrgModelInsert,
 ): Promise<InferSelectModel<typeof orgModels>> {
-  const bound = await boundCredential(overrides.credentialId);
-  const providerId = overrides.providerId ?? bound?.providerId;
-  if (!overrides.configId && !bound?.configId && !providerId) {
-    throw new Error("seedOrgModel: needs configId, a credentialId or a providerId");
-  }
-  const configId =
-    overrides.configId ??
-    bound?.configId ??
-    (await seedModelConfigFor(overrides.orgId, providerId!));
   const [model] = await db
     .insert(orgModels)
     .values({
       label: "Test Model",
       modelId: "claude-sonnet-4-20250514",
       ...overrides,
-      providerId: providerId ?? null,
-      configId,
     })
     .returning();
   return model!;

@@ -17,13 +17,18 @@ import { listOrgModels, loadModel } from "../../../src/services/org-models.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedModelConfigFor, seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
+import {
+  seedModelConfigFor,
+  seedOrgModel,
+  seedOrgModelProviderKey,
+  seedOrgModelProviderOAuth,
+} from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 
 getTestApp(); // boots the model registry
 
-// The alias serving checks below need openai and anthropic at their production endpoint.
-beforeAll(() => seedTestModelProviders({ fixedEndpoint: ["openai", "anthropic"] }));
+// Back to the baseline registry: the alias serving checks need openai and anthropic fixed.
+beforeAll(() => seedTestModelProviders());
 afterAll(() => seedTestModelProviders());
 
 describe("org-models — aliased flag (DB path)", () => {
@@ -48,8 +53,7 @@ describe("org-models — aliased flag (DB path)", () => {
     const cred = await seedCred();
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "Plain GPT-4o",
       modelId: "gpt-4o",
       enabled: true,
@@ -71,8 +75,7 @@ describe("org-models — aliased flag (DB path)", () => {
     const cred = await seedCred();
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       label: "Appstrate Medium",
       modelId: "gpt-4o", // the hidden backing
       enabled: true,
@@ -101,8 +104,7 @@ describe("org-models — aliased flag (DB path)", () => {
     });
     const model = await seedOrgModel({
       orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: cred.providerId,
+      configId: cred.configId!,
       modelId: "deepseek-flash", // takes off/low/high/max
       aliased: true,
     });
@@ -156,6 +158,22 @@ describe("org-models — an alias is served by organization connections only", (
   it("resolves nothing for a payer whose only connection is personal", async () => {
     const alias = await seedAlias();
     await personalKey(alias.configId);
+
+    const resolved = await loadModel(ctx.orgId, alias.id, ctx.user.id);
+    expect(resolved?.credentialSource ?? null).toBeNull();
+  });
+
+  it("resolves nothing when the only connection is a subscription, organization's or the payer's", async () => {
+    const alias = await seedAlias();
+    for (const ownerUserId of [null, ctx.user.id]) {
+      await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: "test-oauth",
+        configId: alias.configId,
+        ownerUserId,
+        expiresAt: Date.now() + 3_600_000,
+      });
+    }
 
     const resolved = await loadModel(ctx.orgId, alias.id, ctx.user.id);
     expect(resolved?.credentialSource ?? null).toBeNull();
