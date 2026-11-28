@@ -1,24 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What the assistant did between two texts, on one line: its reasoning and its tool calls, one
- * step or twenty (`activityGroupOf`). A group of one call is that call's line from its first chunk
- * on (`ThreadCallLine`): a click opens it in the context panel, nothing to unfold; its lead is the
- * spark while the turn runs, its icon once settled. Any other group is a disclosure: opened, a rail
- * of steps, a reasoning reading in place, a call a line opening it in the panel. A group of one
- * reasoning opens straight on its text, the line naming it. A call the context panel reveals
- * (`reveal-tool-call.ts`) opens its group: a folded one does not mount its steps.
+ * What the assistant did between two texts, on one line (`activityGroupOf`). A group of one call
+ * is that call's line (`ThreadCallLine`) from its first chunk on; any other group is a disclosure.
+ * A call the context panel reveals (`reveal-tool-call.ts`) opens its group: a folded one does not
+ * mount its steps.
  *
- * Ending the running message, the line is the turn's status: the spark (the status region, beside
- * the control, saying the step in progress), the step in progress, the turn's clock. Settled, it
- * names its one call, or counts them (« 3 consultations · 1 action »), failures apart; a group of
- * reasoning alone reads its first line, and is a plain line, nothing to open, when its text says
- * nothing more.
+ * Ending the running message, the line holds the turn's one status region (spark, step in
+ * progress, clock); settled, it names its call or counts them.
  *
- * `children` is drawn twice: as steps under the rail, and as what must stay in view whatever the
- * fold (`activity-mode.ts`, "breakout": a connect card, a launched run, a created package's link).
- * The breakout keeps one place in the tree for the group's whole life, whatever its line becomes,
- * so what it holds never remounts.
+ * `children` is rendered in two places: as steps under the rail, and as the breakout that stays in
+ * view whatever the fold (`activity-mode.ts`: a connect card, a launched run, a created package's
+ * link). The breakout keeps its position in the tree for the group's whole life, so it never
+ * remounts.
  */
 
 import * as React from "react";

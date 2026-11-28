@@ -1,22 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The model's reasoning, shown. The engine already streams it
- * (`reasoning-delta`, `pi-chat/ui-stream-mapper.ts`); assistant-ui's default
- * renderer for a reasoning part is `() => null`.
- *
- * A run of consecutive reasoning parts is one step of its activity group
- * (`ReasoningStep`): a line reading the reasoning's first line, its text one
- * click away. It is open while it streams, so a reader who opened the group
- * follows it; their first click hands the open state to them for good. The
- * group's one step has no line of its own: the group's header reads its first
- * line, and opening the group opens on its text.
+ * The model's reasoning, shown (assistant-ui's default renderer for a reasoning part is
+ * `() => null`). A run of consecutive reasoning parts is one step of its activity group
+ * (`ReasoningStep`); it is open while it streams, until the reader's first click takes the state.
  *
  * A running turn has ONE status region (`ThinkingStatus`). assistant-ui emits the `indicator` part
  * only while the message runs and its last part is neither text nor reasoning
- * (`MessageGroupedParts.js`, `shouldShowIndicator`, mode `no-text`): that is the loading line. A
- * message ending in an activity group (`endsInActivity`) draws the region in that group's header
- * instead, and the loading line draws nothing.
+ * (`MessageGroupedParts.js`, `shouldShowIndicator`): that is the loading line. A message ending in
+ * an activity group (`endsInActivity`) draws the region in that group's header instead, and the
+ * loading line draws nothing.
  */
 
 import * as React from "react";

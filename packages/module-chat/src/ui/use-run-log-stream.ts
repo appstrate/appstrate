@@ -18,9 +18,9 @@
  *     whose logs have since been pruned. The frames stay the live incremental
  *     source (chips appear the moment an agent publishes) and this read is
  *     UNIONED on top — never subtracted from — so a failed fetch degrades to
- *     the log-derived set rather than emptying the card.
+ *     the log-derived set rather than emptying the line.
  *
- * Auth mirrors the OAuth connect card: relative URLs, `credentials: "include"`
+ * Auth mirrors `OAuthConnectCard`: relative URLs, `credentials: "include"`
  * (cookie session), and the host's forwarded `X-Org-Id` / `X-Space-Id`
  * for the SSE query params (EventSource cannot send headers).
  */
@@ -74,7 +74,7 @@ interface RunLogStream {
   producedFiles: ChatRunFile[];
   /**
    * The authoritative read came back with more rows than its page held (the
-   * route clamps `limit` to 100). The card says so rather than showing a
+   * route clamps `limit` to 100). The line says so rather than showing a
    * silently truncated chips row; it does not page. Never endangers the
    * auto-present rule — a truncated page holds ≥100 entries, never exactly 1.
    */
@@ -96,20 +96,18 @@ interface RunLogStream {
    *
    *  - the terminal `run_update` handler, after its final log sweep AND the
    *    `/api/files` read have both settled. This is the path for a run that
-   *    was in flight (or of unknown status) when the card mounted.
+   *    was in flight (or of unknown status) when the line mounted.
    *  - the one-shot run read, when no live tail is opened at all (missing
    *    `X-Org-Id` / `X-Space-Id`, no `EventSource`, or an `initialStatus`
    *    already terminal — `shouldOpenLiveTail`) and the run comes back
-   *    terminal — nothing else will ever report on this run. A card that
+   *    terminal — nothing else will ever report on this run. A line that
    *    mounts on an already-finished run takes THIS path: no stream, no
    *    second log sweep, the authoritative `/api/files` read alone.
    *
-   * Never inferred from the ABSENCE of a live tail. `live` used to serve as
-   * this gate and could not: it starts `false`, flips true only on the SSE
-   * handshake — which loses the race against the two plain GETs fired in the
-   * same tick — and never flips at all when no SSE is opened. A run answering
-   * `/runs/:id` with `success` a few ms before its stream connects would be
-   * read as settled on a partial file set.
+   * Never inferred from the ABSENCE of a live tail: the SSE handshake loses the race against
+   * the two plain GETs fired in the same tick, and no handshake happens at all when no SSE is
+   * opened. A run answering `/runs/:id` with `success` a few ms before its stream connects
+   * would be read as settled on a partial file set.
    *
    * When neither path fires (both reads failed, run still in flight) the flag
    * stays false and nothing is auto-presented: no evidence, no presentation.
@@ -136,7 +134,7 @@ export function runReadAccess(has: (permission: string) => boolean): RunReadAcce
 /**
  * @param runId       the launched run id (`run_…`), or undefined to stay idle.
  * @param initialStatus status already known from the launch result (e.g.
- *                      `run_and_wait` returns a terminal run) — seeds the badge
+ *                      `run_and_wait` returns a terminal run) — seeds the line's status
  *                      and skips the SSE tail when already terminal
  *                      (`shouldOpenLiveTail`).
  * @param spaceId      the space the run ran in (the space of the conversation's call
@@ -171,10 +169,10 @@ export function useRunLogStream(
   // `setState` here), so the reset is React's documented render-phase
   // adjustment. It
   // re-renders before anything is painted, so the previous run's values never
-  // reach the screen. Without it a card whose `runId` moves between two real
+  // reach the screen. Without it a line whose `runId` moves between two real
   // ids renders run A's chips under run B and can auto-open A's file against
-  // B's terminal status: `sweepDone` has no self-correcting path (the `live`
-  // flag it replaced was reset on close; this one never is).
+  // B's terminal status: `sweepDone` has no self-correcting path: nothing resets it
+  // but this adjustment.
   const [subscribedRunId, setSubscribedRunId] = useState(runId);
   if (subscribedRunId !== runId) {
     setSubscribedRunId(runId);
@@ -238,7 +236,7 @@ export function useRunLogStream(
      * not be confused with a 500 or an error body.
      *
      * The files themselves are unioned into whatever is already there, so a
-     * failure or a partial page can only ever leave the card with the
+     * failure or a partial page can only ever leave the line with the
      * log-derived list.
      */
     const readProducedFiles = async (): Promise<SweepRead> => {
@@ -263,8 +261,8 @@ export function useRunLogStream(
 
     // 1b. One-shot current-status fetch (best-effort). On a mid-run reload the
     //     persisted launch result only holds the transient `pending`, so the
-    //     badge would read "Lancement" until the SSE snapshot lands. Seed the
-    //     live lifecycle fields from the run resource so the card is correct
+    //     line would read "Lancement" until the SSE snapshot lands. Seed the
+    //     live lifecycle fields from the run resource so the line is correct
     //     immediately. Every setter is a `prev ?? …` merge, so a live
     //     `run_update` frame that arrives first always wins.
     void (async () => {
@@ -281,7 +279,7 @@ export function useRunLogStream(
           setDuration((prev) => prev ?? run.duration ?? undefined);
         if (run.error) setError((prev) => prev ?? run.error ?? undefined);
         // No live tail will ever open (missing org/space context, no
-        // EventSource, or the card mounted on an already-terminal status):
+        // EventSource, or the line mounted on an already-terminal status):
         // this read is the last word on a terminal run, so it also owns the
         // completion signal. With a tail, the `run_update` snapshot below owns
         // it instead — it lands after a strictly larger read.
@@ -308,7 +306,7 @@ export function useRunLogStream(
     })();
 
     // 2. Live tail. Skipped when org/space context or EventSource is
-    //    unavailable, and when the card mounted on an already-terminal status
+    //    unavailable, and when the line mounted on an already-terminal status
     //    (`shouldOpenLiveTail`): the snapshot frame such a stream would answer
     //    with only re-runs the final sweep the one-shot read already covers.
     if (!sseUrl || !willTail) {
@@ -377,7 +375,7 @@ export function useRunLogStream(
       // `validateSSEAuth`, a proxy that refuses `text/event-stream`, a wrong
       // content type. No `run_update` will ever arrive on this stream, and the
       // one-shot run read declined to own the completion signal precisely
-      // because `willTail` was true — so without this the card keeps an empty
+      // because `willTail` was true — so without this the line keeps an empty
       // `producedFiles` FOREVER, and a run whose publication frames fell
       // outside the log window shows no chips at all.
       //

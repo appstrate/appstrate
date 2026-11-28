@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure (React-free, unit-testable) helpers for the in-chat run progress component.
+ * Pure (React-free, unit-testable) helpers for the thread's run line.
  *
  * When the assistant launches a run — via `invoke_operation(runAgent|runInline)`
  * or the bundled `run_and_wait` tool — the result carries the created run's
- * `id`. The panel reads that id, fetches the persisted log history once
+ * `id`. The run line reads that id, fetches the persisted log history once
  * (`GET /api/runs/:id/logs`), then tails new lines live over the run's SSE
  * stream (`GET /api/realtime/runs/:id?verbose=true`). These helpers parse and
  * merge both sources so the React layer (`use-run-log-stream.ts`,
@@ -65,8 +65,8 @@ export function shouldOpenLiveTail(args: {
 
 /**
  * Automatic artefacts belong to a call that mounted live, never to completed
- * history. Capture this result once at card mount; later phase changes must not
- * revoke a live card's eligibility before its final file event arrives.
+ * history. Capture this result once at line mount; later phase changes must not
+ * revoke a live line's eligibility before its final file event arrives.
  */
 export function isRunAutoPresentEligible(
   phase: "pending" | "running" | "success" | "error",
@@ -107,7 +107,7 @@ export function runFailureMessage(
 }
 
 /**
- * A run's outcome as its line reads it, the thread's card and the panel's Runs tab alike: starting,
+ * A run's outcome as its line reads it, the thread's line and the panel's Runs tab alike: starting,
  * then running, while it goes; once terminal, its own failure message, else its status's label.
  */
 export function runOutcomeText(
@@ -233,9 +233,9 @@ export function parseRunUpdateFrame(raw: string): RunUpdateLite | undefined {
 /**
  * Parse a `GET /api/runs/:id` run resource down to the same lifecycle subset as
  * a `run_update` frame (the resource is a superset — extra fields are dropped).
- * Used to seed the run badge immediately on a mid-run reload, instead of waiting
+ * Used to seed the run line's status immediately on a mid-run reload, instead of waiting
  * for the SSE snapshot: the persisted `run_and_wait` result only carries the
- * transient launch status (`pending`), so without this the card would read
+ * transient launch status (`pending`), so without this the line would read
  * "Lancement" for an already-running run until the first live frame arrives.
  */
 export function parseRunResource(body: unknown): RunUpdateLite | undefined {
@@ -302,10 +302,10 @@ export function mergeLogs(
 
 /**
  * Build the per-run SSE URL. Returns `undefined` when org/space context is
- * missing (the caller then renders the static card instead of live run progress).
+ * missing (the caller then renders the line without live progress).
  * `verbose` is REQUIRED: the server strips `run_log.data` for non-verbose
- * subscribers, so without it the panel would show empty lines. Only the two
- * channels the panel reads are declared.
+ * subscribers, so without it the line would show empty log entries. Only the two
+ * channels the line reads are declared.
  */
 export function buildRunSseUrl(args: {
   runId: string;
@@ -375,7 +375,7 @@ export interface VisibleLogEntry {
 
 /**
  * The ordered sequence of the agent's own log-tool output — the queue the run
- * card tickers through one entry at a time. ONLY `event === "log"` rows qualify:
+ * line tickers through one entry at a time. ONLY `event === "log"` rows qualify:
  * the platform writes them for the agent's explicit `log` tool
  * (`@appstrate/platform`), never for the auto-emitted runtime lifecycle /
  * tool-call breadcrumbs (which share `type='progress'` but keep
@@ -479,7 +479,7 @@ export function extractRunFiles(result: unknown): ChatRunFile[] {
 /**
  * Extract published files from the live run log stream — the
  * `type='result' event='file'` frames the sink persists for each
- * `file.published` event. Lets the card show a chip the moment an agent
+ * `file.published` event. Lets the line show a chip the moment an agent
  * publishes, before the run terminates. No other event name
  * (`event='document'`) is read.
  *
@@ -528,7 +528,7 @@ interface ProducedFileList {
  * the AUTHORITATIVE set: the log stream is a truncatable window
  * (`?limit=1000`, ascending, cursor never followed), and the end-of-run
  * `file.published` frames are the last rows a run writes, so a chatty run
- * pushes exactly the frames this card needs out of the page.
+ * pushes exactly the frames this line needs out of the page.
  *
  * Returns `undefined` — NOT an empty page — when `payload` is not a list
  * envelope at all (an error body, a truncated response, anything unparseable).
@@ -583,14 +583,14 @@ export type SweepRead = "ok" | "failed" | "not-attempted";
  *  - `producedFileRead` must be `"ok"`: the response was 2xx AND the payload
  *    parsed as the list envelope. An envelope listing ZERO files IS `"ok"` —
  *    a run that produced nothing is a legitimate, complete answer.
- *  - `logSweep` blocks only when it was attempted and FAILED. The card's set is
+ *  - `logSweep` blocks only when it was attempted and FAILED. The line's set is
  *    the UNION of the log frames and the authoritative read, and the
  *    authoritative half alone already covers everything the run produced, so a
  *    frame the sweep missed can only delay a chip, never remove one. But a
  *    sweep that errored yields `[]`, which is indistinguishable from "this run
  *    wrote no frames", and the tail path attempts one precisely because frames
  *    can land in the same tick as the terminal status. Withholding there costs
- *    nothing (no flag ⇒ nothing presented, card unchanged) and is the only
+ *    nothing (no flag ⇒ nothing presented, line unchanged) and is the only
  *    reading that keeps "no evidence, no flag" literal. The no-tail path never
  *    attempts a final sweep and reports `"not-attempted"`.
  */
@@ -607,7 +607,7 @@ export function shouldRaiseSweepDone(args: {
 /**
  * The derived auto-present rule. Nothing the agent declares takes
  * part in it: the run either produced exactly ONE file — which is then opened
- * for the user — or it did not, and the card just lists what there is.
+ * for the user — or it did not, and the line just lists what there is.
  *
  *  - 0 produced files  → nothing to present.
  *  - exactly 1         → that one.
