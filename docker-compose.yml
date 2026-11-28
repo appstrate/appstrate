@@ -236,17 +236,26 @@ services:
   #   1. Uncomment this service.
   #   2. On the `appstrate` service: remove the `/var/run/docker.sock` volume
   #      mount and the `DOCKER_SOCKET=/var/run/docker.sock` env line, then add
-  #      `- DOCKER_HOST=tcp://appstrate-docker-proxy:2375` and a
+  #      `- DOCKER_SOCKET=http://appstrate-docker-proxy:2375` and a
   #      `appstrate-docker-proxy: { condition: service_started }` entry under
   #      `depends_on`.
   #
   # RESIDUAL: the proxy speaks the Docker API over TCP (:2375, on the internal
   # `appstrate-data` network — never publish it). The platform's Docker client
-  # in this image talks to a UNIX socket path (`DOCKER_SOCKET`); a `tcp://`
-  # `DOCKER_HOST` is only honoured by a platform build whose client supports it.
-  # Verify your image supports TCP `DOCKER_HOST` before switching, otherwise
-  # runs will fail to reach the daemon. Until then the direct mount is the
-  # working default.
+  # targets whatever `DOCKER_SOCKET` names and uses it as a TCP endpoint when
+  # it starts with `http://`/`https://` — hence the switch above (the platform
+  # reads `DOCKER_SOCKET`, not `DOCKER_HOST`).
+  #
+  # Runs with integrations follow the platform's endpoint: their sidecar gets
+  # NO socket bind and reaches the proxy through `DOCKER_HOST` instead, so the
+  # proxy's verb filtering gates the runner containers the sidecar spawns
+  # exactly as it gates the platform's own calls. This works because the
+  # sidecar is attached to the platform's own network — the shipped compose
+  # puts the proxy on `appstrate-data`, which is that network. If you rename
+  # or add networks, keep the proxy on one the sidecar shares with the
+  # platform (the network `detectPlatformNetwork` selects), or the sidecar's
+  # docker CLI will fail to resolve the proxy hostname and every
+  # integration-carrying run will fail.
   #
   # appstrate-docker-proxy:
   #   image: tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
