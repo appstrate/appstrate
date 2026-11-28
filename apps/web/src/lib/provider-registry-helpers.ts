@@ -62,27 +62,6 @@ export function resolveProviderEntry(
   );
 }
 
-/**
- * The `providerId` owning a `(apiShape, base_url, modelId?)` row: the catalog
- * owner of `modelId` first, then the base-URL match. `""` when none claims it.
- */
-export function resolveProviderId(
-  spec: {
-    apiShape: string | null;
-    base_url: string | null | undefined;
-    modelId?: string | null | undefined;
-  },
-  registry: readonly ProviderRegistryEntry[],
-): string {
-  if (spec.apiShape && spec.modelId) {
-    const owner = registry.find(
-      (p) => p.apiShape === spec.apiShape && p.models.some((m) => m.id === spec.modelId),
-    );
-    if (owner) return owner.providerId;
-  }
-  return findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.base_url, registry)?.providerId ?? "";
-}
-
 export function quickConnectProviders(
   registry: readonly ProviderRegistryEntry[] | undefined,
 ): ProviderRegistryEntry[] {

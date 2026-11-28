@@ -440,14 +440,14 @@ cannot read it, its provider: « Mistral · Clé org »), « <credential> · Cl�
 « … · Abonnement perso » (the models their own credential serves), « Système » (the instance's
 own models). The first row is « Hériter (<model>) » where the usage has an inheritance. The default
 model wears a `Par défaut` badge; a search field appears from eight models. A model the person
-cannot use stays in the list, greyed, with its reason underneath (« Clé org indisponible »,
-« Désactivé », « Clé perso requise », « Clé perso à reconnecter », « Clés perso désactivées par
-l'organisation »), and when the fix is theirs, one link under its group (« Ajouter votre clé
-Anthropic → », to Préférences › Mes clés). In a schedule every model a personal key or
+cannot use stays in the list, greyed, with its reason underneath (« Connexion de l'organisation
+à reconnecter », « Sans connexion d'organisation », « Désactivé », « Clé perso requise », « Clé
+perso à reconnecter »), and when the fix is theirs, one link under its group (« Ajouter votre clé
+Anthropic → », to Préférences › Mes clés de modèles). In a schedule every model a personal key or
 subscription serves is greyed with « Une planification ne peut pas encore utiliser une clé perso »
 (the server refuses it: `model_scheduled`). The groups come from what `GET /api/models` already
-says for the caller (`binding`, `billed_to`, `credentialId`, `needs_reconnection`) plus their own
-credentials (`lib/model-picker.ts`); a new surface that picks a model uses this component.
+says for the caller (`billed_to`, `config_id`, `needs_reconnection`) plus their own
+connections (`lib/model-picker.ts`); a new surface that picks a model uses this component.
 
 ## 6. Forms
 
@@ -530,90 +530,59 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 - **Runs** (`components/run-columns.tsx`): identity and timing columns only; the outcome (error,
   output, files) lives on the run's own page. Déclencheur names who or what launched it, and a
   dash when nothing is recorded: no column is left blank.
-- **The keys tables** (Settings › Models, two tabs; Preferences › Mes clés). The rule that reads
-  the whole page: **a connected key makes its provider's models available.** A row is a key or a
-  provider, never a model. **Vocabulary, everywhere (`apps/web`, `packages/ui`,
-  `packages/module-chat`, fr and en):** a **Fournisseur** (Provider) is the company that runs the
-  model (Anthropic, Mistral, OpenAI); never « Service », and never a key. A **Clé** (Key) is a
-  caller's connection to a provider: **Clé org** (org key, an API key or a subscription paired
-  for the organization), **Clé perso** (personal key), **Abonnement perso** (personal
-  subscription); « fournisseur » never names a key. Plus
-  **Système** (the instance). Say « Mes clés », « Ajouter une clé org », « Autoriser des modèles
-  avec une clé perso », never « Mes fournisseurs », « Ajouter un fournisseur », « identifiant ».
-  Keep « fournisseur » where it means the company (« Ce fournisseur ne propose pas ce modèle »). The tabs are `CollectionTabs`, kept in the URL
-  (`?tab=personal`, the first leaves it out), and both are read by a member with no write right
-  (no Actions menu, no click on a row). Each tab places its own deed in the page's Actions menu.
-  - **« Clés org »** (`components/providers-table.tsx`, columns in
-    `components/provider-columns.tsx`, rows from `lib/model-providers.ts`): one row per
-    organization key (an organization subscription included), then the instance's row, named « Système » (its Fournisseur says « Livrés avec
-    l'instance »). Columns: Nom (no badge beside it), Fournisseur, Modèles (the models
-    this key makes usable, a short list, the default one marked with a small star, « Aucun »
-    otherwise), État, « … ». An organization key serves the models bound to it (`credentialId`);
-    the instance row serves the built-in ones. A key the caller cannot read stays a row, named by
-    its provider, with no menu. Menu: Renommer, Choisir les modèles, Changer la clé, Tester,
-    Supprimer (a key no model uses: see « Delete a key » below); the
-    instance, Choisir le modèle par défaut and Tester (a submenu of its models, aliases left out:
-    a test would describe the backing they hide), for a caller with `models:write`. A click on
-    the row (name included) chooses its models. Actions menu: « Ajouter une clé org ». Setting
-    the default from the instance's row says so in a toast (« « X » est maintenant le modèle par
-    défaut. »).
-  - **« Clés perso »** (`components/personal-services-table.tsx`, columns in
-    `components/personal-service-columns.tsx`): first the organization's
-    `personal_model_credentials` switch (`components/settings/personal-credentials-setting.tsx`,
-    the same write as in General), then one row per PROVIDER open to personal keys
-    (`personalServiceRows`: a provider with a model left to personal keys, or one somebody
-    connected a key for). Columns: Fournisseur, Modèles (the ones usable with a personal key of that
-    provider, `binding: "user"`), Clés connectées (who plugged a personal key or subscription in,
-    « Alice Martin (vous), Bob » or « Aucune », read off the credentials the server shows the
-    caller), État, « … ». The providers listed are `personalModelServices`
-    (`allowsMemberModels`: open to personal keys, `personal_allowed`, and with a listing that needs
-    no key to ask with), subscriptions included (Codex, Claude Code). A click on the row, or
-    « Choisir les modèles » in its menu, opens the provider's checklist
-    (`?personalModels=<providerId>`). Actions menu: « Autoriser des modèles avec une clé perso »
-    (the same checklist, with a choice of provider, titled « Modèles utilisables avec une clé
-    perso »). Switched off, the table stays, greyed and inert, under « Les clés perso sont
-    désactivées pour l'organisation ». Under it, for a caller with
-    `model-provider-credentials:read`, **« Clés perso connectées »**: the first table over every
-    personal key and subscription of the organization, with its type, and its holder's name under
-    the name of another person's key. Its menu is the row's `allowed_actions` (an administrator
-    gets Tester and Supprimer on a member's key; Renommer, Changer la clé and Reconnecter stay the
-    holder's). It sits outside the greyed area: a key already held is deleted whatever the
-    setting says. Each member still manages their own keys in Mes clés, linked under the tables.
-  - **One State column** (`components/row-state-cell.tsx`, decided by `rowStates`), in both tables,
-    in this order, and nothing when all is well: `Indisponible` (a key or subscription to
-    reconnect, a key refused; for a provider, every key connected is), `Par défaut` (the row
-    carries the organization's default model), `Désactivé` (it carries models and every one is
-    switched off), `Aucune clé connectée` (a personal provider nobody connected a key for). No
-    badge ever sits beside a name. It is a read column: below 36rem it waits for room like any other.
-  - **Preferences › Mes clés** shows the first table narrowed to the caller's own
-    personal keys and subscriptions, with a Type column (Clé perso or Abonnement perso); its action
-    is « Ajouter une clé perso ou un abonnement ». The
-    menu: Renommer, Changer la clé (or Reconnecter), Tester, Supprimer; another person's, Tester.
-  - **Choose the models** (`?models=<credentialId>`, `components/model-choice-dialog.tsx`,
-    state in `hooks/use-model-choice.ts`, the writes in `hooks/use-apply-model-choice.ts`, the plan
-    in `lib/model-choice.ts`): **the list speaks of ACCESS, never of deleting a model.** A model exists at its provider; the
-    organization gives or withdraws its access. Ticked is access, unticked is none, a star on the
-    default. « Enregistrer » creates the ticked models that have no row yet, switches back on the
-    ones that were switched off (`PATCH enabled: true`, their settings intact), switches OFF the
-    unticked ones (`PATCH enabled: false`, never a `DELETE`; the footer says « Accès retiré pour N
-    modèles »), then sets the default, in that order, so a default that moves can leave the one
-    it replaces. A model switched off is listed UNTICKED, and the tables' Modèles column names only
-    the models with access. **The default model's box is locked** (disabled, tooltip « Choisissez
-    d'abord un autre modèle par défaut »: the server refuses `model_disabled`) until another model
-    is starred. The words « Supprimer » and « Désactiver » do not appear for a model in this
-    list: unticking withdraws access. A refusal the server names (`model_disabled`,
-    `model_scheduled`, said by `refusalMessage`) is shown under the list or in the form. A saved
-    model's finer settings (name, capabilities, prices, the key it is bound to) are the
-    « Réglages avancés » link on its line: the model form, which replaces the
-    list (it is a state of the page, not an address), and opens only on a model a list offers (never one the instance ships). A model's own
+- **Model configurations** (Settings › Models; Preferences › Mes clés de modèles). The rule that reads the
+  whole page: **a configuration is a service the organization set up; its connections serve its
+  models.** A row is a configuration, never a key nor a model. **Vocabulary, everywhere
+  (`apps/web`, `packages/ui`, `packages/module-chat`, fr and en):** a **Configuration** is the
+  service as the organization set it up (its label, a gateway's endpoint, its models, whether
+  members may connect their own: `lib/model-configs.ts`). A **Connexion** is what serves it: an
+  API key or a subscription, owned by the organization (« Connexion de l'organisation ») or by a
+  member (« Ma connexion »). A **Fournisseur** (Provider) stays the company that runs the model.
+  Plus **Système** (the instance's own models). Every connect deed says who pays before the
+  secret is asked (`modelConfigs.payer.*`).
+  - **Settings › Models** (`pages/org-settings/models.tsx`): the organization's default model
+    first (`components/model-configs/default-model-setting.tsx`, a `ModelPicker` with
+    `defaultModelGroups`, read-only text without `models:write`), then « Configurations », one
+    `ModelConfigRow` each (`components/model-configs/model-config-row.tsx`, a `Collapsible` over an
+    `Item`), then the instance's row (Système, its models as read-only chips). Collapsed, a row is
+    its icon, its label (an `InlineEditableLabel`), its state badge (`ConfigStateBadge`: Active,
+    À connecter, À reconnecter, Système) and the repair it needs (`ConnectMenu`,
+    `components/model-configs/connect-menu.tsx`: one button and the other ways to connect in its
+    dropdown, grouped by owner, each group saying who pays). Its « … » menu: Renommer, Modifier
+    l'endpoint (a gateway), Supprimer (`ConfirmModal`: its connections and models go with it).
+    Open, it shows **Connexions** (the organization's lines, the « Connexions personnelles
+    autorisées » switch, the members' lines; a line's own menu is its `allowed_actions`:
+    Renommer, Changer la clé or Reconnecter, Supprimer) and **Modèles** (« Choisir les modèles »
+    and the chips, `components/model-configs/model-chips.tsx`, the default marked « défaut »; a
+    chip opens the model form). The page's Actions menu: « Ajouter une configuration ».
+  - **« Ajouter une configuration »** (`components/model-configs/add-config-flow.tsx`): the
+    service (`AddModelConfigDialog`: provider, a gateway's API type and base URL, an optional
+    label, the personal switch; a service already configured offers « Ouvrir », and so does the
+    server's `409 model_config_exists`), then its models with the recommended ones ticked, then
+    the organization's connection when it has none. Every step can be left: a configuration
+    with no connection is « À connecter », a valid state.
+  - **Preferences › Mes clés de modèles** (`pages/preferences/models.tsx`): one `Item` per configuration
+    that allows personal connections, saying who serves the caller's calls (their own
+    connection, the organization's, nobody yet: `personalServing`), its state badge, and
+    « Utiliser ma clé » (a `ConnectMenu`) or the menu of the caller's own connection.
+  - **A connection's form** (`components/credential-form-modal.tsx`): an API key typed here, or
+    a subscription paired through `PairingModal`. It carries only the secret: the endpoint is the
+    configuration's, the label is named by the server and renamed inline.
+  - **Choose the models** (`components/model-choice-dialog.tsx`, state in
+    `hooks/use-model-choice.ts`, the writes in `hooks/use-apply-model-choice.ts`, the plan in
+    `lib/model-choice.ts`): **the list speaks of ACCESS, never of deleting a model.** Ticked is
+    access, unticked is none. « Enregistrer » sends one `POST /api/models/apply` for the
+    configuration: it creates the ticked models that have no row yet, switches back on the ones
+    that were switched off, and switches OFF the unticked ones (never a `DELETE`; the footer says
+    « Accès retiré pour N modèles »). The default model's box is locked: the default is set in
+    « Modèle par défaut », never here. A listing that asks the endpoint (« Détecter les
+    modèles ») goes through the configuration's organization API key, or, with none, a key typed
+    in the dialog for that one request. A refusal the server names is shown under the list, with
+    the models at fault. A saved model's finer settings (name, capabilities, prices) are the
+    « Réglages avancés » link on its line: the model form, which replaces the list. A model's own
     deeds sit at the start of that form's footer (`components/model-form/saved-model-actions.tsx`):
-    « Supprimer » for a caller with `models:delete`, behind a `ConfirmModal` (« Supprimer le
-    modèle ? »), and « Tester » for a model bound to an organization key (a model left to each
-    member has none to test: `model_credential_required`), its result beside the button.
-    « Ajouter une clé org » is the same list as its second step (provider and key first, every
-    model ticked, nothing written until the last button, « Retour » keeps what was typed). The
-    personal keys' models are the same list per provider (`?personalModels=<providerId>`), with
-    the star and « Réglages avancés » like an organization key's.
+    « Supprimer » for a caller with `models:delete`, behind a `ConfirmModal`, and « Tester » for a
+    model someone pays for.
     **A service that does not publish every id it serves** (an endpoint without `/models`, a live
     search; never a catalog, which binds only its own ids) ends its list with a line,
     « Ajouter un identifiant de modèle » (`components/model-form/manual-model-entry.tsx`, the
@@ -624,14 +593,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     model form's own, shared with this list. A retry after a partly
     refused batch asks only for what failed: the dialog keeps the models its own submission created
     (`knownModels`, `lib/model-choice.ts`).
-  - **Delete a key** (`components/delete-key-confirm.tsx`, its copy in
-    `lib/key-deletion.ts`): the server refuses an organization key that model rows still
-    reference (`credential_in_use`, `ON DELETE RESTRICT`). The confirmation uses the server's
-    reference count, including disabled models and models outside the reader's list. A positive
-    count disables deletion. After a concurrent refusal the dialog waits for the key to be read
-    again. Returning to the tab refreshes the count, so a key freed elsewhere can be deleted
-    in the same dialog. A member's personal key serves no model of its own: its
-    confirmation says the member will have to add a new one.
+  - **Delete a connection** (`components/delete-key-confirm.tsx`): a plain `ConfirmModal`. The
+    configuration and its models stay; a model nobody serves any more reads « À connecter ».
 - **Packages** (agents, skills, integrations, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
   `packages-table.tsx`. Do not build another.
@@ -766,7 +729,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     reached from another modal's button (`editModel`, `editEndUser`) is a state of
     the page instead.
   - **Naming** of a URL param: the act and the object, camelCase (`?editProxy=<id>`,
-    `?endUser=<id>`, `?models=<credentialId>`); `1` when there is no object, the
+    `?endUser=<id>`); `1` when there is no object, the
     object's id otherwise. Export the name when several entry points open the same
     modal (`SHARE_PARAM`).
   - **An object that may not exist**: `useUrlModalTarget(name, items)` resolves the

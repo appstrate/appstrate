@@ -3,7 +3,7 @@
 import type { OrgModelInfo } from "../hooks/use-models.ts";
 
 /**
- * A complete `OrgModel` row — a priced custom model bound to an organization key. Typed, not
+ * A complete `OrgModel` row — a priced custom model of a configuration the organization serves. Typed, not
  * cast: a required field added to the wire type stops this compiling. Suites override what
  * their case turns on.
  */
@@ -25,8 +25,7 @@ export function orgModelFixture(overrides: Partial<OrgModelInfo> = {}): OrgModel
     aliased: false,
     iconUrl: null,
     source: "custom",
-    credentialId: "cred_org",
-    binding: "org",
+    config_id: "cfg_1",
     billed_to: "org",
     cost: { input: 3, output: 15 },
     created_by: null,

@@ -30,7 +30,7 @@
  */
 
 import { createContext, useContext, type ReactNode } from "react";
-import type { PickerCredential } from "@appstrate/ui/components/model-picker-groups";
+import type { PickerConfig, PickerCredential } from "@appstrate/ui/components/model-picker-groups";
 import type { ModelSizing } from "./model-fit.ts";
 
 export type GetHeaders = () => Record<string, string>;
@@ -205,12 +205,12 @@ export interface ChatHost {
    */
   attachTarget: AttachTarget;
   /**
-   * Whether the organization lets members bring personal model credentials. The
-   * shell reads it from the org settings; when off, a refusal that a personal
-   * credential would fix names no link to add one. `undefined` until the
-   * settings load: such a refusal then names neither the link nor the policy.
+   * The organization's model configurations (`GET /api/model-configs`), `undefined` until they
+   * load. They name the model picker's groups and say whether members may bring their own
+   * connection: when none allows it, a refusal that a personal connection would fix names no
+   * link to add one; until they load, such a refusal names neither the link nor the policy.
    */
-  personalModelCredentials: boolean | undefined;
+  modelConfigs: readonly PickerConfig[] | undefined;
   /**
    * The credentials that name the model picker's groups: the organization's (when the caller
    * may read them) and the caller's own, with the upstream models each serves. The shell

@@ -3,7 +3,6 @@
 import type {
   DiscoveredModel,
   DiscoveredModelsResponse,
-  ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import { normalizeHttpUrl } from "@appstrate/core/url";
 
@@ -40,21 +39,24 @@ export function discoveryErrorKey(outcome: DiscoveryState["outcome"]): string {
   }
 }
 
-/** Exactly one of the two forms; the base URL only where the provider lets it move. */
+/**
+ * Exactly one of the two forms: a saved organization key (it carries key and endpoint), or a key
+ * typed for this one request, against the configuration's endpoint.
+ */
 export type DiscoverBody =
-  { credentialId: string } | { providerId: string; api_key: string; base_url_override?: string };
+  { credentialId: string } | { providerId: string; api_key: string; config_id: string };
 
 export function buildDiscoverBody(input: {
   credentialId: string | null;
-  provider: Pick<ProviderRegistryEntry, "providerId" | "baseUrlOverridable">;
+  providerId: string;
+  configId: string;
   inlineApiKey: string;
-  baseUrl: string;
 }): DiscoverBody {
   if (input.credentialId) return { credentialId: input.credentialId };
   return {
-    providerId: input.provider.providerId,
+    providerId: input.providerId,
     api_key: input.inlineApiKey.trim(),
-    ...(input.provider.baseUrlOverridable ? { base_url_override: input.baseUrl.trim() } : {}),
+    config_id: input.configId,
   };
 }
 

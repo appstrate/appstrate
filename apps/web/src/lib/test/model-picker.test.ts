@@ -2,10 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { pickerCredentials } from "../model-picker";
-import type {
-  ModelProviderCredentialInfo,
-  ProviderRegistryEntry,
-} from "../../hooks/use-model-provider-credentials";
+import type { ModelProviderCredentialInfo } from "../../hooks/use-model-provider-credentials";
 
 const credential = (over: Partial<ModelProviderCredentialInfo>): ModelProviderCredentialInfo =>
   ({
@@ -15,13 +12,9 @@ const credential = (over: Partial<ModelProviderCredentialInfo>): ModelProviderCr
     authMode: "api_key",
     owner_type: "org",
     owner_id: null,
+    serves_model_ids: [],
     ...over,
   }) as ModelProviderCredentialInfo;
-
-const registry = [
-  { providerId: "anthropic", models: [{ id: "claude-sonnet" }, { id: "claude-opus" }] },
-  { providerId: "claude-code", models: [{ id: "claude-sonnet" }] },
-] as unknown as ProviderRegistryEntry[];
 
 describe("pickerCredentials", () => {
   it("keeps the organization's credentials and the caller's own, not another member's", () => {
@@ -31,7 +24,6 @@ describe("pickerCredentials", () => {
         credential({ id: "mine", owner_type: "user", owner_id: "u1" }),
         credential({ id: "theirs", owner_type: "user", owner_id: "u2" }),
       ],
-      registry,
       "u1",
     );
     expect(result.map((c) => [c.id, c.owner])).toEqual([
@@ -40,7 +32,7 @@ describe("pickerCredentials", () => {
     ]);
   });
 
-  it("reads the models a credential serves off its provider, and flags a subscription", () => {
+  it("reads the models a credential serves off the server, and flags a subscription", () => {
     const [subscription] = pickerCredentials(
       [
         credential({
@@ -48,16 +40,11 @@ describe("pickerCredentials", () => {
           authMode: "oauth2",
           owner_type: "user",
           owner_id: "u1",
+          serves_model_ids: ["mdl_sonnet"],
         }),
       ],
-      registry,
       "u1",
     );
-    expect(subscription).toMatchObject({ subscription: true, modelIds: ["claude-sonnet"] });
-  });
-
-  it("serves nothing when the provider is not in the registry", () => {
-    const [unknown] = pickerCredentials([credential({ providerId: "nope" })], registry, "u1");
-    expect(unknown!.modelIds).toEqual([]);
+    expect(subscription).toMatchObject({ subscription: true, modelIds: ["mdl_sonnet"] });
   });
 });

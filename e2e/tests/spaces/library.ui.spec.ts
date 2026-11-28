@@ -120,7 +120,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
   expect(credential.status(), await credential.text()).toBe(201);
   const model = await apiClient.post("/models", {
     modelId: "claude-sonnet-4-5-20250929",
-    credentialId: (await credential.json()).id,
+    config_id: (await credential.json()).config_id,
   });
   expect(model.status(), await model.text()).toBe(201);
   const modelId = (await model.json()).id as string;
@@ -230,7 +230,7 @@ test("a switched-off agent leaves the index, stays in the library, and is switch
   expect(credential.status(), await credential.text()).toBe(201);
   const model = await apiClient.post("/models", {
     modelId: "claude-sonnet-4-5-20250929",
-    credentialId: (await credential.json()).id,
+    config_id: (await credential.json()).config_id,
   });
   expect(model.status(), await model.text()).toBe(201);
 

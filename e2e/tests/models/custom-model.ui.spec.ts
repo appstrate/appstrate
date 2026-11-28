@@ -1,21 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Adding a key and models on a custom endpoint from org settings → Modèles,
+ * Adding a gateway configuration and its models from org settings → Modèles,
  * against a mock endpoint this spec serves itself.
  *
- * The provider picker offers one "Endpoint personnalisé" row for every base-URL-
+ * The service picker offers one "Endpoint personnalisé" row for every base-URL-
  * overridable registry entry; which of them it is becomes the "Type d'API"
- * question inside the key form. Both shapes it can speak are exercised here —
+ * question of the configuration form. Both shapes it can speak are exercised here —
  * OpenAI (`GET <baseUrl>/models`, `Authorization: Bearer`) and Anthropic
  * (`GET <baseUrl>/v1/models`, `x-api-key`), which is why the two tests type a
  * different base URL against the same mock.
  *
- * One detection describes every model the endpoint serves, so the second step
- * adds them as a batch: the listing is a checkbox list, every detected model
- * starts ticked. That makes three things worth asserting beyond "a model was
- * saved" — adding several at once, a batch the server only partly accepts, and
- * a detection run against a key the org already saved.
+ * A new configuration has no key yet, so its model list detects with a key typed
+ * for that one request; the organization's key is the flow's last step. One
+ * detection describes every model the endpoint serves, so the list adds them as
+ * a batch, every detected model ticked. That makes three things worth asserting
+ * beyond "a model was saved" — adding several at once, a batch the server only
+ * partly accepts, and a detection run through the configuration's saved key.
  *
  * The mock is a `node:http` server on 127.0.0.1 — Playwright runs under
  * Node, and a loopback endpoint is the only way to exercise discovery
@@ -28,15 +29,16 @@
 
 import { createServer, type Server } from "node:http";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
-import { selectOption } from "../../helpers/select.ts";
-import { openRowMenuItem } from "../../helpers/table.ts";
 import {
-  NEXT,
+  SAVE,
+  addConfiguration,
+  configRow,
+  connectDialog,
   listModels,
+  modelChoiceDialog,
   modelRow,
-  openAddKeyDialog,
-  submitAddKey,
 } from "../../helpers/models.ts";
+import type { ApiClient } from "../../helpers/api-client.ts";
 import type { Locator, Page } from "@playwright/test";
 
 const GOOD_KEY = "e2e-good-key";
@@ -45,7 +47,7 @@ const CUSTOM_ENDPOINT = "Endpoint personnalisé";
 /** Registry display names of the two custom-endpoint entries, the "Type d'API" options. */
 const OPENAI_TYPE = "OpenAI-compatible (custom)";
 const ANTHROPIC_TYPE = "Anthropic-compatible (custom)";
-/** The provider id behind {@link OPENAI_TYPE}, for a credential seeded over the API. */
+/** The provider id behind {@link OPENAI_TYPE}, for a configuration seeded over the API. */
 const OPENAI_PROVIDER_ID = "openai-compatible";
 
 /**
@@ -115,29 +117,53 @@ test.afterAll(async () => {
 });
 
 /**
- * Open « Ajouter une clé org » on the custom-endpoint path and answer step 1:
- * which API shape, where it lives, and the key that opens it; lands on the
- * second step, the models. The shape is always picked explicitly: the
- * pre-selected entry is whichever the registry lists first, which is not
- * something a test should depend on.
+ * Open « Ajouter une configuration » on the custom-endpoint path: which API shape and where it
+ * lives; lands on the model list with `apiKey` typed in its one-request key field. The shape is
+ * always picked explicitly: the pre-selected entry is whichever the registry lists first, which
+ * is not something a test should depend on.
  */
-async function openCustomEndpointForm(
+async function openCustomEndpointList(
   page: Page,
   { baseUrl, apiKey, apiType }: { baseUrl: string; apiKey: string; apiType: string },
 ): Promise<Locator> {
-  const dialog = await openAddKeyDialog(page);
-
-  await selectOption(page, "pk-provider", CUSTOM_ENDPOINT);
-  await selectOption(page, "pk-apiType", apiType);
-  await dialog.locator("#pk-baseUrl").fill(baseUrl);
-  await dialog.locator("#pk-apiKey").fill(apiKey);
-  await dialog.getByRole("button", { name: NEXT, exact: true }).click();
+  const dialog = await addConfiguration(page, CUSTOM_ENDPOINT, { apiType, baseUrl });
+  await dialog.locator("#model-choice-key").fill(apiKey);
   return dialog;
 }
 
-/** The model row of the second step, matched on the model's id. */
-function discoveredRow(dialog: Locator, modelId: string): Locator {
-  return modelRow(dialog, modelId);
+/** A gateway configuration seeded over the API, with its organization key. */
+async function seedGateway(
+  apiClient: Pick<ApiClient, "post">,
+  baseUrl: string,
+): Promise<{ configId: string; label: string }> {
+  const label = `Gateway ${Date.now()}`;
+  const config = await apiClient.post("/model-configs", {
+    provider_id: OPENAI_PROVIDER_ID,
+    base_url: baseUrl,
+    label,
+  });
+  expect(config.status(), await config.text()).toBe(201);
+  const configId = (await config.json()).id as string;
+  const key = await apiClient.post("/model-provider-credentials", {
+    providerId: OPENAI_PROVIDER_ID,
+    api_key: GOOD_KEY,
+    config_id: configId,
+  });
+  expect(key.status(), await key.text()).toBe(201);
+  return { configId, label };
+}
+
+/** Open a seeded configuration's row, then its model list. */
+async function openSavedList(page: Page, label: string): Promise<Locator> {
+  await page.goto("/org-settings/models");
+  const row = configRow(page, label);
+  await row.getByRole("button", { name: `Ouvrir « ${label} »` }).click();
+  await row.getByRole("button", { name: "Choisir les modèles" }).click();
+  const dialog = modelChoiceDialog(page);
+  await expect(dialog).toBeVisible();
+  // The configuration's key detects: none is asked for.
+  await expect(dialog.locator("#model-choice-key")).toHaveCount(0);
+  return dialog;
 }
 
 /**
@@ -171,13 +197,20 @@ async function detect(dialog: Locator, count: number): Promise<void> {
   ).toBeVisible();
 }
 
+/** Save the model list of a new configuration; the flow goes on to its key. */
+async function saveNewList(page: Page, dialog: Locator): Promise<void> {
+  await dialog.getByRole("button", { name: SAVE, exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(connectDialog(page)).toBeVisible();
+}
+
 /**
  * Detect on the split endpoint and submit both models: the first is accepted,
  * the second refused by the server. Resolves to the dialog once the refusal is
  * on screen, after checking that the list is frozen while the batch is in flight.
  */
 async function submitPartlyRefusedBatch(page: Page): Promise<Locator> {
-  const dialog = await openCustomEndpointForm(page, {
+  const dialog = await openCustomEndpointList(page, {
     baseUrl: `${mockOrigin}${SPLIT_PATH}`,
     apiKey: GOOD_KEY,
     apiType: OPENAI_TYPE,
@@ -193,12 +226,11 @@ async function submitPartlyRefusedBatch(page: Page): Promise<Locator> {
     }
     await route.continue();
   });
-  await submitAddKey(dialog).click();
+  await dialog.getByRole("button", { name: SAVE, exact: true }).click();
   await pendingRequest.promise;
   try {
     // While the batch is in flight the list cannot move under it.
-    await expect(discoveredRow(dialog, REFUSED_MODEL)).toBeDisabled();
-    await expect(dialog.getByRole("button", { name: "Retour" })).toBeDisabled();
+    await expect(modelRow(dialog, REFUSED_MODEL)).toBeDisabled();
   } finally {
     releaseRequest.resolve();
   }
@@ -208,12 +240,12 @@ async function submitPartlyRefusedBatch(page: Page): Promise<Locator> {
 }
 
 test.describe("Custom endpoint model — UI", () => {
-  test("discovers an OpenAI-shaped endpoint's models and saves the checked one", async ({
+  test("discovers an OpenAI-shaped endpoint's models, saves the checked one, then the key", async ({
     authedPage: page,
     apiClient,
   }) => {
     const baseUrl = `${mockOrigin}/v1`;
-    const dialog = await openCustomEndpointForm(page, {
+    const dialog = await openCustomEndpointList(page, {
       baseUrl,
       apiKey: GOOD_KEY,
       apiType: OPENAI_TYPE,
@@ -221,19 +253,20 @@ test.describe("Custom endpoint model — UI", () => {
 
     await detect(dialog, 2);
     // Everything detected starts ticked: leave only the one the endpoint described itself.
-    await expect(discoveredRow(dialog, CATALOG_MODEL)).toBeChecked();
-    await expect(discoveredRow(dialog, SERVED_MODEL)).toBeChecked();
-    await discoveredRow(dialog, CATALOG_MODEL).click();
-    await expect(discoveredRow(dialog, CATALOG_MODEL)).not.toBeChecked();
-    await submitAddKey(dialog).click();
+    await expect(modelRow(dialog, CATALOG_MODEL)).toBeChecked();
+    await expect(modelRow(dialog, SERVED_MODEL)).toBeChecked();
+    await modelRow(dialog, CATALOG_MODEL).click();
+    await expect(modelRow(dialog, CATALOG_MODEL)).not.toBeChecked();
+    await saveNewList(page, dialog);
 
-    await expect(dialog).toBeHidden();
-    await expect(page.getByRole("row").filter({ hasText: SERVED_MODEL })).toBeVisible();
+    const connect = connectDialog(page);
+    await connect.locator("#pk-apiKey").fill(GOOD_KEY);
+    await connect.getByRole("button", { name: SAVE, exact: true }).click();
+    await expect(connect).toBeHidden();
 
     const models = await listModels(apiClient);
     expect(models.find((m) => m.modelId === CATALOG_MODEL)).toBeUndefined();
     const created = models.find((m) => m.modelId === SERVED_MODEL);
-    expect(created).toBeDefined();
     // Every capability is written from the listing itself — the catalog does
     // not know this id, so the context window can only be the published hint.
     expect(created).toMatchObject({
@@ -243,10 +276,16 @@ test.describe("Custom endpoint model — UI", () => {
       apiShape: "openai-completions",
       base_url: baseUrl,
     });
+    // The key joined the configuration the models belong to.
+    const keys = (await (await apiClient.get("/model-provider-credentials")).json()).data as Array<{
+      config_id: string;
+      owner_type: string;
+    }>;
+    expect(keys.filter((k) => k.config_id === created!.config_id)).toHaveLength(1);
   });
 
-  test("adds every detected model in one batch", async ({ authedPage: page }) => {
-    const dialog = await openCustomEndpointForm(page, {
+  test("adds every detected model in one batch", async ({ authedPage: page, apiClient }) => {
+    const dialog = await openCustomEndpointList(page, {
       baseUrl: `${mockOrigin}/v1`,
       apiKey: GOOD_KEY,
       apiType: OPENAI_TYPE,
@@ -254,11 +293,10 @@ test.describe("Custom endpoint model — UI", () => {
 
     await detect(dialog, 2);
     await expect(dialog.getByRole("checkbox", { name: "Tout sélectionner" })).toBeChecked();
-    await submitAddKey(dialog).click();
+    await saveNewList(page, dialog);
 
-    await expect(dialog).toBeHidden();
-    await expect(page.getByRole("row").filter({ hasText: CATALOG_MODEL })).toBeVisible();
-    await expect(page.getByRole("row").filter({ hasText: SERVED_MODEL })).toBeVisible();
+    const ids = (await listModels(apiClient)).map((m) => m.modelId);
+    expect(ids).toEqual(expect.arrayContaining([CATALOG_MODEL, SERVED_MODEL]));
   });
 
   test("keeps the dialog open on a refused batch, names the refused model and writes nothing", async ({
@@ -269,20 +307,15 @@ test.describe("Custom endpoint model — UI", () => {
 
     // The batch is one `POST /api/models/apply`, atomic: the refusal names the
     // model at fault, and since nothing was written every row stays checked.
-    await expect(discoveredRow(dialog, REFUSED_MODEL)).toBeChecked();
-    await expect(discoveredRow(dialog, ADDABLE_MODEL)).toBeChecked();
+    await expect(modelRow(dialog, REFUSED_MODEL)).toBeChecked();
+    await expect(modelRow(dialog, ADDABLE_MODEL)).toBeChecked();
 
-    const credentials = await apiClient.get("/model-provider-credentials");
-    const keys = ((await credentials.json()).data as Array<{ id: string; source: string }>).filter(
-      (k) => k.source === "custom",
-    );
-    expect(keys).toHaveLength(0);
     const models = await listModels(apiClient);
     expect(models.find((m) => m.modelId === ADDABLE_MODEL)).toBeUndefined();
     expect(models.find((m) => m.modelId === REFUSED_MODEL)).toBeUndefined();
   });
 
-  // Unchecking the refused model and submitting again saves the rest, under one key.
+  // Unchecking the refused model and submitting again saves the rest.
   test("saves the rest of a refused batch once the refused model is unchecked", async ({
     authedPage: page,
     apiClient,
@@ -295,55 +328,36 @@ test.describe("Custom endpoint model — UI", () => {
         applied.push(request.postDataJSON());
       }
     });
-    await discoveredRow(dialog, REFUSED_MODEL).uncheck();
-    await submitAddKey(dialog).click();
-    await expect(dialog).toBeHidden();
+    await modelRow(dialog, REFUSED_MODEL).uncheck();
+    await saveNewList(page, dialog);
 
     expect(applied.map((body) => body.add.map((entry) => entry.modelId))).toEqual([
       [ADDABLE_MODEL],
     ]);
-    const credentials = await apiClient.get("/model-provider-credentials");
-    const keys = ((await credentials.json()).data as Array<{ id: string; source: string }>).filter(
-      (k) => k.source === "custom",
-    );
-    expect(keys).toHaveLength(1);
     const models = await listModels(apiClient);
     expect(models.filter((m) => m.modelId === ADDABLE_MODEL)).toHaveLength(1);
     expect(models.find((m) => m.modelId === REFUSED_MODEL)).toBeUndefined();
   });
 
-  test("detects through a key the org already saved", async ({ authedPage: page, apiClient }) => {
-    const baseUrl = `${mockOrigin}/v1`;
-    // Seeded over the API rather than by running the form twice: what this
-    // test covers is the key's own model list, not the key's creation.
-    const seeded = await apiClient.post("/model-provider-credentials", {
-      providerId: OPENAI_PROVIDER_ID,
-      api_key: GOOD_KEY,
-      base_url_override: baseUrl,
-    });
-    expect(seeded.status()).toBe(201);
-    const credential = (await seeded.json()) as { id: string; label: string };
+  test("detects through the configuration's saved key", async ({ authedPage: page, apiClient }) => {
+    // Seeded over the API rather than by running the flow: what this test
+    // covers is the configuration's own model list, not its creation.
+    const { configId, label } = await seedGateway(apiClient, `${mockOrigin}/v1`);
 
-    // No URL and no key typed — the saved key carries both.
-    await page.goto("/org-settings/models");
-    await openRowMenuItem(page, credential.label, "Choisir les modèles");
-    const dialog = page.getByRole("dialog", { name: /^Modèles disponibles avec/ });
-    await expect(dialog).toBeVisible();
-
+    const dialog = await openSavedList(page, label);
     await detect(dialog, 2);
-    // A saved key lists what is already its own ticked; nothing else is.
-    await expect(discoveredRow(dialog, SERVED_MODEL)).not.toBeChecked();
-    await discoveredRow(dialog, SERVED_MODEL).click();
-    await dialog.getByRole("button", { name: "Enregistrer" }).click();
+    // A saved configuration lists what is already its own ticked; nothing else is.
+    await expect(modelRow(dialog, SERVED_MODEL)).not.toBeChecked();
+    await modelRow(dialog, SERVED_MODEL).click();
+    await dialog.getByRole("button", { name: SAVE, exact: true }).click();
 
     await expect(dialog).toBeHidden();
     const created = (await listModels(apiClient)).find((m) => m.modelId === SERVED_MODEL);
-    // Bound to the key that was picked — no second credential was minted.
-    expect(created).toMatchObject({ credentialId: credential.id, base_url: baseUrl });
+    expect(created).toMatchObject({ config_id: configId, base_url: `${mockOrigin}/v1` });
   });
 
   test("reports a key the endpoint rejects", async ({ authedPage: page }) => {
-    const dialog = await openCustomEndpointForm(page, {
+    const dialog = await openCustomEndpointList(page, {
       baseUrl: `${mockOrigin}/v1`,
       apiKey: "e2e-wrong-key",
       apiType: OPENAI_TYPE,
@@ -360,18 +374,16 @@ test.describe("Custom endpoint model — UI", () => {
     authedPage: page,
     apiClient,
   }) => {
-    const dialog = await openCustomEndpointForm(page, {
+    const dialog = await openCustomEndpointList(page, {
       baseUrl: `${mockOrigin}/v1`,
       apiKey: GOOD_KEY,
       apiType: OPENAI_TYPE,
     });
 
     await addTypedModel(dialog, "llama3", { contextWindow: "32768", image: true });
-    await expect(discoveredRow(dialog, "llama3")).toBeChecked();
-    await submitAddKey(dialog).click();
+    await expect(modelRow(dialog, "llama3")).toBeChecked();
+    await saveNewList(page, dialog);
 
-    await expect(dialog).toBeHidden();
-    await expect(page.getByRole("row").filter({ hasText: "llama3" })).toBeVisible();
     const created = (await listModels(apiClient)).find((m) => m.modelId === "llama3");
     // No name typed: the server names the row after the id. The limits are the operator's own.
     expect(created).toMatchObject({
@@ -382,29 +394,19 @@ test.describe("Custom endpoint model — UI", () => {
     });
   });
 
-  test("adds a typed model id to a key the org already saved", async ({
+  test("adds a typed model id to a saved configuration", async ({
     authedPage: page,
     apiClient,
   }) => {
-    const seeded = await apiClient.post("/model-provider-credentials", {
-      providerId: OPENAI_PROVIDER_ID,
-      api_key: GOOD_KEY,
-      base_url_override: `${mockOrigin}/v1`,
-    });
-    expect(seeded.status()).toBe(201);
-    const credential = (await seeded.json()) as { id: string; label: string };
+    const { configId, label } = await seedGateway(apiClient, `${mockOrigin}/v1`);
 
-    await page.goto("/org-settings/models");
-    await openRowMenuItem(page, credential.label, "Choisir les modèles");
-    const dialog = page.getByRole("dialog", { name: /^Modèles disponibles avec/ });
-    await expect(dialog).toBeVisible();
-
+    const dialog = await openSavedList(page, label);
     await addTypedModel(dialog, "mistral-local");
-    await dialog.getByRole("button", { name: "Enregistrer" }).click();
+    await dialog.getByRole("button", { name: SAVE, exact: true }).click();
 
     await expect(dialog).toBeHidden();
     const created = (await listModels(apiClient)).find((m) => m.modelId === "mistral-local");
-    expect(created).toMatchObject({ credentialId: credential.id, label: "mistral-local" });
+    expect(created).toMatchObject({ config_id: configId, label: "mistral-local" });
   });
 
   test("discovers an Anthropic-shaped endpoint's models", async ({
@@ -412,17 +414,15 @@ test.describe("Custom endpoint model — UI", () => {
     apiClient,
   }) => {
     // No `/v1`: the platform appends `/v1/models` for this shape.
-    const dialog = await openCustomEndpointForm(page, {
+    const dialog = await openCustomEndpointList(page, {
       baseUrl: mockOrigin,
       apiKey: GOOD_KEY,
       apiType: ANTHROPIC_TYPE,
     });
 
     await detect(dialog, 1);
-    await expect(discoveredRow(dialog, ANTHROPIC_MODEL)).toBeChecked();
-    await submitAddKey(dialog).click();
-
-    await expect(dialog).toBeHidden();
+    await expect(modelRow(dialog, ANTHROPIC_MODEL)).toBeChecked();
+    await saveNewList(page, dialog);
 
     const created = (await listModels(apiClient)).find((m) => m.modelId === ANTHROPIC_MODEL);
     expect(created).toMatchObject({

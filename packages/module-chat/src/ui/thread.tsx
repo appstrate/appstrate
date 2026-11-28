@@ -68,7 +68,7 @@ import {
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
 import { useConversationScope, useConversationTurnCan } from "./conversation-scope.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
-import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
+import { personalConnectionsAllowed, sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { ContextIndicator } from "./context-gauge.tsx";
 import { ComposerPanelProvider } from "./composer-panel.ts";
 import { draftCrossesThreshold, estimateDraftTokens } from "./model-fit.ts";
@@ -893,7 +893,8 @@ function TurnLimitNotice() {
  * not reached a finish chunk yet.
  */
 export function MessageError() {
-  const { t, can, personalModelCredentials } = useChatHost();
+  const { t, can, modelConfigs } = useChatHost();
+  const personalModelCredentials = personalConnectionsAllowed(modelConfigs);
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);

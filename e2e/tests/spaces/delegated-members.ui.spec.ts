@@ -392,7 +392,7 @@ test("an operator's runs page and run detail hold only its own runs", async ({
   expect(credential.status()).toBe(201);
   const model = await apiClient.post("/models", {
     modelId: "claude-sonnet-4-5-20250929",
-    credentialId: (await credential.json()).id,
+    config_id: (await credential.json()).config_id,
   });
   expect(model.status()).toBe(201);
 

@@ -24,21 +24,42 @@ const unpaid = {
   label: "Claude",
   modelId: "claude-sonnet",
   provider_name: "Anthropic",
-  binding: "user" as const,
+  config_id: "cfg_anthropic",
   billed_to: null,
 };
 const dead = {
   id: "dead",
   label: "Mistral",
   modelId: "mistral-medium",
-  binding: "org" as const,
-  billed_to: "org" as const,
-  credentialId: "cred_org",
+  config_id: "cfg_mistral",
+  billed_to: null,
   needs_reconnection: true,
 };
-const live = { ...dead, id: "live", label: "GPT", needs_reconnection: false };
+const live = {
+  ...dead,
+  id: "live",
+  label: "GPT",
+  billed_to: "org" as const,
+  needs_reconnection: false,
+};
 
-const groups = groupModelsForPicker([unpaid, dead, live], { canConnect: true });
+const groups = groupModelsForPicker([unpaid, dead, live], {
+  canConnect: true,
+  configs: [
+    {
+      id: "cfg_anthropic",
+      label: "Anthropic",
+      personal_connections_allowed: true,
+      org_connection: "none",
+    },
+    {
+      id: "cfg_mistral",
+      label: "Mistral",
+      personal_connections_allowed: false,
+      org_connection: "needs_reconnection",
+    },
+  ],
+});
 const labels = buildModelPickerLabels((key) => key);
 
 /** Each item's label → its markup (SSR renders no `data-value`). */

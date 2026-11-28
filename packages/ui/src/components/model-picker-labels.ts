@@ -13,9 +13,9 @@ export function buildModelPickerLabels(t: Translate<Record<string, string>>): Mo
   const reasons: Record<PickerReasonKind, string> = {
     disabled: t("providers.state.disabled"),
     orgUnavailable: t("modelPicker.reason.orgUnavailable"),
+    orgConnectionMissing: t("modelPicker.reason.orgConnectionMissing"),
     personalRequired: t("modelPicker.reason.personalRequired"),
     personalReconnect: t("modelPicker.reason.personalReconnect"),
-    personalOff: t("modelPicker.reason.personalOff"),
     notSchedulable: t("modelPicker.reason.notSchedulable"),
   };
   return {

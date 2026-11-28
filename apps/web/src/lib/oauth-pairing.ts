@@ -13,22 +13,35 @@ type PairingStatus =
 /** `lost`: the server refuses to state the pairing (row gone, or no longer readable). */
 export type PairingPollState = PairingStatus | "lost";
 
-/** What a pairing produces: a new subscription owned as `ownerType` says, or `credentialId` reconnected in place. */
+/**
+ * What a pairing produces: a new subscription owned as `ownerType` says, joining the
+ * configuration `configId` (left out, the server finds or makes its family's), or `credentialId`
+ * reconnected in place.
+ */
 export type PairingTarget =
-  | { ownerType: ModelProviderCredentialInfo["owner_type"]; credentialId?: never }
-  | { credentialId: string; ownerType?: never };
+  | {
+      ownerType: ModelProviderCredentialInfo["owner_type"];
+      configId?: string;
+      credentialId?: never;
+    }
+  | { credentialId: string; ownerType?: never; configId?: never };
 
 /**
  * Body of `POST /api/model-providers-oauth/pairing`. A creation states
- * `owner_type` (the server's default, `org`, is not one a member may create); a
- * reconnect states `credentialId` alone, and the server refuses both together.
+ * `owner_type` (the server's default, `org`, is not one a member may create) and its
+ * configuration when known; a reconnect states `credentialId` alone, and the server refuses a mix.
  */
 export function pairingRequestBody(
   input: { providerId: string } & PairingTarget,
 ): PairingRequestBody {
-  return input.credentialId !== undefined
-    ? { providerId: input.providerId, credentialId: input.credentialId }
-    : { providerId: input.providerId, owner_type: input.ownerType };
+  if (input.credentialId !== undefined) {
+    return { providerId: input.providerId, credentialId: input.credentialId };
+  }
+  return {
+    providerId: input.providerId,
+    owner_type: input.ownerType,
+    ...(input.configId ? { config_id: input.configId } : {}),
+  };
 }
 
 // A refusal ends the poll even over a cached `pending`; a transient error changes nothing.
@@ -40,18 +53,21 @@ export function pairingPollState(
   return status ?? "pending";
 }
 
-/** Whether a usable `bindable` subscription of `providerId` can serve org models (a member's own is not). */
+/** Whether the organization holds a usable subscription of `providerId` (a member's own is not one). */
 export function hasOrgSubscription(
   credentials:
     | readonly Pick<
         ModelProviderCredentialInfo,
-        "authMode" | "providerId" | "bindable" | "needs_reconnection"
+        "authMode" | "providerId" | "owner_type" | "needs_reconnection"
       >[]
     | undefined,
   providerId: string,
 ): boolean {
   return (credentials ?? []).some(
     (c) =>
-      c.authMode === "oauth2" && c.providerId === providerId && c.bindable && !c.needs_reconnection,
+      c.authMode === "oauth2" &&
+      c.providerId === providerId &&
+      c.owner_type === "org" &&
+      !c.needs_reconnection,
   );
 }

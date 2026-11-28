@@ -67,7 +67,7 @@ export function ModelPanel({
   /** After a pick from the list. */
   onPicked: () => void;
 }) {
-  const { t, can, personalModelCredentials, modelCredentials } = useChatHost();
+  const { t, can, modelConfigs, modelCredentials } = useChatHost();
   const translateSettings = (key: string, values?: Record<string, string>) =>
     t(`settings:${key}`, values);
   const active = selectedModel(models, selectedId);
@@ -76,10 +76,10 @@ export function ModelPanel({
     () =>
       groupModelsForPicker(models, {
         credentials: modelCredentials,
-        personalAllowed: personalModelCredentials,
+        configs: modelConfigs,
         canConnect: can("model-provider-credentials:connect"),
       }),
-    [models, modelCredentials, personalModelCredentials, can],
+    [models, modelCredentials, modelConfigs, can],
   );
   const reading = useConversationContext();
   const tokens = reading?.context.tokens;

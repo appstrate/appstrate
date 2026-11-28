@@ -1,139 +1,124 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unified credential modal for both API-key and OAuth model provider connections. The
- * picker is sourced entirely from `useProvidersRegistry()` (module entries appear with
- * `MODULES`); an OAuth provider swaps the body to the pairing-token UI.
+ * A connection of a model configuration: an API key typed here, or a subscription paired through
+ * the helper (`PairingModal`). A new connection joins its configuration, owned by the
+ * organization or by the caller; an existing key is changed in place, an existing subscription
+ * re-paired. Renaming is never done here (`InlineEditableLabel`), nor is the configuration's
+ * endpoint: a connection carries only its secret.
  *
- * `baseUrlOverridable` providers collapse into the picker's single "custom endpoint" row,
- * configured through the shared endpoint fields. Renaming is never done here
- * (`InlineEditableLabel`); editing a key row changes its key; an OAuth row changes only
- * through the reconnect affordance, and no key is ever sent for it.
+ * The form owns its write: its refusal is shown under the field, never toasted.
  */
 
 import { PendingButton } from "@/components/app-ui/pending-button";
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { useWatch } from "react-hook-form";
-import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
-import { FormModal } from "./form-modal";
-import { TestResultSpan } from "./test-result-span";
-import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
-import {
-  useProvidersRegistry,
-  useTestModelProviderCredentialInline,
-  type ProviderRegistryEntry,
-  type ModelProviderCredentialInfo,
-} from "../hooks/use-model-provider-credentials";
 import type { TestResult } from "@appstrate/shared-types";
-import { getProviderById, resolveProviderId } from "@/lib/provider-registry-helpers";
-import { parsesAsUrl } from "@/lib/model-discovery";
-import { EndpointFields } from "./model-form/endpoint-fields";
-import { ProviderPicker } from "./model-form/provider-picker";
+import { FormItem } from "@/components/app-ui/form-item";
+import { useAppForm } from "../hooks/use-app-form";
+import {
+  useCreateModelProviderCredential,
+  useTestModelProviderCredentialInline,
+  useUpdateModelProviderCredential,
+  type ModelProviderCredentialInfo,
+  type ProviderRegistryEntry,
+} from "../hooks/use-model-provider-credentials";
+import type { ModelConfigInfo } from "../lib/model-configs";
+import { connectionBody, keyUpdateBody } from "../lib/model-configs";
+import { errorMessage } from "../lib/mutation-error";
+import { FormModal } from "./form-modal";
 import { PairingModal } from "./pairing-modal";
-import { PreferencesModelsLink } from "./preferences-models-link";
+import { TestResultSpan } from "./test-result-span";
 
-/** Payload of `POST /api/model-provider-credentials`; `baseUrlOverride` only for a base-URL-overridable entry. */
-export interface CredentialFormData {
-  label: string;
-  providerId: string;
-  apiKey?: string;
-  baseUrlOverride?: string | null;
-}
+/** What the form connects: a new connection of a configuration, or an existing one. */
+export type ConnectionFormTarget =
+  | {
+      kind: "create";
+      config: Pick<ModelConfigInfo, "id" | "label" | "base_url">;
+      provider: ProviderRegistryEntry;
+      ownerType: "org" | "user";
+    }
+  | { kind: "edit"; credential: ModelProviderCredentialInfo };
 
-interface CredentialFormModalProps {
-  onClose: () => void;
-  credential: ModelProviderCredentialInfo | null;
-  isPending: boolean;
-  onSubmit: (data: CredentialFormData) => void;
-  /** The submission's refusal, shown under the fields. */
-  error?: string | null;
-  /**
-   * The caller's own credential: the picker offers only what a member may own. Otherwise the
-   * credential is the organization's, a key or a subscription.
-   */
-  personal?: boolean;
-  /** The key being added comes back here from the next step with what was typed. */
-  initial?: CredentialFormData;
-  /** Replaces « Save » when the form is a step, not the whole act. */
-  submitLabel?: string;
-}
-
-interface CredentialFormFields {
-  label: string;
-  apiKey: string;
-  baseUrlOverride: string;
-}
-
-/**
- * Mounted by the caller while open, one per credential (`key`): the picked provider, the typed
- * values and any pairing token start fresh on every open.
- */
+/** Mounted by the caller while open, one per target (`key`): the typed key starts fresh. */
 export function CredentialFormModal({
-  credential,
-  isPending,
-  error,
-  onSubmit,
+  target,
   onClose,
-  personal = false,
-  initial,
-  submitLabel,
-}: CredentialFormModalProps) {
+}: {
+  target: ConnectionFormTarget;
+  onClose: () => void;
+}) {
   const { t } = useTranslation(["settings", "common"]);
-  const registryQuery = useProvidersRegistry();
-  const registry = registryQuery.data ?? [];
-  const offered = personal ? registry.filter((p) => p.personal_allowed) : registry;
 
-  const [selectedId, setSelectedId] = useState<string>(() => {
-    if (initial) return initial.providerId;
-    if (credential?.providerId) return credential.providerId;
-    return credential ? resolveProviderId(credential, registry) : "";
-  });
+  if (target.kind === "create" && target.provider.authMode === "oauth2") {
+    return (
+      <PairingModal
+        title={t("modelConfigs.connect.title", { label: target.config.label })}
+        onClose={onClose}
+        providerId={target.provider.providerId}
+        target={{ ownerType: target.ownerType, configId: target.config.id }}
+        onConnected={() => onClose()}
+      >
+        <p className="text-muted-foreground text-sm">{payerSentence(t, target.ownerType)}</p>
+      </PairingModal>
+    );
+  }
+  if (target.kind === "edit" && target.credential.authMode === "oauth2") {
+    // The menu opens this only for a caller holding the connection's `reconnect` action.
+    return (
+      <PairingModal
+        title={t("credentials.form.reconnectTitle", { label: target.credential.label })}
+        onClose={onClose}
+        providerId={target.credential.providerId ?? ""}
+        target={{ credentialId: target.credential.id }}
+        onConnected={() => onClose()}
+      />
+    );
+  }
+  return <ApiKeyForm target={target} onClose={onClose} />;
+}
 
-  const isEditing = !!credential;
-  const selectedProvider = getProviderById(selectedId, offered);
-  const isOAuthSelected = selectedProvider?.authMode === "oauth2";
-  const needsBaseUrlOverride = !!selectedProvider?.baseUrlOverridable;
-  const overridableProviders = registry.filter((p) => p.baseUrlOverridable);
+function payerSentence(t: (key: string) => string, ownerType: "org" | "user"): string {
+  return t(ownerType === "org" ? "modelConfigs.payer.org" : "modelConfigs.payer.user");
+}
+
+function ApiKeyForm({ target, onClose }: { target: ConnectionFormTarget; onClose: () => void }) {
+  const { t } = useTranslation(["settings", "common"]);
+  const credential = target.kind === "edit" ? target.credential : null;
+  const providerId =
+    target.kind === "edit" ? (target.credential.providerId ?? "") : target.provider.providerId;
+  const baseUrl =
+    target.kind === "edit"
+      ? target.credential.base_url
+      : (target.config.base_url ?? target.provider.defaultBaseUrl);
+
+  const create = useCreateModelProviderCredential({ errorHandledByCaller: true });
+  const update = useUpdateModelProviderCredential({ errorHandledByCaller: true });
+  const mutation = credential ? update : create;
 
   const {
     register,
     handleSubmit,
     control,
-    setValue,
-    clearErrors,
     showError,
     formState: { errors },
-  } = useAppForm<CredentialFormFields>({
-    defaultValues: {
-      label: credential?.label ?? initial?.label ?? "",
-      apiKey: initial?.apiKey ?? "",
-      baseUrlOverride: credential?.base_url ?? initial?.baseUrlOverride ?? "",
-    },
-  });
-
-  const [baseUrlOverride, apiKey, label] = useWatch({
-    control,
-    name: ["baseUrlOverride", "apiKey", "label"],
-  });
+  } = useAppForm<{ apiKey: string }>({ defaultValues: { apiKey: "" } });
+  const apiKey = useWatch({ control, name: "apiKey" });
 
   const testMutation = useTestModelProviderCredentialInline();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
-  const testBaseUrl = needsBaseUrlOverride
-    ? baseUrlOverride.trim()
-    : (selectedProvider?.defaultBaseUrl ?? "");
-  const canTest =
-    !!selectedProvider && !isOAuthSelected && !!testBaseUrl && (!!apiKey.trim() || !!credential);
+  const canTest = !!baseUrl && (!!apiKey.trim() || !!credential);
 
   const handleTest = () => {
-    if (!selectedProvider) return;
+    if (!baseUrl) return;
     setTestResult(null);
     testMutation.mutate(
       {
         body: {
-          providerId: selectedProvider.providerId,
-          base_url: testBaseUrl,
+          providerId,
+          base_url: baseUrl,
           ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
           ...(credential ? { credentialId: credential.id } : {}),
         },
@@ -151,119 +136,41 @@ export function CredentialFormModal({
     );
   };
 
-  /** An auto-filled name follows the picked entry; a typed one is left alone. */
-  const applyProviderName = (provider: ProviderRegistryEntry) => {
-    const current = label.trim();
-    if (!current || current === selectedProvider?.displayName) {
-      setValue("label", provider.displayName);
-    }
-  };
-
-  const handleProviderChange = (id: string) => {
-    setSelectedId(id);
-    clearErrors();
-    const provider = getProviderById(id, offered);
-    if (!provider || provider.authMode === "oauth2") {
-      setValue("baseUrlOverride", "");
+  const onSubmit = handleSubmit((data) => {
+    if (credential) {
+      update.mutate(
+        { params: { path: { id: credential.id } }, body: keyUpdateBody(data.apiKey) },
+        { onSuccess: onClose },
+      );
       return;
     }
-    // Pre-seed the default base URL so users see the value they are customising.
-    setValue("baseUrlOverride", provider.baseUrlOverridable ? provider.defaultBaseUrl : "");
-    applyProviderName(provider);
-  };
-
-  // The URL follows the new entry, the typed key stays.
-  const handleApiTypeChange = (entry: ProviderRegistryEntry) => {
-    setSelectedId(entry.providerId);
-    clearErrors();
-    setValue("baseUrlOverride", entry.defaultBaseUrl);
-    applyProviderName(entry);
-  };
-
-  const onFormSubmit = handleSubmit((data) => {
-    if (!selectedProvider) return;
-    onSubmit({
-      label: data.label.trim(),
-      providerId: selectedProvider.providerId,
-      ...(data.apiKey.trim() ? { apiKey: data.apiKey.trim() } : {}),
-      ...(needsBaseUrlOverride && data.baseUrlOverride.trim()
-        ? { baseUrlOverride: data.baseUrlOverride.trim() }
-        : {}),
-    });
+    if (target.kind !== "create") return;
+    create.mutate(
+      {
+        body: connectionBody({
+          providerId,
+          configId: target.config.id,
+          apiKey: data.apiKey,
+          ownerType: target.ownerType,
+        }),
+      },
+      { onSuccess: onClose },
+    );
   });
 
-  // The field is registered on every render but only shown for an overridable provider: a pinned
-  // one has no URL to ask, and a required rule on an input that is not there blocks the submit.
-  const baseUrlValidate = (v: string) => {
-    if (!needsBaseUrlOverride) return undefined;
-    if (!v.trim()) return t("validation.required", { ns: "common" });
-    return parsesAsUrl(v) ? undefined : t("validation.urlFormat", { ns: "common" });
-  };
-  // Editing keeps the stored key when nothing is typed.
-  const apiKeyValidate = (v: string) =>
-    !credential && !v.trim() ? t("validation.required", { ns: "common" }) : undefined;
-
-  const title = !credential
-    ? t(personal ? "credentials.form.titlePersonal" : "credentials.form.title")
-    : isOAuthSelected
-      ? t("credentials.form.reconnectTitle", { label: credential.label })
-      : t("credentials.form.editTitle", { label: credential.label });
-
-  const providerField = (hint?: ReactNode) => (
-    <FormItem id="pk-provider" label={t("credentials.form.provider")} hint={hint}>
-      <ProviderPicker
-        registry={offered}
-        providerId={selectedId}
-        disabled={isEditing}
-        onChange={handleProviderChange}
-      />
-    </FormItem>
-  );
-
-  const labelField = (
-    <FormItem
-      id="pk-label"
-      label={t("credentials.form.label")}
-      error={showError("label") ? errors.label?.message : undefined}
-    >
-      <Input
-        type="text"
-        {...register("label", {
-          validate: (v) => (!v.trim() ? t("validation.required", { ns: "common" }) : undefined),
-        })}
-        placeholder={t("credentials.form.labelPlaceholder")}
-      />
-    </FormItem>
-  );
-
-  // OAuth-selected: the pairing body owns the connection (the helper POSTs creds back). An
-  // existing row is re-paired in place, whether or not it is flagged: the menu opens this only
-  // for a caller holding its `reconnect` action.
-  if (isOAuthSelected && selectedProvider) {
-    return (
-      <PairingModal
-        title={title}
-        onClose={onClose}
-        providerId={selectedProvider.providerId}
-        target={
-          credential ? { credentialId: credential.id } : { ownerType: personal ? "user" : "org" }
-        }
-        onConnected={() => onClose()}
-      >
-        {!isEditing && providerField()}
-      </PairingModal>
-    );
-  }
+  const title = credential
+    ? t("credentials.form.editTitle", { label: credential.label })
+    : t("modelConfigs.connect.title", {
+        label: target.kind === "create" ? target.config.label : "",
+      });
 
   return (
     <FormModal
       onClose={onClose}
       title={title}
-      onSubmit={onFormSubmit}
-      error={error}
-      isPending={isPending}
-      submitLabel={submitLabel}
-      submitDisabled={!selectedProvider}
+      onSubmit={onSubmit}
+      error={mutation.error ? errorMessage(mutation.error) : null}
+      isPending={mutation.isPending}
       formProps={{ noValidate: true }}
       secondaryActions={
         <div className="mr-auto flex items-center gap-2">
@@ -286,35 +193,23 @@ export function CredentialFormModal({
         </div>
       }
     >
-      {providerField(
-        // The organization's form: a member's own subscription is connected elsewhere.
-        !personal && !isEditing ? (
-          <>
-            {t("credentials.form.subscriptionNote")}{" "}
-            <PreferencesModelsLink>
-              {t("credentials.form.subscriptionNoteLink")}
-            </PreferencesModelsLink>
-          </>
-        ) : undefined,
+      {target.kind === "create" && (
+        <p className="text-muted-foreground text-sm">{payerSentence(t, target.ownerType)}</p>
       )}
-
-      {!isEditing && labelField}
-
-      <EndpointFields
-        idPrefix="pk"
-        providers={overridableProviders}
-        provider={selectedProvider}
-        onApiTypeChange={handleApiTypeChange}
-        // `apiShape` and `baseUrl` are pinned by `providerId` at create
-        // time — delete and re-create to point the key elsewhere.
-        providerLocked={isEditing}
-        baseUrlProps={register("baseUrlOverride", { validate: baseUrlValidate })}
-        baseUrlLocked={isEditing}
-        baseUrlError={showError("baseUrlOverride") ? errors.baseUrlOverride?.message : undefined}
-        apiKeyProps={register("apiKey", { validate: apiKeyValidate })}
-        apiKeyError={showError("apiKey") ? errors.apiKey?.message : undefined}
-        apiKeyHint={credential ? t("credentials.form.apiKeyHint") : undefined}
-      />
+      <FormItem
+        id="pk-apiKey"
+        label={t("credentials.form.apiKey")}
+        error={showError("apiKey") ? errors.apiKey?.message : undefined}
+      >
+        <Input
+          type="password"
+          autoComplete="off"
+          {...register("apiKey", {
+            validate: (v) => (!v.trim() ? t("validation.required", { ns: "common" }) : undefined),
+          })}
+          placeholder={t("credentials.form.apiKeyPlaceholder")}
+        />
+      </FormItem>
     </FormModal>
   );
 }

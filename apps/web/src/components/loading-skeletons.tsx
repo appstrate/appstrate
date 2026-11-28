@@ -699,6 +699,37 @@ export function SettingsSkeleton({ rows = 3, className }: { rows?: number; class
 }
 
 /**
+ * Settings › Models and Preferences › Models: the default model's row (settings only), the
+ * group heading, then the configurations as `Item` rows (logo, label over summary, state badge).
+ */
+export function ModelsPageSkeleton({ withDefault = true }: { withDefault?: boolean }) {
+  return (
+    <Waiting>
+      {withDefault && (
+        <>
+          <SettingsSkeleton rows={1} className="mb-8" />
+          <div className="mb-4 flex h-6 items-center">
+            <Skeleton className="h-4 w-32" />
+          </div>
+        </>
+      )}
+      <div className="flex flex-col gap-2">
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i} className="flex items-center gap-2.5 rounded-md border px-4 py-3">
+            <Skeleton className="size-8 shrink-0 rounded-sm" />
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <Skeleton className="h-3.5 w-40" />
+              <Skeleton className="h-3 w-64 max-w-full" />
+            </div>
+            <SkeletonBadge />
+          </div>
+        ))}
+      </div>
+    </Waiting>
+  );
+}
+
+/**
  * A package's definition editor while its code loads: `PackageEditorFrame`'s padded column, its
  * section heading, then the section's rows.
  */

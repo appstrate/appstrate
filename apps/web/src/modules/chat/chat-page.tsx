@@ -52,11 +52,8 @@ import {
 } from "./use-chat-runtime";
 import { useOwnPersonalSpaceId, useSpaceLabelOf } from "../../hooks/use-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
-import { useOrgSettings } from "../../hooks/use-org-settings";
-import {
-  useModelProviderCredentials,
-  useProvidersRegistry,
-} from "../../hooks/use-model-provider-credentials";
+import { useModelConfigs } from "../../hooks/use-model-configs";
+import { useModelProviderCredentials } from "../../hooks/use-model-provider-credentials";
 import { pickerCredentials } from "../../lib/model-picker";
 import { refreshPackageLists } from "../../hooks/use-mutations";
 
@@ -122,15 +119,13 @@ export function ChatModulePage() {
         : { unavailable: previewing ? "preview" : spacesFailed ? "error" : "loading" },
     [personalSpaceId, previewing, spacesFailed],
   );
-  // Absent means allowed (the setting is opt-out): the chat only drops its
-  // "add my credential" link once the organization has turned them off.
-  const { data: orgSettings } = useOrgSettings();
+  // The configurations say which models a person's own connection may serve; unknown until read.
+  const { data: modelConfigs } = useModelConfigs();
   // The credentials that name the model picker's groups, as in the dashboard's pickers.
   const { data: credentials } = useModelProviderCredentials();
-  const { data: registry } = useProvidersRegistry();
   const modelCredentials = useMemo(
-    () => pickerCredentials(credentials ?? [], registry ?? [], userId ?? undefined),
-    [credentials, registry, userId],
+    () => pickerCredentials(credentials ?? [], userId ?? undefined),
+    [credentials, userId],
   );
   // One presentation interface for both direct clicks and the automatic
   // presentation of a run's single produced file. There is intentionally no
@@ -223,7 +218,7 @@ export function ChatModulePage() {
             canIn={canIn}
             actingSpaceIds={actingSpaceIds}
             attachTarget={attachTarget}
-            personalModelCredentials={orgSettings?.personal_model_credentials}
+            modelConfigs={modelConfigs}
             modelCredentials={modelCredentials}
             formatBytes={formatBytes}
             lang={i18n.language}

@@ -211,8 +211,8 @@ export interface ChatPageProps {
   actingSpaceIds: ChatHost["actingSpaceIds"];
   /** Where an attached file goes, or why it cannot (see `ChatHost`). Pass a stable value. */
   attachTarget: ChatHost["attachTarget"];
-  /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
-  personalModelCredentials: boolean | undefined;
+  /** The organization's model configurations, `undefined` until known (see `ChatHost`). Pass a stable array. */
+  modelConfigs: ChatHost["modelConfigs"];
   /** The credentials naming the model picker's groups (see `ChatHost`). Pass a stable array. */
   modelCredentials: ChatHost["modelCredentials"];
   /** Renders a byte count in the host's language. Pass a stable function. */
@@ -246,7 +246,7 @@ export function ChatPage({
   canIn,
   actingSpaceIds,
   attachTarget,
-  personalModelCredentials,
+  modelConfigs,
   modelCredentials,
   formatBytes,
   lang,
@@ -361,7 +361,7 @@ export function ChatPage({
       canIn,
       actingSpaceIds,
       attachTarget,
-      personalModelCredentials,
+      modelConfigs,
       modelCredentials,
       formatBytes,
       lang,
@@ -383,7 +383,7 @@ export function ChatPage({
       canIn,
       actingSpaceIds,
       attachTarget,
-      personalModelCredentials,
+      modelConfigs,
       modelCredentials,
       formatBytes,
       lang,

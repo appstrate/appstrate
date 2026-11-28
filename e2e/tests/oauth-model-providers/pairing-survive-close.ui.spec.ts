@@ -16,7 +16,6 @@
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import {
-  CREDENTIAL_LABEL,
   SETTINGS_PATH,
   SUCCESS_TOAST,
   closePairingModal,
@@ -63,7 +62,8 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
 
     try {
       await expect(page.getByText(SUCCESS_TOAST)).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByRole("row").filter({ hasText: CREDENTIAL_LABEL })).toBeVisible({
+      // The configuration's row now names the caller's own connection.
+      await expect(page.getByText(/^Ma connexion · /)).toBeVisible({
         timeout: 15_000,
       });
 

@@ -3,7 +3,7 @@
 /**
  * What the model form puts on the wire. Pinned: the omissions (a value the
  * operator never answered is left to the catalog), the `null` clears of an
- * edit, the credential binding, and the entries a model list ships.
+ * edit, and the entries a model list ships.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -16,23 +16,14 @@ import {
   type ModelFormFields,
   type ModelFormModelEntry,
   type ModelFormPayloadInput,
-  type ModelFormProvider,
 } from "../model-form-payload.ts";
 import type { ModelPickRow } from "../model-source.ts";
 import type { CatalogModelValues } from "../row-overrides-catalog.ts";
-
-const ANTHROPIC: ModelFormProvider = { providerId: "anthropic", authMode: "api_key" };
-const OPENAI_COMPATIBLE: ModelFormProvider = {
-  providerId: "openai-compatible",
-  authMode: "api_key",
-};
-const CLAUDE_CODE: ModelFormProvider = { providerId: "claude-code", authMode: "oauth2" };
 
 function fields(overrides: Partial<ModelFormFields> = {}): ModelFormFields {
   return {
     label: "",
     modelId: "",
-    credentialId: "",
     capabilitiesExplicit: false,
     inputText: true,
     inputImage: false,
@@ -43,40 +34,22 @@ function fields(overrides: Partial<ModelFormFields> = {}): ModelFormFields {
   };
 }
 
-/** Asserts a payload was built and returns it. */
-function ok(result: ModelFormData | null): ModelFormData {
-  expect(result).not.toBeNull();
-  if (!result) throw new Error("unreachable");
-  return result;
-}
-
-function build(
-  input: Partial<ModelFormPayloadInput> & { fields: ModelFormFields },
-): ModelFormData | null {
-  return buildModelFormPayload({
-    dirtyFields: {},
-    provider: ANTHROPIC,
-    capabilities: "auto",
-    selectedCredentialId: input.fields.credentialId || null,
-    unbound: false,
-    ...input,
-  });
+function build(input: Partial<ModelFormPayloadInput> & { fields: ModelFormFields }): ModelFormData {
+  return buildModelFormPayload({ dirtyFields: {}, capabilities: "auto", ...input });
 }
 
 /** A catalogued row: the fields describe it, but none of it is the operator's. */
 const CATALOGUED_FIELDS = fields({
   label: "Claude Sonnet 4.5",
   modelId: "claude-sonnet-4-5-20250929",
-  credentialId: "cred_1",
   contextWindow: "200000",
   maxTokens: "64000",
 });
 
 describe("buildModelFormPayload — a catalogued model, toggle off", () => {
-  it("binds the credential and clears the four, a no-op for a row that never overrode", () => {
-    expect(ok(build({ fields: CATALOGUED_FIELDS }))).toEqual({
+  it("clears the four, a no-op for a row that never overrode", () => {
+    expect(build({ fields: CATALOGUED_FIELDS })).toEqual({
       modelId: "claude-sonnet-4-5-20250929",
-      credentialId: "cred_1",
       input: null,
       contextWindow: null,
       maxTokens: null,
@@ -86,16 +59,13 @@ describe("buildModelFormPayload — a catalogued model, toggle off", () => {
 });
 
 describe("buildModelFormPayload — capabilities", () => {
-  const CUSTOM = fields({ modelId: "qwen3:8b", credentialId: "cred_1" });
+  const CUSTOM = fields({ modelId: "qwen3:8b" });
 
   const explicit = (overrides: Partial<ModelFormFields> = {}) =>
-    ok(
-      build({
-        provider: OPENAI_COMPATIBLE,
-        fields: { ...CUSTOM, capabilitiesExplicit: true, ...overrides },
-        capabilities: "explicit",
-      }),
-    );
+    build({
+      fields: { ...CUSTOM, capabilitiesExplicit: true, ...overrides },
+      capabilities: "explicit",
+    });
 
   it("ships every answer once the operator takes the four questions on", () => {
     expect(
@@ -124,13 +94,10 @@ describe("buildModelFormPayload — capabilities", () => {
   });
 
   it("clears every stored override when the toggle is off", () => {
-    const data = ok(
-      build({
-        provider: OPENAI_COMPATIBLE,
-        fields: { ...CUSTOM, contextWindow: "32768", reasoning: true },
-        capabilities: "auto",
-      }),
-    );
+    const data = build({
+      fields: { ...CUSTOM, contextWindow: "32768", reasoning: true },
+      capabilities: "auto",
+    });
     expect(data).toMatchObject({
       input: null,
       contextWindow: null,
@@ -149,7 +116,6 @@ describe("buildModelFormPayload — explicit capabilities on a catalogued model"
   /** The form as the edit opens it: RESOLVED values, toggle then ticked. */
   const PREFILLED = fields({
     modelId: "claude-sonnet-4-5-20250929",
-    credentialId: "cred_1",
     capabilitiesExplicit: true,
     inputText: true,
     inputImage: true,
@@ -162,19 +128,16 @@ describe("buildModelFormPayload — explicit capabilities on a catalogued model"
     overrides: Partial<ModelFormFields> = {},
     catalogEntry: CatalogModelValues = SONNET,
   ) =>
-    ok(
-      build({
-        fields: { ...PREFILLED, ...overrides },
-        capabilities: "explicit",
-        catalogEntry,
-      }),
-    );
+    build({
+      fields: { ...PREFILLED, ...overrides },
+      capabilities: "explicit",
+      catalogEntry,
+    });
 
   it("ships the one modality the operator changed, and clears the three it did not", () => {
     // Sending the catalog's own numbers back would freeze them as overrides.
     expect(edit({ inputImage: false })).toEqual({
       modelId: "claude-sonnet-4-5-20250929",
-      credentialId: "cred_1",
       input: ["text"],
       contextWindow: null,
       maxTokens: null,
@@ -192,9 +155,7 @@ describe("buildModelFormPayload — explicit capabilities on a catalogued model"
   });
 
   it("ships all four for an endpoint no catalog describes", () => {
-    const data = ok(
-      build({ provider: OPENAI_COMPATIBLE, fields: PREFILLED, capabilities: "explicit" }),
-    );
+    const data = build({ fields: PREFILLED, capabilities: "explicit" });
     expect(data).toMatchObject({
       input: ["text", "image"],
       contextWindow: 200000,
@@ -211,15 +172,12 @@ describe("buildModelFormPayload — explicit capabilities on a catalogued model"
 });
 
 describe("buildModelFormPayload — the model's name", () => {
-  const CUSTOM = fields({ modelId: "qwen3:8b", credentialId: "cred_1" });
+  const CUSTOM = fields({ modelId: "qwen3:8b" });
   const named = (label: string, dirty: boolean) =>
-    ok(
-      build({
-        provider: OPENAI_COMPATIBLE,
-        fields: { ...CUSTOM, label },
-        dirtyFields: dirty ? { label: true } : {},
-      }),
-    );
+    build({
+      fields: { ...CUSTOM, label },
+      dirtyFields: dirty ? { label: true } : {},
+    });
 
   it("omits it when untouched, so the saved name is kept", () => {
     expect("label" in named("Local Qwen", false)).toBe(false);
@@ -234,73 +192,8 @@ describe("buildModelFormPayload — the model's name", () => {
   });
 });
 
-describe("buildModelFormPayload — the credential", () => {
-  const model = fields({ modelId: "claude-sonnet-4-5-20250929" });
-
-  it.each([
-    ["an OAuth provider not left to each member", CLAUDE_CODE],
-    ["an api-key provider with no credential picked", ANTHROPIC],
-  ])("builds nothing for %s", (_name, provider) => {
-    expect(build({ provider, fields: model, selectedCredentialId: null })).toBeNull();
-  });
-
-  it("ignores a credential the form cannot match (not among those the model may bind)", () => {
-    expect(
-      build({
-        provider: OPENAI_COMPATIBLE,
-        fields: { ...model, credentialId: "cred_groq" },
-        selectedCredentialId: null,
-      }),
-    ).toBeNull();
-  });
-
-  it("binds the picked organization subscription", () => {
-    expect(
-      ok(
-        build({
-          provider: CLAUDE_CODE,
-          fields: fields({ modelId: "claude-sonnet-4-5", credentialId: "cred_org_sub" }),
-        }),
-      ),
-    ).toMatchObject({ modelId: "claude-sonnet-4-5", credentialId: "cred_org_sub" });
-  });
-
-  it("binds the model to no credential when each member brings their own", () => {
-    for (const provider of [ANTHROPIC, CLAUDE_CODE]) {
-      expect(
-        ok(build({ provider, fields: model, selectedCredentialId: null, unbound: true })),
-      ).toMatchObject({ credentialId: null, providerId: provider.providerId });
-    }
-  });
-});
-
 describe("modelFormRefusals", () => {
-  const base = {
-    modelId: "m",
-    provider: ANTHROPIC,
-    selectedCredentialId: "cred_1",
-    offeredIds: null,
-    unbound: false,
-  };
-
-  it("names no key step for an unbound model, picked or not", () => {
-    for (const provider of [ANTHROPIC, CLAUDE_CODE]) {
-      expect(
-        modelFormRefusals({ ...base, provider, selectedCredentialId: null, unbound: true })
-          .credentialId,
-      ).toBeNull();
-    }
-  });
-
-  it("names the missing key on the key row", () => {
-    expect(modelFormRefusals({ ...base, selectedCredentialId: null })).toEqual({
-      credentialId: "settings:models.form.apiKeyRequired",
-      modelId: null,
-    });
-    expect(
-      modelFormRefusals({ ...base, provider: CLAUDE_CODE, selectedCredentialId: null }),
-    ).toEqual({ credentialId: "settings:models.form.subscriptionRequired", modelId: null });
-  });
+  const base = { modelId: "m", offeredIds: null };
 
   it("requires an id", () => {
     expect(modelFormRefusals({ ...base, modelId: "  " }).modelId).toBe(

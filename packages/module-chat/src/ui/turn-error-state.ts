@@ -29,6 +29,7 @@ import {
   refusalCode,
   type ClientTurnError,
 } from "../turn-error.ts";
+import type { PickerConfig } from "@appstrate/ui/components/model-picker-groups";
 import type { ChatCan, ChatTranslate } from "./runtime-context.ts";
 
 /**
@@ -182,6 +183,16 @@ function classifiedState(
     : { text: t(TURN_ERROR_KEY[category]) };
 }
 
+/**
+ * Whether a model configuration lets members bring their own connection: the link to add one
+ * leads somewhere only then. `undefined` while the configurations load.
+ */
+export function personalConnectionsAllowed(
+  configs: readonly Pick<PickerConfig, "personal_connections_allowed">[] | undefined,
+): boolean | undefined {
+  return configs?.some((config) => config.personal_connections_allowed);
+}
+
 /** Errored outright, or cut by the deadline while failing (see `turnErrorState`). */
 export function turnFailed(turn: AppstrateTurnMetadata | null): turn is AppstrateTurnMetadata {
   return (
@@ -203,8 +214,8 @@ export function turnErrorState(
   message: AssistantState["message"],
   t: ChatTranslate,
   can: ChatCan,
-  // Whether the organization lets members bring personal model credentials
-  // (`personal_model_credentials`).
+  // Whether a model configuration lets members bring their own connection
+  // (`personalConnectionsAllowed`), `undefined` until the configurations load.
   personalModelCredentials: boolean | undefined,
 ): TurnErrorState | null {
   const turn = turnMetadataFromMessage(sourceMessage(message));

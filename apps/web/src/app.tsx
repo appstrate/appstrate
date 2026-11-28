@@ -40,6 +40,7 @@ import {
   OverlayPanelSkeleton,
   PackageDetailSkeleton,
   RunDetailSkeleton,
+  ModelsPageSkeleton,
   ScheduleDetailSkeleton,
   SettingsSkeleton,
   SettingsTableSkeleton,
@@ -395,6 +396,8 @@ function skeletonOf(path: RoutePath): ReactNode {
   if (table !== undefined) return <SettingsTableSkeleton {...table} />;
   if (path === "/") return <HomeSkeleton />;
   if (path === "/dashboard") return <DashboardSkeleton />;
+  if (path === "/org-settings/models") return <ModelsPageSkeleton />;
+  if (path === "/preferences/models") return <ModelsPageSkeleton withDefault={false} />;
   if (inLayout(path)) return <SettingsSkeleton />;
   if (isOverlayPath(path)) return <OverlayPanelSkeleton list />;
   if (path === "/chat/:conversationId") return <ChatConversationSkeleton />;

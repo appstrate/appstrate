@@ -1,27 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Editing a saved model: the credential that serves it, its id, its name and its capabilities.
- * Adding models is `ProviderAddFlow` / `ModelChoiceList`; this form only changes what exists.
- * `authMode` decides whether the credential is a key or a connection, and `modelSource` whether
- * the id must be one the provider's catalog offers.
+ * Editing a saved model: its id, its name and its capabilities. The model stays in its
+ * configuration, whose connections serve it. Adding models is `ModelChoiceDialog`; this form only
+ * changes what exists. `modelSource` decides whether the id must be one the provider's catalog
+ * offers.
  */
 
 import { PendingButton } from "@/components/app-ui/pending-button";
-import { useState } from "react";
-import { FormProvider, useWatch } from "react-hook-form";
+import { FormProvider } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
-import { FormItem } from "@/components/app-ui/form-item";
-import { OptionSelect } from "@/components/app-ui/option-select";
 import { ApiError } from "../api/errors";
 import { useUpdateModel, type OrgModelInfo } from "../hooks/use-models";
 import { ManualModelFields } from "./model-form/manual-model-fields";
 import { SavedModelActions } from "./model-form/saved-model-actions";
 import {
-  useModelProviderCredentials,
   useProvidersRegistry,
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
@@ -37,11 +33,6 @@ import {
 } from "@/lib/model-form-payload";
 import { modelSource } from "@/lib/model-source";
 import { rowOverridesCatalog } from "@/lib/row-overrides-catalog";
-import { selectableCredentials } from "@/lib/model-credential-filter";
-import { allowsMemberModels } from "@/lib/model-providers";
-
-/** The picker item for "each member" — a UI token, never sent on the wire. */
-const EACH_MEMBER_ITEM = "__each_member__";
 
 interface ModelFormBodyProps {
   model: OrgModelInfo;
@@ -59,8 +50,8 @@ export function ModelFormBody(props: ModelFormBodyProps) {
   const registryQuery = useProvidersRegistry();
   if (registryQuery.error) return <ErrorState error={registryQuery.error} />;
   if (!registryQuery.data) return <SettingsSkeleton />;
-  // A row whose provider left the registry has no credential to match: say so rather than render
-  // an empty form.
+  // A row whose provider left the registry has no catalog to check against: say so rather than
+  // render an empty form.
   const provider = getProviderById(props.model.providerId ?? "", registryQuery.data);
   if (!provider) return <ErrorState message={t("models.form.providerUnavailable")} />;
   return <ModelForm {...props} provider={provider} />;
@@ -78,7 +69,6 @@ function ModelForm({
     defaultValues: {
       label: model.label,
       modelId: model.modelId ?? "",
-      credentialId: model.credentialId ?? "",
       capabilitiesExplicit: rowOverridesCatalog(model, catalogEntry(model.modelId ?? "")),
       inputText: model.input?.includes("text") !== false,
       inputImage: model.input?.includes("image") ?? false,
@@ -90,51 +80,15 @@ function ModelForm({
   const {
     register,
     handleSubmit,
-    control,
-    setValue,
     setError,
-    clearErrors,
     showError,
     formState: { errors, dirtyFields },
   } = form;
-  const credentialId = useWatch({ control, name: "credentialId" });
-
-  const credentialsQuery = useModelProviderCredentials();
-  // A model binds an organization credential, key or subscription: a member's personal one serves
-  // only their own calls, reached through "each member" below.
-  const availableCredentials = selectableCredentials({
-    credentials: credentialsQuery.data,
-    provider,
-    apiShape: model.apiShape ?? "",
-    baseUrl: model.base_url ?? "",
-  }).filter((k) => k.bindable);
-  const selectedCredential = availableCredentials.find((k) => k.id === credentialId);
-
-  // An alias hides its binding.
-  const eachMemberOffered = allowsMemberModels(provider) && !model.aliased;
-  // A member-served row (`binding: "user"`) is the saved form of the same choice.
-  const [eachMember, setEachMember] = useState(model.binding === "user");
-  const unbound = eachMemberOffered && eachMember;
-
-  const chooseCredential = (value: string) => {
-    const member = value === EACH_MEMBER_ITEM;
-    setEachMember(member);
-    setValue("credentialId", member ? "" : value);
-    clearErrors("credentialId");
-  };
-
   const refusals = (modelId: string) =>
     modelFormRefusals({
       modelId,
-      provider,
-      selectedCredentialId: selectedCredential?.id ?? null,
       offeredIds: modelSource(provider) === "catalog" ? provider.models.map((m) => m.id) : null,
-      unbound,
     });
-  const credentialValidate = () => {
-    const key = refusals("").credentialId;
-    return key ? t(key) : undefined;
-  };
   const modelIdValidate = (v: string) => {
     const key = refusals(v).modelId;
     return key ? t(key, { provider: provider.displayName }) : undefined;
@@ -147,17 +101,13 @@ function ModelForm({
     const payload = buildModelFormPayload({
       fields: data,
       dirtyFields,
-      provider,
-      selectedCredentialId: selectedCredential?.id ?? null,
       capabilities: data.capabilitiesExplicit ? "explicit" : "auto",
       catalogEntry: catalogEntry(data.modelId.trim()),
-      unbound,
     });
-    if (!payload) return;
     try {
       await onSubmit(payload);
     } catch (err) {
-      // A refusal the server names (« model_scheduled ») is said as it is, else the generic line.
+      // A refusal the server names is said as it is, else the generic line.
       const code =
         err instanceof ApiError ? (validationFieldErrors(err)[0]?.code ?? err.code) : null;
       setError("modelId", {
@@ -166,34 +116,9 @@ function ModelForm({
     }
   });
 
-  const options = [
-    ...availableCredentials.map((k) => ({ value: k.id, label: k.label })),
-    ...(eachMemberOffered
-      ? [{ value: EACH_MEMBER_ITEM, label: t("providers.type.personalKey") }]
-      : []),
-  ];
-
   return (
     <FormProvider {...form}>
       <form id="model-form" onSubmit={onFormSubmit} noValidate className="flex flex-col gap-4">
-        <input type="hidden" {...register("credentialId", { validate: credentialValidate })} />
-        <FormItem
-          id="mdl-credential"
-          label={
-            provider.authMode === "oauth2"
-              ? t("models.form.identityLabel")
-              : t("credentials.form.apiKey")
-          }
-          hint={unbound ? t("models.form.eachMemberHint") : undefined}
-          error={showError("credentialId") ? errors.credentialId?.message : undefined}
-        >
-          <OptionSelect
-            value={unbound ? EACH_MEMBER_ITEM : (selectedCredential?.id ?? "")}
-            onValueChange={chooseCredential}
-            options={options}
-            placeholder={t("models.form.chooseIdentity")}
-          />
-        </FormItem>
         <ManualModelFields
           idPrefix="mdl"
           modelIdProps={register("modelId", { validate: modelIdValidate })}

@@ -8,23 +8,16 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Star } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { cn } from "@appstrate/ui/cn";
 import type { ModelPickRow } from "@/lib/model-source";
 import { TextSkeleton } from "../loading-skeletons";
 
 /** What a row can offer beyond its tick, once the list is told how (the provider's models dialog). */
 interface RowExtras {
-  /** The upstream id starred as the organization's default. */
-  defaultId?: string | null;
-  onDefaultChange?: (id: string) => void;
-  /** The key needs reconnecting: the server refuses any of its models as the default. */
-  defaultUnavailable?: boolean;
   /** The row that cannot be unticked: the organization's default model keeps its access. */
   lockedId?: string | null;
   /** The rows already saved, whose finer settings open in the model form. */
@@ -47,8 +40,6 @@ function PickRow({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const locked = extras.lockedId === row.id;
-  const isDefault = extras.defaultId === row.id;
-  const starBlocked = extras.defaultUnavailable === true && !isDefault;
   return (
     <div className="flex items-center gap-2 px-3 py-2">
       <span title={locked ? t("models.choice.defaultLocked") : undefined} className="inline-flex">
@@ -87,25 +78,6 @@ function PickRow({
           onClick={() => extras.onAdvanced?.(row.id)}
         >
           {t("models.choice.advanced")}
-        </Button>
-      )}
-      {extras.onDefaultChange && checked && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="desktop-pointer:size-7 shrink-0"
-          aria-pressed={isDefault}
-          aria-label={
-            isDefault
-              ? t("models.choice.isDefault", { name: row.label ?? row.id })
-              : t("models.choice.setDefault", { name: row.label ?? row.id })
-          }
-          title={starBlocked ? t("credentials.unavailableHint") : t("models.default")}
-          disabled={starBlocked}
-          onClick={() => extras.onDefaultChange?.(row.id)}
-        >
-          <Star className={cn(isDefault ? "fill-warning text-warning" : "text-muted-foreground")} />
         </Button>
       )}
     </div>

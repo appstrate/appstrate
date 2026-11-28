@@ -31,7 +31,6 @@ describe("planModelChoice", () => {
     const plan = planModelChoice({
       picked: picked("a", "b"),
       existing: [existing("a")],
-      starred: null,
     });
     expect(plan.add.map((r) => r.id)).toEqual(["b"]);
     expect(plan.withdraw).toEqual([]);
@@ -41,7 +40,6 @@ describe("planModelChoice", () => {
     const plan = planModelChoice({
       picked: picked("a"),
       existing: [existing("a"), existing("b")],
-      starred: null,
     });
     expect(plan.withdraw.map((m) => m.modelId)).toEqual(["b"]);
     expect(plan.add).toEqual([]);
@@ -52,7 +50,6 @@ describe("planModelChoice", () => {
     const plan = planModelChoice({
       picked: picked("a", "b"),
       existing: [existing("a"), existing("b", false, false)],
-      starred: null,
     });
     expect(plan.grant.map((m) => m.modelId)).toEqual(["b"]);
     expect(plan.add).toEqual([]);
@@ -63,17 +60,8 @@ describe("planModelChoice", () => {
     const plan = planModelChoice({
       picked: picked("a"),
       existing: [existing("a"), existing("b", false, false)],
-      starred: null,
     });
     expect(plan.grant).toEqual([]);
     expect(plan.withdraw).toEqual([]);
-  });
-
-  it("changes the default only to a ticked model that is not already it", () => {
-    const base = { picked: picked("a", "b"), existing: [existing("a", true), existing("b")] };
-    expect(planModelChoice({ ...base, starred: "a" }).defaultModelId).toBeNull();
-    expect(planModelChoice({ ...base, starred: "b" }).defaultModelId).toBe("b");
-    expect(planModelChoice({ ...base, starred: "c" }).defaultModelId).toBeNull();
-    expect(planModelChoice({ ...base, starred: null }).defaultModelId).toBeNull();
   });
 });

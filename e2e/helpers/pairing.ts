@@ -10,21 +10,23 @@ import { expect, type APIResponse, type Locator, type Page } from "@playwright/t
 import type { ApiClient } from "./api-client.ts";
 
 /**
- * A subscription is personal, so it is added from Preferences › Mes clés de modèles (never from
- * the organization's settings).
+ * A personal subscription is added from Preferences › Models, on the row of the configuration it
+ * joins (« Utiliser ma clé », then the subscription in its menu).
  */
 export const SETTINGS_PATH = "/preferences/models";
 export const STORAGE_KEY = "appstrate:web:pendingPairings";
 export const SUCCESS_TOAST = "Abonnement connecté avec succès";
 /** The label the simulated helper names the credential with. */
-export const CREDENTIAL_LABEL = "E2E pairing";
+const CREDENTIAL_LABEL = "E2E pairing";
 
 const PROVIDER_ID = "claude-code";
 const PROVIDER_LABEL = /Claude Code/;
 /** Any provider but the pairing's: the redeem route refuses the mismatch. */
 const OTHER_PROVIDER_ID = "codex";
 
-const CREDENTIAL_DIALOG = "Ajouter une clé perso ou un abonnement";
+/** The configuration a `claude-code` subscription joins: its family's, Anthropic. */
+const CONFIG_LABEL = "Anthropic";
+const CREDENTIAL_DIALOG = `Connecter « ${CONFIG_LABEL} »`;
 const CONFIRM_DIALOG = "Fermer la fenêtre de connexion ?";
 
 interface DisplayedPairing {
@@ -37,35 +39,33 @@ export function credentialDialog(page: Page): Locator {
 }
 
 /**
- * Preferences only offers the providers whose key would serve a model the organization opened to
- * personal keys: leave one of the provider's models to each person's own subscription first.
+ * Preferences only lists the configurations open to personal connections: make sure the family
+ * of the pairing's provider has one (a `409 model_config_exists` means it already does).
  */
 export async function openModelToPersonalKeys(apiClient: ApiClient): Promise<void> {
-  const registry = await apiClient.get("/model-provider-credentials/registry");
-  expect(registry.status()).toBe(200);
-  const provider = (
-    (await registry.json()).data as Array<{ providerId: string; models: { id: string }[] }>
-  ).find((p) => p.providerId === PROVIDER_ID);
-  expect(provider?.models[0], `a catalogued ${PROVIDER_ID} model`).toBeDefined();
-  const created = await apiClient.post("/models", {
-    modelId: provider!.models[0]!.id,
-    credentialId: null,
-    providerId: PROVIDER_ID,
+  const created = await apiClient.post("/model-configs", {
+    provider_id: PROVIDER_ID,
+    personal_connections_allowed: true,
   });
-  expect(created.status()).toBe(201);
+  expect([201, 409]).toContain(created.status());
+  if (created.status() === 409) {
+    const id = (await created.json()).existing_config_id as string;
+    const opened = await apiClient.patch(`/model-configs/${id}`, {
+      personal_connections_allowed: true,
+    });
+    expect(opened.status()).toBe(200);
+  }
 }
 
 /**
- * Opens the add-subscription modal from the page's Actions menu and returns the command it shows:
- * a fresh mint, or the pending pairing it resumes.
+ * Opens the pairing modal from the configuration's row (its connect menu, the subscription) and
+ * returns the command it shows: a fresh mint, or the pending pairing it resumes.
  */
 export async function openPairingModal(page: Page): Promise<DisplayedPairing> {
-  await page.getByRole("button", { name: "Actions", exact: true }).click();
-  await page.getByRole("menuitem", { name: CREDENTIAL_DIALOG }).click();
+  await page.getByRole("button", { name: "Autres façons de connecter" }).first().click();
+  await page.getByRole("menuitem", { name: PROVIDER_LABEL }).click();
 
   const dialog = credentialDialog(page);
-  await dialog.locator("#pk-provider").click();
-  await page.getByRole("option", { name: PROVIDER_LABEL }).click();
 
   const code = dialog.locator("code");
   await expect(code).toContainText("npx @appstrate/connect-helper", { timeout: 15_000 });

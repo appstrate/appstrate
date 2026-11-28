@@ -7,50 +7,20 @@ import { rowToEntry } from "../lib/model-form-payload";
 import { refusalMessage } from "../lib/mutation-error";
 import type { ModelChoicePlan } from "../lib/model-choice";
 
-/** Where the models of a choice live: an organization key, or no key (each person's own). */
-interface ModelChoiceTarget {
-  credentialId: string | null;
-  /** The service, named on a model left to personal keys. */
-  providerId: string;
-}
-
-/** The key to mint first, in « Add a provider »: nothing else exists until the models are chosen. */
-export interface NewProviderCredential {
-  label: string;
-  providerId: string;
-  apiKey: string;
-  baseUrlOverride?: string;
-}
-
 export type ModelChoiceBody =
   paths["/api/models/apply"]["post"]["requestBody"]["content"]["application/json"];
 
-/** The body of a choice (key, models added, switched back on, default, switched off); the server applies it in that order, in one transaction. */
+/** The body of a choice (models added, switched back on, switched off) in a configuration; the server applies it in one transaction. */
 export function modelChoiceBody(input: {
   plan: ModelChoicePlan;
-  target: ModelChoiceTarget;
-  newCredential?: NewProviderCredential;
+  configId: string;
 }): ModelChoiceBody {
-  const { plan, target, newCredential } = input;
-  const credential: ModelChoiceBody["credential"] = newCredential
-    ? {
-        label: newCredential.label,
-        providerId: newCredential.providerId,
-        api_key: newCredential.apiKey,
-        ...(newCredential.baseUrlOverride
-          ? { base_url_override: newCredential.baseUrlOverride }
-          : {}),
-      }
-    : target.credentialId
-      ? { id: target.credentialId }
-      : null;
+  const { plan, configId } = input;
   return {
-    credential,
-    ...(credential === null ? { providerId: target.providerId } : {}),
+    config_id: configId,
     add: plan.add.map(rowToEntry),
     enable: plan.grant.map((model) => model.id),
     disable: plan.withdraw.map((model) => model.id),
-    ...(plan.defaultModelId ? { default_model_id: plan.defaultModelId } : {}),
   };
 }
 
@@ -81,9 +51,7 @@ export function choiceRefusal(err: unknown, plan: ModelChoicePlan): ModelChoiceR
           ? (plan.grant[at]?.modelId ?? undefined)
           : list === "disable"
             ? (plan.withdraw[at]?.modelId ?? undefined)
-            : list === "default_model_id"
-              ? (plan.defaultModelId ?? undefined)
-              : undefined;
+            : undefined;
     if (!modelId) return null;
     failedModelIds.push(modelId);
     refusal ??= refusalMessage({
@@ -97,7 +65,11 @@ export function choiceRefusal(err: unknown, plan: ModelChoicePlan): ModelChoiceR
 
 /** Applies a choice in one write: all of it, or — refused — none of it. */
 export function useApplyModelChoice() {
-  const invalidate = useInvalidatePaths("/api/models", "/api/model-provider-credentials");
+  const invalidate = useInvalidatePaths(
+    "/api/models",
+    "/api/model-configs",
+    "/api/model-provider-credentials",
+  );
   const mutation = $api.useMutation("post", "/api/models/apply", {
     meta: { errorHandledByCaller: true },
     onSuccess: invalidate,

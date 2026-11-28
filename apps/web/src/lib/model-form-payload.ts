@@ -3,7 +3,6 @@
 /** What the model form (an edit) and the model list (an id typed by hand) submit. Pure. */
 
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
-import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
 import type { ModelPickRow } from "./model-source";
 import { catalogValues, type CatalogModelValues } from "./row-overrides-catalog";
 import { sameSet } from "./strings";
@@ -25,9 +24,7 @@ export interface ManualRowFields extends CapabilityFields {
 }
 
 /** The model form's controlled field values. */
-export interface ModelFormFields extends ManualRowFields {
-  credentialId: string;
-}
+export type ModelFormFields = ManualRowFields;
 
 /**
  * Catalog-derivable overrides. Sent only when the operator answered for them,
@@ -40,7 +37,7 @@ interface ModelCapabilityOverrides {
   reasoning?: boolean;
 }
 
-/** One `add` entry of a model choice, minus the credential every entry shares. */
+/** One `add` entry of a model choice. */
 export interface ModelFormModelEntry extends ModelCapabilityOverrides {
   /** Sent only when typed; the server derives and dedupes one otherwise. */
   label?: string;
@@ -49,23 +46,18 @@ export interface ModelFormModelEntry extends ModelCapabilityOverrides {
 }
 
 /**
- * One `PATCH /api/models/{id}` body. `credentialId` is `null` when each member serves the model
- * with their own credential (`providerId` then names the provider theirs match). Overrides widen
- * to `null`: "drop the stored override".
+ * One `PATCH /api/models/{id}` body: the model stays in its configuration, whose connections serve
+ * it. Overrides widen to `null`: "drop the stored override".
  */
 export interface ModelFormData {
   /** Sent only when typed; `PATCH` reads an absent name as "keep it". */
   label?: string;
   modelId: string;
-  credentialId: string | null;
-  providerId?: string;
   input?: ModelInputModality[] | null;
   contextWindow?: number | null;
   maxTokens?: number | null;
   reasoning?: boolean | null;
 }
-
-export type ModelFormProvider = Pick<ProviderRegistryEntry, "providerId" | "authMode">;
 
 export interface ModelFormPayloadInput {
   fields: ModelFormFields;
@@ -75,47 +67,18 @@ export interface ModelFormPayloadInput {
   capabilities: "explicit" | "auto";
   /** The catalog's values for the id; a field still equal to them is not an answer (shipping it would freeze it as an override, cutting off catalog updates). */
   catalogEntry?: CatalogModelValues;
-  provider: ModelFormProvider;
-  /** The credential picked among those the model may bind, or `null`. */
-  selectedCredentialId: string | null;
-  /** Each member serves the model with their own credential: `credentialId` goes `null`. */
-  unbound: boolean;
 }
 
-type CredentialBinding = Pick<ModelFormData, "credentialId" | "providerId">;
-
-/** The credential half of a save, or the i18n key of what is missing. A subscription (`oauth2`) is paired, never typed. */
-function resolveCredentialBinding(
-  input: Pick<ModelFormPayloadInput, "provider" | "selectedCredentialId" | "unbound">,
-): { ok: true; binding: CredentialBinding } | { ok: false; messageKey: string } {
-  const { provider, selectedCredentialId } = input;
-  if (input.unbound) {
-    return { ok: true, binding: { credentialId: null, providerId: provider.providerId } };
-  }
-  if (selectedCredentialId) return { ok: true, binding: { credentialId: selectedCredentialId } };
-  return {
-    ok: false,
-    messageKey:
-      provider.authMode === "oauth2"
-        ? "models.form.subscriptionRequired"
-        : "models.form.apiKeyRequired",
-  };
-}
-
-/** What refuses a save before anything is sent: one namespaced i18n key per field. */
-export function modelFormRefusals(
-  input: Pick<ModelFormPayloadInput, "provider" | "selectedCredentialId" | "unbound"> & {
-    modelId: string;
-    /** The ids a catalog provider binds (the server refuses any other); `null` = free-form. */
-    offeredIds: readonly string[] | null;
-  },
-): { credentialId: string | null; modelId: string | null } {
-  const credential = resolveCredentialBinding(input);
-  const credentialId = credential.ok ? null : `settings:${credential.messageKey}`;
+/** What refuses the model id before anything is sent: a namespaced i18n key, `null` when none. */
+export function modelFormRefusals(input: {
+  modelId: string;
+  /** The ids a catalog provider binds (the server refuses any other); `null` = free-form. */
+  offeredIds: readonly string[] | null;
+}): { modelId: string | null } {
   const id = input.modelId.trim();
-  if (!id) return { credentialId, modelId: "common:validation.required" };
+  if (!id) return { modelId: "common:validation.required" };
   const outsideOffer = input.offeredIds !== null && !input.offeredIds.includes(id);
-  return { credentialId, modelId: outsideOffer ? "settings:models.form.modelNotOffered" : null };
+  return { modelId: outsideOffer ? "settings:models.form.modelNotOffered" : null };
 }
 
 function capabilityOverrides(input: {
@@ -154,16 +117,11 @@ function capabilityOverrides(input: {
   return answered;
 }
 
-/** `null` without a credential to bind — {@link modelFormRefusals} is what says so to the user. */
-export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormData | null {
+export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormData {
   const { fields, dirtyFields } = input;
-  const credential = resolveCredentialBinding(input);
-  if (!credential.ok) return null;
-
   return {
     ...(dirtyFields.label === true && fields.label.trim() ? { label: fields.label.trim() } : {}),
     modelId: fields.modelId.trim(),
-    ...credential.binding,
     ...capabilityOverrides({ ...input, isEdit: true }),
   };
 }

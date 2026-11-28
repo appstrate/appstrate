@@ -50,7 +50,7 @@ test("a never-published agent opens read-only for an operator, and becomes launc
   expect(credential.status(), await credential.text()).toBe(201);
   const model = await apiClient.post("/models", {
     modelId: "claude-sonnet-4-5-20250929",
-    credentialId: (await credential.json()).id,
+    config_id: (await credential.json()).config_id,
   });
   expect(model.status(), await model.text()).toBe(201);
 

@@ -5,11 +5,11 @@
  * BEFORE spending on it. This exercises the pure rule the badge renders
  * (`model-pricing.ts`) — each exclusion on its own, because an exclusion
  * silently dropped is a false positive on every alias or every built-in row —
- * then the model cell that draws it, row by row.
+ * then the model chips that draw it, chip by chip.
  */
 
 import { describe, it, expect } from "bun:test";
-import { ModelsCell } from "../../../components/provider-models-cell.tsx";
+import { ModelChips } from "../../../components/model-configs/model-chips.tsx";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { orgModelFixture as orgModel } from "../../../test/org-model-fixture.ts";
 import { render } from "../../../test/render.tsx";
@@ -70,7 +70,7 @@ describe("isModelUnpriced", () => {
 describe("the unpriced badge", () => {
   const cell = () =>
     render(
-      <ModelsCell
+      <ModelChips
         models={[
           orgModel({ id: "mdl_priced", label: "Priced" }),
           orgModel({ id: "mdl_local", label: "Local", cost: null }),

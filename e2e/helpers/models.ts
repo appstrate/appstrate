@@ -1,32 +1,64 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Driving Settings › Models: the « Ajouter une clé org » flow and the rows of
- * the « Clés org » table, shared by the specs that add keys and models.
+ * Driving Settings › Models: the « Ajouter une configuration » flow and the rows of the
+ * configurations, shared by the specs that add configurations and models.
  *
- * A key is added in two steps inside one dialog: the key itself (provider, name,
- * secret, and for a custom endpoint its API type and base URL), then the models
- * that key makes available. Nothing is written until the second step's button.
+ * The flow is three dialogs in a row: the service (and a gateway's API type and base URL), then
+ * « Choisir les modèles de « … » », then « Connecter « … » », the organization's key. The
+ * configuration is written by the first, the models by the second, the key by the third.
  */
 
 import { expect, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "./api-client.ts";
+import { selectOption } from "./select.ts";
 
 export const MODELS_SETTINGS_PATH = "/org-settings/models";
-/** The dialog's title and its last button (`credentials.add`). */
-const ADD_KEY = "Ajouter une clé org";
-/** The first step's button (`credentials.form.next`). */
-export const NEXT = "Suivant";
+/** The page action and the first dialog's title (`modelConfigs.add.*`). */
+const ADD_CONFIG = "Ajouter une configuration";
+/** The first dialog's button (`modelConfigs.add.submit`). */
+const NEXT = "Suivant";
+/** The model list's and the key form's button (`btn.save`). */
+export const SAVE = "Enregistrer";
 
-/** Open Settings › Models, then the Actions menu's « Ajouter une clé org »; resolves to the dialog. */
-export async function openAddKeyDialog(page: Page): Promise<Locator> {
+/**
+ * Open Settings › Models, then « Ajouter une configuration », pick the service (and, for a
+ * gateway, answer its endpoint), and go on; resolves to « Choisir les modèles ».
+ */
+export async function addConfiguration(
+  page: Page,
+  service: string,
+  endpoint?: { apiType: string; baseUrl: string },
+): Promise<Locator> {
   await page.goto(MODELS_SETTINGS_PATH);
   await page.getByRole("button", { name: "Actions", exact: true }).click();
-  await page.getByRole("menuitem", { name: ADD_KEY }).click();
+  await page.getByRole("menuitem", { name: ADD_CONFIG }).click();
   // Named, because the settings overlay around it is a `dialog` too.
-  const dialog = page.getByRole("dialog", { name: ADD_KEY });
+  const dialog = page.getByRole("dialog", { name: ADD_CONFIG });
   await expect(dialog).toBeVisible();
-  return dialog;
+
+  await selectOption(page, "cfg-provider", service);
+  if (endpoint) {
+    await selectOption(page, "cfg-apiType", endpoint.apiType);
+    await dialog.locator("#cfg-baseUrl").fill(endpoint.baseUrl);
+  } else {
+    // A pinned provider answers for its own endpoint: no API type, no base URL.
+    await expect(dialog.locator("#cfg-apiType")).toHaveCount(0);
+    await expect(dialog.locator("#cfg-baseUrl")).toHaveCount(0);
+  }
+  await dialog.getByRole("button", { name: NEXT, exact: true }).click();
+  await expect(dialog).toBeHidden();
+  return modelChoiceDialog(page);
+}
+
+/** « Choisir les modèles de « … » », whichever configuration it is for. */
+export function modelChoiceDialog(page: Page): Locator {
+  return page.getByRole("dialog", { name: /^Choisir les modèles de « / });
+}
+
+/** « Connecter « … » », the step that follows the models of a new configuration. */
+export function connectDialog(page: Page): Locator {
+  return page.getByRole("dialog", { name: /^Connecter « / });
 }
 
 /** The checkbox of one model in the list, matched on its id (a substring of its accessible name). */
@@ -34,9 +66,25 @@ export function modelRow(dialog: Locator, modelId: string): Locator {
   return dialog.getByRole("checkbox", { name: new RegExp(`${modelId}$`) });
 }
 
-/** The footer button that writes everything: the same label as the dialog's title. */
-export function submitAddKey(dialog: Locator): Locator {
-  return dialog.getByRole("button", { name: ADD_KEY, exact: true });
+/** Leave exactly `modelId` ticked, whatever the list started with. */
+export async function tickOnly(dialog: Locator, modelId: string): Promise<void> {
+  const all = dialog.getByRole("checkbox", { name: "Tout sélectionner" });
+  if (!(await all.isChecked())) await all.click();
+  await all.click();
+  await expect(all).not.toBeChecked();
+  await modelRow(dialog, modelId).click();
+  await expect(modelRow(dialog, modelId)).toBeChecked();
+}
+
+/**
+ * A configuration's row on the page, found by its label through its open/fold toggle: the label
+ * alone can also be a connection's, a row nested in the open configuration.
+ */
+export function configRow(page: Page, label: string): Locator {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return page.locator("[data-row]").filter({
+    has: page.getByRole("button", { name: new RegExp(`^(Ouvrir|Replier) « ${escaped} »$`) }),
+  });
 }
 
 /** The org's models, as `GET /api/models` resolves them. */

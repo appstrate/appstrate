@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Adding a catalogued provider's key and model from org settings → Modèles, and
- * then renaming the model.
+ * Adding a catalogued provider's configuration, its model and its key from org
+ * settings → Modèles, and then renaming the model.
  *
  * A pinned provider is the half of the model form that touches no network at
  * all: its endpoint is not the operator's to describe, and the models it offers
@@ -18,14 +18,14 @@
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
-import { selectOption } from "../../helpers/select.ts";
-import { openRowMenuItem } from "../../helpers/table.ts";
 import {
-  NEXT,
+  SAVE,
+  addConfiguration,
+  configRow,
+  connectDialog,
   listModels,
   modelRow,
-  openAddKeyDialog,
-  submitAddKey,
+  tickOnly,
 } from "../../helpers/models.ts";
 import type { APIResponse, Locator, Page } from "@playwright/test";
 
@@ -66,36 +66,27 @@ async function catalogEntry(apiClient: {
   return entry!;
 }
 
-/** Open the flow and answer step 1: the provider, and the key to open it with; lands on the model list. */
-async function addCatalogKey(page: Page): Promise<Locator> {
-  const dialog = await openAddKeyDialog(page);
-
-  await selectOption(page, "pk-provider", PROVIDER);
-  // A pinned provider answers for its own endpoint: no API type, no base URL.
-  await expect(dialog.locator("#pk-apiType")).toHaveCount(0);
-  await expect(dialog.locator("#pk-baseUrl")).toHaveCount(0);
-
-  await dialog.getByPlaceholder("sk-...").fill("sk-e2e");
-  await dialog.getByRole("button", { name: NEXT, exact: true }).click();
-  // The catalog is free to read, so the list is there as soon as the key is
-  // typed — nothing to detect, and every model starts ticked.
-  await expect(dialog.locator("#mdl-modelSearch")).toBeVisible();
-  return dialog;
+/** Add the configuration with exactly {@link MODEL_ID}, then its organization key. */
+async function addConfigWithOneModel(page: Page): Promise<void> {
+  const dialog = await addConfiguration(page, PROVIDER);
+  await tickOnly(dialog, MODEL_ID);
+  await dialog.getByRole("button", { name: SAVE, exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await connectKey(page);
 }
 
-/** Add the key with exactly {@link MODEL_ID} ticked, and wait for the dialog to close. */
-async function addKeyWithOneModel(page: Page): Promise<void> {
-  const dialog = await addCatalogKey(page);
-  await dialog.getByRole("checkbox", { name: "Tout sélectionner" }).click();
-  await modelRow(dialog, MODEL_ID).click();
-  await expect(modelRow(dialog, MODEL_ID)).toBeChecked();
-  await submitAddKey(dialog).click();
+/** The flow's last step: the organization's key, typed and saved. */
+async function connectKey(page: Page): Promise<void> {
+  const dialog = connectDialog(page);
+  await expect(dialog).toBeVisible();
+  await dialog.getByPlaceholder("sk-...").fill("sk-e2e");
+  await dialog.getByRole("button", { name: SAVE, exact: true }).click();
   await expect(dialog).toBeHidden();
 }
 
-/** From the key's row, open the model list, then the saved model's « Réglages avancés ». */
+/** From the configuration's row, open its model list, then the saved model's « Réglages avancés ». */
 async function openModelSettings(page: Page): Promise<Locator> {
-  await openRowMenuItem(page, PROVIDER, "Choisir les modèles");
+  await configRow(page, PROVIDER).getByRole("button", { name: "Choisir les modèles" }).click();
   await page.getByRole("button", { name: "Réglages avancés" }).click();
   const dialog = page.getByRole("dialog", { name: EDIT_MODEL });
   await expect(dialog).toBeVisible();
@@ -108,7 +99,8 @@ test.describe("Catalogued model — UI", () => {
     apiClient,
   }) => {
     const { label } = await catalogEntry(apiClient);
-    const dialog = await addCatalogKey(page);
+    // The catalog is free to read: the list is there with no key typed, nothing to detect.
+    const dialog = await addConfiguration(page, PROVIDER);
 
     await expect(modelRow(dialog, MODEL_ID)).toBeVisible();
     await expect(modelRow(dialog, OTHER_MODEL_ID)).toHaveCount(1);
@@ -117,18 +109,14 @@ test.describe("Catalogued model — UI", () => {
     await expect(modelRow(dialog, OTHER_MODEL_ID)).toHaveCount(0);
     await expect(modelRow(dialog, MODEL_ID)).toBeVisible();
 
-    // A new key starts with the whole catalog ticked: leave only the one.
+    // A new configuration starts with the recommended models ticked: leave only the one.
     await dialog.locator("#mdl-modelSearch").fill("");
-    await dialog.getByRole("checkbox", { name: "Tout sélectionner" }).click();
-    await expect(modelRow(dialog, MODEL_ID)).not.toBeChecked();
-    await modelRow(dialog, MODEL_ID).click();
-    await expect(modelRow(dialog, MODEL_ID)).toBeChecked();
-    await submitAddKey(dialog).click();
-
+    await tickOnly(dialog, MODEL_ID);
+    await dialog.getByRole("button", { name: SAVE, exact: true }).click();
     await expect(dialog).toBeHidden();
-    await expect(
-      page.getByRole("row").filter({ hasText: PROVIDER }).getByText(label),
-    ).toBeVisible();
+    await connectKey(page);
+
+    await expect(configRow(page, PROVIDER).getByText(label).first()).toBeVisible();
 
     const models = await listModels(apiClient);
     const created = models.find((m) => m.modelId === MODEL_ID);
@@ -149,14 +137,12 @@ test.describe("Catalogued model — UI", () => {
     apiClient,
   }) => {
     const { contextWindow } = await catalogEntry(apiClient);
-    await addKeyWithOneModel(page);
+    await addConfigWithOneModel(page);
 
     const dialog = await openModelSettings(page);
 
-    // The endpoint belongs to the saved row: the form offers no provider to change,
-    // and the key it runs on is the credential shown selected, not a secret asked for again.
+    // The endpoint and the key belong to the configuration: the form asks for neither.
     await expect(dialog.locator("#mdl-provider")).toHaveCount(0);
-    await expect(dialog.locator("#mdl-credential")).toContainText(PROVIDER);
     await expect(dialog.getByPlaceholder("sk-...")).toHaveCount(0);
     await expect(dialog.locator("#mdl-modelId")).toHaveValue(MODEL_ID);
     // The row's numbers ARE the catalog's, so it has overridden nothing: the
@@ -167,7 +153,7 @@ test.describe("Catalogued model — UI", () => {
     const saved = page.waitForRequest(
       (req) => req.method() === "PATCH" && /\/api\/models\/[^/]+$/.test(req.url()),
     );
-    await dialog.getByRole("button", { name: "Enregistrer" }).click();
+    await dialog.getByRole("button", { name: SAVE }).click();
 
     const body = JSON.parse((await saved).postData() ?? "{}") as Record<string, unknown>;
     expect(body.label).toBe(NEW_LABEL);
@@ -177,9 +163,7 @@ test.describe("Catalogued model — UI", () => {
     for (const field of CATALOG_DERIVABLE) expect(body[field] ?? null).toBeNull();
 
     await expect(dialog).toBeHidden();
-    await expect(
-      page.getByRole("row").filter({ hasText: PROVIDER }).getByText(NEW_LABEL),
-    ).toBeVisible();
+    await expect(configRow(page, PROVIDER).getByText(NEW_LABEL).first()).toBeVisible();
     const renamed = (await listModels(apiClient)).find((m) => m.modelId === MODEL_ID);
     expect(renamed).toMatchObject({ label: NEW_LABEL, contextWindow });
   });
@@ -189,7 +173,7 @@ test.describe("Catalogued model — UI", () => {
     apiClient,
   }) => {
     const { contextWindow } = await catalogEntry(apiClient);
-    await addKeyWithOneModel(page);
+    await addConfigWithOneModel(page);
 
     const dialog = await openModelSettings(page);
 
@@ -202,7 +186,7 @@ test.describe("Catalogued model — UI", () => {
     const saved = page.waitForRequest(
       (req) => req.method() === "PATCH" && /\/api\/models\/[^/]+$/.test(req.url()),
     );
-    await dialog.getByRole("button", { name: "Enregistrer" }).click();
+    await dialog.getByRole("button", { name: SAVE }).click();
 
     const body = JSON.parse((await saved).postData() ?? "{}") as Record<string, unknown>;
     // The one answer the operator gave — and nothing else. A number here would

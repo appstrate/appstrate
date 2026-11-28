@@ -26,6 +26,12 @@ describe("pairingRequestBody", () => {
     });
   });
 
+  it("joins the configuration it is opened from", () => {
+    expect(
+      pairingRequestBody({ providerId: "claude-code", ownerType: "org", configId: "cfg_1" }),
+    ).toEqual({ providerId: "claude-code", owner_type: "org", config_id: "cfg_1" });
+  });
+
   it("reconnects a credential in place, naming it and no owner", () => {
     const body = pairingRequestBody({ providerId: "claude-code", credentialId: "cred_1" });
     expect(body).toEqual({ providerId: "claude-code", credentialId: "cred_1" });
@@ -43,6 +49,8 @@ describe("pairingRequestBody", () => {
     pairingRequestBody({ providerId: "codex", ownerType: "user", credentialId: "cred_1" });
     // @ts-expect-error a creation states its owner
     pairingRequestBody({ providerId: "codex" });
+    // @ts-expect-error a reconnect joins no configuration
+    pairingRequestBody({ providerId: "codex", credentialId: "cred_1", configId: "cfg_1" });
   });
 });
 
@@ -83,16 +91,18 @@ describe("hasOrgSubscription", () => {
   const subscription = {
     authMode: "oauth2",
     providerId: "claude-code",
-    bindable: true,
+    owner_type: "org",
     needs_reconnection: false,
   } as const;
 
-  it("counts a healthy subscription the server lists as bindable", () => {
+  it("counts a healthy subscription of the organization", () => {
     expect(hasOrgSubscription([subscription], "claude-code")).toBe(true);
   });
 
-  it("ignores a subscription no organization model may bind, a member's own", () => {
-    expect(hasOrgSubscription([{ ...subscription, bindable: false }], "claude-code")).toBe(false);
+  it("ignores a member's own subscription", () => {
+    expect(hasOrgSubscription([{ ...subscription, owner_type: "user" }], "claude-code")).toBe(
+      false,
+    );
   });
 
   it("ignores a subscription that needs reconnecting, another provider's, and an API key", () => {

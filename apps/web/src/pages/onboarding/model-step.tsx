@@ -12,14 +12,11 @@ import {
   useOnboardingGuard,
   useOnboardingNav,
 } from "../../components/onboarding-layout";
-import { ProviderAddFlow } from "../../components/provider-add-flow";
+import { AddConfigFlow } from "../../components/model-configs/add-config-flow";
 import { OnboardingQuickConnect } from "../../components/onboarding-quick-connect";
 import { quickConnectProviders } from "../../lib/provider-registry-helpers";
 import { useModels } from "../../hooks/use-models";
-import {
-  useModelProviderCredentials,
-  useProvidersRegistry,
-} from "../../hooks/use-model-provider-credentials";
+import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import { getModelIcon } from "../../components/icons";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -36,7 +33,6 @@ export function OnboardingModelStep() {
   const { data: registry, isLoading: registryLoading } = useProvidersRegistry();
   // The list, the separator and the button's label all hang on these two reads.
   const settled = !modelsLoading && !registryLoading;
-  const { data: credentials } = useModelProviderCredentials();
 
   const goNext = () => nextRoute && navigate(nextRoute);
 
@@ -140,9 +136,7 @@ export function OnboardingModelStep() {
         )}
       </div>
 
-      {adding && (
-        <ProviderAddFlow credentials={credentials ?? []} onClose={() => setAdding(false)} />
-      )}
+      {adding && <AddConfigFlow onClose={() => setAdding(false)} />}
     </OnboardingLayout>
   );
 }

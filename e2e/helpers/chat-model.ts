@@ -77,15 +77,21 @@ export async function withLocalChatModel<T>(
   try {
     const address = provider.address();
     if (!address || typeof address === "string") throw new Error("Expected local provider port");
+    // A gateway's endpoint belongs to its configuration; the key joins it.
+    const config = await apiClient.post("/model-configs", {
+      provider_id: "openai-compatible",
+      base_url: `http://127.0.0.1:${address.port}/v1`,
+    });
+    expect(config.status()).toBe(201);
     const credential = await apiClient.post("/model-provider-credentials", {
       providerId: "openai-compatible",
       api_key: key,
-      base_url_override: `http://127.0.0.1:${address.port}/v1`,
+      config_id: (await config.json()).id,
     });
     expect(credential.status()).toBe(201);
     const model = await apiClient.post("/models", {
       modelId,
-      credentialId: (await credential.json()).id,
+      config_id: (await credential.json()).config_id,
       input,
       cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
     });

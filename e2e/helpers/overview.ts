@@ -35,7 +35,7 @@ export async function seedModel(client: {
   if (credential.status() !== 201) throw new Error(`credential: ${await credential.text()}`);
   const model = await client.post("/models", {
     modelId: "claude-sonnet-4-5-20250929",
-    credentialId: (await credential.json()).id,
+    config_id: (await credential.json()).config_id,
   });
   if (model.status() !== 201) throw new Error(`model: ${await model.text()}`);
 }
