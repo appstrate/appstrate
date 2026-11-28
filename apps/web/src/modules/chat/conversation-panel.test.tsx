@@ -3,8 +3,8 @@
 /**
  * The context panel. Closed, its reads wait (`active` false), and nothing it draws in the meantime
  * is an error or an empty list made up from a read that never ran. Open, each group of the summary
- * stands on its own read. The Tools tab lists the calls by turn, lookups behind a switch, and a
- * call's detail. The Info tab shows its sections open.
+ * stands on its own read. The Tools tab lists the calls by turn as step lines, lookups behind a
+ * switch, a call's detail open on its line. The Info tab shows its sections open.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -23,7 +23,7 @@ const { formatDuration } = await import("../../lib/format-duration.ts");
 const { ConversationSummary } = await import("./conversation-summary.tsx");
 const { ConversationInfo } = await import("./conversation-info.tsx");
 const { ConversationFiles, ConversationRuns } = await import("./conversation-sidebar.tsx");
-const { ConversationToolsList, ShownToolCall } = await import("./conversation-tools-tab.tsx");
+const { ConversationToolsList } = await import("./conversation-tools-tab.tsx");
 const { publishLiveConversation, withdrawLiveConversation } =
   await import("@appstrate/module-chat/live-conversation");
 const { ChatTransportProvider } = await import("@appstrate/module-chat/ui");
@@ -42,6 +42,16 @@ await i18n.loadNamespaces(["chat", "common"]);
 
 const spaces = [testSpace("spc_a", ["chat:read", "runs:read", "files:read"])];
 const noop = () => {};
+
+/** The Tools list's props past its conversation: switch off, every line folded. */
+const TOOLS_PROPS = {
+  showLookups: false,
+  onShowLookupsChange: noop,
+  openToolCallId: null,
+  missing: false,
+  onOpenChange: noop,
+  onShowInThread: noop,
+};
 
 /** The conversation as the server stores it, its assistant turns holding `turns`' parts. */
 function seedConversation(queryClient: QueryClient, turns: unknown[][]) {
@@ -120,7 +130,8 @@ function render(node: React.ReactElement, queryClient: QueryClient = memberSpace
   return renderInSpace(node, { queryClient, overview: false });
 }
 
-const rowsOf = (html: string) => html.split("min-h-14 w-full").length - 1;
+/** The Tools tab's step lines: one disclosure trigger each. */
+const rowsOf = (html: string) => html.split("aria-expanded=").length - 1;
 
 const GMAIL = { kind: "integration", id: "@acme/gmail", display_name: "Gmail" };
 
@@ -172,26 +183,14 @@ describe("the context panel, closed", () => {
     ["Infos", <ConversationInfo conversationId="chs_1" active={false} />],
     ["Runs", <ConversationRuns conversationId="chs_1" active={false} />],
     ["Fichiers", <ConversationFiles conversationId="chs_1" active={false} onSelect={noop} />],
+    ["Outils", <ConversationToolsList conversationId="chs_1" active={false} {...TOOLS_PROPS} />],
     [
-      "Outils",
+      "Outils, un appel ouvert",
       <ConversationToolsList
         conversationId="chs_1"
         active={false}
-        showLookups={false}
-        onShowLookupsChange={noop}
-        onSelect={noop}
-      />,
-    ],
-    [
-      "un appel",
-      <ShownToolCall
-        conversationId="chs_1"
-        toolCallId="call_1"
-        active={false}
-        missing={false}
-        from="list"
-        onBack={noop}
-        onShowInThread={noop}
+        {...TOOLS_PROPS}
+        openToolCallId="call_1"
       />,
     ],
   ];
@@ -203,7 +202,6 @@ describe("the context panel, closed", () => {
       expect(html).not.toContain(i18n.t("chat:context.runs.empty"));
       expect(html).not.toContain(i18n.t("chat:context.files.empty"));
       expect(html).not.toContain(i18n.t("chat:context.tools.empty"));
-      expect(html).not.toContain(i18n.t("chat:context.tools.gone"));
       // One `status` for the pane that waits.
       expect(html.split('role="status"').length - 1).toBe(1);
     });
@@ -219,18 +217,8 @@ describe("the context panel, closed", () => {
         <ConversationToolsList
           conversationId="chs_1"
           active={active}
-          showLookups={false}
-          onShowLookupsChange={noop}
-          onSelect={noop}
-        />
-        <ShownToolCall
-          conversationId="chs_1"
-          toolCallId="call_1"
-          active={active}
-          missing={false}
-          from="list"
-          onBack={noop}
-          onShowInThread={noop}
+          {...TOOLS_PROPS}
+          openToolCallId="call_1"
         />
       </ChatTransportProvider>
     );
@@ -443,7 +431,11 @@ describe("the Info tab, open", () => {
 describe("the Tools tab, open", () => {
   function tools(
     turns: unknown[][],
-    { showLookups = false }: { showLookups?: boolean } = {},
+    {
+      showLookups = false,
+      openToolCallId = null,
+      missing = false,
+    }: { showLookups?: boolean; openToolCallId?: string | null; missing?: boolean } = {},
   ): string {
     const queryClient = memberSpaceClient(spaces);
     seedConversation(queryClient, turns);
@@ -451,9 +443,10 @@ describe("the Tools tab, open", () => {
       <ConversationToolsList
         conversationId="chs_1"
         active
+        {...TOOLS_PROPS}
         showLookups={showLookups}
-        onShowLookupsChange={noop}
-        onSelect={noop}
+        openToolCallId={openToolCallId}
+        missing={missing}
       />,
       queryClient,
     );
@@ -470,6 +463,14 @@ describe("the Tools tab, open", () => {
     expect(rowsOf(shown)).toBe(3);
   });
 
+  it("lists the lookup it holds open with the switch off", () => {
+    const html = tools([[toolPart("call_a"), toolPart("call_l1", { lookup: true })]], {
+      openToolCallId: "call_l1",
+    });
+    expect(rowsOf(html)).toBe(2);
+    expect(html).toContain('aria-expanded="true"');
+  });
+
   it("lists the calls under their turn", () => {
     const html = tools([[toolPart("call_a")], [toolPart("call_b"), toolPart("call_c")]]);
     const first = html.indexOf(i18n.t("chat:context.tools.turn", { turn: 1 }));
@@ -478,6 +479,24 @@ describe("the Tools tab, open", () => {
     expect(second).toBeGreaterThan(first);
     expect(rowsOf(html.slice(first, second))).toBe(1);
     expect(rowsOf(html.slice(second))).toBe(2);
+  });
+
+  it("counts each turn's calls beside its heading as the thread's group does", () => {
+    const html = tools([
+      [
+        toolPart("call_a"),
+        toolPart("call_l1", { lookup: true }),
+        toolPart("call_l2", { lookup: true }),
+      ],
+      [toolPart("call_b")],
+    ]);
+    const second = html.indexOf(i18n.t("chat:context.tools.turn", { turn: 2 }));
+    const reads = i18n.t("chat:tool.reads.done", { count: 2 });
+    const actions = i18n.t("chat:tool.actions.done", { count: 1 });
+    // The hidden lookups count all the same: the heading says the whole turn.
+    expect(html.slice(0, second)).toContain(`${reads} · ${actions}`);
+    expect(html.slice(second)).toContain(actions);
+    expect(html.slice(second)).not.toContain(i18n.t("chat:tool.reads.done", { count: 1 }));
   });
 
   it("draws a call on an agent outside the chat host", () => {
@@ -493,9 +512,51 @@ describe("the Tools tab, open", () => {
     expect(html).toContain("Bot");
   });
 
-  it("says how long a call ran on its row", () => {
+  it("says how long a call ran on its line", () => {
     const html = tools([[toolPart("call_a", { durationMs: 1200 })]]);
     expect(html).toContain(formatDuration(1200));
+  });
+
+  it("folds every call's detail until one is open", () => {
+    const html = tools([[toolPart("call_a")]]);
+    expect(html).not.toContain('aria-expanded="true"');
+    expect(html).not.toContain(i18n.t("chat:tool.detail.input"));
+  });
+
+  it("holds a call opened from the summary open on its line: its detail, its way to the thread", () => {
+    const html = tools([[toolPart("call_a", { durationMs: 2500 }), toolPart("call_b")]], {
+      openToolCallId: "call_a",
+    });
+    expect(html.split('aria-expanded="true"').length - 1).toBe(1);
+    expect(html.split('aria-expanded="false"').length - 1).toBe(1);
+    expect(html).toContain(formatDuration(2500));
+    expect(html).toContain(i18n.t("chat:tool.detail.input"));
+    expect(html).toContain(i18n.t("chat:context.tools.showInThread"));
+    expect(html).not.toContain(i18n.t("chat:context.tools.notInThread"));
+  });
+
+  it("says under the open call that the last reveal found no card", () => {
+    const html = tools([[toolPart("call_a"), toolPart("call_b")]], {
+      openToolCallId: "call_a",
+      missing: true,
+    });
+    expect(html.split(i18n.t("chat:context.tools.notInThread")).length - 1).toBe(1);
+  });
+
+  it("says a failed call the thread's way: a cross named by its outcome, its message under the line", () => {
+    const turns = [[toolPart("call_x", { state: "output-error" })]];
+    const folded = tools(turns);
+    expect(folded).toContain("lucide-x");
+    // No word beside the cross: it is named for assistive tech, the message says the rest.
+    expect(folded).toContain(
+      `role="img" aria-label="${i18n.t("chat:context.tools.status.error")}"`,
+    );
+    expect(folded).not.toContain(`>${i18n.t("chat:context.tools.status.error")}<`);
+    expect(folded).toMatch(/<p class="text-muted-foreground[^"]*"[^>]*>boom</);
+    // The cross alone is red: the call's own icon keeps the line's muted tone.
+    expect(folded.split("text-destructive").length - 1).toBe(1);
+    const open = tools(turns, { openToolCallId: "call_x" });
+    expect(open).toContain(i18n.t("chat:tool.detail.error"));
   });
 
   it("reads the open chat's turn in flight: its call without outcome is running", () => {
@@ -511,16 +572,9 @@ describe("the Tools tab, open", () => {
     });
     try {
       // Nothing stored: the live conversation alone answers.
-      const html = render(
-        <ConversationToolsList
-          conversationId="chs_1"
-          active
-          showLookups={false}
-          onShowLookupsChange={noop}
-          onSelect={noop}
-        />,
-      );
-      expect(html).toContain(i18n.t("chat:context.tools.status.running"));
+      const html = render(<ConversationToolsList conversationId="chs_1" active {...TOOLS_PROPS} />);
+      // Its label shimmers, as the thread's running step does.
+      expect(html).toContain("shimmer-text");
       expect(html).not.toContain('role="status"');
     } finally {
       withdrawLiveConversation("chs_1");
@@ -557,52 +611,5 @@ describe("the Runs and Files tabs, open", () => {
     expect(html).toContain("#12");
     expect(html).toContain("rapport.pdf");
     expect(html).not.toContain(i18n.t("common:error.generic"));
-  });
-});
-
-describe("a call's detail", () => {
-  function detail(toolCallId: string, from: "list" | "summary" = "list"): string {
-    const queryClient = memberSpaceClient(spaces);
-    seedConversation(queryClient, [
-      [toolPart("call_a", { durationMs: 2500 }), toolPart("call_x", { state: "output-error" })],
-    ]);
-    return render(
-      <ShownToolCall
-        conversationId="chs_1"
-        toolCallId={toolCallId}
-        active
-        missing={false}
-        from={from}
-        onBack={noop}
-        onShowInThread={noop}
-      />,
-      queryClient,
-    );
-  }
-
-  it("shows its outcome, its turn, its duration and its input", () => {
-    const html = detail("call_a");
-    expect(html).toContain(i18n.t("chat:context.tools.status.success"));
-    expect(html).toContain(formatDuration(2500));
-    expect(html).toContain(i18n.t("chat:tool.detail.input"));
-    expect(html).toContain(i18n.t("chat:context.tools.showInThread"));
-    expect(html).toContain(i18n.t("chat:context.tools.backToList"));
-  });
-
-  it("says what a failed call says", () => {
-    const html = detail("call_x");
-    expect(html).toContain(i18n.t("chat:context.tools.status.error"));
-    expect(html).toContain(i18n.t("chat:tool.detail.error"));
-    expect(html).toContain("boom");
-  });
-
-  it("leads back to the summary it was opened from", () => {
-    expect(detail("call_a", "summary")).toContain(i18n.t("chat:context.backToSummary"));
-  });
-
-  it("says a call no longer in the conversation is gone, with its way back", () => {
-    const html = detail("call_gone");
-    expect(html).toContain(i18n.t("chat:context.tools.gone"));
-    expect(html).toContain(i18n.t("chat:context.tools.backToList"));
   });
 });

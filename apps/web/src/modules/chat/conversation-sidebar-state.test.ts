@@ -5,9 +5,9 @@ import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
   conversationSidebarReducer,
   heldLocalUrl,
+  openToolCallId,
   revealMissed,
   shownFile,
-  shownToolCallId,
   type ConversationSidebarState,
 } from "./conversation-sidebar-state";
 
@@ -79,7 +79,7 @@ describe("conversation sidebar state", () => {
     });
     const info = conversationSidebarReducer(shown, { type: "select-tab", tab: "info" });
     expect(info).toMatchObject({ expanded: true, activeTab: "info", selectedFile: null });
-    expect(shownToolCallId(info)).toBeNull();
+    expect(openToolCallId(info)).toBeNull();
   });
 
   it("clears the shown file on navigation but keeps the user's panel layout", () => {
@@ -166,63 +166,65 @@ describe("conversation sidebar state", () => {
 });
 
 describe("conversation sidebar tool calls", () => {
-  it("shows a tool call over the Tools tab and goes back to its list", () => {
-    const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+  it("opens a call on its line of the Tools tab and folds it back, the list staying", () => {
+    const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-tool-call",
       toolCallId: "call_1",
     });
-    expect(shown).toMatchObject({ expanded: true, activeTab: "tools" });
-    expect(shownToolCallId(shown)).toBe("call_1");
+    expect(open).toMatchObject({ expanded: true, activeTab: "tools" });
+    expect(openToolCallId(open)).toBe("call_1");
 
-    const back = conversationSidebarReducer(shown, { type: "close-tool-call" });
-    expect(back).toMatchObject({ expanded: true, activeTab: "tools" });
-    expect(shownToolCallId(back)).toBeNull();
+    const folded = conversationSidebarReducer(open, { type: "close-tool-call" });
+    expect(folded).toMatchObject({ expanded: true, activeTab: "tools" });
+    expect(openToolCallId(folded)).toBeNull();
   });
 
-  it("goes back to the summary from a call opened there, and to the list from one opened there", () => {
-    const fromSummary = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+  it("opens a call from the summary expanded in the Tools list, one call at a time", () => {
+    const onSummary = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "select-tab",
+      tab: "summary",
+    });
+    const fromSummary = conversationSidebarReducer(onSummary, {
       type: "show-tool-call",
       toolCallId: "call_1",
-      from: "summary",
     });
-    expect(shownToolCallId(fromSummary)).toBe("call_1");
-    const back = conversationSidebarReducer(fromSummary, { type: "close-tool-call" });
-    expect(back).toMatchObject({ expanded: true, activeTab: "summary" });
-    expect(shownToolCallId(back)).toBeNull();
+    expect(fromSummary).toMatchObject({ expanded: true, activeTab: "tools" });
+    expect(openToolCallId(fromSummary)).toBe("call_1");
 
-    // A miss reopens on the call: its way back still leads to the summary.
-    const missed = conversationSidebarReducer(fromSummary, {
-      type: "revealed",
-      toolCallId: "call_1",
-      found: false,
-    });
-    expect(conversationSidebarReducer(missed, { type: "close-tool-call" }).activeTab).toBe(
-      "summary",
-    );
-
-    const fromList = conversationSidebarReducer(back, {
-      type: "show-tool-call",
-      toolCallId: "call_2",
-      from: "list",
-    });
-    expect(conversationSidebarReducer(fromList, { type: "close-tool-call" }).activeTab).toBe(
+    // Folding it stays on the list it opened on.
+    expect(conversationSidebarReducer(fromSummary, { type: "close-tool-call" }).activeTab).toBe(
       "tools",
     );
+
+    // Opening another folds the first.
+    const other = conversationSidebarReducer(fromSummary, {
+      type: "show-tool-call",
+      toolCallId: "call_2",
+    });
+    expect(openToolCallId(other)).toBe("call_2");
   });
 
-  it("keeps the lookups' switch through a call's detail, a tab choice and a reopening", () => {
+  it("holds the open call only while the Tools tab shows", () => {
+    const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-tool-call",
+      toolCallId: "call_1",
+    });
+    expect(openToolCallId({ ...open, activeTab: "summary" })).toBeNull();
+  });
+
+  it("keeps the lookups' switch through an open call, a tab choice and a reopening", () => {
     const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-lookups",
       show: true,
     });
     expect(shown.showLookups).toBe(true);
-    const detail = conversationSidebarReducer(shown, {
+    const open = conversationSidebarReducer(shown, {
       type: "show-tool-call",
       toolCallId: "call_1",
     });
-    const back = conversationSidebarReducer(detail, { type: "close-tool-call" });
-    expect(back.showLookups).toBe(true);
-    const elsewhere = conversationSidebarReducer(back, { type: "select-tab", tab: "summary" });
+    const folded = conversationSidebarReducer(open, { type: "close-tool-call" });
+    expect(folded.showLookups).toBe(true);
+    const elsewhere = conversationSidebarReducer(folded, { type: "select-tab", tab: "summary" });
     const reopened = conversationSidebarReducer(
       conversationSidebarReducer(elsewhere, { type: "toggle" }),
       { type: "toggle" },
@@ -233,29 +235,29 @@ describe("conversation sidebar tool calls", () => {
     ).toBe(false);
   });
 
-  it("drops the shown call on a tab choice, a reopening and a conversation change", () => {
-    const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+  it("folds the open call on a tab choice, a reopening and a conversation change", () => {
+    const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-tool-call",
       toolCallId: "call_1",
     });
-    const tab = conversationSidebarReducer(shown, { type: "select-tab", tab: "tools" });
-    expect(shownToolCallId(tab)).toBeNull();
+    const tab = conversationSidebarReducer(open, { type: "select-tab", tab: "tools" });
+    expect(openToolCallId(tab)).toBeNull();
 
-    const closed = conversationSidebarReducer(shown, { type: "toggle" });
-    expect(shownToolCallId(closed)).toBe("call_1");
-    expect(shownToolCallId(conversationSidebarReducer(closed, { type: "toggle" }))).toBeNull();
+    const closed = conversationSidebarReducer(open, { type: "toggle" });
+    expect(openToolCallId(closed)).toBe("call_1");
+    expect(openToolCallId(conversationSidebarReducer(closed, { type: "toggle" }))).toBeNull();
 
-    const changed = conversationSidebarReducer(shown, { type: "conversation-change" });
-    expect(shownToolCallId(changed)).toBeNull();
+    const changed = conversationSidebarReducer(open, { type: "conversation-change" });
+    expect(openToolCallId(changed)).toBeNull();
   });
 
   it("leaves the panel as it is when the thread holds the call's card", () => {
-    const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+    const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-tool-call",
       toolCallId: "call_1",
     });
     // The phone's sheet closed to show the card, and the card was there.
-    const closed = conversationSidebarReducer(shown, { type: "toggle" });
+    const closed = conversationSidebarReducer(open, { type: "toggle" });
     const found = conversationSidebarReducer(closed, {
       type: "revealed",
       toolCallId: "call_1",
@@ -265,22 +267,22 @@ describe("conversation sidebar tool calls", () => {
     expect(revealMissed(found)).toBe(false);
   });
 
-  it("opens again on the call, saying so, when the thread does not hold its card", () => {
-    const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+  it("opens again on the Tools list, the call open and saying so, when the thread does not hold its card", () => {
+    const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-tool-call",
       toolCallId: "call_1",
     });
-    const closed = conversationSidebarReducer(shown, { type: "toggle" });
+    const closed = conversationSidebarReducer(open, { type: "toggle" });
     const missed = conversationSidebarReducer(closed, {
       type: "revealed",
       toolCallId: "call_1",
       found: false,
     });
     expect(missed).toMatchObject({ expanded: true, activeTab: "tools" });
-    expect(shownToolCallId(missed)).toBe("call_1");
+    expect(openToolCallId(missed)).toBe("call_1");
     expect(revealMissed(missed)).toBe(true);
 
-    // Another call or the list no longer carry the miss.
+    // Another call, or the call folded, no longer carry the miss.
     const other = conversationSidebarReducer(missed, {
       type: "show-tool-call",
       toolCallId: "call_2",

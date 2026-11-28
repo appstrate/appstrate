@@ -53,17 +53,26 @@ const LEADING_MARKS = /^(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)+/;
 const LINK = /!?\[([^\]]*)\]\([^)]*\)/g;
 const EMPHASIS = /\*\*|__|~~|[*`]|(?<![\w])_|_(?![\w])/g;
 
+/** A line of reasoning as words, without its markdown; "" when it holds none. */
+function wordsOf(line: string): string {
+  return line.trim().replace(LEADING_MARKS, "").replace(LINK, "$1").replace(EMPHASIS, "").trim();
+}
+
 /** The first line of a reasoning text that reads as words, without its markdown; "" when none. */
 export function reasoningTitle(text: string): string {
   // Lazily, line by line: a long reasoning is not split past its title.
   for (const [line] of text.matchAll(/^.*$/gm)) {
-    const title = line
-      .trim()
-      .replace(LEADING_MARKS, "")
-      .replace(LINK, "$1")
-      .replace(EMPHASIS, "")
-      .trim();
+    const title = wordsOf(line);
     if (title) return title;
   }
   return "";
+}
+
+/** A reasoning text holds a second line of words: more than its title says. */
+export function reasoningSaysMore(text: string): boolean {
+  let lines = 0;
+  for (const [line] of text.matchAll(/^.*$/gm)) {
+    if (wordsOf(line) && ++lines > 1) return true;
+  }
+  return false;
 }

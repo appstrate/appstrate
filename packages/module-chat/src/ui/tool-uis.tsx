@@ -19,14 +19,9 @@
 
 import * as React from "react";
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
-import { ArrowUpRightIcon, BracesIcon, PlayIcon, XIcon } from "lucide-react";
+import { ArrowUpRightIcon, BracesIcon, PlayIcon } from "lucide-react";
 import { formatDuration } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@appstrate/ui/components/collapsible";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { useChatHost } from "./runtime-context.ts";
 import { ToolCallDetail } from "./tool-call-detail.tsx";
@@ -34,15 +29,8 @@ import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
 import { CallSpace } from "./call-space.tsx";
-import {
-  ACTIVITY_CONTENT_CLASS,
-  ACTIVITY_DETAIL_CLASS,
-  ActivityChevron,
-  ActivityId,
-  ActivityLabel,
-  ActivityLine,
-  ActivityTrigger,
-} from "./activity-line.tsx";
+import { ActivityId, ActivityLine } from "./activity-line.tsx";
+import { CallStep } from "./call-step.tsx";
 import { useActivityMode } from "./activity-mode.ts";
 import {
   extractAgentLabel,
@@ -82,21 +70,6 @@ import {
  * card (button + auto-resume on completion — see oauth-connect-card).
  */
 const INITIATE_CONNECT_OP = "initiateIntegrationConnect";
-
-/**
- * The small red cross of a failed call, the only red its row keeps. Given a `label` it is an image
- * named by it; without one it is decorative, beside a text that already says the failure.
- */
-export function FailedGlyph({ label }: { label?: string }) {
-  return (
-    <span
-      {...(label ? { role: "img", "aria-label": label } : { "aria-hidden": true })}
-      className="text-destructive shrink-0"
-    >
-      <XIcon className="size-3.5" />
-    </span>
-  );
-}
 
 /** A card's props: its part, and what its stored part says (`useStoredResults`). */
 export type ToolCardProps = ToolCallMessagePartProps<Record<string, unknown>, unknown> & {
@@ -202,13 +175,14 @@ type InvokeOperationArgs = { operation_id?: string; path_params?: { packageId?: 
 /**
  * A tool call as a step of its activity group: named as the context panel names it (`showCall`),
  * with what a search found beside it. Its label shimmers while it runs; its detail opens under
- * it, already open when it is its group's one step.
+ * it. The group's one step has no line of its own (`bare`): the group's header names it, and
+ * opening the group opens on what follows the label and the detail.
  */
 export function ToolStep(props: ToolCardProps) {
   const { t, lang } = useChatHost();
   const anchor = useRevealAnchor(props.toolCallId);
   const solo = useActivityMode()?.solo ?? false;
-  const [readerOpen, setReaderOpen] = React.useState<boolean | null>(null);
+  const [readerOpen, setReaderOpen] = React.useState(false);
   const presentation = props.stored?.presentation;
   const phase = deriveToolPhase(props);
   const { Icon, subject, label, idText } = showCall({ ...props, presentation }, t);
@@ -218,59 +192,56 @@ export function ToolStep(props: ToolCardProps) {
   const status = httpStatusOf(unwrapped);
   const durationMs = props.stored?.durationMs;
   const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
+  const spaceId = cardSpaceOf(props);
 
   return (
-    <Collapsible
+    <CallStep
       {...anchor}
-      open={readerOpen ?? solo}
+      bare={solo}
+      open={readerOpen}
       onOpenChange={setReaderOpen}
       className={`rounded-sm ${REVEAL_RING_CLASS}`}
+      lead={subject ? <SubjectGlyph subject={subject} /> : <Icon aria-hidden />}
+      label={label}
+      idText={idText}
+      running={phase === "running"}
+      trailing={
+        presentation?.call === "search" || spaceId || durationMs !== undefined ? (
+          <>
+            {presentation?.call === "search" ? (
+              <span className="flex shrink-0 items-center gap-1.5 text-xs">
+                <SubjectStack subjects={presentation.items} />
+                {t("tool.search.count", { count: presentation.count })}
+              </span>
+            ) : null}
+            <CallSpace spaceId={spaceId} />
+            {durationMs !== undefined ? (
+              <span className="shrink-0 text-xs tabular-nums">
+                {formatDuration(durationMs, lang)}
+              </span>
+            ) : null}
+          </>
+        ) : undefined
+      }
+      failure={
+        phase === "error"
+          ? { label: status === undefined ? t("tool.failed") : t("tool.failedHttp", { status }) }
+          : undefined
+      }
+      errorText={errorMsg}
     >
-      {/* What lands with the result (duration, cross) follows the trigger on a line of fixed
-          height: its arrival moves nothing. */}
-      <ActivityLine lead={subject ? <SubjectGlyph subject={subject} /> : <Icon aria-hidden />}>
-        <CollapsibleTrigger render={<ActivityTrigger />}>
-          <ActivityLabel active={phase === "running"}>{label}</ActivityLabel>
-          {idText ? <ActivityId>{idText}</ActivityId> : null}
-          <ActivityChevron />
-        </CollapsibleTrigger>
-        {presentation?.call === "search" ? (
-          <span className="flex shrink-0 items-center gap-1.5 text-xs">
-            <SubjectStack subjects={presentation.items} />
-            {t("tool.search.count", { count: presentation.count })}
-          </span>
-        ) : null}
-        <CallSpace spaceId={cardSpaceOf(props)} />
-        {durationMs !== undefined ? (
-          <span className="shrink-0 text-xs tabular-nums">{formatDuration(durationMs, lang)}</span>
-        ) : null}
-        {phase === "error" ? (
-          <FailedGlyph
-            label={status === undefined ? t("tool.failed") : t("tool.failedHttp", { status })}
-          />
-        ) : null}
-      </ActivityLine>
-      {errorMsg ? (
-        <p className="text-muted-foreground pb-1.5 pl-6 text-xs break-words">{errorMsg}</p>
-      ) : null}
-      <CollapsibleContent className={ACTIVITY_CONTENT_CLASS}>
-        <div className={ACTIVITY_DETAIL_CLASS}>
-          <div className="bg-card rounded-lg border p-3">
-            <ToolCallDetail
-              t={t}
-              input={props.args}
-              output={unwrapped}
-              metadata={definedEntries({
-                tool_call_id: props.toolCallId,
-                is_error: props.isError,
-                http_status: status,
-                duration_ms: durationMs,
-              })}
-            />
-          </div>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+      <ToolCallDetail
+        t={t}
+        input={props.args}
+        output={unwrapped}
+        metadata={definedEntries({
+          tool_call_id: props.toolCallId,
+          is_error: props.isError,
+          http_status: status,
+          duration_ms: durationMs,
+        })}
+      />
+    </CallStep>
   );
 }
 

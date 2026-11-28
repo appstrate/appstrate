@@ -15,6 +15,7 @@ import { deriveToolPhase, extractErrorMessage, unwrapToolResult } from "./tool-r
 import { callOutcome, callPresentation, presentationMethod } from "./tool-presentation.ts";
 import { callSpaceOf } from "./conversation-scope.ts";
 import { extractRunId } from "./run-events.ts";
+import type { ChatTranslate } from "./runtime-context.ts";
 
 /** `running` only while the call's turn runs: a call left without an outcome after it failed. */
 export type ConversationToolStatus = "running" | "success" | "error" | "denied";
@@ -96,6 +97,22 @@ export function callsAt<P extends GroupablePart>(
     const part = parts[i];
     return part?.type === "tool-call" && part.toolCallId ? [part] : [];
   });
+}
+
+/**
+ * Tool calls counted as the thread's group header and the context panel's turn heading say them:
+ * « 3 consultations · 1 action », a zero part left out.
+ */
+export function activityCounts(
+  t: ChatTranslate,
+  { lookups, actions }: { lookups: number; actions: number },
+): string {
+  return [
+    lookups > 0 ? t("tool.reads.done", { count: lookups }) : null,
+    actions > 0 ? t("tool.actions.done", { count: actions }) : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
 }
 
 /** The engine stamped the part's call a lookup: counted as a consultation, the others as actions. */

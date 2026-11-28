@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useId, type ReactNode } from "react";
-import { ArrowLeftIcon, MessageSquareIcon, WrenchIcon } from "lucide-react";
+import { useEffect, useId, useRef } from "react";
+import { MessageSquareIcon, WrenchIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { ConversationToolCall } from "@appstrate/module-chat/conversation-tools";
+import {
+  activityCounts,
+  type ConversationToolCall,
+} from "@appstrate/module-chat/conversation-tools";
 import { subjectIconSrc, type ShownCall } from "@appstrate/module-chat/tool-presentation";
 import { ToolCallDetail } from "@appstrate/module-chat/tool-call-detail";
+import { CallStep } from "@appstrate/module-chat/call-step";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
@@ -16,115 +20,131 @@ import { Waiting } from "../../components/loading-skeletons";
 import { SkeletonLine } from "../../components/skeleton-line";
 import { RowSpaceName } from "../../components/run-row";
 import { formatDuration } from "../../lib/format-duration";
-import type { SidebarOrigin } from "./conversation-sidebar-state";
 import {
   TOOL_STATUS_LABEL,
-  TOOL_STATUS_TONE,
   actsInSeveralSpaces,
   useConversationTools,
   useToolLabel,
 } from "./use-conversation-tools";
 import { useChatTranslate } from "./use-chat-runtime";
 
-/** A text button of the panel: 40 px on touch, its own size under a mouse. */
-const PANEL_BUTTON = "desktop-pointer:h-9 h-10";
-
 /** The line holding the lookups' switch: the whole line is its label, a 40 px target. */
 const SWITCH_LINE_CLASS = "flex min-h-10 items-center justify-between gap-3 border-b px-4";
 
 const TURN_HEAD_CLASS =
-  "text-muted-foreground bg-muted/40 border-b px-4 py-1.5 text-xs font-medium";
+  "text-muted-foreground bg-muted/40 flex items-center gap-2 border-b px-4 py-1.5 text-xs font-medium";
 
-/** One call's row: its glyph tile beside two lines. */
-const CALL_ROW_CLASS = "flex min-h-14 w-full items-center gap-3 px-4 py-2.5";
-
-const GLYPH_CLASS = "flex size-8 shrink-0 items-center justify-center rounded-lg";
+/** A turn's step lines, under its heading. */
+const TURN_CALLS_CLASS = "border-b px-4 py-1 last:border-b-0";
 
 /**
  * The call's icon: the logo of the integration it acted on, as its card draws it, else its icon
- * (`showCall`) in its status' tone. An agent's tile is not drawn: it reads the chat host, which
- * the panel is rendered outside of.
+ * (`showCall`) in its line's muted tone. An agent's tile is not drawn: it reads the chat host,
+ * which the panel is rendered outside of.
  */
-export function ToolCallIcon({ call, shown }: { call: ConversationToolCall; shown: ShownCall }) {
+export function ToolCallIcon({ shown }: { shown: ShownCall }) {
   if (shown.subject?.kind === "integration") {
     return <IntegrationIcon src={subjectIconSrc(shown.subject)} className="size-4 rounded-sm" />;
   }
   const { Icon } = shown;
-  return <Icon aria-hidden="true" className={cn("size-4", TOOL_STATUS_TONE[call.status])} />;
+  return <Icon aria-hidden="true" className="size-4" />;
 }
 
-/** The call's lead glyph: its icon on a tile. */
-function ToolGlyph({ call, shown }: { call: ConversationToolCall; shown: ShownCall }) {
-  return (
-    <span className={cn("bg-muted", GLYPH_CLASS)}>
-      <ToolCallIcon call={call} shown={shown} />
-    </span>
-  );
-}
-
-/** How long the call ran, in the interface's language, as a run's duration reads; absent while it runs. */
-function callDuration(call: ConversationToolCall): string | null {
-  return call.durationMs === undefined ? null : formatDuration(call.durationMs);
-}
-
-/** One call: its tool, what it acted on, its outcome when it is not a plain success, how long it ran. */
-function ToolCallRow({
+/**
+ * One call as the thread draws it, a step line (`CallStep`): its detail opens under it, led by
+ * "See in the thread" (`missing`: the last ask found no card). Once open it scrolls into view, so
+ * a call opened from the summary or by a reveal that missed is in sight; one the reader opened
+ * already is, and does not move.
+ */
+function ToolCallStep({
   call,
   shown,
   spanning,
-  onSelect,
+  open,
+  missing,
+  onOpenChange,
+  onShowInThread,
 }: {
   call: ConversationToolCall;
   shown: ShownCall;
-  /** The calls acted in several spaces: the row names its own. */
+  /** The calls acted in several spaces: the line names its own. */
   spanning: boolean;
-  onSelect: () => void;
+  open: boolean;
+  missing: boolean;
+  onOpenChange: (open: boolean) => void;
+  onShowInThread: () => void;
 }) {
   const { t } = useTranslation("chat");
-  const { label, idText } = shown;
-  const status =
-    call.status === "success"
-      ? call.lookup
-        ? t("context.tools.lookup")
-        : null
-      : t(TOOL_STATUS_LABEL[call.status]);
-  const detail = [idText, status, callDuration(call)].filter(Boolean).join(" · ");
+  const chatT = useChatTranslate();
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (open) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [open]);
   return (
-    <button
-      type="button"
-      className={cn(CALL_ROW_CLASS, "hover:bg-muted/50 text-left transition-colors")}
-      onClick={onSelect}
+    <CallStep
+      ref={ref}
+      lead={<ToolCallIcon shown={shown} />}
+      label={shown.label}
+      idText={shown.idText}
+      running={call.status === "running"}
+      trailing={
+        <>
+          {spanning ? <RowSpaceName spaceId={call.spaceId} /> : null}
+          {call.durationMs === undefined ? null : (
+            <span className="shrink-0 text-xs tabular-nums">{formatDuration(call.durationMs)}</span>
+          )}
+        </>
+      }
+      failure={
+        call.status === "error" || call.status === "denied"
+          ? { label: t(TOOL_STATUS_LABEL[call.status]) }
+          : undefined
+      }
+      errorText={call.error}
+      open={open}
+      onOpenChange={onOpenChange}
     >
-      <ToolGlyph call={call} shown={shown} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">{label}</span>
-        {detail && (
-          <span className="text-muted-foreground block truncate text-xs tabular-nums">
-            {detail}
-          </span>
-        )}
-      </span>
-      {spanning && <RowSpaceName spaceId={call.spaceId} />}
-    </button>
+      <div className="mb-3 flex flex-col gap-1">
+        <Button
+          variant="outline"
+          size="sm"
+          className="desktop-pointer:h-9 h-10 self-start"
+          onClick={onShowInThread}
+        >
+          <MessageSquareIcon />
+          {t("context.tools.showInThread")}
+        </Button>
+        {missing ? (
+          <p className="text-muted-foreground text-xs">{t("context.tools.notInThread")}</p>
+        ) : null}
+      </div>
+      <ToolCallDetail
+        t={chatT}
+        input={call.input}
+        output={call.output}
+        error={call.error}
+        metadata={{
+          tool_call_id: call.toolCallId,
+          ...(call.durationMs === undefined ? {} : { duration_ms: call.durationMs }),
+        }}
+      />
+    </CallStep>
   );
 }
 
-/** A call's row on its way: its tile and its two lines. */
-function CallRowSkeleton({ width }: { width: string }) {
+/** A step line on its way: its icon's square and its label's bar. */
+function CallLineSkeleton({ width }: { width: string }) {
   return (
-    <div className={CALL_ROW_CLASS}>
-      <Skeleton className={GLYPH_CLASS} />
-      <span className="min-w-0 flex-1">
-        <SkeletonLine className={cn("text-sm font-medium", width)} />
-        <SkeletonLine className="w-20 text-xs" />
-      </span>
+    <div className="desktop-pointer:h-8 flex h-10 items-center gap-2">
+      <Skeleton className="size-4 shrink-0 rounded-sm" />
+      <SkeletonLine className={cn("text-sm", width)} />
     </div>
   );
 }
 
 /**
- * The Tools tab while its calls are read: a turn's heading, its rows. No lookups' switch: the list
- * draws it only when the calls hold a lookup.
+ * The Tools tab while its calls are read: a turn's heading, its step lines. No lookups' switch:
+ * the list draws it only when the calls hold a lookup.
  */
 function ToolsListSkeleton() {
   return (
@@ -132,30 +152,42 @@ function ToolsListSkeleton() {
       <div className={TURN_HEAD_CLASS}>
         <SkeletonLine className="w-12" />
       </div>
-      <div className="divide-y">
+      <div className={TURN_CALLS_CLASS}>
         {["w-32", "w-40", "w-28"].map((width) => (
-          <CallRowSkeleton key={width} width={width} />
+          <CallLineSkeleton key={width} width={width} />
         ))}
       </div>
     </Waiting>
   );
 }
 
-/** The conversation's calls by turn, its lookups behind a switch the panel keeps. */
+/**
+ * The conversation's calls by turn, each heading counting its turn's calls as the thread's group
+ * does, its lookups behind a switch the panel keeps. A call is a step line holding its detail;
+ * the one the panel holds open (`openToolCallId`) is listed even when it is a hidden lookup.
+ */
 export function ConversationToolsList({
   conversationId,
   active,
   showLookups,
   onShowLookupsChange,
-  onSelect,
+  openToolCallId,
+  missing,
+  onOpenChange,
+  onShowInThread,
 }: {
   conversationId: string | null;
   active: boolean;
   showLookups: boolean;
   onShowLookupsChange: (show: boolean) => void;
-  onSelect: (call: ConversationToolCall) => void;
+  openToolCallId: string | null;
+  /** "See in the thread" found no card for the open call. */
+  missing: boolean;
+  onOpenChange: (call: ConversationToolCall, open: boolean) => void;
+  onShowInThread: (call: ConversationToolCall) => void;
 }) {
   const { t } = useTranslation("chat");
+  const chatT = useChatTranslate();
   const switchId = useId();
   const { tools, error } = useConversationTools(conversationId, active);
   const show = useToolLabel();
@@ -173,7 +205,9 @@ export function ConversationToolsList({
   }
 
   const lookups = tools.calls.filter((call) => call.lookup).length;
-  const shown = showLookups ? tools.calls : tools.calls.filter((call) => !call.lookup);
+  const shown = showLookups
+    ? tools.calls
+    : tools.calls.filter((call) => !call.lookup || call.toolCallId === openToolCallId);
   const spanning = actsInSeveralSpaces(shown);
   const turns = [...new Set(shown.map((call) => call.turn))];
 
@@ -194,168 +228,43 @@ export function ConversationToolsList({
       {shown.length === 0 ? (
         <EmptyState message={t("context.tools.noAction")} icon={WrenchIcon} compact />
       ) : (
-        turns.map((turn) => (
-          <section key={turn} aria-labelledby={`${switchId}-turn-${turn}`}>
-            <h3 id={`${switchId}-turn-${turn}`} className={TURN_HEAD_CLASS}>
-              {t("context.tools.turn", { turn })}
-            </h3>
-            <div className="divide-y border-b last:border-b-0">
-              {shown
-                .filter((call) => call.turn === turn)
-                .map((call) => (
-                  <ToolCallRow
-                    key={call.toolCallId}
-                    call={call}
-                    shown={show(call)}
-                    spanning={spanning}
-                    onSelect={() => onSelect(call)}
-                  />
-                ))}
-            </div>
-          </section>
-        ))
+        turns.map((turn) => {
+          const turnCalls = tools.calls.filter((call) => call.turn === turn);
+          const turnLookups = turnCalls.filter((call) => call.lookup).length;
+          return (
+            <section key={turn} aria-labelledby={`${switchId}-turn-${turn}`}>
+              <h3 id={`${switchId}-turn-${turn}`} className={TURN_HEAD_CLASS}>
+                <span className="shrink-0">{t("context.tools.turn", { turn })}</span>
+                <span className="ml-auto min-w-0 truncate font-normal">
+                  {activityCounts(chatT, {
+                    lookups: turnLookups,
+                    actions: turnCalls.length - turnLookups,
+                  })}
+                </span>
+              </h3>
+              <div className={TURN_CALLS_CLASS}>
+                {shown
+                  .filter((call) => call.turn === turn)
+                  .map((call) => {
+                    const open = call.toolCallId === openToolCallId;
+                    return (
+                      <ToolCallStep
+                        key={call.toolCallId}
+                        call={call}
+                        shown={show(call)}
+                        spanning={spanning}
+                        open={open}
+                        missing={open && missing}
+                        onOpenChange={(next) => onOpenChange(call, next)}
+                        onShowInThread={() => onShowInThread(call)}
+                      />
+                    );
+                  })}
+              </div>
+            </section>
+          );
+        })
       )}
-    </div>
-  );
-}
-
-/** The detail's way back, to where the call was opened from. */
-function BackButton({
-  from,
-  onBack,
-}: {
-  from: Exclude<SidebarOrigin, "thread">;
-  onBack: () => void;
-}) {
-  const { t } = useTranslation("chat");
-  return (
-    <Button variant="ghost" size="sm" className={cn("self-start", PANEL_BUTTON)} onClick={onBack}>
-      <ArrowLeftIcon />
-      {from === "summary" ? t("context.backToSummary") : t("context.tools.backToList")}
-    </Button>
-  );
-}
-
-/** A call's detail on its way: its way back, its heading, "See in the thread", one section. */
-function ShownToolCallSkeleton({ back }: { back: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-4 p-3">
-      {back}
-      <Waiting className="flex flex-col gap-4">
-        <div className="flex items-start gap-3 px-1">
-          <Skeleton className={GLYPH_CLASS} />
-          <div className="min-w-0 flex-1">
-            <SkeletonLine className="w-40 text-sm font-medium" />
-            <SkeletonLine className="mt-1 w-28 text-xs" />
-          </div>
-        </div>
-        <div className="px-1">
-          <Skeleton className={cn("w-36 rounded-md", PANEL_BUTTON)} />
-        </div>
-        <div className="flex flex-col gap-1">
-          <SkeletonLine className="w-16 text-[0.65rem] font-semibold" />
-          <Skeleton className="h-24 w-full rounded-lg" />
-        </div>
-      </Waiting>
-    </div>
-  );
-}
-
-/**
- * One call over the Tools list: its outcome, input and output. "See in the thread" asks the panel
- * to bring its card into view (`onShowInThread`); `missing` says the last ask found no card. Its
- * way back leads where it was opened from (`from`).
- */
-export function ShownToolCall({
-  conversationId,
-  toolCallId,
-  active,
-  missing,
-  from,
-  onBack,
-  onShowInThread,
-}: {
-  conversationId: string | null;
-  toolCallId: string;
-  active: boolean;
-  missing: boolean;
-  from: Exclude<SidebarOrigin, "thread">;
-  onBack: () => void;
-  onShowInThread: (call: ConversationToolCall) => void;
-}) {
-  const { t } = useTranslation("chat");
-  const chatT = useChatTranslate();
-  const { tools, error } = useConversationTools(conversationId, active);
-  const show = useToolLabel();
-  const call = tools?.calls.find((candidate) => candidate.toolCallId === toolCallId);
-
-  const back = <BackButton from={from} onBack={onBack} />;
-  if (error) {
-    return (
-      <div className="flex flex-col gap-2 p-3">
-        {back}
-        <ErrorState error={error} compact />
-      </div>
-    );
-  }
-  if (tools === undefined) return <ShownToolCallSkeleton back={back} />;
-  if (!call) {
-    return (
-      <div className="flex flex-col gap-2 p-3">
-        {back}
-        <EmptyState message={t("context.tools.gone")} icon={WrenchIcon} compact />
-      </div>
-    );
-  }
-
-  const shown = show(call);
-  const { label, idText } = shown;
-  const duration = callDuration(call);
-  return (
-    <div className="flex flex-col gap-4 p-3">
-      {back}
-      <div className="flex items-start gap-3 px-1">
-        <ToolGlyph call={call} shown={shown} />
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-medium break-words">{label}</h3>
-          {idText ? (
-            <code className="text-muted-foreground block text-xs break-all">{idText}</code>
-          ) : null}
-          <p className={cn("mt-1 text-xs tabular-nums", TOOL_STATUS_TONE[call.status])}>
-            {[
-              t(TOOL_STATUS_LABEL[call.status]),
-              t("context.tools.turn", { turn: call.turn }),
-              duration,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        </div>
-      </div>
-      <div className="flex flex-col gap-1 px-1">
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn("self-start", PANEL_BUTTON)}
-          onClick={() => onShowInThread(call)}
-        >
-          <MessageSquareIcon />
-          {t("context.tools.showInThread")}
-        </Button>
-        {missing ? (
-          <p className="text-muted-foreground text-xs">{t("context.tools.notInThread")}</p>
-        ) : null}
-      </div>
-      <ToolCallDetail
-        t={chatT}
-        input={call.input}
-        output={call.output}
-        error={call.error}
-        metadata={{
-          tool_call_id: call.toolCallId,
-          ...(call.durationMs === undefined ? {} : { duration_ms: call.durationMs }),
-        }}
-      />
     </div>
   );
 }

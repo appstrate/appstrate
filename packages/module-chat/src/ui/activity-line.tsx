@@ -8,7 +8,7 @@
  */
 
 import * as React from "react";
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, XIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 
 /**
@@ -22,6 +22,23 @@ export const ACTIVITY_BLOCK_CLASS = "isolate my-1";
 const LINE_CLASS =
   "text-muted-foreground desktop-pointer:h-8 flex h-10 min-w-0 items-center gap-2 text-sm";
 
+/** A fixed slot: the spark, a glyph or an icon swap in it without moving the label. */
+export function ActivityLead({
+  className,
+  children,
+}: {
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      className={cn("flex size-4 shrink-0 items-center justify-center [&_svg]:size-4", className)}
+    >
+      {children}
+    </span>
+  );
+}
+
 export function ActivityLine({
   lead,
   className,
@@ -30,10 +47,7 @@ export function ActivityLine({
 }: React.HTMLAttributes<HTMLDivElement> & { lead: React.ReactNode }) {
   return (
     <div {...rest} className={cn(LINE_CLASS, className)}>
-      {/* A fixed slot: the spark, a glyph or an icon swap in it without moving the label. */}
-      <span className="flex size-4 shrink-0 items-center justify-center [&_svg]:size-4">
-        {lead}
-      </span>
+      <ActivityLead>{lead}</ActivityLead>
       {children}
     </div>
   );
@@ -67,6 +81,21 @@ export function ActivityChevron() {
   );
 }
 
+/**
+ * The small red cross of a failed call, the only red its row keeps. Given a `label` it is an image
+ * named by it; without one it is decorative, beside a text that already says the failure.
+ */
+export function FailedGlyph({ label }: { label?: string }) {
+  return (
+    <span
+      {...(label ? { role: "img", "aria-label": label } : { "aria-hidden": true })}
+      className="text-destructive shrink-0"
+    >
+      <XIcon className="size-3.5" />
+    </span>
+  );
+}
+
 /** A label, shimmering while what it names is in progress (`.shimmer-text`, still under reduced motion). */
 export function ActivityLabel({
   active = false,
@@ -82,9 +111,12 @@ export function ActivityLabel({
   );
 }
 
-/** What a line names precisely (an operation, a path, an id), in monospace after its label. */
+/**
+ * What a line names precisely (an operation, a path, an id), in monospace after its label. In a
+ * narrow line it gives way first (`shrink-100`): it truncates before its label does.
+ */
 export function ActivityId({ children }: { children: React.ReactNode }) {
-  return <code className="min-w-0 truncate text-xs">{children}</code>;
+  return <code className="min-w-0 shrink-100 truncate text-xs">{children}</code>;
 }
 
 /** The steps under a header: a rule under its lead slot, their own slots under its label. */

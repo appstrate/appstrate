@@ -7,7 +7,13 @@
 
 import { describe, expect, it } from "bun:test";
 import { formatDuration } from "@appstrate/core/format";
-import { reasoningTitle, showStep, turnClock, turnStartOf } from "../src/ui/turn-status.ts";
+import {
+  reasoningSaysMore,
+  reasoningTitle,
+  showStep,
+  turnClock,
+  turnStartOf,
+} from "../src/ui/turn-status.ts";
 import { testHost } from "./test-host.ts";
 
 const { t } = testHost();
@@ -69,5 +75,23 @@ describe("reasoningTitle", () => {
     expect(reasoningTitle("**\nReal line")).toBe("Real line");
     expect(reasoningTitle("  \n---\n")).toBe("---");
     expect(reasoningTitle(" \n ")).toBe("");
+  });
+});
+
+describe("reasoningSaysMore", () => {
+  it("is false for a text that is its title alone", () => {
+    expect(reasoningSaysMore("Le run est terminé, je résume.")).toBe(false);
+  });
+
+  it("is false for a title among blank lines", () => {
+    expect(reasoningSaysMore("\n  \nLe run est terminé.\n\n  \n")).toBe(false);
+  });
+
+  it("is false for a title whose other lines are markdown marks only", () => {
+    expect(reasoningSaysMore("**Le run est terminé.**\n**\n> \n``")).toBe(false);
+  });
+
+  it("is true once a second line holds words", () => {
+    expect(reasoningSaysMore("**Le run est terminé.**\n\nJe résume les sorties.")).toBe(true);
   });
 });

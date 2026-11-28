@@ -4,13 +4,14 @@
  * What the assistant did between two texts, on one line: its reasoning and its tool calls, one
  * step or twenty. The line is the same from the first step on, so nothing changes shape when a
  * second one joins (`activityGroupOf`). Opened, it is a rail of steps, each one click from its
- * own detail. A call the context panel reveals (`reveal-tool-call.ts`) opens its group: a folded
- * one does not mount its steps.
+ * own detail; a group of one step opens straight on that step's content, the line naming it. A
+ * call the context panel reveals (`reveal-tool-call.ts`) opens its group: a folded one does not
+ * mount its steps.
  *
  * Ending the running message, the line is the turn's status: the spark (the status region, beside
  * the trigger), the step in progress, the turn's clock. Settled, it names its one call, or counts
  * them (« 3 consultations · 1 action »), failures apart; a group of reasoning alone reads its
- * first line.
+ * first line, and is a plain line, nothing to open, when its text says nothing more.
  *
  * `children` is drawn twice: as steps under the rail, and as what must stay in view whatever the
  * fold (`activity-mode.ts`, "breakout": a connect card, a launched run, a created package's link).
@@ -27,11 +28,15 @@ import {
 } from "@appstrate/ui/components/collapsible";
 import { useChatHost, type ChatTranslate } from "./runtime-context.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
-import { callsAt, isStampedLookup, type GroupablePart } from "./conversation-tools.ts";
-import { FailedGlyph } from "./tool-uis.tsx";
+import {
+  activityCounts,
+  callsAt,
+  isStampedLookup,
+  type GroupablePart,
+} from "./conversation-tools.ts";
 import { ThinkingStatus } from "./reasoning.tsx";
 import { useTurnClock } from "./use-turn-clock.ts";
-import { reasoningTitle, showStep } from "./turn-status.ts";
+import { reasoningSaysMore, reasoningTitle, showStep } from "./turn-status.ts";
 import { showCall } from "./tool-presentation.ts";
 import { deriveToolPhase } from "./tool-result.ts";
 import type { StoredResults } from "./use-call-presentation.ts";
@@ -46,6 +51,7 @@ import {
   ActivityLine,
   ActivityRail,
   ActivityTrigger,
+  FailedGlyph,
 } from "./activity-line.tsx";
 import { ActivityModeContext, type ActivityMode } from "./activity-mode.ts";
 
@@ -71,6 +77,13 @@ function reasoningRunsAt(parts: readonly GroupablePart[], indices: readonly numb
     inRun = reasoning;
   }
   return runs;
+}
+
+/** The group's reasoning text, its parts joined. */
+function reasoningTextAt(parts: readonly StepPart[], indices: readonly number[]): string {
+  return indices
+    .map((i) => (parts[i]?.type === "reasoning" ? (parts[i]?.text ?? "") : ""))
+    .join("\n");
 }
 
 /** The first line of the group's reasoning, its title when it holds no call. */
@@ -135,6 +148,13 @@ export function ActivityGroup({
       ? reasoningTitleAt(s.message.parts as readonly StepPart[], indices)
       : "",
   );
+  // A settled group of reasoning alone that says nothing past its title has nothing to open.
+  const plain = useAuiState(
+    (s) =>
+      calls === 0 &&
+      !running &&
+      !reasoningSaysMore(reasoningTextAt(s.message.parts as readonly StepPart[], indices)),
+  );
   const subjects = React.useMemo(
     () =>
       callIds.flatMap((id): PresentationSubject[] => {
@@ -168,10 +188,6 @@ export function ActivityGroup({
   const solo = calls + reasoningRuns === 1;
   const stepMode = React.useMemo((): ActivityMode => ({ mode: "step", solo }), [solo]);
   const actions = calls - lookups;
-  const counts = [
-    lookups > 0 ? t("tool.reads.done", { count: lookups }) : null,
-    actions > 0 ? t("tool.actions.done", { count: actions }) : null,
-  ].filter((part): part is string => part !== null);
 
   const lead = running ? (
     <ThinkingStatus />
@@ -188,6 +204,19 @@ export function ActivityGroup({
   ) : (
     <ListTreeIcon aria-hidden />
   );
+
+  if (plain) {
+    // The disclosure's line without its trigger: the trigger adds no padding, the label stays put.
+    return (
+      <div className={ACTIVITY_BLOCK_CLASS}>
+        <ActivityLine lead={lead}>
+          <ActivityLabel>{title || t("reasoning.done")}</ActivityLabel>
+        </ActivityLine>
+      </div>
+    );
+  }
+
+  const steps = <ActivityModeContext value={stepMode}>{children}</ActivityModeContext>;
 
   return (
     <Collapsible
@@ -211,7 +240,7 @@ export function ActivityGroup({
           ) : calls === 0 ? (
             <ActivityLabel>{title || t("reasoning.done")}</ActivityLabel>
           ) : (
-            <span className="shrink-0">{counts.join(" · ")}</span>
+            <span className="shrink-0">{activityCounts(t, { lookups, actions })}</span>
           )}
           {failed > 0 ? (
             <>
@@ -225,9 +254,8 @@ export function ActivityGroup({
         </CollapsibleTrigger>
       </ActivityLine>
       <CollapsibleContent className={ACTIVITY_CONTENT_CLASS}>
-        <ActivityRail>
-          <ActivityModeContext value={stepMode}>{children}</ActivityModeContext>
-        </ActivityRail>
+        {/* One step: the header names it, so its content opens straight under the header. */}
+        {solo ? steps : <ActivityRail>{steps}</ActivityRail>}
       </CollapsibleContent>
       <ActivityModeContext value={BREAKOUT_MODE}>{children}</ActivityModeContext>
     </Collapsible>

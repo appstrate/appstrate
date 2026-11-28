@@ -9,6 +9,7 @@ import type {
   ConversationToolCall,
   ConversationTools,
 } from "@appstrate/module-chat/conversation-tools";
+import { ActivityId, ActivityLead, FailedGlyph } from "@appstrate/module-chat/activity-line";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { MimeIcon } from "@appstrate/ui/components/mime-icon";
@@ -34,12 +35,7 @@ import {
   useConversationIntegrations,
   useConversationRuns,
 } from "./use-conversation-lists";
-import {
-  TOOL_STATUS_LABEL,
-  TOOL_STATUS_TONE,
-  useConversationTools,
-  useToolLabel,
-} from "./use-conversation-tools";
+import { TOOL_STATUS_LABEL, useConversationTools, useToolLabel } from "./use-conversation-tools";
 import { useConversationTabs } from "./use-conversation-tabs";
 
 /** The latest lines each group of the activity draws before its "See all". */
@@ -103,7 +99,7 @@ function SummarySkeleton() {
  * One item of the activity on one line: its icon, its name, what it acted on, the space it is in
  * (a list spanning spaces), then its outcome. Laid in its line's own flex row.
  */
-function ActivityLine({
+function SummaryLine({
   icon,
   label,
   detail,
@@ -112,20 +108,18 @@ function ActivityLine({
 }: {
   icon: ReactNode;
   label: string;
-  detail?: string;
+  detail?: ReactNode;
   space?: ReactNode;
   trailing?: ReactNode;
 }) {
   return (
     <>
-      <span className="text-muted-foreground flex size-4 shrink-0 items-center justify-center [&_svg]:size-4">
-        {icon}
-      </span>
+      <ActivityLead className="text-muted-foreground">{icon}</ActivityLead>
       {/* The detail takes only the room left (basis 0): the name truncates once it has none, never over the outcome. */}
       <span className="flex min-w-0 flex-1 items-baseline gap-2">
         <span className="min-w-0 truncate font-medium">{label}</span>
         {detail ? (
-          <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">{detail}</span>
+          <span className="text-muted-foreground flex min-w-0 flex-1">{detail}</span>
         ) : null}
       </span>
       {space}
@@ -152,10 +146,10 @@ function RunLine({
 }) {
   return (
     <RunLink run={run} className={LINE_CLASS}>
-      <ActivityLine
+      <SummaryLine
         icon={<ActivityIcon />}
         label={agentName}
-        detail={`#${run.runNumber}`}
+        detail={<span className="min-w-0 truncate text-xs">{`#${run.runNumber}`}</span>}
         space={spanning ? <RowSpaceName spaceId={run.spaceId} /> : null}
         trailing={<RunStatusBadge status={run.status} unread={run.unread} compact />}
       />
@@ -163,7 +157,7 @@ function RunLine({
   );
 }
 
-/** A call on one line, opening its detail in the Tools tab; its outcome when it is not a success. */
+/** A call on one line, opening it on its line of the Tools tab; its outcome when it is not a success. */
 function CallLine({
   call,
   dispatch,
@@ -177,18 +171,19 @@ function CallLine({
     <button
       type="button"
       className={BUTTON_LINE_CLASS}
-      onClick={() =>
-        dispatch({ type: "show-tool-call", toolCallId: call.toolCallId, from: "summary" })
-      }
+      onClick={() => dispatch({ type: "show-tool-call", toolCallId: call.toolCallId })}
     >
-      <ActivityLine
-        icon={<ToolCallIcon call={call} shown={shown} />}
+      <SummaryLine
+        icon={<ToolCallIcon shown={shown} />}
         label={shown.label}
-        detail={shown.idText}
+        detail={shown.idText ? <ActivityId>{shown.idText}</ActivityId> : undefined}
         trailing={
           call.status === "success" ? null : (
-            <span className={cn("text-xs", TOOL_STATUS_TONE[call.status])}>
-              {t(TOOL_STATUS_LABEL[call.status])}
+            <span className="flex items-center gap-1">
+              {call.status === "error" ? <FailedGlyph /> : null}
+              <span className="text-muted-foreground text-xs">
+                {t(TOOL_STATUS_LABEL[call.status])}
+              </span>
             </span>
           )
         }
@@ -217,7 +212,7 @@ function FileLine({
         })
       }
     >
-      <ActivityLine
+      <SummaryLine
         icon={<MimeIcon mime={file.mime} name={file.name} />}
         label={file.name}
         trailing={
@@ -234,7 +229,7 @@ function FileLine({
  * A group of the activity, a section named by its heading: its name, its latest lines, and, when
  * it holds more (`onSeeAll`), "See all" to its tab, with `total` when the server counts it.
  */
-function ActivityGroup({
+function SummaryGroup({
   title,
   aside,
   total,
@@ -339,12 +334,12 @@ function SummaryActivity({
         <div className="flex flex-col gap-1 py-2">
           {runsRead === "pending" ? <GroupSkeleton /> : null}
           {runsRead === "error" ? (
-            <ActivityGroup title={t("common:nav.runs")}>
+            <SummaryGroup title={t("common:nav.runs")}>
               <ErrorState error={runs.query.error} compact />
-            </ActivityGroup>
+            </SummaryGroup>
           ) : null}
           {runRows.length > 0 ? (
-            <ActivityGroup
+            <SummaryGroup
               title={t("common:nav.runs")}
               total={runs.total}
               onSeeAll={runs.total > SUMMARY_ROWS ? seeAll("runs") : undefined}
@@ -357,16 +352,16 @@ function SummaryActivity({
                   spanning={runs.spanning}
                 />
               ))}
-            </ActivityGroup>
+            </SummaryGroup>
           ) : null}
           {filesRead === "pending" ? <GroupSkeleton /> : null}
           {filesRead === "error" ? (
-            <ActivityGroup title={t("common:nav.files")}>
+            <SummaryGroup title={t("common:nav.files")}>
               <ErrorState error={files.query.error} compact />
-            </ActivityGroup>
+            </SummaryGroup>
           ) : null}
           {fileRows.length > 0 ? (
-            <ActivityGroup
+            <SummaryGroup
               title={t("common:nav.files")}
               onSeeAll={
                 files.hasMore || files.files.length > SUMMARY_ROWS ? seeAll("files") : undefined
@@ -375,11 +370,11 @@ function SummaryActivity({
               {fileRows.map((file) => (
                 <FileLine key={file.id} file={file} dispatch={dispatch} />
               ))}
-            </ActivityGroup>
+            </SummaryGroup>
           ) : null}
           {reachedRead === "pending" && callRows.length === 0 ? <GroupSkeleton /> : null}
           {showsIntegrations ? (
-            <ActivityGroup
+            <SummaryGroup
               title={t("context.summary.integrations")}
               aside={
                 reachedRead === "pending" ? (
@@ -409,7 +404,7 @@ function SummaryActivity({
               {callRows.map((call) => (
                 <CallLine key={call.toolCallId} call={call} dispatch={dispatch} />
               ))}
-            </ActivityGroup>
+            </SummaryGroup>
           ) : null}
         </div>
       )}

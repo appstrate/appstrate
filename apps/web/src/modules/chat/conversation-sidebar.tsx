@@ -27,11 +27,11 @@ import { formatDateField } from "../../lib/format-date";
 import { readShown, useConversationFiles, useConversationRuns } from "./use-conversation-lists";
 import { ConversationInfo } from "./conversation-info";
 import { ConversationSummary } from "./conversation-summary";
-import { ConversationToolsList, ShownToolCall } from "./conversation-tools-tab";
+import { ConversationToolsList } from "./conversation-tools-tab";
 import {
+  openToolCallId,
   revealMissed,
   shownFile,
-  shownToolCallId,
   type ConversationSidebarAction,
   type ConversationSidebarState,
   type ConversationSidebarTab,
@@ -291,7 +291,6 @@ function ConversationContext({
   // Read from the state, not the readable tabs: a file the thread opens shows
   // even for a caller whose Files tab is not drawn.
   const previewedFile = shownFile(state);
-  const shownCall = shownToolCallId(state);
 
   if (previewedFile) {
     return (
@@ -363,28 +362,22 @@ function ConversationContext({
               />
             ) : null}
             {id === "tools" ? (
-              shownCall ? (
-                <ShownToolCall
-                  key={shownCall}
-                  conversationId={conversationId}
-                  toolCallId={shownCall}
-                  active={active}
-                  missing={revealMissed(state)}
-                  from={state.toolCallFrom}
-                  onBack={() => dispatch({ type: "close-tool-call" })}
-                  onShowInThread={onShowInThread}
-                />
-              ) : (
-                <ConversationToolsList
-                  conversationId={conversationId}
-                  active={active}
-                  showLookups={state.showLookups}
-                  onShowLookupsChange={(show) => dispatch({ type: "show-lookups", show })}
-                  onSelect={(call) =>
-                    dispatch({ type: "show-tool-call", toolCallId: call.toolCallId, from: "list" })
-                  }
-                />
-              )
+              <ConversationToolsList
+                conversationId={conversationId}
+                active={active}
+                showLookups={state.showLookups}
+                onShowLookupsChange={(show) => dispatch({ type: "show-lookups", show })}
+                openToolCallId={openToolCallId(state)}
+                missing={revealMissed(state)}
+                onOpenChange={(call, open) =>
+                  dispatch(
+                    open
+                      ? { type: "show-tool-call", toolCallId: call.toolCallId }
+                      : { type: "close-tool-call" },
+                  )
+                }
+                onShowInThread={onShowInThread}
+              />
             ) : null}
             {id === "summary" ? (
               <ConversationSummary

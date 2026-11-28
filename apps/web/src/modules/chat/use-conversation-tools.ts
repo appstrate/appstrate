@@ -38,20 +38,9 @@ export function actsInSeveralSpaces(calls: readonly ConversationToolCall[]): boo
   return new Set(calls.map((call) => call.spaceId).filter(Boolean)).size > 1;
 }
 
-export const TOOL_STATUS_LABEL: Record<ConversationToolStatus, string> = {
+/** A call's outcome in words, said only when it is not a plain success. */
+export const TOOL_STATUS_LABEL: Record<Exclude<ConversationToolStatus, "success">, string> = {
   running: "context.tools.status.running",
-  success: "context.tools.status.success",
   error: "context.tools.status.error",
   denied: "context.tools.status.denied",
-};
-
-/**
- * A call's outcome in its tone, as text: the panel colours a word or a glyph (the thread's card
- * marks a failure with a small red cross only, `tool-uis.tsx`, and has no `denied` phase).
- */
-export const TOOL_STATUS_TONE: Record<ConversationToolStatus, string> = {
-  running: "text-muted-foreground",
-  success: "text-muted-foreground",
-  error: "text-destructive",
-  denied: "text-warning",
 };

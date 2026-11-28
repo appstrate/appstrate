@@ -18,8 +18,8 @@ export interface LocalSidebarFile {
 export type SidebarFile = StoredSidebarFile | LocalSidebarFile;
 
 /**
- * Where a detail shown over its tab (a file, a tool call) was opened from, so closing it goes back
- * there: the thread (closing the detail closes the panel), its tab's list, or the summary.
+ * Where a file shown over the Files tab was opened from, so closing it goes back there: the thread
+ * (closing the file closes the panel), the tab's list, or the summary.
  */
 export type SidebarOrigin = "thread" | "list" | "summary";
 
@@ -29,10 +29,9 @@ export interface ConversationSidebarState {
   /** The file shown over the Files tab, null when the tab shows its list. */
   selectedFile: SidebarFile | null;
   fileFrom: SidebarOrigin;
-  /** The tool call shown over the Tools tab, null when the tab shows its list. */
+  /** The call the Tools list holds open, null when every line is folded. */
   selectedToolCallId: string | null;
-  toolCallFrom: Exclude<SidebarOrigin, "thread">;
-  /** "See in the thread" looked for the shown call's card and did not find it. */
+  /** "See in the thread" looked for the open call's card and did not find it. */
   revealMissed: boolean;
   /** The Tools tab lists the lookups beside the actions. */
   showLookups: boolean;
@@ -43,7 +42,7 @@ export type ConversationSidebarAction =
   | { type: "select-tab"; tab: ConversationSidebarTab }
   | { type: "show-file"; file: SidebarFile; from?: SidebarOrigin }
   | { type: "close-file" }
-  | { type: "show-tool-call"; toolCallId: string; from?: Exclude<SidebarOrigin, "thread"> }
+  | { type: "show-tool-call"; toolCallId: string }
   | { type: "close-tool-call" }
   | { type: "revealed"; toolCallId: string; found: boolean }
   | { type: "show-lookups"; show: boolean }
@@ -55,22 +54,22 @@ export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
   selectedFile: null,
   fileFrom: "thread",
   selectedToolCallId: null,
-  toolCallFrom: "list",
   revealMissed: false,
   showLookups: false,
 };
 
 /**
- * State behind the chat's context panel. A file shows in the Files tab over its list, a tool call
- * in the Tools tab over its list; closing either goes back where it was opened from
- * (`SidebarOrigin`). Choosing a tab shows that tab's own content.
+ * State behind the chat's context panel. A file shows in the Files tab over its list; closing it
+ * goes back where it was opened from (`SidebarOrigin`). A tool call opens on its line of the Tools
+ * list, one at a time, from the list itself, the summary, or a reveal that missed; folding it
+ * leaves the list as it is. Choosing a tab shows that tab's own content.
  *
  * Opening the panel always shows its tabs: a file is shown by a "show-file",
  * never restored. Collapsing keeps it, so it stays drawn while the panel slides
  * out, and the next opening drops it.
  *
  * "See in the thread" may close the panel first (the phone's sheet covers the thread): when the
- * card is not there, the panel opens again on the call, which says so.
+ * card is not there, the panel opens again on the Tools list, the call open, saying so.
  */
 export function conversationSidebarReducer(
   state: ConversationSidebarState,
@@ -117,16 +116,10 @@ export function conversationSidebarReducer(
         expanded: true,
         activeTab: "tools",
         selectedToolCallId: action.toolCallId,
-        toolCallFrom: action.from ?? "list",
         revealMissed: false,
       };
     case "close-tool-call":
-      return {
-        ...state,
-        activeTab: state.toolCallFrom === "summary" ? "summary" : "tools",
-        selectedToolCallId: null,
-        revealMissed: false,
-      };
+      return { ...state, selectedToolCallId: null, revealMissed: false };
     case "revealed":
       return action.found
         ? { ...state, revealMissed: false }
@@ -149,14 +142,14 @@ export function shownFile(state: ConversationSidebarState): SidebarFile | null {
   return state.activeTab === "files" ? state.selectedFile : null;
 }
 
-/** The tool call the panel shows over the Tools tab, null while it shows a tab's content. */
-export function shownToolCallId(state: ConversationSidebarState): string | null {
+/** The call the Tools list holds open, null while another tab shows or every line is folded. */
+export function openToolCallId(state: ConversationSidebarState): string | null {
   return state.activeTab === "tools" ? state.selectedToolCallId : null;
 }
 
-/** Whether "See in the thread" missed the card of the call the panel shows. */
+/** Whether "See in the thread" missed the card of the call the Tools list holds open. */
 export function revealMissed(state: ConversationSidebarState): boolean {
-  return shownToolCallId(state) !== null && state.revealMissed;
+  return openToolCallId(state) !== null && state.revealMissed;
 }
 
 /**

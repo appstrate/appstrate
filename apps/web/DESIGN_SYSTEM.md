@@ -925,7 +925,11 @@ one call or counts them (« 3 consultations · 1 action »), failures apart; rea
 first line. A running turn holds one spark: on that line, or on the loading line
 (« Réflexion en cours… ») of the same shape before any step exists. Opened, the group is a rail
 of steps (`ToolStep` in `tool-uis.tsx`, `ReasoningStep`), each a line of the same height whose
-detail (a call's raw input / output, a reasoning's text) opens under it: no dialog. A failed call
+detail (a call's raw input / output, a reasoning's text) opens under it: no dialog. A group of one
+step draws no second line: its header names the step, so opening it shows the step's content
+directly under the header's label (a reasoning's text; a call's count, space, duration and cross
+on one muted line, then its detail). A settled reasoning that says nothing past its first line is
+a plain line: the same lead and label, no chevron, nothing to open. A failed call
 is softened, never hidden: no red border or lead icon, its message stays under its step in muted
 text, and a small red cross (`FailedGlyph`, named « Échec · HTTP 404 » for assistive tech) ends
 the step; the same cross, decorative, precedes the muted failed count on the group's line; only
@@ -950,8 +954,14 @@ models and tokens, the reader's access and the details as titled sections, alway
 unsaved conversation, the access alone. Tools lists the
 calls as the open chat holds them, the turn in flight included, else as stored
 (`@appstrate/module-chat/conversation-tools`, `live-conversation`), named as their cards
-name them (`tool-presentation.ts`), lookups behind a switch the panel keeps; a call's
-detail is the card's (`tool-call-detail`). A file or a call opened from the Summary leads
+name them (`tool-presentation.ts`), lookups behind a switch the panel keeps. Each call is
+drawn with the thread's own step line (`CallStep`, `@appstrate/module-chat/call-step`, the
+component `ToolStep` adapts): the bare 16px icon in the line's muted tone, label, id, chevron,
+a failure said by the small red cross named by its outcome and its muted message under the line,
+and the call's detail
+(`tool-call-detail`) opening inline under it, led by « Voir dans le fil ». Each turn's
+heading counts its calls with the group line's own words (`activityCounts`); a call opened
+from the Summary opens on its line of Tools, in view. A file opened from the Summary leads
 back to it. Its height follows its content (the conversation's whole height for a previewed file); its
 width is one for every tab (400 px by default, from 300 px to 60% of the chat area), remembered
 per browser (`appstrate-chat-context-width`), so switching tabs never changes it. Both widths, the sidebar's
