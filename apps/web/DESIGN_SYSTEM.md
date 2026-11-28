@@ -924,7 +924,12 @@ the step; the same cross, decorative, precedes the muted failed count on the gro
 what ends the turn stays red. The HTTP status is no badge: it is in the call's detail. What needs
 the reader stays in view under the line whatever the fold: a connect card, a launched run, a
 created package's link, a read skill's chip. A run started from the chat is a
-`ChatRunProgressCard`, the model picker `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
+`ChatRunProgressCard`, drawn with the run line the context panel shares (`RunLine`,
+`@appstrate/module-chat/run-line`): the agent's 32px tile leads (a neutral bot tile for an inline
+run), the run's state on a 16px badge at its corner; line 1 is the name, then the agent's
+integration logos, its space, its duration and the run page's link; line 2 the paced live log,
+then the outcome, or a failed run's own message, muted. The colour lives in the tile alone, and
+both lines keep their height whatever arrives. The model picker is `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
 The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that
 canvas and floats beside the thread: its cards and its previewed file are `Card` /

@@ -10,7 +10,7 @@ import { BotIcon } from "lucide-react";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { cn } from "@appstrate/ui/cn";
 import type { ChatAgentCommand } from "../commands.ts";
-import { useChatCommands } from "./use-chat-commands.ts";
+import { useKnownAgent, type AgentRef } from "./use-chat-commands.ts";
 
 /** What an agent's tile reads of it. */
 export type AgentAppearance = Pick<ChatAgentCommand, "packageId" | "icon" | "color">;
@@ -37,19 +37,30 @@ export function AgentGlyph({
   );
 }
 
-/** The glyph of an agent the commands query knows (its key is shared with the `/` menu). */
+/** The glyph of an agent the commands query knows. */
 export function KnownAgentGlyph({
   agentRef,
   label,
   className,
 }: {
-  agentRef: { promptName: string } | { packageId: string };
+  agentRef: AgentRef;
   label: string;
   className?: string;
 }) {
-  const { data } = useChatCommands(true);
-  const agent = data?.agents.find((a) =>
-    "packageId" in agentRef ? a.packageId === agentRef.packageId : a.name === agentRef.promptName,
-  );
-  return <AgentGlyph agent={agent} label={label} className={className} />;
+  return <AgentGlyph agent={useKnownAgent(agentRef)} label={label} className={className} />;
+}
+
+/**
+ * An agent's tile at a run's lead (32px): its identity tile, a neutral bot tile of the same size
+ * for an inline run or an agent the data does not hold.
+ */
+export function AgentTile({ agent, label }: { agent: AgentAppearance | undefined; label: string }) {
+  if (!agent) {
+    return (
+      <span className="bg-muted text-muted-foreground flex size-8 items-center justify-center rounded-lg">
+        <BotIcon className="size-4" aria-hidden="true" />
+      </span>
+    );
+  }
+  return <AgentGlyph agent={agent} label={label} className="size-8 rounded-lg" />;
 }

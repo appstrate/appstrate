@@ -6,19 +6,21 @@
  * is even known — so the card keeps a constant two-line height with no
  * transient placeholder swap.
  *
- * Line 1: the package name. Line 2: the run's own log-tool output (the
+ * Drawn as a `RunLine`: the agent's tile leads (a neutral bot tile for an inline run or an agent
+ * the `/chat/commands` data does not hold), with the run's state on a badge at its corner.
+ * Line 1: the package name, then the agent's integration logos. Line 2: the run's own log-tool output (the
  * `event='log'` rows the platform writes for the agent's explicit `log` tool
  * of `@appstrate/platform` — NOT runtime lifecycle or tool-call breadcrumbs),
  * streamed live over the run's SSE channel (`useRunLogStream`) and paced one
  * at a time (`useLogTicker`, ≥500ms each) with a fade/slide animation so a
  * burst reads as a sequence rather than a flash.
  * Before the first log the line reads `run.starting` (still starting), then
- * `run.running` once running; once terminal it settles on the final outcome. A
- * leading status glyph (centered across both lines) shows the run state; the
- * live execution time and a link to the run's page sit on the right. Clicking
+ * `run.running` once running; once terminal it settles on the final outcome (a failed
+ * or timed-out run's own error message when it carries one). The live execution time and a
+ * link to the run's page sit on the right. Clicking
  * the card opens the raw input/output detail modal (`details`).
  *
- * Before the tool returns a `run_…` id there is no SSE yet: status glyph falls back to the tool-call phase.
+ * Before the tool returns a `run_…` id there is no SSE yet: the badge falls back to the tool-call phase.
  *
  * A launch failure (tool errored before a run id exists) renders INSIDE this
  * card — error glyph + `errorText` on line 2 — never as a swap to another
@@ -44,6 +46,7 @@ import {
   isTerminalStatus,
   mergeRunFiles,
   publishedFilesFromLogs,
+  runFailureMessage,
   runStatusLineKey,
   visibleLogEntries,
   type ChatRunFile,
@@ -51,6 +54,11 @@ import {
 import type { RunStatus } from "@appstrate/core/run-status";
 import { FileAttachment } from "./file-attachment.tsx";
 import type { ToolPhase } from "./tool-result.ts";
+import { AgentTile } from "./agent-glyph.tsx";
+import { useKnownAgent } from "./use-chat-commands.ts";
+import { RunLine } from "./run-line.tsx";
+import { SubjectStack } from "./subject-glyph.tsx";
+import type { ChatAgentCommand } from "../commands.ts";
 
 /**
  * Row of file attachments surfaced under a run card — the same unified
@@ -71,8 +79,33 @@ function FileChips({ files, spaceId }: { files: ChatRunFile[]; spaceId?: string 
   );
 }
 
+/** The agent's integrations as stacked logos, named for assistive technology. */
+function IntegrationLogos({
+  integrations,
+  label,
+}: {
+  integrations: ChatAgentCommand["integrations"];
+  label: (names: string) => string;
+}) {
+  const subjects = React.useMemo(
+    () =>
+      integrations.map((integration) => ({
+        kind: "integration" as const,
+        id: integration.id,
+        ...(integration.icon && { icon: integration.icon }),
+      })),
+    [integrations],
+  );
+  if (subjects.length === 0) return null;
+  return (
+    <span role="img" aria-label={label(integrations.map((i) => i.name).join(", "))}>
+      <SubjectStack subjects={subjects} />
+    </span>
+  );
+}
+
 /**
- * Leading status glyph (no label — the icon IS the status). Prefers the run's
+ * The badge's status icon, sized by the badge (no label — the icon IS the status). Prefers the run's
  * real status (SSE / launch result); until that exists it falls back to the
  * tool-call phase so a just-started run still shows a spinner (or an error
  * state) rather than nothing. A non-terminal run spins; each way of ending has its
@@ -87,14 +120,14 @@ function StatusIcon({
   phase: ToolPhase;
   denied: boolean;
 }) {
-  if (denied) return <LockIcon className="text-muted-foreground size-4 shrink-0" />;
+  if (denied) return <LockIcon className="text-muted-foreground" />;
   if (status) {
-    return <RunStatusIcon status={status} className="size-4 shrink-0" />;
+    return <RunStatusIcon status={status} />;
   }
   if (phase === "error") {
-    return <AlertTriangleIcon className="text-destructive size-4 shrink-0" />;
+    return <AlertTriangleIcon className="text-destructive" />;
   }
-  return <Spinner className="text-muted-foreground size-4 shrink-0" />;
+  return <Spinner className="text-muted-foreground" />;
 }
 
 export function ChatRunProgressCard({
@@ -147,6 +180,7 @@ export function ChatRunProgressCard({
     producedFilesTruncated,
     sweepDone,
     runDenied,
+    error,
   } = useRunLogStream(runId, initialStatus, initialPackageId, spaceId);
 
   // Files: the persisted tool-result list (reload-safe), the frames that arrive
@@ -217,7 +251,10 @@ export function ChatRunProgressCard({
   // than reading "starting" forever, and offer no link to a page that 403s.
   const denied = !!runId && runDenied && !terminal;
   const line = terminal
-    ? { id: -1, text: t(runStatusLineKey(effectiveStatus)) }
+    ? {
+        id: -1,
+        text: runFailureMessage(effectiveStatus, error) ?? t(runStatusLineKey(effectiveStatus)),
+      }
     : launchFailed
       ? { id: -1, text: errorText ?? t("run.launchFailed") }
       : denied
@@ -225,6 +262,8 @@ export function ChatRunProgressCard({
         : current;
   const effectiveRunHref =
     runId && !runDenied ? runPageHref(linkInSpace, packageId, runId, spaceId) : undefined;
+  const agent = useKnownAgent(packageId ? { packageId } : undefined);
+  const label = agentLabel ?? t("run.fallbackLabel");
 
   // `isolate` scopes the internal z-0/z-10 layering to this card — without it
   // the z-10 content escapes into the thread's stacking context and paints
@@ -243,53 +282,50 @@ export function ChatRunProgressCard({
         className="hover:bg-muted/50 absolute inset-0 z-0 rounded-lg"
         onClick={() => setOpen(true)}
       />
-      <div className="pointer-events-none relative z-10 flex items-center gap-2 px-3 py-2">
-        {/* Leading status glyph — vertically centered across the two lines. */}
-        <StatusIcon status={effectiveStatus} phase={phase} denied={denied} />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          {/* Line 1: package name + live execution time + run-page link */}
-          <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium">
-              {agentLabel ?? t("run.fallbackLabel")}
-            </span>
-            <span className="ml-auto flex shrink-0 items-center gap-2">
-              <CallSpace spaceId={spaceId} />
-              {elapsedMs !== undefined ? (
-                <span className="text-muted-foreground text-xs tabular-nums">
-                  {formatDuration(elapsedMs, lang)}
-                </span>
-              ) : null}
-              {effectiveRunHref ? (
-                <a
-                  href={effectiveRunHref}
-                  className="text-muted-foreground hover:text-foreground pointer-events-auto"
-                  title={t("run.openPage")}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <ExternalLinkIcon className="size-3.5" />
-                </a>
-              ) : null}
-            </span>
-          </div>
-          {/* Line 2: paced log-tool line (constant height). Keyed by log id
-              so each new line remounts and runs the fade/slide enter animation;
-              `grid` keeps the row height fixed while the line swaps. */}
-          <div className="grid font-mono text-xs">
-            {line ? (
-              <span
-                key={line.id}
-                className={`${launchFailed ? "text-destructive" : "text-muted-foreground"} animate-in fade-in slide-in-from-bottom-1 ease-surface duration-base col-start-1 row-start-1 truncate`}
+      <RunLine
+        className="pointer-events-none relative z-10 px-3 py-2"
+        tile={<AgentTile agent={agent} label={label} />}
+        badge={<StatusIcon status={effectiveStatus} phase={phase} denied={denied} />}
+        name={label}
+        trailing={
+          <>
+            <IntegrationLogos
+              integrations={agent?.integrations ?? []}
+              label={(names) => t("run.integrations", { names })}
+            />
+            <CallSpace spaceId={spaceId} />
+            {elapsedMs !== undefined ? (
+              <span className="text-muted-foreground text-xs tabular-nums">
+                {formatDuration(elapsedMs, lang)}
+              </span>
+            ) : null}
+            {effectiveRunHref ? (
+              <a
+                href={effectiveRunHref}
+                className="text-muted-foreground hover:text-foreground pointer-events-auto"
+                title={t("run.openPage")}
+                onClick={(e) => e.stopPropagation()}
               >
-                {line.text}
-              </span>
-            ) : (
-              <span className="text-muted-foreground col-start-1 row-start-1 truncate">
-                {placeholder}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
+                <ExternalLinkIcon className="size-3.5" />
+              </a>
+            ) : null}
+          </>
+        }
+        // The paced log line, keyed by log id so each new one remounts and runs the fade/slide
+        // enter animation over the last.
+        sub={
+          line ? (
+            <span
+              key={line.id}
+              className={`${launchFailed ? "text-destructive" : ""} animate-in fade-in slide-in-from-bottom-1 ease-surface duration-base font-mono`}
+            >
+              {line.text}
+            </span>
+          ) : (
+            <span className="font-mono">{placeholder}</span>
+          )
+        }
+      />
 
       {/* Downloadable file chips (z-10 so they sit above the full-card click
           target and stay individually clickable). The authoritative read is one

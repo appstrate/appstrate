@@ -6431,6 +6431,15 @@ export interface components {
                 icon: string | null;
                 /** @description The agent's chosen colour (a palette key); null when none. */
                 color: string | null;
+                /** @description The integrations a launch of the agent uses, as the agents index (`GET /api/agents`) lists them in the space of its prompt; `[]` when none. */
+                integrations: {
+                    /** @description `@scope/name` integration package id. */
+                    id: string;
+                    /** @description The manifest's `display_name`; the id when it declares none. */
+                    name: string;
+                    /** @description The manifest's `icon` (an Iconify id or an image URL); null when it declares none. */
+                    icon: string | null;
+                }[];
             }[];
         };
         ChatMessage: {

@@ -21,6 +21,10 @@ const chatAgentCommandSchema = z.object({
   packageId: z.string(),
   icon: z.string().nullable(),
   color: z.string().nullable(),
+  /** The integrations the agent uses, as the agents index names and draws them. */
+  integrations: z.array(
+    z.object({ id: z.string(), name: z.string(), icon: z.string().nullable() }),
+  ),
 });
 
 export const catalogueSources = ["published_skills", "draft_skills", "agents"] as const;

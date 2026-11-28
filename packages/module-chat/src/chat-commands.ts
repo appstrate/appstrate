@@ -70,6 +70,7 @@ export async function readChatCommands(
                   packageId: meta.packageId,
                   icon: meta.icon,
                   color: meta.color,
+                  integrations: meta.integrations,
                 },
               ];
             }),

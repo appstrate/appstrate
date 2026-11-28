@@ -222,7 +222,7 @@ export const chatComponentSchemas = {
           "The agents the caller can launch, as launch prompts. Empty when the caller cannot run agents.",
         items: {
           type: "object",
-          required: ["name", "title", "description", "packageId", "icon", "color"],
+          required: ["name", "title", "description", "packageId", "icon", "color", "integrations"],
           properties: {
             name: {
               type: "string",
@@ -243,6 +243,27 @@ export const chatComponentSchemas = {
             color: {
               type: ["string", "null"],
               description: "The agent's chosen colour (a palette key); null when none.",
+            },
+            integrations: {
+              type: "array",
+              description:
+                "The integrations a launch of the agent uses, as the agents index (`GET /api/agents`) lists them in the space of its prompt; `[]` when none.",
+              items: {
+                type: "object",
+                required: ["id", "name", "icon"],
+                properties: {
+                  id: { type: "string", description: "`@scope/name` integration package id." },
+                  name: {
+                    type: "string",
+                    description: "The manifest's `display_name`; the id when it declares none.",
+                  },
+                  icon: {
+                    type: ["string", "null"],
+                    description:
+                      "The manifest's `icon` (an Iconify id or an image URL); null when it declares none.",
+                  },
+                },
+              },
             },
           },
         },

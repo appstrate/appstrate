@@ -130,15 +130,25 @@ describe("readToolIntegration", () => {
 describe("readAgentPromptMeta", () => {
   const key = AGENT_PROMPT_META_KEY;
   it("reads a well-formed payload", () => {
+    const integrations = [{ id: "@acme/gmail", name: "Gmail", icon: null }];
     expect(
-      readAgentPromptMeta({ [key]: { packageId: "@a/b", icon: "lucide:bot", color: null } }),
-    ).toEqual({ packageId: "@a/b", icon: "lucide:bot", color: null });
+      readAgentPromptMeta({
+        [key]: { packageId: "@a/b", icon: "lucide:bot", color: null, integrations },
+      }),
+    ).toEqual({ packageId: "@a/b", icon: "lucide:bot", color: null, integrations });
   });
   it("is null when missing or malformed", () => {
+    const base = { packageId: "@a/b", icon: null, color: null, integrations: [] };
     expect(readAgentPromptMeta(undefined)).toBeNull();
     expect(readAgentPromptMeta({})).toBeNull();
-    expect(readAgentPromptMeta({ [key]: { packageId: "", icon: null, color: null } })).toBeNull();
-    expect(readAgentPromptMeta({ [key]: { packageId: "@a/b", icon: 1, color: null } })).toBeNull();
-    expect(readAgentPromptMeta({ [key]: { packageId: "@a/b", icon: null } })).toBeNull();
+    expect(readAgentPromptMeta({ [key]: { ...base, packageId: "" } })).toBeNull();
+    expect(readAgentPromptMeta({ [key]: { ...base, icon: 1 } })).toBeNull();
+    expect(
+      readAgentPromptMeta({ [key]: { packageId: "@a/b", icon: null, integrations: [] } }),
+    ).toBeNull();
+    expect(readAgentPromptMeta({ [key]: { ...base, integrations: undefined } })).toBeNull();
+    expect(
+      readAgentPromptMeta({ [key]: { ...base, integrations: [{ id: "@acme/x", icon: null }] } }),
+    ).toBeNull();
   });
 });

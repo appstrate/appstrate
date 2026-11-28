@@ -64,6 +64,8 @@ interface RunLogStream {
    * runner supplied its own execution-window `durationMs` at finalize.
    */
   duration: number | undefined;
+  /** The run's own failure message (`runs.error`), once reported. */
+  error: string | undefined;
   /**
    * Files this run PRODUCED, read from `/api/files` (see source 3 above).
    * Empty until that read lands — the caller unions it with the log-derived
@@ -147,6 +149,7 @@ export function useRunLogStream(
   const [startedAt, setStartedAt] = useState<string | undefined>(undefined);
   const [completedAt, setCompletedAt] = useState<string | undefined>(undefined);
   const [duration, setDuration] = useState<number | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
   const [producedFiles, setProducedFiles] = useState<ChatRunFile[]>([]);
   const [producedFilesTruncated, setProducedFilesTruncated] = useState(false);
   const [sweepDone, setSweepDone] = useState(false);
@@ -169,6 +172,7 @@ export function useRunLogStream(
     setStartedAt(undefined);
     setCompletedAt(undefined);
     setDuration(undefined);
+    setError(undefined);
     setProducedFiles([]);
     setProducedFilesTruncated(false);
     setSweepDone(false);
@@ -263,6 +267,7 @@ export function useRunLogStream(
         if (run.completedAt) setCompletedAt((prev) => prev ?? run.completedAt ?? undefined);
         if (typeof run.duration === "number")
           setDuration((prev) => prev ?? run.duration ?? undefined);
+        if (run.error) setError((prev) => prev ?? run.error ?? undefined);
         // No live tail will ever open (missing org/space context, no
         // EventSource, or the card mounted on an already-terminal status):
         // this read is the last word on a terminal run, so it also owns the
@@ -322,6 +327,7 @@ export function useRunLogStream(
       if (update.startedAt) setStartedAt(update.startedAt);
       if (update.completedAt) setCompletedAt(update.completedAt);
       if (typeof update.duration === "number") setDuration(update.duration);
+      if (update.error) setError(update.error);
       if (isTerminalStatus(update.status) && !swept) {
         swept = true;
         // One final full history sweep catches log lines the trigger may have
@@ -391,6 +397,7 @@ export function useRunLogStream(
     startedAt,
     completedAt,
     duration,
+    error,
     producedFiles,
     producedFilesTruncated,
     sweepDone,

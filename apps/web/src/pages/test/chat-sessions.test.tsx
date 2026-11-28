@@ -194,6 +194,70 @@ describe("chat surfaces held to the caller's grants", () => {
   });
 });
 
+describe("chat run card", () => {
+  const agent = {
+    name: "run-bot",
+    title: "Bot",
+    description: "",
+    packageId: "@acme/bot",
+    icon: "lucide:mail",
+    color: "teal",
+    integrations: [
+      { id: "@acme/gmail", name: "Gmail", icon: null },
+      { id: "@acme/slack", name: "Slack", icon: null },
+    ],
+  };
+  /** The card under a commands cache holding `agents`, keyed as `useChatCommands` reads it outside a transport. */
+  const card = (packageId: string | undefined, phase: "running" | "error" = "running") => {
+    const qc = new QueryClient();
+    qc.setQueryData(["packages", "chat-commands", undefined, null, true], {
+      skills: [],
+      agents: [agent],
+    });
+    const host: ChatHost = {
+      ...hostWith(["runs:read"]),
+      t: (key, params) => (params?.names ? `${key}:${params.names}` : key),
+    };
+    return render(
+      <ChatHostProvider value={host}>
+        <ChatRunProgressCard
+          runId={undefined}
+          agentLabel="@acme/bot"
+          initialPackageId={packageId}
+          phase={phase}
+          modalTitle="run"
+          details={null}
+        />
+      </ChatHostProvider>,
+      { queryClient: qc },
+    );
+  };
+
+  it("leads with the agent's tile and follows its name with its integrations, named", () => {
+    const html = card("@acme/bot");
+    expect(html).toContain("size-8 rounded-lg");
+    expect(html).not.toContain("bg-muted text-muted-foreground flex size-8");
+    expect(html).toContain('role="img" aria-label="run.integrations:Gmail, Slack"');
+    expect(html.indexOf("run.integrations")).toBeGreaterThan(html.indexOf("@acme/bot<"));
+  });
+
+  it("draws the neutral bot tile, and no logos, for an agent the commands do not hold", () => {
+    const html = card("@inline/shadow");
+    expect(html).toContain("bg-muted text-muted-foreground flex size-8");
+    expect(html).not.toContain("run.integrations");
+  });
+
+  it("puts the state on the tile's corner: a spinner until it is known, an alert on a launch failure", () => {
+    const starting = card("@acme/bot");
+    expect(starting).toContain("bg-card absolute -right-1 -bottom-1");
+    expect(starting).toContain("animate-spin");
+    const failed = card("@acme/bot", "error");
+    expect(failed).not.toContain("animate-spin");
+    expect(failed).toContain("text-destructive");
+    expect(failed).toContain("run.launchFailed");
+  });
+});
+
 describe("conversation sidebar usage", () => {
   const session = (windowAssumed: boolean) =>
     ({

@@ -94,6 +94,18 @@ export function runStatusLineKey(status: RunStatus | undefined): string {
   }
 }
 
+/**
+ * The message a terminal run's card shows in place of its outcome label: the run's own error
+ * (`runs.error`), for a run that failed or timed out with one. Not for a cancellation, whose
+ * label already says it all.
+ */
+export function runFailureMessage(
+  status: RunStatus | undefined,
+  error: string | undefined,
+): string | undefined {
+  return (status === "failed" || status === "timeout") && error ? error : undefined;
+}
+
 /** Is this op-id one whose result we can mine for a launched run id? */
 export function isRunLaunchOp(opId: string | undefined): opId is RunLaunchOp {
   return !!opId && (RUN_LAUNCH_OPS as readonly string[]).includes(opId);

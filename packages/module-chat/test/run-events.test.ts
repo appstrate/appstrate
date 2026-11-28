@@ -33,6 +33,7 @@ import {
   shouldRaiseSweepDone,
   resolveAttachmentContent,
   safeJsonParse,
+  runFailureMessage,
   runStatusLineKey,
   visibleLogEntries,
   type RunLogLine,
@@ -83,6 +84,15 @@ describe("run-events helpers", () => {
     expect(runStatusLineKey("timeout")).toBe("run.status.timeout");
     expect(runStatusLineKey("cancelled")).toBe("run.status.cancelled");
     expect(runStatusLineKey(undefined)).toBe("run.status.done");
+  });
+
+  it("settles a failed or timed-out run on its own error, any other end on its label", () => {
+    expect(runFailureMessage("failed", "Gmail refused the token")).toBe("Gmail refused the token");
+    expect(runFailureMessage("timeout", "No answer in 300 s")).toBe("No answer in 300 s");
+    expect(runFailureMessage("failed", undefined)).toBeUndefined();
+    expect(runFailureMessage("failed", "")).toBeUndefined();
+    expect(runFailureMessage("cancelled", "stopped")).toBeUndefined();
+    expect(runFailureMessage("success", "stale")).toBeUndefined();
   });
 
   it("extracts run id and status from invoke and run_and_wait results", () => {
@@ -161,6 +171,8 @@ describe("run-events helpers", () => {
       completedAt: "2026-06-30T00:00:42Z",
       duration: 42_000,
     });
+    // A failed run's own message is kept: the card settles on it.
+    expect(parseRunResource({ id: "run_2", status: "failed", error: "boom" })?.error).toBe("boom");
     // Malformed body (no status) → undefined, so the seed is skipped.
     expect(parseRunResource({ id: "run_1" })).toBeUndefined();
     expect(parseRunResource(null)).toBeUndefined();

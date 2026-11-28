@@ -107,18 +107,28 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
           packageId: "@acme/summarizer",
           icon: "lucide:bot",
           color: "teal",
+          integrations: [{ id: "@acme/gmail", name: "Gmail", icon: "logos:gmail" }],
         },
       },
     },
     {
       name: "run-bare",
-      _meta: { "dev.appstrate/agent": { packageId: "@acme/bare", icon: null, color: null } },
+      _meta: {
+        "dev.appstrate/agent": {
+          packageId: "@acme/bare",
+          icon: null,
+          color: null,
+          integrations: [],
+        },
+      },
     },
     // No meta, or a malformed one: no id to seed the colour from, so left out.
     { name: "run-nometa", title: "No meta" },
     {
       name: "run-bad",
-      _meta: { "dev.appstrate/agent": { packageId: 3, icon: null, color: null } },
+      _meta: {
+        "dev.appstrate/agent": { packageId: 3, icon: null, color: null, integrations: [] },
+      },
     },
   ];
 
@@ -151,6 +161,7 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
           packageId: "@acme/summarizer",
           icon: "lucide:bot",
           color: "teal",
+          integrations: [{ id: "@acme/gmail", name: "Gmail", icon: "logos:gmail" }],
         },
         {
           name: "run-bare",
@@ -159,6 +170,7 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
           packageId: "@acme/bare",
           icon: null,
           color: null,
+          integrations: [],
         },
       ],
     });

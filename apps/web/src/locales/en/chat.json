@@ -39,6 +39,7 @@
   "run.launchFailed": "Launch failed",
   "run.details": "Run details",
   "run.openPage": "Open the run page",
+  "run.integrations": "Integrations: {{names}}",
   "run.status.success": "Completed",
   "run.status.failed": "Failed",
   "run.status.timeout": "Timed out",
