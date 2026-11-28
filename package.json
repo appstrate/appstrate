@@ -23,7 +23,7 @@
     "@earendil-works/pi-ai": "1.6.0",
     "@eslint/js": "^10.0.1",
     "@readme/openapi-parser": "^11.0.0",
-    "@redocly/openapi-core": "^2.82.0",
+    "@redocly/openapi-core": "^2.83.0",
     "@types/bun": "latest",
     "drizzle-orm": "^0.45.4",
     "eslint": "^10.15.0",
